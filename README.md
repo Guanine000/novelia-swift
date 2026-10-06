@@ -1,6 +1,6 @@
 # Novelia iOS 移植（基础版本）
 
-这是一个独立的 SwiftUI iOS 项目，参考 [nobYoQ/novelia](https://github.com/nobYoQ/novelia) 的产品功能和公开 API 实现。**本项目与原 Android 仓库分离，不会修改原仓库。**当前版本用于验证 iOS 上的基础发现、阅读和账号认证流程，尚未达到原项目的功能完整度。
+这是一个独立的 SwiftUI iOS 项目，移植对照对象是第三方原生 Android 客户端 [nobYoQ/novelia](https://github.com/nobYoQ/novelia)。该 Android 客户端基于 [AutoNovel 网页版及服务端](https://github.com/auto-novel/auto-novel) 提供的服务开发。本 README 的功能差距清单以 Android 客户端为准，AutoNovel 是其上游网站/API 服务来源。**本 iOS 项目与这两个上游仓库分离，不会修改它们。**当前版本用于验证 iOS 上的基础发现、阅读和账号认证流程，尚未达到 Android 客户端的功能完整度。
 
 ## 当前已实现
 
@@ -65,4 +65,4 @@
 
 ## 许可证与移植边界
 
-原项目采用 GPL-3.0-only。当前移植是独立 Swift 实现；如后续直接复用原项目代码或第三方资源用于分发，请先检查 GPL 条款及各依赖的许可证和声明。
+Android 对照项目 `nobYoQ/novelia` 标注为 GPL-3.0-only；AutoNovel 上游仓库也提供其自己的许可证声明。当前 iOS 移植是独立 Swift 实现；如后续直接复用任一上游仓库的代码或第三方资源用于分发，请分别核对对应许可证、版权声明和依赖条款。
