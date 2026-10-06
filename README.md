@@ -1,30 +1,68 @@
-# Novelia iOS port (MVP)
+# Novelia iOS 移植（基础版本）
 
-An independent iOS-native prototype for the reading flow of [nobYoQ/novelia](https://github.com/nobYoQ/novelia). The upstream repository is not cloned or modified here. This MVP is a new Swift implementation with fictional local sample content; it does not include upstream source code, account credentials, or branding assets.
+这是一个独立的 SwiftUI iOS 项目，参考 [nobYoQ/novelia](https://github.com/nobYoQ/novelia) 的产品功能和公开 API 实现。**本项目与原 Android 仓库分离，不会修改原仓库。**当前版本用于验证 iOS 上的基础发现、阅读和账号认证流程，尚未达到原项目的功能完整度。
 
-## Included
+## 当前已实现
 
-- SwiftUI demo shelf, live discovery search, and remote book details
-- Chapter reader with original / translated / bilingual modes
-- Read-only Novelia API connection for online search, book metadata, chapter lists, and chapter text
-- Novelia account login through the upstream unified authentication page, with app-token storage in Keychain
-- Adjustable reader text size
-- Per-book reading progress and chapter bookmarks in `UserDefaults`
-- iOS 17+ presentation
+- SwiftUI 三个主入口：书架、发现、我的。
+- 发现页调用 Novelia 公开 API 搜索在线作品。
+- 读取在线作品详情、章节目录和章节正文。
+- 基础章节阅读，支持原文、译文、双语显示，以及上一章/下一章。
+- 调整阅读字号；本地保存章节级阅读进度和章节书签。
+- 小说账号统一认证流程：通过 WKWebView 登录，调用 refresh 接口获取应用令牌，并将令牌保存在 iOS Keychain。
+- 最低部署版本为 iOS 17。
 
-## Current limits
+> 当前书架中的作品来自 `DemoLibrary`，是用于演示界面与阅读器的虚构样例；发现、详情和章节正文使用在线 API。书架尚不能管理真实收藏。
 
-- The shelf uses `DemoLibrary`; the discovery tab calls the public Novelia API at `https://n.novelia.cc/api/`.
-- Login and bearer-token attachment are connected for the novel account. Forum login, automatic 401 refresh, authenticated write operations, source/mirror selection, and ECH transport are not connected. If the network requires ECH or blocks the API host, remote requests will fail and show an in-app error.
-- ECH transport, forum, WebDAV sync, offline download queues, import/export, and TTS are not ported yet.
-- Demo Japanese and Chinese text is fictional and exists only to exercise the reading UI.
+## 尚未实现
 
-## Open in Xcode
+### 书架与账号
 
-Open `NoveliaIOS.xcodeproj` in Xcode 15 or newer and run the `Novelia` scheme on an iPhone simulator. The deployment target is iOS 17. `Package.swift` separately exposes the platform-independent model and sample library as `NoveliaIOSCore`.
+- 可编辑、持久化的本地书架，收藏夹、置顶、阅读状态、批量整理和阅读历史。
+- 云端收藏、云端书架、阅读历史读写和进度同步。
+- 小说令牌自动续期、API 遇到 401 后恢复会话；独立论坛账号与会话。
 
-The current machine has Swift command-line tools but no full Xcode installation, so an iOS simulator build could not be produced in this environment.
+### 发现与作品详情
 
-## Porting boundary
+- 排行榜、搜索分页、书源/镜像切换。
+- 标签库、标签翻译与分类管理、字数筛选、高级搜索表达式、屏蔽和保存搜索。
+- 分享链接识别与站内链接跳转。
+- 作品资料编辑、文库作品和分卷管理。
 
-The upstream project uses Kotlin, Jetpack Compose, Android-specific persistence/background APIs, and a Go ECH transport built with the Android NDK. This prototype adapts documented list, detail, chapter, and novel-login flows; authenticated write APIs still need their own iOS implementation. Before reusing upstream implementation code in a distributable app, review its GPL-3.0-only terms and all third-party notices.
+### 阅读器
+
+- 滚动/分页切换、电子纸模式、深色与阅读主题、行距和单本作品的独立设置。
+- 选择译文引擎、更多译文排列与简繁显示选项。
+- 精确到段落的阅读位置、章内/全书搜索、插图查看。
+- 摘录、笔记、书签管理页和系统语音朗读。
+
+### 文件与离线
+
+- EPUB、TXT、SRT 导入和本地文件阅读。
+- 章节缓存/预读、离线下载队列，以及下载文件导入、导出和分享。
+- 文库分卷上传/下载、备份恢复和文件转换工具。
+
+### 社区、同步与维护
+
+- 论坛内容流、帖子、评论/回复、Markdown 编辑器、草稿和社区权限功能。
+- WebDAV 多设备同步、离线写入队列与冲突处理。
+- ECH 网络传输、书源线路配置、网络日志与诊断。
+- 应用更新检查与通知，以及覆盖上述功能的自动化和设备测试。
+
+## 在 Xcode 中运行
+
+1. 用 Xcode 打开 `NoveliaIOS.xcodeproj`。
+2. 选择 `Novelia` scheme 和 iPhone 模拟器。
+3. 点击 Run，或按 **⌘R**。
+
+项目最低部署版本是 iOS 17。`Package.swift` 单独提供平台无关的 `NoveliaIOSCore` 模型和样例数据。当前工程已通过 arm64 iOS Simulator Debug 构建；最新认证改动仍需在模拟器或设备上完整验证。
+
+## 项目结构
+
+- `iOSApp/`：SwiftUI 页面、阅读器和账号认证。
+- `Sources/NoveliaIOSCore/`：作品模型、样例数据、Novelia API 客户端和 Keychain 令牌存储。
+- `NoveliaIOS.xcodeproj/`：Xcode 工程。
+
+## 许可证与移植边界
+
+原项目采用 GPL-3.0-only。当前移植是独立 Swift 实现；如后续直接复用原项目代码或第三方资源用于分发，请先检查 GPL 条款及各依赖的许可证和声明。
