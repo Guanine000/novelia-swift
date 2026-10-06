@@ -1,0 +1,288 @@
+import Foundation
+import Security
+
+public struct NoveliaAPIClient: Sendable {
+    public static let defaultBaseURL = URL(string: "https://n.novelia.cc/api/")!
+
+    private let baseURL: URL
+    private let session: URLSession
+    private let tokenProvider: @Sendable () -> String?
+
+    public init(
+        baseURL: URL = NoveliaAPIClient.defaultBaseURL,
+        session: URLSession = .shared,
+        tokenProvider: @escaping @Sendable () -> String? = { NoveliaSessionTokenVault.read() }
+    ) {
+        self.baseURL = baseURL
+        self.session = session
+        self.tokenProvider = tokenProvider
+    }
+
+    public func searchNovels(query: String, page: Int = 1) async throws -> [Novel] {
+        let response: APIPage<APIWebOutline> = try await get(
+            path: ["novel"],
+            query: [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "pageSize", value: "20"),
+                URLQueryItem(name: "query", value: query),
+                URLQueryItem(name: "provider", value: Self.providers.joined(separator: ",")),
+                URLQueryItem(name: "type", value: "0"),
+                URLQueryItem(name: "level", value: "1"),
+                URLQueryItem(name: "translate", value: "0"),
+                URLQueryItem(name: "sort", value: "0")
+            ]
+        )
+
+        return response.items.compactMap { $0.asNovel }
+    }
+
+    public func novel(providerId: String, novelId: String) async throws -> Novel {
+        let detail: APIWebDetail = try await get(path: ["novel", providerId, novelId])
+        return detail.asNovel(providerId: providerId, novelId: novelId)
+    }
+
+    public func chapter(providerId: String, novelId: String, chapterId: String) async throws -> NovelChapter {
+        let response: APIChapter = try await get(
+            path: ["novel", providerId, novelId, "chapter", chapterId]
+        )
+        return response.asNovelChapter(id: chapterId)
+    }
+
+    private func get<T: Decodable>(path: [String], query: [URLQueryItem] = []) async throws -> T {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            throw NoveliaAPIError.invalidURL
+        }
+        var basePath = components.percentEncodedPath
+        if !basePath.hasSuffix("/") { basePath += "/" }
+        let encodedPath = path.map { segment in
+            segment.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#%"))) ?? segment
+        }.joined(separator: "/")
+        components.percentEncodedPath = basePath + encodedPath
+        components.queryItems = query.isEmpty ? nil : query
+        guard let url = components.url else { throw NoveliaAPIError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let token = tokenProvider(), !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.timeoutInterval = 30
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw NoveliaAPIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw NoveliaAPIError.httpStatus(http.statusCode, serverMessage(in: data))
+        }
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            throw NoveliaAPIError.decoding(error.localizedDescription)
+        }
+    }
+
+    private func serverMessage(in data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return object["message"] as? String ?? object["msg"] as? String ?? object["error"] as? String
+    }
+
+    // Mirrors the provider order used by the Android client's public novel-list request.
+    private static let providers = ["kakuyomu", "syosetu", "novelup", "hameln", "pixiv", "alphapolis"]
+
+    fileprivate static func providerName(_ id: String) -> String {
+        switch id {
+        case "kakuyomu": "Kakuyomu"
+        case "syosetu": "成为小说家吧"
+        case "novelup": "Novelup"
+        case "hameln": "Hameln"
+        case "pixiv": "Pixiv"
+        case "alphapolis": "Alphapolis"
+        default: id
+        }
+    }
+}
+
+/// Stores only the Novelia app access token. Authentication cookies stay in WKWebView's
+/// website data store, which is the browser-owned store used by the official login flow.
+public enum NoveliaSessionTokenVault {
+    private static let service = "cc.novelia.ios.session"
+    private static let account = "novel-access-token"
+
+    public static func read() -> String? {
+        var query = baseQuery
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    public static func save(_ token: String) throws {
+        let data = Data(token.utf8)
+        let status = SecItemUpdate(baseQuery as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecItemNotFound {
+            var query = baseQuery
+            query[kSecValueData as String] = data
+            query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            let addStatus = SecItemAdd(query as CFDictionary, nil)
+            guard addStatus == errSecSuccess else { throw NoveliaSessionError.keychain(addStatus) }
+        } else if status != errSecSuccess {
+            throw NoveliaSessionError.keychain(status)
+        }
+    }
+
+    public static func clear() {
+        SecItemDelete(baseQuery as CFDictionary)
+    }
+
+    private static var baseQuery: [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: service,
+         kSecAttrAccount as String: account]
+    }
+}
+
+public enum NoveliaSessionError: LocalizedError {
+    case keychain(OSStatus)
+
+    public var errorDescription: String? {
+        switch self {
+        case .keychain: "无法安全保存 Novelia 登录会话。"
+        }
+    }
+}
+
+public enum NoveliaAPIError: LocalizedError {
+    case invalidURL
+    case invalidResponse
+    case httpStatus(Int, String?)
+    case decoding(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidURL: return "API 地址无效。"
+        case .invalidResponse: return "服务器返回了无法识别的响应。"
+        case let .httpStatus(status, message):
+            if let message, !message.isEmpty { return "Novelia API 错误（HTTP \(status)）：\(message)" }
+            return "Novelia API 错误（HTTP \(status)）。"
+        case let .decoding(message): return "无法解析 Novelia API 响应：\(message)"
+        }
+    }
+}
+
+private struct APIPage<Item: Decodable>: Decodable {
+    let pageNumber: Int?
+    let items: [Item]
+}
+
+private struct APIWebOutline: Decodable {
+    let providerId: String?
+    let novelId: String?
+    let titleJp: String?
+    let titleZh: String?
+    let type: String?
+    let keywords: [String]?
+    let total: Int?
+
+    var asNovel: Novel? {
+        guard let providerId, let novelId else { return nil }
+        return Novel(
+            id: "remote/\(providerId)/\(novelId)",
+            title: titleZh?.nonEmpty ?? titleJp?.nonEmpty ?? novelId,
+            author: NoveliaAPIClient.providerName(providerId),
+            summary: "\(type?.nonEmpty ?? "网络小说") · \(total ?? 0) 章",
+            genres: keywords ?? [],
+            chapters: [],
+            accent: NovelAccent.forProvider(providerId),
+            providerId: providerId,
+            novelId: novelId
+        )
+    }
+}
+
+private struct APIWebDetail: Decodable {
+    let titleJp: String?
+    let titleZh: String?
+    let authors: [APIAuthor]?
+    let type: String?
+    let keywords: [String]?
+    let introductionJp: String?
+    let introductionZh: String?
+    let toc: [APITocItem]?
+}
+
+private struct APIAuthor: Decodable {
+    let name: String?
+}
+
+private struct APITocItem: Decodable {
+    let titleJp: String?
+    let titleZh: String?
+    let chapterId: String?
+}
+
+private struct APIChapter: Decodable {
+    let titleJp: String?
+    let titleZh: String?
+    let paragraphs: [String]?
+    let youdaoParagraphs: [String]?
+    let gptParagraphs: [String]?
+    let sakuraParagraphs: [String]?
+
+    func asNovelChapter(id: String) -> NovelChapter {
+        let original = paragraphs?.joined(separator: "\n\n") ?? ""
+        let translated = [gptParagraphs, sakuraParagraphs, youdaoParagraphs]
+            .compactMap { $0?.joined(separator: "\n\n").nonEmpty }
+            .first ?? ""
+        return NovelChapter(
+            id: id,
+            title: titleZh?.nonEmpty ?? titleJp?.nonEmpty ?? id,
+            originalText: original,
+            translatedText: translated
+        )
+    }
+}
+
+private extension APIWebDetail {
+    func asNovel(providerId: String, novelId: String) -> Novel {
+        let chapters = (toc ?? []).compactMap { item -> NovelChapter? in
+            guard let chapterId = item.chapterId?.nonEmpty else { return nil }
+            return NovelChapter(
+                id: chapterId,
+                title: item.titleZh?.nonEmpty ?? item.titleJp?.nonEmpty ?? chapterId,
+                originalText: "",
+                translatedText: ""
+            )
+        }
+        let author = (authors ?? []).compactMap { $0.name?.nonEmpty }.joined(separator: "、")
+        return Novel(
+            id: "remote/\(providerId)/\(novelId)",
+            title: titleZh?.nonEmpty ?? titleJp?.nonEmpty ?? novelId,
+            author: author.isEmpty ? providerId : author,
+            summary: introductionZh?.nonEmpty ?? introductionJp?.nonEmpty ?? "暂无简介",
+            genres: [type?.nonEmpty].compactMap { $0 } + (keywords ?? []),
+            chapters: chapters,
+            accent: NovelAccent.forProvider(providerId),
+            providerId: providerId,
+            novelId: novelId
+        )
+    }
+}
+
+private extension NovelAccent {
+    static func forProvider(_ providerId: String) -> NovelAccent {
+        switch providerId {
+        case "kakuyomu", "novelup": .plum
+        case "syosetu", "alphapolis": .ocean
+        default: .moss
+        }
+    }
+}
+
+private extension String {
+    var nonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
