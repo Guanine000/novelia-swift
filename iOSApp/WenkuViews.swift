@@ -431,7 +431,8 @@ private struct WenkuDownloadSheet: View {
             let filename = mode.websiteDownloadFilename(
                 volumeId: volume.volumeId,
                 translationsMode: translationsMode,
-                translators: filenameTranslators
+                translators: filenameTranslators,
+                authors: detail.authors
             )
             let destination = localLibrary.downloadDestination(for: filename)
             try await api.downloadWenkuEPUB(
@@ -441,6 +442,7 @@ private struct WenkuDownloadSheet: View {
                 mode: mode,
                 translator: translator,
                 filenameTranslators: filenameTranslators,
+                filenameAuthors: detail.authors,
                 translationsMode: translationsMode
             )
             try await localLibrary.registerDownloadedFile(at: destination, title: "\(detail.displayTitle) · \(volume.volumeId)")

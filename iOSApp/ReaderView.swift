@@ -51,6 +51,7 @@ enum ReaderAppearance: String, CaseIterable, Identifiable {
 struct ReaderView: View {
     let novel: Novel
     private let isOffline: Bool
+    private let offlineTranslationSource: NovelTranslationSource?
     @Environment(\.colorScheme) private var systemColorScheme
     @State private var chapterIndex: Int
     @AppStorage("readerAppearance") private var appearanceRaw = ReaderAppearance.system.rawValue
@@ -64,9 +65,15 @@ struct ReaderView: View {
     @State private var chapterError: String?
     @State private var loadAttempt = 0
 
-    init(novel: Novel, startingAt: Int, offlineChapters: [String: NovelChapter]? = nil) {
+    init(
+        novel: Novel,
+        startingAt: Int,
+        offlineChapters: [String: NovelChapter]? = nil,
+        offlineTranslationSource: NovelTranslationSource? = nil
+    ) {
         self.novel = novel
         isOffline = offlineChapters != nil
+        self.offlineTranslationSource = offlineTranslationSource
         _chapterIndex = State(initialValue: min(max(0, startingAt), max(0, novel.chapters.count - 1)))
         _loadedChapters = State(initialValue: offlineChapters ?? [:])
         _bookmarkIDsJSON = AppStorage(wrappedValue: "[]", "bookmarks.\(novel.id)")
@@ -81,6 +88,10 @@ struct ReaderView: View {
     private var appearance: ReaderAppearance { ReaderAppearance(rawValue: appearanceRaw) ?? .system }
     private var translationSource: NovelTranslationSource {
         NovelTranslationSource(rawValue: translationSourceRaw) ?? .gpt
+    }
+    private var availableTranslationSources: [NovelTranslationSource] {
+        guard isOffline else { return NovelTranslationSource.allCases }
+        return offlineTranslationSource.map { [$0] } ?? []
     }
     private var readerBackground: Color { appearance.background(system: systemColorScheme) }
     private var readerPrimaryText: Color { appearance.primaryText(system: systemColorScheme) }
@@ -224,9 +235,11 @@ struct ReaderView: View {
                             }
                         }
                         Divider()
-                        Picker("译文来源", selection: $translationSourceRaw) {
-                            ForEach(NovelTranslationSource.allCases) { source in
-                                Text(source.title).tag(source.rawValue)
+                        if !availableTranslationSources.isEmpty {
+                            Picker("译文来源", selection: $translationSourceRaw) {
+                                ForEach(availableTranslationSources) { source in
+                                    Text(source.title).tag(source.rawValue)
+                                }
                             }
                         }
                         Divider()
@@ -249,7 +262,10 @@ struct ReaderView: View {
                     .accessibilityLabel("阅读设置")
                 }
             }
-            .onAppear { savedChapterIndex = chapterIndex }
+            .onAppear {
+                savedChapterIndex = chapterIndex
+                if let offlineTranslationSource { translationSourceRaw = offlineTranslationSource.rawValue }
+            }
             .task(id: "\(chapter.id)-\(loadAttempt)") { await loadChapter() }
         }
         .navigationTitle("阅读")

@@ -698,6 +698,7 @@ struct NovelDetailView: View {
     @State private var favoriteError: String?
     @State private var showFavoriteError = false
     @State private var isLoadingFavoriteFolders = false
+    @State private var downloadRequest: Novel?
     @AppStorage private var savedChapterIndex: Int
 
     init(novel: Novel) {
@@ -712,6 +713,11 @@ struct NovelDetailView: View {
             return cloudIndex
         }
         return min(savedChapterIndex, max(0, displayNovel.chapters.count - 1))
+    }
+
+    private var availableTranslationSources: [NovelTranslationSource] {
+        guard let counts = displayNovel.translationChapterCounts else { return [] }
+        return NovelTranslationSource.allCases.filter { (counts[$0] ?? 0) > 0 }
     }
 
     var body: some View {
@@ -844,7 +850,7 @@ struct NovelDetailView: View {
                     let progress = webNovelDownloads.progress[displayNovel.id]
                     VStack(alignment: .leading, spacing: 8) {
                         Button {
-                            Task { await webNovelDownloads.download(displayNovel) }
+                            downloadRequest = displayNovel
                         } label: {
                             HStack(spacing: 10) {
                                 if progress != nil {
@@ -854,7 +860,7 @@ struct NovelDetailView: View {
                                 }
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(progress == nil
-                                         ? (webNovelDownloads.isDownloaded(displayNovel.id) ? "重新下载全书" : "下载全书")
+                                         ? (webNovelDownloads.isDownloaded(displayNovel.id) ? "重新下载全书" : "选择译源并下载")
                                          : "正在下载 \(progress!.completed) / \(progress!.total) 章")
                                         .font(.system(size: 15, weight: .bold, design: .rounded))
                                     Text("下载后可在“我的 → 我的下载”离线阅读")
@@ -967,6 +973,9 @@ struct NovelDetailView: View {
         .navigationTitle("作品详情")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: "\(novel.id)|\(auth.username ?? "")") { await loadDetail() }
+        .sheet(item: $downloadRequest) { requestedNovel in
+            WebNovelDownloadSheet(novel: requestedNovel, availableSources: availableTranslationSources)
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -1065,6 +1074,91 @@ struct NovelDetailView: View {
     private func presentFavoriteError(_ error: Error) {
         favoriteError = error.localizedDescription
         showFavoriteError = true
+    }
+}
+
+private struct WebNovelDownloadSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var downloads: WebNovelDownloadStore
+    let novel: Novel
+    let availableSources: [NovelTranslationSource]
+
+    @State private var selectedSourceRaw: String
+    @State private var isDownloading = false
+    @State private var didFinish = false
+
+    init(novel: Novel, availableSources: [NovelTranslationSource]) {
+        self.novel = novel
+        self.availableSources = availableSources
+        let preferredSource = UserDefaults.standard.string(forKey: "readerTranslationSource")
+        let initialSource = preferredSource.flatMap { value in
+            availableSources.first(where: { $0.rawValue == value })?.rawValue
+        } ?? availableSources.first?.rawValue ?? "original"
+        _selectedSourceRaw = State(initialValue: initialSource)
+    }
+
+    private var selectedSource: NovelTranslationSource? {
+        NovelTranslationSource(rawValue: selectedSourceRaw)
+    }
+
+    private var progress: WebNovelDownloadProgress? { downloads.progress[novel.id] }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("下载内容") {
+                    Text(novel.title).font(.headline)
+                    Text("共 \(novel.chapters.count) 章，下载完成后可离线阅读。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section("翻译源") {
+                    Picker("内容", selection: $selectedSourceRaw) {
+                        Text("原文").tag("original")
+                        ForEach(availableSources) { source in
+                            let count = novel.translationChapterCounts?[source] ?? 0
+                            Text("\(source.title)（\(count) 章）").tag(source.rawValue)
+                        }
+                    }
+                    Text("下载后会保存所选译源的内容。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                if let progress {
+                    Section("下载进度") {
+                        ProgressView(value: progress.fraction)
+                        Text("已下载 \(progress.completed) / \(progress.total) 章")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                if let error = downloads.errors[novel.id] {
+                    Section { Text("下载失败：\(error)").font(.footnote).foregroundStyle(.red) }
+                }
+                if didFinish {
+                    Section { Label("下载完成，可在“我的下载”中阅读", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
+                }
+                Section {
+                    Button {
+                        isDownloading = true
+                        Task {
+                            await downloads.download(novel, translationSource: selectedSource)
+                            isDownloading = false
+                            didFinish = downloads.isDownloaded(novel.id) && downloads.errors[novel.id] == nil
+                        }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if isDownloading { ProgressView() } else { Text("开始下载") }
+                            Spacer()
+                        }
+                    }
+                    .disabled(isDownloading || progress != nil || novel.chapters.isEmpty)
+                }
+            }
+            .navigationTitle("下载全书")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("关闭") { dismiss() } }
+            }
+        }
     }
 }
 
@@ -1585,6 +1679,15 @@ struct MyDownloadsView: View {
                                     .font(.system(size: 12))
                                     .foregroundStyle(NoveliaStyle.muted)
                                     .lineLimit(1)
+                                if let source = book.translationSource {
+                                    Text("译源：\(source.title)")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                } else {
+                                    Text("原文")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                }
                                 Text("\(book.novel.chapters.count) 章 · \(book.downloadedAt.formatted(date: .numeric, time: .omitted))")
                                     .font(.system(size: 11))
                                     .foregroundStyle(NoveliaStyle.muted)
@@ -1672,7 +1775,12 @@ private struct DownloadedWebNovelReader: View {
     var body: some View {
         Group {
             if let chapters {
-                ReaderView(novel: book.novel, startingAt: 0, offlineChapters: chapters)
+                ReaderView(
+                    novel: book.novel,
+                    startingAt: 0,
+                    offlineChapters: chapters,
+                    offlineTranslationSource: book.translationSource
+                )
             } else if let errorMessage {
                 ContentUnavailableView("无法打开下载内容", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
             } else {

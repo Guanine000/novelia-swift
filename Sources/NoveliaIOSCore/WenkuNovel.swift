@@ -142,11 +142,21 @@ public enum WenkuEPUBMode: String, CaseIterable, Identifiable, Sendable {
     public func websiteDownloadFilename(
         volumeId: String,
         translationsMode: WenkuTranslationsMode,
-        translators: [WenkuTranslator]
+        translators: [WenkuTranslator],
+        authors: [String] = []
     ) -> String {
         let translatorCodes = translators.map { String($0.rawValue.prefix(1)) }.joined()
         let sourceMode = translationsMode == .parallel ? "B" : "Y"
-        return [rawValue, sourceMode + translatorCodes, volumeId].joined(separator: ".")
+        let filename = URL(fileURLWithPath: volumeId).lastPathComponent
+        let fileExtension = URL(fileURLWithPath: filename).pathExtension
+        var volumeName = URL(fileURLWithPath: filename).deletingPathExtension().lastPathComponent
+        for author in authors where !author.isEmpty {
+            volumeName = volumeName.replacingOccurrences(of: author, with: "")
+        }
+        let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "-_—–·,，、"))
+        volumeName = volumeName.trimmingCharacters(in: separators)
+        let cleanVolumeId = fileExtension.isEmpty ? volumeName : "\(volumeName).\(fileExtension)"
+        return [rawValue, sourceMode + translatorCodes, cleanVolumeId].joined(separator: ".")
     }
 
     public var title: String {

@@ -341,6 +341,7 @@ struct DownloadedWebNovel: Codable, Identifiable, Hashable {
     let novel: Novel
     let chapterDataFilename: String
     let downloadedAt: Date
+    let translationSource: NovelTranslationSource?
 
     var id: String { novel.id }
 }
@@ -381,7 +382,7 @@ final class WebNovelDownloadStore: ObservableObject {
         }.value
     }
 
-    func download(_ novel: Novel) async {
+    func download(_ novel: Novel, translationSource: NovelTranslationSource?) async {
         guard novel.isRemote,
               let providerId = novel.providerId,
               let novelId = novel.novelId,
@@ -401,7 +402,7 @@ final class WebNovelDownloadStore: ObservableObject {
                     novelId: novelId,
                     chapterId: listedChapter.id
                 )
-                chapters.append(chapter)
+                chapters.append(Self.selecting(translationSource, in: chapter))
                 progress[novel.id] = WebNovelDownloadProgress(completed: index + 1, total: novel.chapters.count)
             }
 
@@ -410,7 +411,12 @@ final class WebNovelDownloadStore: ObservableObject {
             let data = try JSONEncoder().encode(chapters)
             try data.write(to: dataURL, options: .atomic)
 
-            let record = DownloadedWebNovel(novel: novel, chapterDataFilename: filename, downloadedAt: Date())
+            let record = DownloadedWebNovel(
+                novel: novel,
+                chapterDataFilename: filename,
+                downloadedAt: Date(),
+                translationSource: translationSource
+            )
             let previousBooks = books
             books.removeAll { $0.id == novel.id }
             books.insert(record, at: 0)
@@ -439,5 +445,35 @@ final class WebNovelDownloadStore: ObservableObject {
     private func persistIndex() throws {
         let data = try JSONEncoder().encode(books)
         try data.write(to: indexURL, options: .atomic)
+    }
+
+    private static func selecting(_ source: NovelTranslationSource?, in chapter: NovelChapter) -> NovelChapter {
+        guard let source else {
+            return NovelChapter(
+                id: chapter.id,
+                title: chapter.title,
+                originalText: chapter.originalText,
+                translatedText: "",
+                bilingualParagraphs: [],
+                translationsBySource: [:]
+            )
+        }
+        let translation = chapter.translation(for: source) ?? []
+        let count = max(chapter.originalText.components(separatedBy: "\n\n").count, translation.count)
+        let originals = chapter.originalText.components(separatedBy: "\n\n")
+        let pairs = (0..<count).map { index in
+            NovelBilingualParagraph(
+                original: originals.indices.contains(index) ? originals[index] : "",
+                translation: translation.indices.contains(index) ? translation[index] : ""
+            )
+        }
+        return NovelChapter(
+            id: chapter.id,
+            title: chapter.title,
+            originalText: chapter.originalText,
+            translatedText: translation.joined(separator: "\n\n"),
+            bilingualParagraphs: pairs,
+            translationsBySource: [source: translation]
+        )
     }
 }
