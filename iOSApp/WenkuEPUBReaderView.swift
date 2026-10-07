@@ -29,11 +29,17 @@ private enum EPUBTurnAnimation: String, CaseIterable, Identifiable, Codable {
 
 private struct EPUBReaderPreferences: Codable, Equatable {
     var paragraphSpacing = 0.4
+    var firstLineIndent = 1.5
     var lineHeight = 1.5
     var fontFamily = "serif"
     var fontSize = 1.15
+    var topMargin = 18.0
+    var rightMargin = 20.0
+    var bottomMargin = 18.0
+    var leftMargin = 20.0
     var backgroundHex = "F8F3E9"
     var backgroundImagePath: String?
+    var removeEmptyLines = false
     var verticalText = false
     var readingDirection = "ltr"
     var publisherStyles = false
@@ -47,12 +53,47 @@ private struct EPUBReaderPreferences: Codable, Equatable {
             fontFamily: ReadiumNavigator.FontFamily(rawValue: fontFamily),
             fontSize: fontSize,
             lineHeight: lineHeight,
+            paragraphIndent: firstLineIndent,
             paragraphSpacing: paragraphSpacing,
             publisherStyles: publisherStyles,
             readingProgression: ReadiumNavigator.ReadingProgression(rawValue: readingDirection),
-            scroll: layout == .chapterScroll,
+            // Readium forces scrolling with vertical text; paged mode below
+            // uses viewport snapping on the EPUB's WKWebView scroll view.
+            scroll: layout == .chapterScroll || verticalText,
             verticalText: verticalText
         )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case paragraphSpacing, firstLineIndent, lineHeight, fontFamily, fontSize
+        case topMargin, rightMargin, bottomMargin, leftMargin
+        case backgroundHex, backgroundImagePath, removeEmptyLines
+        case verticalText, readingDirection, publisherStyles, volumeButtonsTurnPages
+        case layout, animation
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        paragraphSpacing = try values.decodeIfPresent(Double.self, forKey: .paragraphSpacing) ?? 0.4
+        firstLineIndent = try values.decodeIfPresent(Double.self, forKey: .firstLineIndent) ?? 1.5
+        lineHeight = try values.decodeIfPresent(Double.self, forKey: .lineHeight) ?? 1.5
+        fontFamily = try values.decodeIfPresent(String.self, forKey: .fontFamily) ?? "serif"
+        fontSize = try values.decodeIfPresent(Double.self, forKey: .fontSize) ?? 1.15
+        topMargin = try values.decodeIfPresent(Double.self, forKey: .topMargin) ?? 18
+        rightMargin = try values.decodeIfPresent(Double.self, forKey: .rightMargin) ?? 20
+        bottomMargin = try values.decodeIfPresent(Double.self, forKey: .bottomMargin) ?? 18
+        leftMargin = try values.decodeIfPresent(Double.self, forKey: .leftMargin) ?? 20
+        backgroundHex = try values.decodeIfPresent(String.self, forKey: .backgroundHex) ?? "F8F3E9"
+        backgroundImagePath = try values.decodeIfPresent(String.self, forKey: .backgroundImagePath)
+        removeEmptyLines = try values.decodeIfPresent(Bool.self, forKey: .removeEmptyLines) ?? false
+        verticalText = try values.decodeIfPresent(Bool.self, forKey: .verticalText) ?? false
+        readingDirection = try values.decodeIfPresent(String.self, forKey: .readingDirection) ?? "ltr"
+        publisherStyles = try values.decodeIfPresent(Bool.self, forKey: .publisherStyles) ?? false
+        volumeButtonsTurnPages = try values.decodeIfPresent(Bool.self, forKey: .volumeButtonsTurnPages) ?? false
+        layout = try values.decodeIfPresent(EPUBReadingLayout.self, forKey: .layout) ?? .paged
+        animation = try values.decodeIfPresent(EPUBTurnAnimation.self, forKey: .animation) ?? .slide
     }
 
     var backgroundImageData: Data? {
@@ -125,6 +166,7 @@ private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegat
     private var onLocationChanged: ((Locator) -> Void)?
     private var onTap: (() -> Void)?
     private var backgroundImageBase64: String?
+    private var activePreferences = EPUBReaderPreferences()
 
     func open(
         _ url: URL,
@@ -136,6 +178,7 @@ private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegat
         errorMessage = nil
         self.onLocationChanged = onLocationChanged
         self.onTap = onTap
+        activePreferences = preferences
         backgroundImageBase64 = preferences.backgroundImageData?.base64EncodedString()
         do {
             let httpClient = DefaultHTTPClient()
@@ -170,6 +213,7 @@ private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegat
             navigator.view.isOpaque = false
             self.publication = publication
             self.navigator = navigator
+            configureVerticalPaging(for: preferences)
             let toc = (try? await publication.tableOfContents().get()) ?? publication.readingOrder
             tableOfContents = Self.flatten(toc)
             positionCount = try? await publication.positions().get().count
@@ -185,12 +229,19 @@ private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegat
 
     func apply(_ preferences: EPUBReaderPreferences) async {
         guard let navigator else { return }
+        activePreferences = preferences
         backgroundImageBase64 = preferences.backgroundImageData?.base64EncodedString()
         navigator.submitPreferences(preferences.readium)
         navigator.view.backgroundColor = ReadiumNavigator.Color(hex: preferences.backgroundHex)?.uiColor ?? .systemBackground
         navigator.view.isOpaque = false
-        let imageScript = Self.backgroundImageScript(base64: backgroundImageBase64)
-        _ = await navigator.evaluateJavaScript(imageScript)
+        _ = await navigator.evaluateJavaScript(Self.readerStyleScript(base64: backgroundImageBase64, preferences: preferences))
+        configureVerticalPaging(for: preferences)
+        for delay in [150_000_000, 500_000_000] {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(delay))
+                self?.configureVerticalPaging(for: preferences)
+            }
+        }
     }
 
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
@@ -203,6 +254,7 @@ private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegat
             totalProgression = nil
         }
         onLocationChanged?(locator)
+        configureVerticalPaging(for: EPUBReaderPreferencesStore.shared.value)
     }
 
     func navigator(_ navigator: Navigator, presentError error: NavigatorError) {
@@ -220,7 +272,7 @@ private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegat
 
     func navigator(_ navigator: EPUBNavigatorViewController, setupUserScripts userContentController: WKUserContentController) {
         userContentController.addUserScript(WKUserScript(
-            source: Self.backgroundImageScript(base64: backgroundImageBase64),
+            source: Self.readerStyleScript(base64: backgroundImageBase64, preferences: activePreferences),
             injectionTime: .atDocumentEnd,
             forMainFrameOnly: false
         ))
@@ -233,8 +285,13 @@ private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegat
         }
     }
 
-    private static func backgroundImageScript(base64: String?) -> String {
+    private static func readerStyleScript(base64: String?, preferences: EPUBReaderPreferences) -> String {
         let background = base64.map { "url(data:image/jpeg;base64,\($0))" } ?? "none"
+        let top = String(preferences.topMargin)
+        let right = String(preferences.rightMargin)
+        let bottom = String(preferences.bottomMargin)
+        let left = String(preferences.leftMargin)
+        let removeEmptyLines = preferences.removeEmptyLines ? "true" : "false"
         return """
         (() => {
           const apply = () => {
@@ -244,13 +301,36 @@ private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegat
               style.id = 'novelia-reader-custom-background';
               (document.head || document.documentElement).appendChild(style);
             }
-            const css = 'html, body { background-image: \(background) !important; background-size: cover !important; background-position: center !important; background-attachment: fixed !important; background-color: transparent !important; }';
+            const css = 'html, body { background-image: \(background) !important; background-size: cover !important; background-position: center !important; background-attachment: fixed !important; background-color: transparent !important; }' +
+              ':root[style*="--USER__pageMargins"] body { padding: \(top)px \(right)px \(bottom)px \(left)px !important; }' +
+              'body { padding: \(top)px \(right)px \(bottom)px \(left)px !important; }' +
+              '.novelia-remove-empty-lines p.novelia-empty-line { display: none !important; }';
             if (style.textContent !== css) style.textContent = css;
+            document.documentElement.classList.toggle('novelia-remove-empty-lines', \(removeEmptyLines));
+            document.querySelectorAll('p').forEach(paragraph => {
+              const hasMedia = paragraph.querySelector('img, svg, video, audio, canvas, iframe, object, embed, math');
+              const isEmpty = !paragraph.textContent.replace(/[\\s\\u00a0\\u200b\\ufeff]/g, '') && !hasMedia;
+              paragraph.classList.toggle('novelia-empty-line', isEmpty);
+            });
           };
           apply();
           new MutationObserver(apply).observe(document.documentElement, { childList: true, subtree: true });
         })();
         """
+    }
+
+    private func configureVerticalPaging(for preferences: EPUBReaderPreferences) {
+        guard let navigator else { return }
+        let shouldSnapByViewport = preferences.verticalText && preferences.layout == .paged
+        func update(_ view: UIView) {
+            if let webView = view as? WKWebView {
+                webView.scrollView.isPagingEnabled = shouldSnapByViewport
+                webView.scrollView.decelerationRate = shouldSnapByViewport ? .fast : .normal
+                webView.scrollView.bounces = !shouldSnapByViewport
+            }
+            view.subviews.forEach(update)
+        }
+        update(navigator.view)
     }
 }
 
@@ -291,7 +371,7 @@ struct WenkuEPUBReaderView: View {
             if model.navigator != nil && isShowingControls {
                 HStack(spacing: 14) {
                     Button { Task { await turnPage(forward: false) } } label: {
-                        Image(systemName: "chevron.left").frame(width: 36, height: 34)
+                        Image(systemName: pageArrow(forward: false)).frame(width: 36, height: 34)
                     }
                     .accessibilityLabel("上一页")
                     ProgressView(value: model.totalProgression ?? 0)
@@ -301,7 +381,7 @@ struct WenkuEPUBReaderView: View {
                         .foregroundStyle(NoveliaStyle.muted)
                         .monospacedDigit()
                     Button { Task { await turnPage(forward: true) } } label: {
-                        Image(systemName: "chevron.right").frame(width: 36, height: 34)
+                        Image(systemName: pageArrow(forward: true)).frame(width: 36, height: 34)
                     }
                     .accessibilityLabel("下一页")
                 }
@@ -388,29 +468,112 @@ struct WenkuEPUBReaderView: View {
     @MainActor
     private func turnPage(forward: Bool) async {
         guard let navigator = model.navigator else { return }
-        let move = { @MainActor in
-            if forward { _ = await navigator.goForward(options: .none) }
-            else { _ = await navigator.goBackward(options: .none) }
-        }
         switch preferences.value.animation {
         case .none:
-            await move()
+            _ = await advancePage(forward: forward, navigator: navigator, animated: false)
         case .slide:
-            if forward { _ = await navigator.goForward(options: .animated) }
-            else { _ = await navigator.goBackward(options: .animated) }
+            _ = await advancePage(forward: forward, navigator: navigator, animated: true)
         case .simulation, .cover:
-            let transition: UIView.AnimationOptions = preferences.value.animation == .simulation
-                ? (forward ? .transitionCurlUp : .transitionCurlDown)
-                : (forward ? .transitionFlipFromRight : .transitionFlipFromLeft)
-            await withCheckedContinuation { continuation in
-                UIView.transition(with: navigator.view, duration: 0.45, options: [transition, .showHideTransitionViews]) {
-                    Task { @MainActor in
-                        await move()
-                        continuation.resume()
-                    }
-                }
+            await turnPageWithSnapshot(forward: forward, navigator: navigator)
+        }
+    }
+
+    @MainActor
+    private func advancePage(
+        forward: Bool,
+        navigator: EPUBNavigatorViewController,
+        animated: Bool
+    ) async -> Bool {
+        let prefs = preferences.value
+        if prefs.verticalText && prefs.layout == .paged {
+            let rtl = prefs.readingDirection == "rtl"
+            let progression = forward ? 1 : -1
+            let behavior = animated ? "smooth" : "instant"
+            let script = """
+            (() => {
+              const root = document.scrollingElement || document.documentElement;
+              const max = Math.max(0, root.scrollWidth - window.innerWidth);
+              const current = Math.min(max, Math.abs(window.scrollX));
+              const next = Math.max(0, Math.min(max, current + (window.innerWidth * \(progression))));
+              if (Math.abs(next - current) < 1) return false;
+              const targetX = \(rtl ? "-next" : "next");
+              window.scrollTo({ left: targetX, behavior: '\(behavior)' });
+              return true;
+            })()
+            """
+            if case let .success(value) = await navigator.evaluateJavaScript(script),
+               (value as? Bool) == true {
+                return true
             }
         }
+
+        return forward
+            ? await navigator.goForward(options: NavigatorGoOptions(animated: animated))
+            : await navigator.goBackward(options: NavigatorGoOptions(animated: animated))
+    }
+
+    @MainActor
+    private func turnPageWithSnapshot(forward: Bool, navigator: EPUBNavigatorViewController) async {
+        guard let oldPage = navigator.view.snapshotView(afterScreenUpdates: false) else {
+            _ = await advancePage(forward: forward, navigator: navigator, animated: false)
+            return
+        }
+        guard await advancePage(forward: forward, navigator: navigator, animated: false) else { return }
+        guard let newPage = navigator.view.snapshotView(afterScreenUpdates: true) else { return }
+
+        let bounds = navigator.view.bounds
+        oldPage.frame = bounds
+        newPage.frame = bounds
+        oldPage.isUserInteractionEnabled = false
+        newPage.isUserInteractionEnabled = false
+        navigator.view.addSubview(oldPage)
+
+        let isRTL = preferences.value.readingDirection == "rtl"
+        let turnSign: CGFloat = (forward == !isRTL) ? -1 : 1
+
+        switch preferences.value.animation {
+        case .slide:
+            await animate(duration: 0.28) {
+                oldPage.transform = CGAffineTransform(translationX: turnSign * bounds.width, y: 0)
+            }
+            oldPage.removeFromSuperview()
+        case .cover:
+            newPage.frame = bounds.offsetBy(dx: -turnSign * bounds.width, dy: 0)
+            navigator.view.addSubview(newPage)
+            await animate(duration: 0.32) { newPage.frame = bounds }
+            oldPage.removeFromSuperview()
+            newPage.removeFromSuperview()
+        case .simulation:
+            let pivotX: CGFloat = turnSign < 0 ? 0 : bounds.width
+            oldPage.layer.anchorPoint = CGPoint(x: pivotX / max(bounds.width, 1), y: 0.5)
+            oldPage.center = CGPoint(x: bounds.minX + pivotX, y: bounds.midY)
+            oldPage.layer.isDoubleSided = false
+            var perspective = CATransform3DIdentity
+            perspective.m34 = -1 / 900
+            oldPage.layer.transform = perspective
+            await animate(duration: 0.48) {
+                oldPage.layer.transform = CATransform3DRotate(perspective, turnSign * .pi / 2, 0, 1, 0)
+                oldPage.alpha = 0
+            }
+            oldPage.removeFromSuperview()
+        case .none:
+            oldPage.removeFromSuperview()
+        }
+    }
+
+    @MainActor
+    private func animate(duration: TimeInterval, changes: @escaping () -> Void) async {
+        await withCheckedContinuation { continuation in
+            UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut]) {
+                changes()
+            } completion: { _ in continuation.resume() }
+        }
+    }
+
+    private func pageArrow(forward: Bool) -> String {
+        let rtl = preferences.value.readingDirection == "rtl"
+        if forward { return rtl ? "chevron.left" : "chevron.right" }
+        return rtl ? "chevron.right" : "chevron.left"
     }
 
     private static func isCurrent(_ href: String, locatorHref: String?) -> Bool {
@@ -473,11 +636,32 @@ private struct EPUBReaderSettingsView: View {
                         }
                         Slider(value: binding(\.paragraphSpacing), in: 0 ... 2.0, step: 0.1)
                     }
+                    VStack(alignment: .leading) {
+                        HStack {
+                            Text("首行缩进")
+                            Spacer()
+                            Text(String(format: "%.2f em", store.value.firstLineIndent))
+                                .foregroundStyle(.secondary).monospacedDigit()
+                        }
+                        Slider(value: binding(\.firstLineIndent), in: 0 ... 3, step: 0.25)
+                    }
+                    Toggle("去除空行", isOn: binding(\.removeEmptyLines))
+                    Text("隐藏不含文字或图片的空白段落。")
+                        .font(.footnote).foregroundStyle(.secondary)
                     Toggle("使用书籍内置样式", isOn: binding(\.publisherStyles))
                     if store.value.publisherStyles {
                         Text("启用书籍样式时，书籍自身的排版可能覆盖字体、间距和颜色设置。")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
+                }
+
+                Section("页面边距") {
+                    marginSlider("上边距", keyPath: \.topMargin)
+                    marginSlider("右边距", keyPath: \.rightMargin)
+                    marginSlider("下边距", keyPath: \.bottomMargin)
+                    marginSlider("左边距", keyPath: \.leftMargin)
+                    Text("边距以点为单位，四边可分别调整。")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
 
                 Section("阅读外观") {
@@ -505,8 +689,11 @@ private struct EPUBReaderSettingsView: View {
                     Picker("阅读方式", selection: binding(\.layout)) {
                         ForEach(EPUBReadingLayout.allCases) { mode in Text(mode.title).tag(mode) }
                     }
-                    if store.value.verticalText && store.value.layout == .chapterScroll {
-                        Text("竖排阅读由 Readium 使用分页布局；关闭竖排后可使用章节内滚动。")
+                    if store.value.verticalText && store.value.layout == .paged {
+                        Text("Readium 的竖排内容采用横向滚动布局；分页模式会按屏幕宽度吸附，每次翻一屏。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    } else if store.value.verticalText {
+                        Text("章节内滚动会连续横向滚动；翻页按钮和音量键仍按一屏移动。")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
@@ -551,6 +738,21 @@ private struct EPUBReaderSettingsView: View {
             get: { store.value[keyPath: keyPath] },
             set: { store.value[keyPath: keyPath] = $0 }
         )
+    }
+
+    private func marginSlider(
+        _ title: String,
+        keyPath: WritableKeyPath<EPUBReaderPreferences, Double>
+    ) -> some View {
+        VStack(alignment: .leading) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text("\(Int(store.value[keyPath: keyPath])) pt")
+                    .foregroundStyle(.secondary).monospacedDigit()
+            }
+            Slider(value: binding(keyPath), in: 0 ... 64, step: 1)
+        }
     }
 }
 
