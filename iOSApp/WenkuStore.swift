@@ -1,5 +1,8 @@
 import Combine
 import Foundation
+import ReadiumShared
+import ReadiumStreamer
+import UIKit
 import UniformTypeIdentifiers
 
 @MainActor
@@ -135,10 +138,14 @@ private enum WenkuStoreError: LocalizedError {
 
 struct LocalWenkuEPUB: Codable, Identifiable, Hashable {
     let id: UUID
-    let title: String
+    var title: String
     let filename: String
     let addedAt: Date
     var lastLocatorJSON: String? = nil
+    var bookDescription: String? = nil
+    var author: String? = nil
+    var coverFilename: String? = nil
+    var metadataLoaded: Bool? = nil
 }
 
 @MainActor
@@ -164,11 +171,17 @@ final class WenkuLocalLibraryStore: ObservableObject {
         directory.appendingPathComponent(book.filename)
     }
 
+    func coverURL(for book: LocalWenkuEPUB) -> URL? {
+        guard let coverFilename = book.coverFilename else { return nil }
+        let url = directory.appendingPathComponent(coverFilename)
+        return fileManager.fileExists(atPath: url.path) ? url : nil
+    }
+
     func downloadDestination(for filename: String) -> URL {
         uniqueDestination(for: Self.safeFilename(filename))
     }
 
-    func registerDownloadedFile(at fileURL: URL, title: String) throws {
+    func registerDownloadedFile(at fileURL: URL, title: String) async throws {
         guard fileURL.deletingLastPathComponent().standardizedFileURL == directory.standardizedFileURL else {
             throw WenkuLocalLibraryError.invalidEPUB
         }
@@ -182,11 +195,18 @@ final class WenkuLocalLibraryStore: ObservableObject {
             throw WenkuLocalLibraryError.invalidEPUB
         }
 
+        let metadata = await Self.metadata(for: fileURL)
+        let id = UUID()
+        let coverFilename = try? saveCover(metadata.cover, id: id)
         let book = LocalWenkuEPUB(
-            id: UUID(),
-            title: title,
+            id: id,
+            title: metadata.title ?? title,
             filename: fileURL.lastPathComponent,
-            addedAt: Date()
+            addedAt: Date(),
+            bookDescription: metadata.description,
+            author: metadata.author,
+            coverFilename: coverFilename,
+            metadataLoaded: true
         )
         books.insert(book, at: 0)
         do {
@@ -198,22 +218,49 @@ final class WenkuLocalLibraryStore: ObservableObject {
         }
     }
 
-    func save(data: Data, title: String, filename: String) throws {
+    func save(data: Data, title: String, filename: String) async throws {
         guard data.starts(with: [0x50, 0x4b]) else { throw WenkuLocalLibraryError.invalidEPUB }
         let safeName = Self.safeFilename(filename)
         let destination = uniqueDestination(for: safeName)
         try data.write(to: destination, options: .atomic)
-        books.insert(LocalWenkuEPUB(id: UUID(), title: title, filename: destination.lastPathComponent, addedAt: Date()), at: 0)
-        try persistIndex()
+        let metadata = await Self.metadata(for: destination)
+        let id = UUID()
+        let coverFilename = try? saveCover(metadata.cover, id: id)
+        books.insert(
+            LocalWenkuEPUB(
+                id: id,
+                title: metadata.title ?? title,
+                filename: destination.lastPathComponent,
+                addedAt: Date(),
+                bookDescription: metadata.description,
+                author: metadata.author,
+                coverFilename: coverFilename,
+                metadataLoaded: true
+            ), at: 0
+        )
+        do { try persistIndex() } catch {
+            books.removeAll { $0.id == id }
+            try? fileManager.removeItem(at: destination)
+            if let coverFilename { try? fileManager.removeItem(at: directory.appendingPathComponent(coverFilename)) }
+            throw error
+        }
     }
 
-    func importEPUB(from source: URL) throws {
+    func importEPUB(from source: URL) async throws {
         let accessed = source.startAccessingSecurityScopedResource()
         defer { if accessed { source.stopAccessingSecurityScopedResource() } }
         guard source.pathExtension.lowercased() == "epub" else { throw WenkuLocalLibraryError.unsupportedFile }
-        let data = try Data(contentsOf: source)
+        // Coordinate reads from Files providers (including iCloud Drive) while their
+        // security-scoped URL is active, then work only with the app-owned copy.
+        var coordinatedError: NSError?
+        var importedData: Data?
+        NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinatedError) { readableURL in
+            importedData = try? Data(contentsOf: readableURL, options: .mappedIfSafe)
+        }
+        if let coordinatedError { throw coordinatedError }
+        guard let data = importedData else { throw CocoaError(.fileReadNoPermission) }
         let title = source.deletingPathExtension().lastPathComponent
-        try save(data: data, title: title, filename: source.lastPathComponent)
+        try await save(data: data, title: title, filename: source.lastPathComponent)
     }
 
     func remove(_ book: LocalWenkuEPUB) {
@@ -225,6 +272,21 @@ final class WenkuLocalLibraryStore: ObservableObject {
     func updateReadingLocation(bookID: UUID, locatorJSON: String) {
         guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
         books[index].lastLocatorJSON = locatorJSON
+        try? persistIndex()
+    }
+
+    func refreshMissingMetadata() async {
+        for index in books.indices where books[index].metadataLoaded != true {
+            let bookID = books[index].id
+            let url = fileURL(for: books[index])
+            let metadata = await Self.metadata(for: url)
+            guard let currentIndex = books.firstIndex(where: { $0.id == bookID }) else { continue }
+            if let title = metadata.title { books[currentIndex].title = title }
+            books[currentIndex].bookDescription = metadata.description
+            books[currentIndex].author = metadata.author
+            books[currentIndex].coverFilename = try? saveCover(metadata.cover, id: bookID)
+            books[currentIndex].metadataLoaded = true
+        }
         try? persistIndex()
     }
 
@@ -242,6 +304,33 @@ final class WenkuLocalLibraryStore: ObservableObject {
     private func persistIndex() throws {
         let data = try JSONEncoder().encode(books)
         try data.write(to: indexURL, options: .atomic)
+    }
+
+    private func saveCover(_ image: UIImage?, id: UUID) throws -> String? {
+        guard let image, let data = image.jpegData(compressionQuality: 0.82) else { return nil }
+        let filename = "cover-\(id.uuidString).jpg"
+        try data.write(to: directory.appendingPathComponent(filename), options: .atomic)
+        return filename
+    }
+
+    private static func metadata(for url: URL) async -> (title: String?, description: String?, author: String?, cover: UIImage?) {
+        let httpClient = DefaultHTTPClient()
+        let assetRetriever = AssetRetriever(httpClient: httpClient)
+        let opener = PublicationOpener(parser: DefaultPublicationParser(httpClient: httpClient, assetRetriever: assetRetriever, pdfFactory: DefaultPDFDocumentFactory()))
+        guard let fileURL = FileURL(url: url),
+              let asset = try? await assetRetriever.retrieve(url: fileURL).get(),
+              let publication = try? await opener.open(asset: asset, allowUserInteraction: false).get(),
+              publication.conforms(to: .epub) else { return (nil, nil, nil, nil) }
+        let metadata = publication.metadata
+        let title = metadata.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let description = metadata.description?
+            .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let author = metadata.authors.compactMap(\.name).joined(separator: ", ")
+        let cover = try? await publication.coverFitting(maxSize: CGSize(width: 240, height: 320)).get()
+        return (title?.isEmpty == false ? title : nil, description?.isEmpty == false ? description : nil, author.isEmpty ? nil : author, cover ?? nil)
     }
 
     private static func safeFilename(_ filename: String) -> String {

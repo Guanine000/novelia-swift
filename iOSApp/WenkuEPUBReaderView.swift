@@ -10,6 +10,9 @@ private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegat
     @Published private(set) var publication: Publication?
     @Published private(set) var tableOfContents: [WenkuEPUBTOCEntry] = []
     @Published private(set) var errorMessage: String?
+    @Published private(set) var currentHref: String?
+    @Published private(set) var totalProgression: Double?
+    private var positionCount: Int?
     private var onLocationChanged: ((Locator) -> Void)?
 
     func open(_ url: URL, initialLocatorJSON: String?, onLocationChanged: @escaping (Locator) -> Void) async {
@@ -48,6 +51,7 @@ private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegat
             self.navigator = navigator
             let toc = (try? await publication.tableOfContents().get()) ?? publication.readingOrder
             tableOfContents = Self.flatten(toc)
+            positionCount = try? await publication.positions().get().count
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -59,6 +63,14 @@ private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegat
     }
 
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
+        currentHref = locator.href.string
+        if let total = locator.locations.totalProgression {
+            totalProgression = total
+        } else if let position = locator.locations.position, let positionCount, positionCount > 0 {
+            totalProgression = min(1, max(0, Double(position) / Double(positionCount)))
+        } else {
+            totalProgression = nil
+        }
         onLocationChanged?(locator)
     }
 
@@ -82,6 +94,7 @@ private struct WenkuEPUBTOCEntry: Identifiable {
 
 struct WenkuEPUBReaderView: View {
     @EnvironmentObject private var localLibrary: WenkuLocalLibraryStore
+    @Environment(\.dismiss) private var dismiss
     let book: LocalWenkuEPUB
     let url: URL
 
@@ -101,7 +114,26 @@ struct WenkuEPUBReaderView: View {
         }
         .navigationTitle(model.publication?.metadata.title ?? book.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if model.navigator != nil {
+                HStack(spacing: 10) {
+                    ProgressView(value: model.totalProgression ?? 0)
+                        .tint(NoveliaStyle.coral)
+                    Text(model.totalProgression.map { "全书 \(Int(($0 * 100).rounded()))%" } ?? "正在计算进度")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .monospacedDigit()
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
+                .background(.regularMaterial)
+            }
+        }
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("完成") { dismiss() }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { isShowingTOC = true } label: { Image(systemName: "list.bullet") }
                     .disabled(model.navigator == nil || model.tableOfContents.isEmpty)
@@ -111,16 +143,27 @@ struct WenkuEPUBReaderView: View {
         .sheet(isPresented: $isShowingTOC) {
             NavigationStack {
                 List(model.tableOfContents) { entry in
+                    let isCurrent = Self.isCurrent(entry.link.href, locatorHref: model.currentHref)
                     Button {
                         Task {
                             await model.go(to: entry.link)
                             isShowingTOC = false
                         }
                     } label: {
-                        Text(entry.link.title ?? entry.link.href)
-                            .padding(.leading, CGFloat(entry.depth) * 14)
-                            .foregroundStyle(NoveliaStyle.ink)
+                        HStack(spacing: 8) {
+                            Text(entry.link.title ?? entry.link.href)
+                                .lineLimit(2)
+                                .padding(.leading, CGFloat(entry.depth) * 14)
+                                .foregroundStyle(isCurrent ? NoveliaStyle.coral : NoveliaStyle.ink)
+                            Spacer(minLength: 4)
+                            if isCurrent {
+                                Text("当前")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(NoveliaStyle.coral)
+                            }
+                        }
                     }
+                    .listRowBackground(isCurrent ? NoveliaStyle.coral.opacity(0.08) : Color.clear)
                 }
                 .navigationTitle("目录")
                 .navigationBarTitleDisplayMode(.inline)
@@ -136,6 +179,15 @@ struct WenkuEPUBReaderView: View {
                 localLibrary.updateReadingLocation(bookID: book.id, locatorJSON: json)
             }
         }
+    }
+
+    private static func isCurrent(_ href: String, locatorHref: String?) -> Bool {
+        guard let locatorHref else { return false }
+        func resourcePath(_ value: String) -> String {
+            let withoutFragment = value.split(separator: "#", maxSplits: 1).first.map(String.init) ?? value
+            return URL(string: withoutFragment)?.lastPathComponent ?? withoutFragment
+        }
+        return resourcePath(href) == resourcePath(locatorHref)
     }
 }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct WenkuView: View {
@@ -9,6 +10,7 @@ struct WenkuView: View {
     @State private var query = ""
     @State private var importError: String?
     @State private var isImporting = false
+    @State private var readingBook: LocalWenkuEPUB?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,11 +43,13 @@ struct WenkuView: View {
             }
         }
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.epub], allowsMultipleSelection: true) { result in
-            do {
-                for url in try result.get() { try localLibrary.importEPUB(from: url) }
-                importError = nil
-            } catch {
-                importError = error.localizedDescription
+            Task { @MainActor in
+                do {
+                    for url in try result.get() { try await localLibrary.importEPUB(from: url) }
+                    importError = nil
+                } catch {
+                    importError = error.localizedDescription
+                }
             }
         }
         .alert("导入 EPUB 失败", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
@@ -55,8 +59,17 @@ struct WenkuView: View {
         }
         .environmentObject(store)
         .environmentObject(localLibrary)
+        .fullScreenCover(item: $readingBook) { book in
+            NavigationStack {
+                WenkuEPUBReaderView(book: book, url: localLibrary.fileURL(for: book))
+                    .environmentObject(localLibrary)
+            }
+        }
         .task(id: auth.username) {
             await store.refreshFavorites(account: auth.username)
+        }
+        .task {
+            await localLibrary.refreshMissingMetadata()
         }
         .task(id: query) {
             do { try await Task.sleep(nanoseconds: 350_000_000) } catch { return }
@@ -119,31 +132,38 @@ struct WenkuView: View {
                 List {
                     ForEach(localLibrary.books) { book in
                         HStack(spacing: 12) {
-                            NavigationLink {
-                                WenkuEPUBReaderView(book: book, url: localLibrary.fileURL(for: book))
-                                    .environmentObject(localLibrary)
-                            } label: {
+                            Button { readingBook = book } label: {
                                 HStack(spacing: 12) {
-                                    Image(systemName: "book.closed.fill")
-                                        .font(.title2).foregroundStyle(NoveliaStyle.coral)
-                                        .frame(width: 42, height: 52)
-                                        .background(NoveliaStyle.coral.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
+                                    if let coverURL = localLibrary.coverURL(for: book), let image = UIImage(contentsOfFile: coverURL.path) {
+                                        Image(uiImage: image).resizable().scaledToFill()
+                                            .frame(width: 52, height: 72).clipShape(RoundedRectangle(cornerRadius: 7))
+                                    } else {
+                                        Image(systemName: "book.closed.fill")
+                                            .font(.title2).foregroundStyle(NoveliaStyle.coral)
+                                            .frame(width: 52, height: 72)
+                                            .background(NoveliaStyle.coral.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
+                                    }
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(book.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
-                                        Text(book.filename).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
+                                        if let author = book.author, !author.isEmpty {
+                                            Text(author).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
+                                        }
+                                        if let description = book.bookDescription, !description.isEmpty {
+                                            Text(description).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(2)
+                                        }
                                     }
                                     Spacer(minLength: 4)
                                 }
                             }
                             .buttonStyle(.plain)
-                            ShareLink(item: localLibrary.fileURL(for: book)) {
-                                Image(systemName: "square.and.arrow.up")
-                            }
-                            .accessibilityLabel("导出 EPUB")
                         }
                         .padding(.vertical, 4)
                         .listRowBackground(Color.white)
                         .swipeActions {
+                            ShareLink(item: localLibrary.fileURL(for: book)) {
+                                Label("导出", systemImage: "square.and.arrow.up")
+                            }
+                            .tint(.blue)
                             Button(role: .destructive) { localLibrary.remove(book) } label: { Label("删除", systemImage: "trash") }
                         }
                     }
@@ -480,7 +500,7 @@ private struct WenkuDownloadSheet: View {
                 translator: translator,
                 translationsMode: translationsMode
             )
-            try localLibrary.registerDownloadedFile(at: destination, title: "\(detail.displayTitle) · \(volume.volumeId)")
+            try await localLibrary.registerDownloadedFile(at: destination, title: "\(detail.displayTitle) · \(volume.volumeId)")
             finished = true
         } catch { errorMessage = error.localizedDescription }
     }
