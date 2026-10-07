@@ -48,7 +48,45 @@ public struct NoveliaAPIClient: Sendable {
         return response.asNovelChapter(id: chapterId)
     }
 
+    public func cloudFavoriteFolders() async throws -> [NoveliaCloudFolder] {
+        let response: APICloudFolders = try await get(path: ["user", "favored"])
+        return response.favoredWeb
+    }
+
+    public func cloudFavorites(page: Int = 0) async throws -> [Novel] {
+        let response: APIPage<APIWebOutline> = try await get(
+            path: ["user", "favored-web", "all"],
+            query: [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "pageSize", value: "20"),
+                URLQueryItem(name: "sort", value: "update")
+            ]
+        )
+        return response.items.compactMap { $0.asNovel }
+    }
+
+    public func addCloudFavorite(providerId: String, novelId: String, folderId: String) async throws {
+        try await mutate(path: ["user", "favored-web", folderId, providerId, novelId], method: "PUT")
+    }
+
+    public func removeCloudFavorite(providerId: String, novelId: String, folderId: String) async throws {
+        try await mutate(path: ["user", "favored-web", folderId, providerId, novelId], method: "DELETE")
+    }
+
+    private func mutate(path: [String], method: String) async throws {
+        _ = try await request(path: path, method: method)
+    }
+
     private func get<T: Decodable>(path: [String], query: [URLQueryItem] = []) async throws -> T {
+        let data = try await request(path: path, query: query)
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            throw NoveliaAPIError.decoding(error.localizedDescription)
+        }
+    }
+
+    private func request(path: [String], method: String = "GET", query: [URLQueryItem] = []) async throws -> Data {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw NoveliaAPIError.invalidURL
         }
@@ -62,8 +100,11 @@ public struct NoveliaAPIClient: Sendable {
         guard let url = components.url else { throw NoveliaAPIError.invalidURL }
 
         var request = URLRequest(url: url)
-        request.httpMethod = "GET"
+        request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if method != "GET" && method != "HEAD" {
+            request.httpBody = Data()
+        }
         if let token = tokenProvider(), !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -74,11 +115,7 @@ public struct NoveliaAPIClient: Sendable {
         guard (200..<300).contains(http.statusCode) else {
             throw NoveliaAPIError.httpStatus(http.statusCode, serverMessage(in: data))
         }
-        do {
-            return try JSONDecoder().decode(T.self, from: data)
-        } catch {
-            throw NoveliaAPIError.decoding(error.localizedDescription)
-        }
+        return data
     }
 
     private func serverMessage(in data: Data) -> String? {
@@ -99,6 +136,22 @@ public struct NoveliaAPIClient: Sendable {
         case "alphapolis": "Alphapolis"
         default: id
         }
+    }
+}
+
+public struct NoveliaCloudFolder: Codable, Identifiable, Hashable, Sendable {
+    public let id: String
+    public let title: String
+}
+
+private struct APICloudFolders: Decodable {
+    let favoredWeb: [NoveliaCloudFolder]
+
+    private enum CodingKeys: String, CodingKey { case favoredWeb }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        favoredWeb = try container.decodeIfPresent([NoveliaCloudFolder].self, forKey: .favoredWeb) ?? []
     }
 }
 
@@ -184,6 +237,7 @@ private struct APIWebOutline: Decodable {
     let type: String?
     let keywords: [String]?
     let total: Int?
+    let favored: String?
 
     var asNovel: Novel? {
         guard let providerId, let novelId else { return nil }
@@ -196,7 +250,8 @@ private struct APIWebOutline: Decodable {
             chapters: [],
             accent: NovelAccent.forProvider(providerId),
             providerId: providerId,
-            novelId: novelId
+            novelId: novelId,
+            cloudFavoriteFolderID: favored
         )
     }
 }
@@ -210,6 +265,7 @@ private struct APIWebDetail: Decodable {
     let introductionJp: String?
     let introductionZh: String?
     let toc: [APITocItem]?
+    let favored: String?
 }
 
 private struct APIAuthor: Decodable {
@@ -265,7 +321,8 @@ private extension APIWebDetail {
             chapters: chapters,
             accent: NovelAccent.forProvider(providerId),
             providerId: providerId,
-            novelId: novelId
+            novelId: novelId,
+            cloudFavoriteFolderID: favored
         )
     }
 }

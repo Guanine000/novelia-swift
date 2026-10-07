@@ -29,6 +29,7 @@ enum NoveliaStyle {
 
 struct RootView: View {
     @StateObject private var auth = AccountAuthStore()
+    @StateObject private var favorites = FavoritesStore()
 
     var body: some View {
         TabView {
@@ -49,5 +50,9 @@ struct RootView: View {
         }
         .background(NoveliaStyle.paper)
         .environmentObject(auth)
+        .environmentObject(favorites)
+        .sheet(isPresented: $auth.isLoginPresented) {
+            NoveliaLoginSheet(auth: auth)
+        }
     }
 }

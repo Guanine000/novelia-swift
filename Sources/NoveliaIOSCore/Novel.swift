@@ -1,6 +1,6 @@
 import Foundation
 
-public struct Novel: Identifiable, Hashable, Sendable {
+public struct Novel: Identifiable, Hashable, Codable, Sendable {
     public let id: String
     public let title: String
     public let author: String
@@ -10,6 +10,7 @@ public struct Novel: Identifiable, Hashable, Sendable {
     public let accent: NovelAccent
     public let providerId: String?
     public let novelId: String?
+    public let cloudFavoriteFolderID: String?
 
     public init(
         id: String,
@@ -20,7 +21,8 @@ public struct Novel: Identifiable, Hashable, Sendable {
         chapters: [NovelChapter],
         accent: NovelAccent,
         providerId: String? = nil,
-        novelId: String? = nil
+        novelId: String? = nil,
+        cloudFavoriteFolderID: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -31,12 +33,28 @@ public struct Novel: Identifiable, Hashable, Sendable {
         self.accent = accent
         self.providerId = providerId
         self.novelId = novelId
+        self.cloudFavoriteFolderID = cloudFavoriteFolderID
     }
 
     public var isRemote: Bool { providerId != nil && novelId != nil }
+
+    public func settingCloudFavoriteFolder(_ folderID: String?) -> Novel {
+        Novel(
+            id: id,
+            title: title,
+            author: author,
+            summary: summary,
+            genres: genres,
+            chapters: chapters,
+            accent: accent,
+            providerId: providerId,
+            novelId: novelId,
+            cloudFavoriteFolderID: folderID
+        )
+    }
 }
 
-public struct NovelChapter: Identifiable, Hashable, Sendable {
+public struct NovelChapter: Identifiable, Hashable, Codable, Sendable {
     public let id: String
     public let title: String
     public let originalText: String
@@ -50,7 +68,7 @@ public struct NovelChapter: Identifiable, Hashable, Sendable {
     }
 }
 
-public enum NovelAccent: String, Hashable, Sendable {
+public enum NovelAccent: String, Hashable, Codable, Sendable {
     case plum
     case ocean
     case moss

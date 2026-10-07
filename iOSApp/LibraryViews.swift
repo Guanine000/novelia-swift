@@ -1,49 +1,86 @@
 import SwiftUI
 
 struct ShelfView: View {
-    private let novels = DemoLibrary.novels
+    @EnvironmentObject private var auth: AccountAuthStore
+    @EnvironmentObject private var favorites: FavoritesStore
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("TUESDAY · YOUR LIBRARY")
+                    Text("YOUR PERSONAL LIBRARY")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .tracking(1.4)
                         .foregroundStyle(NoveliaStyle.coral)
-                    Text("继续阅读")
+                    Text("我的书架")
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(NoveliaStyle.ink)
-                    Text("把故事留在手边。")
+                    Text("收藏的作品会保存在这台设备上。")
                         .font(.system(size: 15))
                         .foregroundStyle(NoveliaStyle.muted)
                 }
 
-                if let first = novels.first {
-                    NavigationLink {
-                        NovelDetailView(novel: first)
-                    } label: {
-                        ContinueReadingCard(novel: first)
-                    }
-                    .buttonStyle(.plain)
-                }
-
                 VStack(alignment: .leading, spacing: 14) {
                     HStack {
-                        Text("我的书架")
+                        Text("已收藏")
                             .font(.system(size: 21, weight: .bold, design: .rounded))
                         Spacer()
-                        Text("\(novels.count) 本")
+                        Text("\(favorites.novels.count) 本")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(NoveliaStyle.muted)
                     }
-                    ForEach(novels) { novel in
-                        NavigationLink {
-                            NovelDetailView(novel: novel)
-                        } label: {
-                            NovelRow(novel: novel)
+                    if auth.username == nil {
+                        ContentUnavailableView {
+                            Label("登录后同步网页收藏", systemImage: "person.crop.circle.badge.checkmark")
+                        } description: {
+                            Text("此处会显示你在 Novelia 网页端收藏的作品。")
+                        } actions: {
+                            Button("登录 Novelia 账号") { auth.isLoginPresented = true }
+                                .buttonStyle(.borderedProminent)
+                                .tint(NoveliaStyle.coral)
                         }
-                        .buttonStyle(.plain)
+                        .padding(.vertical, 22)
+                    } else if favorites.isLoading && favorites.novels.isEmpty {
+                        HStack { Spacer(); ProgressView("正在同步网页收藏…"); Spacer() }
+                            .padding(.vertical, 28)
+                    } else if favorites.novels.isEmpty {
+                        ContentUnavailableView {
+                            Label("网页收藏夹为空", systemImage: "heart")
+                        } description: {
+                            Text("在作品详情中收藏后，这里会与网页端保持同步。")
+                        }
+                        .padding(.vertical, 22)
+                    } else {
+                        ForEach(favorites.novels) { novel in
+                            NavigationLink {
+                                NovelDetailView(novel: novel)
+                            } label: {
+                                NovelRow(novel: novel)
+                            }
+                            .buttonStyle(.plain)
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    guard let account = auth.username else { return }
+                                    Task {
+                                        do { try await favorites.remove(novel, account: account) }
+                                        catch { favorites.report(error) }
+                                    }
+                                } label: {
+                                    Label("取消收藏", systemImage: "heart.slash")
+                                }
+                            }
+                        }
+                    }
+                    if let error = favorites.errorMessage {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.red)
+                        Button("重新同步") { Task { await favorites.refresh(account: auth.username) } }
+                            .tint(NoveliaStyle.coral)
+                    } else if auth.username != nil {
+                        Button("刷新网页收藏") { Task { await favorites.refresh(account: auth.username) } }
+                            .font(.system(size: 13, weight: .medium))
+                            .tint(NoveliaStyle.coral)
                     }
                 }
             }
@@ -53,6 +90,7 @@ struct ShelfView: View {
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
+        .task(id: auth.username) { await favorites.refresh(account: auth.username) }
     }
 }
 
@@ -132,10 +170,17 @@ struct DiscoverView: View {
 }
 
 struct NovelDetailView: View {
+    @EnvironmentObject private var auth: AccountAuthStore
+    @EnvironmentObject private var favorites: FavoritesStore
     let novel: Novel
     @State private var displayNovel: Novel
     @State private var isLoadingDetail = false
     @State private var detailError: String?
+    @State private var cloudFolders: [NoveliaCloudFolder] = []
+    @State private var showCloudFavoriteOptions = false
+    @State private var favoriteError: String?
+    @State private var showFavoriteError = false
+    @State private var isLoadingFavoriteFolders = false
     @AppStorage private var savedChapterIndex: Int
 
     init(novel: Novel) {
@@ -242,8 +287,18 @@ struct NovelDetailView: View {
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle("作品详情")
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: novel.id) { await loadDetail() }
+        .task(id: "\(novel.id)|\(auth.username ?? "")") { await loadDetail() }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    favoriteTapped()
+                } label: {
+                    Image(systemName: isCloudFavorite ? "heart.fill" : "heart")
+                        .foregroundStyle(NoveliaStyle.coral)
+                }
+                .accessibilityLabel(isCloudFavorite ? "取消网页收藏" : "收藏到网页端")
+                .disabled(isLoadingDetail || isLoadingFavoriteFolders)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
                     ReaderView(novel: displayNovel, startingAt: min(savedChapterIndex, max(0, displayNovel.chapters.count - 1)))
@@ -255,21 +310,98 @@ struct NovelDetailView: View {
                 .disabled(displayNovel.chapters.isEmpty)
             }
         }
+        .confirmationDialog("收藏到网页端", isPresented: $showCloudFavoriteOptions, titleVisibility: .visible) {
+            ForEach(cloudFolders) { folder in
+                Button(folder.title) {
+                    guard let account = auth.username else { return }
+                    Task {
+                        do {
+                            try await favorites.add(displayNovel, to: folder, account: account)
+                            displayNovel = displayNovel.settingCloudFavoriteFolder(folder.id)
+                        }
+                        catch { presentFavoriteError(error) }
+                    }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("选择 Novelia 网页端的收藏夹。")
+        }
+        .alert("网页收藏同步失败", isPresented: $showFavoriteError) {
+            Button("好", role: .cancel) {}
+            if auth.username == nil {
+                Button("登录") { auth.isLoginPresented = true }
+            }
+        } message: {
+            Text(favoriteError ?? "请稍后重试。")
+        }
     }
 
     @MainActor
     private func loadDetail() async {
         guard novel.isRemote, let providerId = novel.providerId, let novelId = novel.novelId else { return }
+        let account = auth.username
+        let token = NoveliaSessionTokenVault.read()
+        let api = NoveliaAPIClient(tokenProvider: { token })
         isLoadingDetail = true
         detailError = nil
         defer { isLoadingDetail = false }
         do {
-            displayNovel = try await NoveliaAPIClient().novel(providerId: providerId, novelId: novelId)
+            let loaded = try await api.novel(providerId: providerId, novelId: novelId)
+            guard !Task.isCancelled, auth.username == account else { return }
+            displayNovel = loaded
+            favorites.updateStatus(from: loaded, account: account)
         } catch {
             guard !Task.isCancelled else { return }
             detailError = error.localizedDescription
         }
     }
+
+    private var isCloudFavorite: Bool {
+        favorites.contains(displayNovel) || favorites.folderID(for: displayNovel) != nil
+    }
+
+    private func favoriteTapped() {
+        guard let account = auth.username else {
+            auth.isLoginPresented = true
+            return
+        }
+        if isCloudFavorite {
+            Task {
+                do {
+                    try await favorites.remove(displayNovel, account: account)
+                    displayNovel = displayNovel.settingCloudFavoriteFolder(nil)
+                }
+                catch { presentFavoriteError(error) }
+            }
+            return
+        }
+        isLoadingFavoriteFolders = true
+        Task {
+            defer { isLoadingFavoriteFolders = false }
+            do {
+                cloudFolders = try await favorites.folders(account: account)
+                guard auth.username == account else { return }
+                if cloudFolders.isEmpty {
+                    throw NoveliaFavoritesUIError.noFolders
+                }
+                showCloudFavoriteOptions = true
+            } catch {
+                presentFavoriteError(error)
+            }
+        }
+    }
+
+    private func presentFavoriteError(_ error: Error) {
+        favoriteError = error.localizedDescription
+        showFavoriteError = true
+    }
+}
+
+private enum NoveliaFavoritesUIError: LocalizedError {
+    case noFolders
+
+    var errorDescription: String? { "网页账号下没有可用的收藏夹，请先在 Novelia 网页端创建收藏夹。" }
 }
 
 private struct ContinueReadingCard: View {
@@ -457,7 +589,7 @@ struct SettingsView: View {
             Section("关于此移植") {
                 LabeledContent("平台", value: "iOS 17+")
                 LabeledContent("版本", value: "独立 MVP")
-                Text("发现页和在线阅读已连接 Novelia API，账号登录使用官方统一认证页。云端书架同步、下载队列与 ECH 传输尚未接入。")
+                Text("发现、在线阅读和网页收藏已连接 Novelia API，账号登录使用官方统一认证页。云端书架文件夹管理、下载队列与 ECH 传输尚未接入。")
                     .font(.system(size: 13))
                     .foregroundStyle(NoveliaStyle.muted)
             }
@@ -466,8 +598,5 @@ struct SettingsView: View {
         .background(NoveliaStyle.paper)
         .navigationTitle("我的")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $auth.isLoginPresented) {
-            NoveliaLoginSheet(auth: auth)
-        }
     }
 }
