@@ -1,16 +1,17 @@
-# Novelia iOS 移植（v0.2.0）
+# Novelia iOS 移植（v0.3.0）
 
-这是一个独立的 SwiftUI iOS 项目，移植对照对象是第三方原生 Android 客户端 [nobYoQ/novelia](https://github.com/nobYoQ/novelia)。该 Android 客户端基于 [AutoNovel 网页版及服务端](https://github.com/auto-novel/auto-novel) 提供的服务开发。本 README 的功能差距清单以 Android 客户端为准，AutoNovel 是其上游网站/API 服务来源。**本 iOS 项目与这两个上游仓库分离，不会修改它们。**当前版本包含基础发现、在线阅读、账号认证、站内热度榜和阅读外观设置，但尚未达到 Android 客户端的功能完整度。
+这是一个独立的 SwiftUI iOS 项目，移植对照对象是第三方原生 Android 客户端 [nobYoQ/novelia](https://github.com/nobYoQ/novelia)。该 Android 客户端基于 [AutoNovel 网页版及服务端](https://github.com/auto-novel/auto-novel) 提供的服务开发。本 README 的功能差距清单以 Android 客户端为准，AutoNovel 是其上游网站/API 服务来源。**本 iOS 项目与这两个上游仓库分离，不会修改它们。**当前版本包含基础发现、在线阅读、账号认证、站内热度榜、阅读外观、网页评论区和简洁应用图标，但尚未达到 Android 客户端的功能完整度。
 
 ## 当前版本
 
-- 最新版本：**v0.2.0**（2026-10-07）。
-- [查看 GitHub Release](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.2.0)，可下载 [未签名 IPA](https://github.com/Guanine000/novelia-ios-port/releases/download/v0.2.0/Novelia-unsigned.ipa)。
-- 本版本排行榜仅提供 Novelia 站内点击热度榜；阅读器外观可选浅色、深色或跟随系统。
+- 最新版本：**v0.3.0**（2026-10-07）。
+- [查看 GitHub Release](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.3.0)，可下载 [未签名 IPA](https://github.com/Guanine000/novelia-ios-port/releases/download/v0.3.0/Novelia-unsigned.ipa)。
+- 本版本新增 Novelia 网页评论区和简洁书本应用图标；排行榜仅提供站内点击热度榜，阅读器外观可选浅色、深色或跟随系统。
 
 ## 当前已实现
 
 - SwiftUI 三个主入口：书架、发现、我的。
+- 使用简洁的打开书本图案作为 iOS 主屏幕应用图标。
 - 发现页调用 Novelia 公开 API 搜索在线作品，并在滚动到结果底部时自动分页加载。
 - 发现页提供 Novelia 站内点击热度排行榜，支持分页浏览并可进入作品详情。
 - 作品详情页标签可点击并精确筛选包含该标签的作品，标签结果页支持继续分页。
@@ -19,7 +20,7 @@
 - 基础章节阅读，支持原文、译文、逐段对照的双语显示，以及上一章/下一章。
 - 阅读界面可切换浅色、深色或跟随系统；调整阅读字号；本地保存章节级阅读进度和章节书签。
 - 在作品详情中选择网页端收藏夹收藏/取消收藏；书架登录后读取 Novelia 账号的云端收藏，并按账号缓存供离线查看。
-- 作品详情可进入 Novelia 网页端评论区，查看分页评论及每条评论附带的首批回复；登录后可发表评论和回复，内容同步到网页端。
+- 作品详情可进入 Novelia 网页端评论区，分页查看评论和回复；登录后可发表评论和回复，内容同步到网页端。
 - 首页横向展示少量最近阅读和网页收藏，均可进入完整列表；阅读历史列表分页加载，滑到底部会自动读取下一页。作品详情页提供续读入口，并优先使用云端最近章节位置。
 - 小说账号统一认证流程：通过 WKWebView 登录，调用 refresh 接口获取应用令牌，并将令牌保存在 iOS Keychain。
 - 最低部署版本为 iOS 17。
@@ -56,7 +57,7 @@
 
 ### 社区、同步与维护
 
-- 论坛内容流、帖子、评论编辑/删除、完整回复分页、Markdown 编辑器、草稿和社区权限功能；iOS 当前评论区读取每条根评论随附的首批回复，更多回复可在网页端查看。
+- 论坛内容流、帖子、评论编辑/删除、Markdown 编辑器、草稿和社区权限功能。
 - WebDAV 多设备同步、离线写入队列与冲突处理。
 - ECH 网络传输、书源线路配置、网络日志与诊断。
 - 应用更新检查与通知，以及覆盖上述功能的自动化和设备测试。
@@ -67,13 +68,13 @@
 2. 选择 `Novelia` scheme 和 iPhone 模拟器。
 3. 点击 Run，或按 **⌘R**。
 
-项目最低部署版本是 iOS 17。`Package.swift` 单独提供平台无关的 `NoveliaIOSCore` 模型和样例数据。v0.2.0 已通过 iOS Simulator Debug 构建和 GitHub Actions 设备版构建；阅读界面的浅色、深色及跟随系统选项已手动验证。
+项目最低部署版本是 iOS 17。`Package.swift` 单独提供平台无关的 `NoveliaIOSCore` 模型和样例数据。v0.3.0 已通过 iOS Simulator Debug 构建和 GitHub Actions 设备版构建；阅读界面的浅色、深色及跟随系统选项已手动验证。
 
 ## 使用 GitHub Actions 构建 IPA
 
 推送到 `main` 后，GitHub Actions 会自动构建 iOS 设备版并发布名为 `Novelia-unsigned-ipa` 的工件；也可以在仓库的 **Actions** 页面手动运行 **Build iOS IPA**。完成后从对应运行记录的 **Artifacts** 下载 `Novelia-unsigned.ipa`。
 
-此工作流产出未签名 IPA。当前 v0.2.0 的 IPA 已附在 GitHub Release 中。未签名 IPA 不能直接用于常规真机安装或发布到 App Store；这仍需要 Apple 开发者签名证书及匹配的 provisioning profile，并在工作流中配置签名。
+此工作流产出未签名 IPA。当前 v0.3.0 的 IPA 已附在 GitHub Release 中。未签名 IPA 不能直接用于常规真机安装或发布到 App Store；这仍需要 Apple 开发者签名证书及匹配的 provisioning profile，并在工作流中配置签名。
 
 ## 项目结构
 
