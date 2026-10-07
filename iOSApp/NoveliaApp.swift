@@ -39,6 +39,8 @@ struct RootView: View {
     @StateObject private var auth = AccountAuthStore()
     @StateObject private var favorites = FavoritesStore()
     @StateObject private var readingHistory = ReadingHistoryStore()
+    @StateObject private var wenkuDownloads = WenkuLocalLibraryStore()
+    @StateObject private var webNovelDownloads = WebNovelDownloadStore()
 
     var body: some View {
         TabView {
@@ -66,6 +68,8 @@ struct RootView: View {
         .environmentObject(auth)
         .environmentObject(favorites)
         .environmentObject(readingHistory)
+        .environmentObject(wenkuDownloads)
+        .environmentObject(webNovelDownloads)
         .sheet(isPresented: $auth.isLoginPresented) {
             NoveliaLoginSheet(auth: auth)
         }

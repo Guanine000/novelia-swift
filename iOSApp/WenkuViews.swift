@@ -1,10 +1,9 @@
 import SwiftUI
-import UIKit
 
 struct WenkuView: View {
     @EnvironmentObject private var auth: AccountAuthStore
+    @EnvironmentObject private var localLibrary: WenkuLocalLibraryStore
     @StateObject private var store = WenkuStore()
-    @StateObject private var localLibrary = WenkuLocalLibraryStore()
     @State private var section = WenkuSection.search
     @State private var query = ""
 
@@ -31,7 +30,6 @@ struct WenkuView: View {
         .navigationTitle("文库")
         .navigationBarTitleDisplayMode(.inline)
         .environmentObject(store)
-        .environmentObject(localLibrary)
         .task(id: auth.username) {
             await store.refreshFavorites(account: auth.username)
         }
@@ -85,58 +83,7 @@ struct WenkuView: View {
     }
 
     private var downloadedContent: some View {
-        Group {
-            if localLibrary.books.isEmpty {
-                ContentUnavailableView {
-                    Label("暂无下载文件", systemImage: "book.closed")
-                } description: {
-                    Text("在文库作品详情页下载 EPUB 后，可在这里导出到“文件”或其他阅读 App。")
-                }
-            } else {
-                List {
-                    ForEach(localLibrary.books) { book in
-                        HStack(spacing: 12) {
-                            ShareLink(item: localLibrary.fileURL(for: book)) {
-                                HStack(spacing: 12) {
-                                    if let coverURL = localLibrary.coverURL(for: book), let image = UIImage(contentsOfFile: coverURL.path) {
-                                        Image(uiImage: image).resizable().scaledToFill()
-                                            .frame(width: 52, height: 72).clipShape(RoundedRectangle(cornerRadius: 7))
-                                    } else {
-                                        Image(systemName: "book.closed.fill")
-                                            .font(.title2).foregroundStyle(NoveliaStyle.coral)
-                                            .frame(width: 52, height: 72)
-                                            .background(NoveliaStyle.coral.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
-                                    }
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(book.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
-                                        if let author = book.author, !author.isEmpty {
-                                            Text(author).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
-                                        }
-                                        if let description = book.bookDescription, !description.isEmpty {
-                                            Text(description).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(2)
-                                        }
-                                    }
-                                    Spacer(minLength: 4)
-                                    Image(systemName: "square.and.arrow.up")
-                                        .foregroundStyle(NoveliaStyle.coral)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.vertical, 4)
-                        .listRowBackground(Color.white)
-                        .swipeActions {
-                            ShareLink(item: localLibrary.fileURL(for: book)) {
-                                Label("导出", systemImage: "square.and.arrow.up")
-                            }
-                            .tint(.blue)
-                            Button(role: .destructive) { localLibrary.remove(book) } label: { Label("删除", systemImage: "trash") }
-                        }
-                    }
-                }
-                .scrollContentBackground(.hidden)
-            }
-        }
+        MyDownloadsView(initialTab: .wenku)
     }
 
     @ViewBuilder
@@ -405,6 +352,7 @@ private struct WenkuDownloadSheet: View {
     let volume: WenkuVolumeAvailability
     @State private var mode: WenkuEPUBMode = .translated
     @State private var translator: WenkuTranslator = .sakura
+    @State private var hasCustomTranslatorSelection = false
     @State private var translationsMode: WenkuTranslationsMode = .priority
     @State private var isDownloading = false
     @State private var errorMessage: String?
@@ -434,7 +382,13 @@ private struct WenkuDownloadSheet: View {
                         Text("此卷暂无可用翻译源，上游目前也未提供原文单独 EPUB 下载接口。")
                             .font(.footnote).foregroundStyle(.secondary)
                     } else {
-                        Picker("翻译源", selection: $translator) {
+                        Picker(
+                            "翻译源",
+                            selection: Binding(
+                                get: { translator },
+                                set: { translator = $0; hasCustomTranslatorSelection = true }
+                            )
+                        ) {
                             ForEach(availableTranslators) { source in
                                 Text("\(source.title)（\(volume.count(for: source)) 段）").tag(source)
                             }
@@ -442,7 +396,7 @@ private struct WenkuDownloadSheet: View {
                     }
                 }
                 if let errorMessage { Section { Text(errorMessage).font(.footnote).foregroundStyle(.red) } }
-                if finished { Section { Label("下载完成，可在下载列表中导出", systemImage: "checkmark.circle.fill").foregroundStyle(.green) } }
+                if finished { Section { Label("下载完成，可在“我的 → 我的下载”中导出", systemImage: "checkmark.circle.fill").foregroundStyle(.green) } }
                 Section {
                     Button {
                         Task { await download() }
@@ -473,7 +427,12 @@ private struct WenkuDownloadSheet: View {
         errorMessage = nil
         defer { isDownloading = false }
         do {
-            let filename = "\(detail.id)-\(volume.volumeId)-\(mode.rawValue)-\(translator.rawValue).epub"
+            let filenameTranslators = hasCustomTranslatorSelection ? [translator] : WenkuTranslator.websiteDefaultPriority
+            let filename = mode.websiteDownloadFilename(
+                volumeId: volume.volumeId,
+                translationsMode: translationsMode,
+                translators: filenameTranslators
+            )
             let destination = localLibrary.downloadDestination(for: filename)
             try await api.downloadWenkuEPUB(
                 to: destination,
@@ -481,6 +440,7 @@ private struct WenkuDownloadSheet: View {
                 volumeId: volume.volumeId,
                 mode: mode,
                 translator: translator,
+                filenameTranslators: filenameTranslators,
                 translationsMode: translationsMode
             )
             try await localLibrary.registerDownloadedFile(at: destination, title: "\(detail.displayTitle) · \(volume.volumeId)")

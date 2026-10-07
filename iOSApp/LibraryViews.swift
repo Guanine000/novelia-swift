@@ -687,6 +687,7 @@ private struct TagSearchResultsView: View {
 struct NovelDetailView: View {
     @EnvironmentObject private var auth: AccountAuthStore
     @EnvironmentObject private var favorites: FavoritesStore
+    @EnvironmentObject private var webNovelDownloads: WebNovelDownloadStore
     let novel: Novel
     @State private var displayNovel: Novel
     @State private var isLoadingDetail = false
@@ -837,6 +838,46 @@ struct NovelDetailView: View {
                         .background(NoveliaStyle.coral, in: RoundedRectangle(cornerRadius: 15))
                     }
                     .buttonStyle(.plain)
+                }
+
+                if displayNovel.isRemote && !displayNovel.chapters.isEmpty {
+                    let progress = webNovelDownloads.progress[displayNovel.id]
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            Task { await webNovelDownloads.download(displayNovel) }
+                        } label: {
+                            HStack(spacing: 10) {
+                                if progress != nil {
+                                    ProgressView().tint(.white)
+                                } else {
+                                    Image(systemName: webNovelDownloads.isDownloaded(displayNovel.id) ? "arrow.clockwise" : "arrow.down.to.line")
+                                }
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(progress == nil
+                                         ? (webNovelDownloads.isDownloaded(displayNovel.id) ? "重新下载全书" : "下载全书")
+                                         : "正在下载 \(progress!.completed) / \(progress!.total) 章")
+                                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                                    Text("下载后可在“我的 → 我的下载”离线阅读")
+                                        .font(.system(size: 12, weight: .medium)).opacity(0.82)
+                                }
+                                Spacer()
+                                if let progress {
+                                    ProgressView(value: progress.fraction).tint(.white).frame(width: 48)
+                                }
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 17)
+                            .padding(.vertical, 14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(NoveliaStyle.accent(for: displayNovel.accent), in: RoundedRectangle(cornerRadius: 15))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(progress != nil)
+                        if let error = webNovelDownloads.errors[displayNovel.id] {
+                            Text("下载失败：\(error)")
+                                .font(.footnote).foregroundStyle(.red)
+                        }
+                    }
                 }
 
                 if displayNovel.isRemote,
@@ -1482,6 +1523,170 @@ struct BookCover: View {
     }
 }
 
+enum MyDownloadsTab: String, CaseIterable, Identifiable {
+    case network, wenku
+    var id: String { rawValue }
+    var title: String { self == .network ? "网络小说" : "文库" }
+}
+
+struct MyDownloadsView: View {
+    @EnvironmentObject private var webNovelDownloads: WebNovelDownloadStore
+    @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
+    @State private var selectedTab: MyDownloadsTab
+
+    init(initialTab: MyDownloadsTab = .network) {
+        _selectedTab = State(initialValue: initialTab)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("下载内容", selection: $selectedTab) {
+                ForEach(MyDownloadsTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+
+            Group {
+                switch selectedTab {
+                case .network: networkDownloads
+                case .wenku: wenkuDownloadsList
+                }
+            }
+        }
+        .background(NoveliaStyle.paper.ignoresSafeArea())
+        .navigationTitle("我的下载")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await wenkuDownloads.refreshMissingMetadata() }
+    }
+
+    private var networkDownloads: some View {
+        Group {
+            if webNovelDownloads.books.isEmpty {
+                ContentUnavailableView {
+                    Label("暂无网络小说下载", systemImage: "arrow.down.book")
+                } description: {
+                    Text("打开网络小说详情，选择“下载全书”后即可在这里离线阅读。")
+                }
+            } else {
+                List {
+                    ForEach(webNovelDownloads.books) { book in
+                        NavigationLink {
+                            DownloadedWebNovelReader(book: book)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(book.novel.title)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(NoveliaStyle.ink)
+                                    .lineLimit(2)
+                                Text(book.novel.author)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(NoveliaStyle.muted)
+                                    .lineLimit(1)
+                                Text("\(book.novel.chapters.count) 章 · \(book.downloadedAt.formatted(date: .numeric, time: .omitted))")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(NoveliaStyle.muted)
+                            }
+                            .padding(.vertical, 5)
+                        }
+                        .listRowBackground(Color.white)
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                webNovelDownloads.remove(book)
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+                .scrollContentBackground(.hidden)
+            }
+        }
+    }
+
+    private var wenkuDownloadsList: some View {
+        Group {
+            if wenkuDownloads.books.isEmpty {
+                ContentUnavailableView {
+                    Label("暂无文库下载", systemImage: "book.closed")
+                } description: {
+                    Text("在文库作品详情下载 EPUB 后，可从这里导出到“文件”或其他阅读 App。")
+                }
+            } else {
+                List {
+                    ForEach(wenkuDownloads.books) { book in
+                        ShareLink(item: wenkuDownloads.fileURL(for: book)) {
+                            HStack(spacing: 12) {
+                                if let coverURL = wenkuDownloads.coverURL(for: book),
+                                   let image = UIImage(contentsOfFile: coverURL.path) {
+                                    Image(uiImage: image).resizable().scaledToFill()
+                                        .frame(width: 52, height: 72)
+                                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                                } else {
+                                    Image(systemName: "book.closed.fill")
+                                        .font(.title2).foregroundStyle(NoveliaStyle.coral)
+                                        .frame(width: 52, height: 72)
+                                        .background(NoveliaStyle.coral.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
+                                }
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(book.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
+                                    if let author = book.author, !author.isEmpty {
+                                        Text(author).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
+                                    }
+                                    if let description = book.bookDescription, !description.isEmpty {
+                                        Text(description).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(2)
+                                    }
+                                }
+                                Spacer(minLength: 4)
+                                Image(systemName: "square.and.arrow.up").foregroundStyle(NoveliaStyle.coral)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                        .listRowBackground(Color.white)
+                        .swipeActions {
+                            ShareLink(item: wenkuDownloads.fileURL(for: book)) {
+                                Label("导出", systemImage: "square.and.arrow.up")
+                            }
+                            .tint(.blue)
+                            Button(role: .destructive) { wenkuDownloads.remove(book) } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+                .scrollContentBackground(.hidden)
+            }
+        }
+    }
+}
+
+private struct DownloadedWebNovelReader: View {
+    @EnvironmentObject private var downloads: WebNovelDownloadStore
+    let book: DownloadedWebNovel
+    @State private var chapters: [String: NovelChapter]?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if let chapters {
+                ReaderView(novel: book.novel, startingAt: 0, offlineChapters: chapters)
+            } else if let errorMessage {
+                ContentUnavailableView("无法打开下载内容", systemImage: "exclamationmark.triangle", description: Text(errorMessage))
+            } else {
+                ProgressView("正在打开下载内容…")
+            }
+        }
+        .task {
+            guard chapters == nil, errorMessage == nil else { return }
+            do { chapters = try await downloads.chapters(for: book) }
+            catch { errorMessage = error.localizedDescription }
+        }
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var auth: AccountAuthStore
     @AppStorage("readerFontSize") private var fontSize = 20.0
@@ -1535,12 +1740,16 @@ struct SettingsView: View {
                         .tint(NoveliaStyle.coral)
                 }
             }
-            Section("关于此移植") {
+            Section("下载") {
+                NavigationLink {
+                    MyDownloadsView()
+                } label: {
+                    Label("我的下载", systemImage: "arrow.down.circle")
+                }
+            }
+            Section("版本") {
+                LabeledContent("当前版本", value: appVersion)
                 LabeledContent("平台", value: "iOS 17+")
-                LabeledContent("版本", value: appVersion)
-                Text("发现、在线阅读和网页收藏已连接 Novelia API，账号登录使用官方统一认证页。云端书架文件夹管理、下载队列与 ECH 传输尚未接入。")
-                    .font(.system(size: 13))
-                    .foregroundStyle(NoveliaStyle.muted)
             }
             Section("诊断") {
                 Button {

@@ -330,3 +330,114 @@ private enum WenkuLocalLibraryError: LocalizedError {
         }
     }
 }
+
+struct WebNovelDownloadProgress: Equatable {
+    let completed: Int
+    let total: Int
+    var fraction: Double { total == 0 ? 0 : Double(completed) / Double(total) }
+}
+
+struct DownloadedWebNovel: Codable, Identifiable, Hashable {
+    let novel: Novel
+    let chapterDataFilename: String
+    let downloadedAt: Date
+
+    var id: String { novel.id }
+}
+
+@MainActor
+final class WebNovelDownloadStore: ObservableObject {
+    @Published private(set) var books: [DownloadedWebNovel] = []
+    @Published private(set) var progress: [String: WebNovelDownloadProgress] = [:]
+    @Published private(set) var errors: [String: String] = [:]
+
+    private let fileManager: FileManager
+    private let directory: URL
+    private let indexURL: URL
+    private let api = NoveliaAPIClient()
+
+    init(fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+        let applicationSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        directory = applicationSupport.appendingPathComponent("WebNovelDownloads", isDirectory: true)
+        indexURL = directory.appendingPathComponent("library.json")
+        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        if let data = try? Data(contentsOf: indexURL),
+           let saved = try? JSONDecoder().decode([DownloadedWebNovel].self, from: data) {
+            books = saved.filter { fileManager.fileExists(atPath: directory.appendingPathComponent($0.chapterDataFilename).path) }
+        }
+    }
+
+    func isDownloaded(_ novelID: String) -> Bool {
+        books.contains { $0.id == novelID }
+    }
+
+    func chapters(for book: DownloadedWebNovel) async throws -> [String: NovelChapter] {
+        let url = directory.appendingPathComponent(book.chapterDataFilename)
+        return try await Task.detached(priority: .userInitiated) {
+            let data = try Data(contentsOf: url)
+            let chapters = try JSONDecoder().decode([NovelChapter].self, from: data)
+            return Dictionary(chapters.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
+        }.value
+    }
+
+    func download(_ novel: Novel) async {
+        guard novel.isRemote,
+              let providerId = novel.providerId,
+              let novelId = novel.novelId,
+              !novel.chapters.isEmpty,
+              progress[novel.id] == nil else { return }
+
+        errors[novel.id] = nil
+        progress[novel.id] = WebNovelDownloadProgress(completed: 0, total: novel.chapters.count)
+        var chapters: [NovelChapter] = []
+        chapters.reserveCapacity(novel.chapters.count)
+
+        do {
+            for (index, listedChapter) in novel.chapters.enumerated() {
+                try Task.checkCancellation()
+                let chapter = try await api.chapter(
+                    providerId: providerId,
+                    novelId: novelId,
+                    chapterId: listedChapter.id
+                )
+                chapters.append(chapter)
+                progress[novel.id] = WebNovelDownloadProgress(completed: index + 1, total: novel.chapters.count)
+            }
+
+            let filename = "chapters-\(UUID().uuidString).json"
+            let dataURL = directory.appendingPathComponent(filename)
+            let data = try JSONEncoder().encode(chapters)
+            try data.write(to: dataURL, options: .atomic)
+
+            let record = DownloadedWebNovel(novel: novel, chapterDataFilename: filename, downloadedAt: Date())
+            let previousBooks = books
+            books.removeAll { $0.id == novel.id }
+            books.insert(record, at: 0)
+            do {
+                try persistIndex()
+            } catch {
+                books = previousBooks
+                try? fileManager.removeItem(at: dataURL)
+                throw error
+            }
+            if let old = previousBooks.first(where: { $0.id == novel.id }) {
+                try? fileManager.removeItem(at: directory.appendingPathComponent(old.chapterDataFilename))
+            }
+        } catch {
+            errors[novel.id] = error.localizedDescription
+        }
+        progress[novel.id] = nil
+    }
+
+    func remove(_ book: DownloadedWebNovel) {
+        try? fileManager.removeItem(at: directory.appendingPathComponent(book.chapterDataFilename))
+        books.removeAll { $0.id == book.id }
+        try? persistIndex()
+    }
+
+    private func persistIndex() throws {
+        let data = try JSONEncoder().encode(books)
+        try data.write(to: indexURL, options: .atomic)
+    }
+}

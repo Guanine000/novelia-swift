@@ -124,6 +124,7 @@ public struct NoveliaAPIClient: Sendable {
         volumeId: String,
         mode: WenkuEPUBMode,
         translator: WenkuTranslator,
+        filenameTranslators: [WenkuTranslator]? = nil,
         translationsMode: WenkuTranslationsMode = .priority
     ) async throws {
         guard mode != .original else { throw NoveliaAPIError.unsupportedWenkuOriginalDownload }
@@ -140,7 +141,14 @@ public struct NoveliaAPIClient: Sendable {
             URLQueryItem(name: "mode", value: mode.rawValue),
             URLQueryItem(name: "translationsMode", value: translationsMode.rawValue),
             URLQueryItem(name: "type", value: "epub"),
-            URLQueryItem(name: "filename", value: "\(mode.rawValue).\(translator.rawValue).\(volumeId)"),
+            URLQueryItem(
+                name: "filename",
+                value: mode.websiteDownloadFilename(
+                    volumeId: volumeId,
+                    translationsMode: translationsMode,
+                    translators: filenameTranslators ?? [translator]
+                )
+            ),
             URLQueryItem(name: "translations", value: translator.rawValue)
         ]
         guard let url = components.url else { throw NoveliaAPIError.invalidURL }

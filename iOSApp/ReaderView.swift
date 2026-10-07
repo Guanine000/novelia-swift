@@ -50,6 +50,7 @@ enum ReaderAppearance: String, CaseIterable, Identifiable {
 
 struct ReaderView: View {
     let novel: Novel
+    private let isOffline: Bool
     @Environment(\.colorScheme) private var systemColorScheme
     @State private var chapterIndex: Int
     @AppStorage("readerAppearance") private var appearanceRaw = ReaderAppearance.system.rawValue
@@ -63,9 +64,11 @@ struct ReaderView: View {
     @State private var chapterError: String?
     @State private var loadAttempt = 0
 
-    init(novel: Novel, startingAt: Int) {
+    init(novel: Novel, startingAt: Int, offlineChapters: [String: NovelChapter]? = nil) {
         self.novel = novel
+        isOffline = offlineChapters != nil
         _chapterIndex = State(initialValue: min(max(0, startingAt), max(0, novel.chapters.count - 1)))
+        _loadedChapters = State(initialValue: offlineChapters ?? [:])
         _bookmarkIDsJSON = AppStorage(wrappedValue: "[]", "bookmarks.\(novel.id)")
         _savedChapterIndex = AppStorage(wrappedValue: 0, "progress.\(novel.id)")
     }
@@ -323,7 +326,8 @@ struct ReaderView: View {
 
     @MainActor
     private func loadChapter() async {
-        guard novel.isRemote,
+        guard !isOffline,
+              novel.isRemote,
               let providerId = novel.providerId,
               let novelId = novel.novelId,
               chapter.originalText.isEmpty else { return }
