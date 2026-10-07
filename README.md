@@ -4,9 +4,10 @@
 
 ## 版本状态
 
-- 最新已发布版本：**v0.3.0**（2026-10-07）。当前工作区包含尚未发布的文库功能开发。
-- [查看 GitHub Release](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.3.0)，可下载 [未签名 IPA](https://github.com/Guanine000/novelia-ios-port/releases/download/v0.3.0/Novelia-unsigned.ipa)。
-- 本版本新增 Novelia 网页评论区和简洁书本应用图标；排行榜仅提供站内点击热度榜，阅读器外观可选浅色、深色或跟随系统。
+- 最新已发布版本：**v0.4.0**（2026-10-07）。
+- [查看 GitHub Release](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.4.0)，可下载 [未签名 IPA](https://github.com/Guanine000/novelia-ios-port/releases/download/v0.4.0/Novelia-unsigned.ipa)。
+- v0.4.0 优化网页阅读时的纵向滚动性能；文库评论区继续与 Novelia 网页端同步；移除应用内 EPUB 阅读和导入，改为通过“下载列表”管理 EPUB 下载文件并导出。
+- v0.3.0 起提供 Novelia 网页评论区和简洁书本应用图标；排行榜仅提供站内点击热度榜，阅读器外观可选浅色、深色或跟随系统。
 
 ## 当前已实现
 
@@ -74,13 +75,13 @@
 2. 选择 `Novelia` scheme 和 iPhone 模拟器。
 3. 点击 Run，或按 **⌘R**。
 
-项目最低部署版本是 iOS 17。Xcode 工程使用 Swift Package Manager 引入 Readium Swift Toolkit 的解析模块，用于读取已下载 EPUB 的封面和元数据；不再包含 ReadiumNavigator 阅读模块。`Package.swift` 单独提供平台无关的 `NoveliaIOSCore` 模型和样例数据。最新已发布的 v0.3.0 已通过 iOS Simulator Debug 构建和 GitHub Actions 设备版构建；本地文库开发版本已通过 iOS Simulator Debug 构建，文库在线接口和真实 EPUB 文件仍待模拟器端到端验证。
+项目最低部署版本是 iOS 17。Xcode 工程使用 Swift Package Manager 引入 Readium Swift Toolkit 的解析模块，用于读取已下载 EPUB 的封面和元数据；不再包含 ReadiumNavigator 阅读模块。`Package.swift` 单独提供平台无关的 `NoveliaIOSCore` 模型和样例数据。v0.4.0 已通过 iOS Simulator Debug 构建和 GitHub Actions iOS 设备版构建。文库在线接口和真实 EPUB 文件仍待模拟器端到端验证。
 
 ## 使用 GitHub Actions 构建 IPA
 
 推送到 `main` 后，GitHub Actions 会自动构建 iOS 设备版并发布名为 `Novelia-unsigned-ipa` 的工件；也可以在仓库的 **Actions** 页面手动运行 **Build iOS IPA**。完成后从对应运行记录的 **Artifacts** 下载 `Novelia-unsigned.ipa`。
 
-此工作流产出未签名 IPA。当前 v0.3.0 的 IPA 已附在 GitHub Release 中。未签名 IPA 不能直接用于常规真机安装或发布到 App Store；这仍需要 Apple 开发者签名证书及匹配的 provisioning profile，并在工作流中配置签名。
+此工作流产出未签名 IPA。当前 v0.4.0 的 IPA 已附在 GitHub Release 中。未签名 IPA 不能直接用于常规真机安装或发布到 App Store；这仍需要 Apple 开发者签名证书及匹配的 provisioning profile，并在工作流中配置签名。
 
 ## 项目结构
 
