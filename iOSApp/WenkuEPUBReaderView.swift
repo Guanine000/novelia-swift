@@ -398,10 +398,10 @@ struct WenkuEPUBReaderView: View {
         }
         .navigationTitle(model.publication?.metadata.title ?? book.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(isShowingControls ? .visible : .hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if model.navigator != nil && isShowingControls {
+            if model.navigator != nil {
                 HStack(spacing: 14) {
                     Button { Task { await turnPage(forward: false) } } label: {
                         Image(systemName: pageArrow(forward: false)).frame(width: 36, height: 34)
@@ -421,6 +421,9 @@ struct WenkuEPUBReaderView: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 6)
                 .background(.regularMaterial)
+                .opacity(isShowingControls ? 1 : 0)
+                .allowsHitTesting(isShowingControls)
+                .accessibilityHidden(!isShowingControls)
             }
         }
         .background(alignment: .topLeading) {
@@ -431,23 +434,32 @@ struct WenkuEPUBReaderView: View {
             .opacity(0.001)
             .allowsHitTesting(false)
         }
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack(spacing: 16) {
                 Button("完成") { dismiss() }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
+                Spacer(minLength: 0)
+                Text(model.publication?.metadata.title ?? book.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
                 Menu {
                     Button { isShowingTOC = true } label: { Label("目录", systemImage: "list.bullet") }
                         .disabled(model.navigator == nil || model.tableOfContents.isEmpty)
                     Button { isShowingSettings = true } label: { Label("阅读设置", systemImage: "textformat.size") }
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    Image(systemName: "ellipsis.circle").font(.title3)
                 }
                 .accessibilityLabel("阅读菜单")
-                .sheet(isPresented: $isShowingSettings) {
-                    EPUBReaderSettingsView(store: preferences)
-                }
             }
+            .frame(height: 44)
+            .padding(.horizontal, 18)
+            .background(.regularMaterial)
+            .opacity(isShowingControls ? 1 : 0)
+            .allowsHitTesting(isShowingControls)
+            .accessibilityHidden(!isShowingControls)
+        }
+        .sheet(isPresented: $isShowingSettings) {
+            EPUBReaderSettingsView(store: preferences)
         }
         .sheet(isPresented: $isShowingTOC) {
             NavigationStack {
@@ -603,8 +615,8 @@ struct WenkuEPUBReaderView: View {
             oldPage.removeFromSuperview()
             newPage.removeFromSuperview()
         case .simulation:
-            let curl: UIView.AnimationOptions = turnSign < 0 ? .transitionCurlUp : .transitionCurlDown
-            await animateCurl(from: oldPage, to: newPage, in: overlay, options: curl)
+            await animateCurl(from: oldPage, to: newPage, in: overlay,
+                              navigator: navigator, direction: turnSign < 0 ? .forward : .reverse)
         case .none:
             oldPage.removeFromSuperview()
         }
@@ -624,28 +636,42 @@ struct WenkuEPUBReaderView: View {
         from oldPage: UIView,
         to newPage: UIView,
         in container: UIView,
-        options: UIView.AnimationOptions
+        navigator: EPUBNavigatorViewController,
+        direction: UIPageViewController.NavigationDirection
     ) async {
-        oldPage.frame = container.bounds
-        newPage.frame = container.bounds
-        oldPage.isUserInteractionEnabled = false
-        newPage.isUserInteractionEnabled = false
-        container.addSubview(oldPage)
+        // Use UIKit's horizontal book turn rather than a vertical view curl.
+        let pages = UIPageViewController(
+            transitionStyle: .pageCurl,
+            navigationOrientation: .horizontal,
+            options: [.spineLocation: UIPageViewController.SpineLocation.min.rawValue]
+        )
+        pages.isDoubleSided = false
+        func leaf(_ snapshot: UIView) -> UIViewController {
+            let controller = UIViewController()
+            controller.view.backgroundColor = navigator.view.backgroundColor
+            snapshot.removeFromSuperview()
+            snapshot.frame = controller.view.bounds
+            snapshot.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            controller.view.addSubview(snapshot)
+            return controller
+        }
+        let current = leaf(oldPage)
+        let destination = leaf(newPage)
+        pages.setViewControllers([current], direction: direction, animated: false)
+        navigator.addChild(pages)
+        pages.view.frame = container.bounds
+        pages.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        container.addSubview(pages.view)
+        pages.didMove(toParent: navigator)
+        pages.view.layoutIfNeeded()
         await withCheckedContinuation { continuation in
-            UIView.transition(
-                with: container,
-                duration: 0.62,
-                options: [options, .curveEaseInOut],
-                animations: {
-                    oldPage.removeFromSuperview()
-                    container.addSubview(newPage)
-                }
-            ) { _ in
-                oldPage.removeFromSuperview()
-                newPage.removeFromSuperview()
+            pages.setViewControllers([destination], direction: direction, animated: true) { _ in
                 continuation.resume()
             }
         }
+        pages.willMove(toParent: nil)
+        pages.view.removeFromSuperview()
+        pages.removeFromParent()
     }
 
     private func pageArrow(forward: Bool) -> String {
