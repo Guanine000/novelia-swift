@@ -77,3 +77,35 @@ final class DiscoverStore: ObservableObject {
         }
     }
 }
+
+@MainActor
+final class RankingStore: ObservableObject {
+    @Published private(set) var novels: [Novel] = []
+    @Published private(set) var pageCount = 1
+    @Published private(set) var isLoading = false
+    @Published private(set) var errorMessage: String?
+
+    private let api = NoveliaAPIClient()
+    private var requestGeneration = 0
+
+    func load(page: Int) async {
+        requestGeneration += 1
+        let generation = requestGeneration
+        isLoading = true
+        errorMessage = nil
+        novels = []
+        defer {
+            if generation == requestGeneration { isLoading = false }
+        }
+
+        do {
+            let result = try await api.siteRankedNovels(page: page)
+            guard generation == requestGeneration else { return }
+            novels = result.novels
+            pageCount = result.pageCount
+        } catch {
+            guard generation == requestGeneration else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+}

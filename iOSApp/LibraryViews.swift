@@ -374,6 +374,33 @@ struct DiscoverView: View {
                         .foregroundStyle(NoveliaStyle.ink)
                 }
 
+                NavigationLink {
+                    RankingView()
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 42, height: 42)
+                            .background(NoveliaStyle.coral, in: RoundedRectangle(cornerRadius: 13))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("小说排行榜")
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(NoveliaStyle.ink)
+                            Text("查看 Novelia 站内热门作品")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(NoveliaStyle.muted)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(NoveliaStyle.muted)
+                    }
+                    .padding(13)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 17))
+                }
+                .buttonStyle(.plain)
+
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(NoveliaStyle.muted)
@@ -461,6 +488,107 @@ struct DiscoverView: View {
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .task(id: query) { await store.search(query: query) }
+    }
+}
+
+private struct RankingView: View {
+    @State private var page = 1
+    @StateObject private var store = RankingStore()
+
+    private var requestKey: String { String(page) }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("RANKING")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .tracking(1.4)
+                        .foregroundStyle(NoveliaStyle.coral)
+                    Text("小说排行榜")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundStyle(NoveliaStyle.ink)
+                }
+
+                HStack(spacing: 8) {
+                    Image(systemName: "flame.fill")
+                        .foregroundStyle(NoveliaStyle.coral)
+                    Text("Novelia 站内点击热度 · 一般向作品")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(NoveliaStyle.muted)
+                    Spacer(minLength: 0)
+                }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.white, in: RoundedRectangle(cornerRadius: 17))
+
+                if store.isLoading && store.novels.isEmpty {
+                    HStack { Spacer(); ProgressView("正在加载排行榜…"); Spacer() }
+                        .padding(.vertical, 24)
+                }
+
+                if let errorMessage = store.errorMessage {
+                    ContentUnavailableView {
+                        Label("排行榜加载失败", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(errorMessage)
+                    } actions: {
+                        Button("重试") { Task { await loadCurrentPage() } }
+                            .buttonStyle(.borderedProminent)
+                            .tint(NoveliaStyle.coral)
+                    }
+                }
+
+                ForEach(Array(store.novels.enumerated()), id: \.element.id) { index, novel in
+                    NavigationLink {
+                        NovelDetailView(novel: novel)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text(String(format: "%02d", (page - 1) * 20 + index + 1))
+                                .font(.system(size: 14, weight: .heavy, design: .rounded))
+                                .foregroundStyle(index < 3 && page == 1 ? NoveliaStyle.coral : NoveliaStyle.muted)
+                                .frame(width: 34)
+                            FeaturedNovelCard(novel: novel)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if !store.novels.isEmpty && store.pageCount > 1 {
+                    HStack {
+                        Button("上一页") { page = max(1, page - 1) }
+                            .disabled(page <= 1 || store.isLoading)
+                        Spacer()
+                        Text("第 \(page) / \(store.pageCount) 页")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(NoveliaStyle.muted)
+                        Spacer()
+                        Button("下一页") { page = min(store.pageCount, page + 1) }
+                            .disabled(page >= store.pageCount || store.isLoading)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(NoveliaStyle.coral)
+                    .padding(.vertical, 8)
+                } else if !store.novels.isEmpty {
+                    Text("共 \(store.novels.count) 部上榜作品")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                } else if !store.isLoading && store.errorMessage == nil {
+                    ContentUnavailableView("暂无排行榜作品", systemImage: "chart.bar")
+                }
+            }
+            .padding(20)
+        }
+        .background(NoveliaStyle.paper.ignoresSafeArea())
+        .navigationTitle("小说排行榜")
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: requestKey) { await loadCurrentPage() }
+    }
+
+    private func loadCurrentPage() async {
+        await store.load(page: page)
     }
 }
 

@@ -1,8 +1,58 @@
 import SwiftUI
 
+enum ReaderAppearance: String, CaseIterable, Identifiable {
+    case light
+    case dark
+    case system
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .light: "浅色"
+        case .dark: "深色"
+        case .system: "跟随系统"
+        }
+    }
+
+    var preferredColorScheme: ColorScheme? {
+        switch self {
+        case .light: .light
+        case .dark: .dark
+        case .system: nil
+        }
+    }
+
+    func isDark(system scheme: ColorScheme) -> Bool {
+        switch self {
+        case .light: false
+        case .dark: true
+        case .system: scheme == .dark
+        }
+    }
+
+    func background(system scheme: ColorScheme) -> Color {
+        isDark(system: scheme) ? Color(red: 0.08, green: 0.08, blue: 0.09) : NoveliaStyle.paper
+    }
+
+    func card(system scheme: ColorScheme) -> Color {
+        isDark(system: scheme) ? Color(red: 0.14, green: 0.14, blue: 0.15) : .white
+    }
+
+    func primaryText(system scheme: ColorScheme) -> Color {
+        isDark(system: scheme) ? Color(red: 0.91, green: 0.91, blue: 0.92) : NoveliaStyle.ink
+    }
+
+    func secondaryText(system scheme: ColorScheme) -> Color {
+        isDark(system: scheme) ? Color(red: 0.68, green: 0.68, blue: 0.71) : NoveliaStyle.muted
+    }
+}
+
 struct ReaderView: View {
     let novel: Novel
+    @Environment(\.colorScheme) private var systemColorScheme
     @State private var chapterIndex: Int
+    @AppStorage("readerAppearance") private var appearanceRaw = ReaderAppearance.system.rawValue
     @AppStorage("readerMode") private var modeRaw = ReaderMode.bilingual.rawValue
     @AppStorage("readerFontSize") private var fontSize = 20.0
     @AppStorage private var bookmarkIDsJSON: String
@@ -24,6 +74,10 @@ struct ReaderView: View {
         return loadedChapters[listed.id] ?? listed
     }
     private var mode: ReaderMode { ReaderMode(rawValue: modeRaw) ?? .bilingual }
+    private var appearance: ReaderAppearance { ReaderAppearance(rawValue: appearanceRaw) ?? .system }
+    private var readerBackground: Color { appearance.background(system: systemColorScheme) }
+    private var readerPrimaryText: Color { appearance.primaryText(system: systemColorScheme) }
+    private var readerSecondaryText: Color { appearance.secondaryText(system: systemColorScheme) }
     private var bookmarkIDs: Set<String> {
         Set((try? JSONDecoder().decode([String].self, from: Data(bookmarkIDsJSON.utf8))) ?? [])
     }
@@ -53,10 +107,10 @@ struct ReaderView: View {
                         Text(chapter.title)
                             .font(.system(size: 27, weight: .bold, design: .rounded))
                             .lineSpacing(4)
-                            .foregroundStyle(NoveliaStyle.ink)
+                            .foregroundStyle(readerPrimaryText)
                         Text("著 · \(novel.author)")
                             .font(.system(size: 13))
-                            .foregroundStyle(NoveliaStyle.muted)
+                            .foregroundStyle(readerSecondaryText)
                     }
                     .padding(.top, 14)
 
@@ -113,7 +167,7 @@ struct ReaderView: View {
                 .frame(maxWidth: 660)
                 .frame(maxWidth: .infinity)
             }
-            .background(NoveliaStyle.paper.ignoresSafeArea())
+            .background(readerBackground.ignoresSafeArea())
             .onChange(of: chapterIndex) { _, newIndex in
                 guard novel.chapters.indices.contains(newIndex) else { return }
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -123,10 +177,10 @@ struct ReaderView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     NavigationLink {
-                        ChapterDirectoryView(novel: novel, selectedIndex: $chapterIndex)
+                        ChapterDirectoryView(novel: novel, selectedIndex: $chapterIndex, appearance: appearance)
                     } label: {
                         Image(systemName: "list.bullet")
-                            .foregroundStyle(NoveliaStyle.ink)
+                            .foregroundStyle(readerPrimaryText)
                     }
                     .accessibilityLabel("章节目录")
                 }
@@ -145,6 +199,12 @@ struct ReaderView: View {
                             }
                         }
                         Divider()
+                        Picker("阅读外观", selection: $appearanceRaw) {
+                            ForEach(ReaderAppearance.allCases) { option in
+                                Text(option.title).tag(option.rawValue)
+                            }
+                        }
+                        Divider()
                         Button("缩小字号", systemImage: "textformat.size.smaller") {
                             fontSize = max(16, fontSize - 1)
                         }
@@ -153,7 +213,7 @@ struct ReaderView: View {
                         }
                     } label: {
                         Image(systemName: "textformat.size")
-                            .foregroundStyle(NoveliaStyle.ink)
+                            .foregroundStyle(readerPrimaryText)
                     }
                     .accessibilityLabel("阅读设置")
                 }
@@ -163,31 +223,32 @@ struct ReaderView: View {
         }
         .navigationTitle("阅读")
         .navigationBarTitleDisplayMode(.inline)
+        .preferredColorScheme(appearance.preferredColorScheme)
     }
 
     @ViewBuilder
     private var readerText: some View {
         switch mode {
         case .original:
-            Paragraphs(text: chapter.originalText, fontSize: fontSize, color: NoveliaStyle.ink)
+            Paragraphs(text: chapter.originalText, fontSize: fontSize, color: readerPrimaryText)
         case .translated:
-            Paragraphs(text: chapter.translatedText, fontSize: fontSize, color: NoveliaStyle.ink)
+            Paragraphs(text: chapter.translatedText, fontSize: fontSize, color: readerPrimaryText)
         case .bilingual:
             VStack(alignment: .leading, spacing: 35) {
                 ForEach(Array(bilingualParagraphs.enumerated()), id: \.offset) { _, paragraph in
                     VStack(alignment: .leading, spacing: 8) {
                         if !paragraph.original.isEmpty {
-                            Paragraphs(text: paragraph.original, fontSize: fontSize, color: NoveliaStyle.ink)
+                            Paragraphs(text: paragraph.original, fontSize: fontSize, color: readerPrimaryText)
                         }
                         if !paragraph.translation.isEmpty {
-                            Paragraphs(text: paragraph.translation, fontSize: fontSize, color: NoveliaStyle.muted)
+                            Paragraphs(text: paragraph.translation, fontSize: fontSize, color: readerSecondaryText)
                         }
                     }
                 }
                 if bilingualParagraphs.isEmpty {
                     Text("当前章节暂无正文。")
                         .font(.system(size: 13))
-                        .foregroundStyle(NoveliaStyle.muted)
+                        .foregroundStyle(readerSecondaryText)
                 }
             }
         }
@@ -236,8 +297,10 @@ struct ReaderView: View {
 
 private struct ChapterDirectoryView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var systemColorScheme
     let novel: Novel
     @Binding var selectedIndex: Int
+    let appearance: ReaderAppearance
 
     var body: some View {
         List(Array(novel.chapters.enumerated()), id: \.element.id) { index, chapter in
@@ -248,11 +311,11 @@ private struct ChapterDirectoryView: View {
                 HStack(spacing: 12) {
                     Text("\(index + 1)")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(NoveliaStyle.muted)
+                        .foregroundStyle(appearance.secondaryText(system: systemColorScheme))
                         .frame(minWidth: 32, alignment: .trailing)
                     Text(chapter.title)
                         .font(.system(size: 14, weight: index == selectedIndex ? .semibold : .regular))
-                        .foregroundStyle(NoveliaStyle.ink)
+                        .foregroundStyle(appearance.primaryText(system: systemColorScheme))
                         .lineLimit(2)
                     Spacer(minLength: 8)
                     if index == selectedIndex {
@@ -264,10 +327,10 @@ private struct ChapterDirectoryView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .listRowBackground(Color.white)
+            .listRowBackground(appearance.card(system: systemColorScheme))
         }
         .scrollContentBackground(.hidden)
-        .background(NoveliaStyle.paper.ignoresSafeArea())
+        .background(appearance.background(system: systemColorScheme).ignoresSafeArea())
         .navigationTitle("章节目录")
         .navigationBarTitleDisplayMode(.inline)
     }

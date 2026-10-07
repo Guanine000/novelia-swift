@@ -6,7 +6,6 @@ struct NoveliaApp: App {
         WindowGroup {
             RootView()
                 .tint(NoveliaStyle.coral)
-                .preferredColorScheme(.light)
         }
     }
 }

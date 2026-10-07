@@ -37,6 +37,26 @@ public struct NoveliaAPIClient: Sendable {
         return response.items.compactMap { $0.asNovel }
     }
 
+    public func siteRankedNovels(page: Int = 1) async throws -> NoveliaRankPage {
+        let response: APIPage<APIWebOutline> = try await get(
+            path: ["novel"],
+            query: [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "pageSize", value: "20"),
+                URLQueryItem(name: "query", value: ""),
+                URLQueryItem(name: "provider", value: Self.providers.joined(separator: ",")),
+                URLQueryItem(name: "type", value: "0"),
+                URLQueryItem(name: "level", value: "1"),
+                URLQueryItem(name: "translate", value: "0"),
+                URLQueryItem(name: "sort", value: "1")
+            ]
+        )
+        return NoveliaRankPage(
+            novels: response.items.compactMap { $0.asNovel },
+            pageCount: max(1, response.pageNumber ?? 1)
+        )
+    }
+
     public func novel(providerId: String, novelId: String) async throws -> Novel {
         let detail: APIWebDetail = try await get(path: ["novel", providerId, novelId])
         return detail.asNovel(providerId: providerId, novelId: novelId)
@@ -167,6 +187,16 @@ public struct NoveliaAPIClient: Sendable {
 public struct NoveliaCloudFolder: Codable, Identifiable, Hashable, Sendable {
     public let id: String
     public let title: String
+}
+
+public struct NoveliaRankPage: Sendable {
+    public let novels: [Novel]
+    public let pageCount: Int
+
+    public init(novels: [Novel], pageCount: Int) {
+        self.novels = novels
+        self.pageCount = pageCount
+    }
 }
 
 public struct NoveliaCloudReadingHistoryItem: Codable, Identifiable, Hashable, Sendable {
