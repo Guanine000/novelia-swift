@@ -1,6 +1,5 @@
 import SwiftUI
 import UIKit
-import UniformTypeIdentifiers
 
 struct WenkuView: View {
     @EnvironmentObject private var auth: AccountAuthStore
@@ -8,9 +7,6 @@ struct WenkuView: View {
     @StateObject private var localLibrary = WenkuLocalLibraryStore()
     @State private var section = WenkuSection.search
     @State private var query = ""
-    @State private var importError: String?
-    @State private var isImporting = false
-    @State private var readingBook: LocalWenkuEPUB?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,40 +30,8 @@ struct WenkuView: View {
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle("文库")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if section == .downloaded {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { isImporting = true } label: { Image(systemName: "square.and.arrow.down") }
-                        .accessibilityLabel("导入 EPUB")
-                }
-            }
-        }
-        .sheet(isPresented: $isImporting) {
-            EPUBImportPicker { urls in
-                isImporting = false
-                Task { @MainActor in
-                    var failures: [String] = []
-                    for url in urls {
-                        do { try await localLibrary.importEPUB(from: url) }
-                        catch { failures.append("\(url.lastPathComponent)：\(error.localizedDescription)") }
-                    }
-                    importError = failures.isEmpty ? nil : failures.joined(separator: "\n")
-                }
-            }
-        }
-        .alert("导入 EPUB 失败", isPresented: Binding(get: { importError != nil }, set: { if !$0 { importError = nil } })) {
-            Button("好", role: .cancel) { importError = nil }
-        } message: {
-            Text(importError ?? "")
-        }
         .environmentObject(store)
         .environmentObject(localLibrary)
-        .fullScreenCover(item: $readingBook) { book in
-            NavigationStack {
-                WenkuEPUBReaderView(book: book, url: localLibrary.fileURL(for: book))
-                    .environmentObject(localLibrary)
-            }
-        }
         .task(id: auth.username) {
             await store.refreshFavorites(account: auth.username)
         }
@@ -124,18 +88,15 @@ struct WenkuView: View {
         Group {
             if localLibrary.books.isEmpty {
                 ContentUnavailableView {
-                    Label("还没有 EPUB", systemImage: "book.closed")
+                    Label("暂无下载文件", systemImage: "book.closed")
                 } description: {
-                    Text("下载文库卷，或从“文件”导入 EPUB。")
-                } actions: {
-                    Button("导入 EPUB") { isImporting = true }
-                        .buttonStyle(.borderedProminent).tint(NoveliaStyle.coral)
+                    Text("在文库作品详情页下载 EPUB 后，可在这里导出到“文件”或其他阅读 App。")
                 }
             } else {
                 List {
                     ForEach(localLibrary.books) { book in
                         HStack(spacing: 12) {
-                            Button { readingBook = book } label: {
+                            ShareLink(item: localLibrary.fileURL(for: book)) {
                                 HStack(spacing: 12) {
                                     if let coverURL = localLibrary.coverURL(for: book), let image = UIImage(contentsOfFile: coverURL.path) {
                                         Image(uiImage: image).resizable().scaledToFill()
@@ -156,6 +117,8 @@ struct WenkuView: View {
                                         }
                                     }
                                     Spacer(minLength: 4)
+                                    Image(systemName: "square.and.arrow.up")
+                                        .foregroundStyle(NoveliaStyle.coral)
                                 }
                             }
                             .buttonStyle(.plain)
@@ -217,37 +180,6 @@ struct WenkuView: View {
     }
 }
 
-private struct EPUBImportPicker: UIViewControllerRepresentable {
-    let onSelect: ([URL]) -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    func makeCoordinator() -> Coordinator { Coordinator(onSelect: onSelect, onCancel: { dismiss() }) }
-
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        // Some Files providers label EPUBs as generic data. The store still checks
-        // the extension and ZIP signature, while asCopy materializes cloud files.
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.epub, .data], asCopy: true)
-        picker.allowsMultipleSelection = true
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
-
-    final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onSelect: ([URL]) -> Void
-        let onCancel: () -> Void
-        init(onSelect: @escaping ([URL]) -> Void, onCancel: @escaping () -> Void) {
-            self.onSelect = onSelect
-            self.onCancel = onCancel
-        }
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            onSelect(urls)
-        }
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { onCancel() }
-    }
-}
-
 private enum WenkuSection: String, CaseIterable, Identifiable {
     case search, favorites, downloaded
     var id: String { rawValue }
@@ -255,7 +187,7 @@ private enum WenkuSection: String, CaseIterable, Identifiable {
         switch self {
         case .search: "搜索"
         case .favorites: "收藏"
-        case .downloaded: "本地 EPUB"
+        case .downloaded: "下载列表"
         }
     }
 }
@@ -324,6 +256,23 @@ private struct WenkuDetailView: View {
                                 Text(detail.keywords.joined(separator: " · ")).font(.subheadline).foregroundStyle(NoveliaStyle.muted)
                             }
                         }
+                        NavigationLink {
+                            NovelCommentsView(title: detail.displayTitle, subjectKey: "wenku-\(detail.id)")
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "text.bubble").font(.title3)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("评论区").font(.headline)
+                                    Text("查看或参与 Novelia 文库讨论")
+                                        .font(.caption).foregroundStyle(NoveliaStyle.muted)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption)
+                            }
+                            .padding(14)
+                            .background(NoveliaStyle.coral.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
                         volumesSection(detail)
                     }
                     .padding(18)
@@ -493,7 +442,7 @@ private struct WenkuDownloadSheet: View {
                     }
                 }
                 if let errorMessage { Section { Text(errorMessage).font(.footnote).foregroundStyle(.red) } }
-                if finished { Section { Label("已保存到本地 EPUB", systemImage: "checkmark.circle.fill").foregroundStyle(.green) } }
+                if finished { Section { Label("下载完成，可在下载列表中导出", systemImage: "checkmark.circle.fill").foregroundStyle(.green) } }
                 Section {
                     Button {
                         Task { await download() }

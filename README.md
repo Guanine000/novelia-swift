@@ -26,8 +26,9 @@
 - 首页横向展示少量最近阅读和网页收藏，均可进入完整列表；阅读历史列表分页加载，滑到底部会自动读取下一页。作品详情页提供续读入口，并优先使用云端最近章节位置。
 - 小说账号统一认证流程：通过 WKWebView 登录，调用 refresh 接口获取应用令牌，并将令牌保存在 iOS Keychain。
 - 文库入口调用 Novelia 文库搜索和详情接口，独立读取、添加及取消账号云端文库收藏。
+- 文库详情提供 Novelia 网页端同一作品的评论区，支持评论分页、加载回复，以及登录后发表评论和回复。
 - 文库作品详情显示分卷及百度、有道、GPT、Sakura 翻译可用数量；可下载译文 EPUB 或两种段落顺序的双语 EPUB。
-- 本地 EPUB 书架支持从 Novelia 下载后阅读、从“文件”导入，以及通过系统分享导出；使用 Readium Swift Toolkit 解析和呈现 EPUB，提供目录跳转并保存本地阅读位置。
+- 文库内提供 EPUB 下载，下载完成后进入“下载列表”，点击文件即可通过系统分享保存到“文件”或交给其他阅读 App；支持导出和删除已下载文件。应用内 EPUB 阅读器及导入功能已移除。
 - 最低部署版本为 iOS 17。
 
 > 文库收藏同步 Novelia 云端文库收藏夹，与网络小说收藏分开。上游下载接口拒绝单独生成日文原文 EPUB，因此当前只有译文和双语下载；原文单独下载需上游开放相应能力。
@@ -57,7 +58,7 @@
 
 ### 文件与离线
 
-- EPUB 的高级阅读偏好、书签管理页和批量文件管理。
+- EPUB 批量文件管理；应用内 EPUB 阅读和导入不在当前功能范围。
 - TXT、SRT 导入和本地阅读；章节缓存/预读、离线下载队列、备份恢复和文件转换工具。
 
 ### 社区、同步与维护
@@ -73,7 +74,7 @@
 2. 选择 `Novelia` scheme 和 iPhone 模拟器。
 3. 点击 Run，或按 **⌘R**。
 
-项目最低部署版本是 iOS 17。Xcode 工程使用 Swift Package Manager 引入 Readium Swift Toolkit。`Package.swift` 单独提供平台无关的 `NoveliaIOSCore` 模型和样例数据。最新已发布的 v0.3.0 已通过 iOS Simulator Debug 构建和 GitHub Actions 设备版构建；本地文库开发版本已通过 iOS Simulator Debug 构建，文库在线接口和真实 EPUB 文件仍待模拟器端到端验证。
+项目最低部署版本是 iOS 17。Xcode 工程使用 Swift Package Manager 引入 Readium Swift Toolkit 的解析模块，用于读取已下载 EPUB 的封面和元数据；不再包含 ReadiumNavigator 阅读模块。`Package.swift` 单独提供平台无关的 `NoveliaIOSCore` 模型和样例数据。最新已发布的 v0.3.0 已通过 iOS Simulator Debug 构建和 GitHub Actions 设备版构建；本地文库开发版本已通过 iOS Simulator Debug 构建，文库在线接口和真实 EPUB 文件仍待模拟器端到端验证。
 
 ## 使用 GitHub Actions 构建 IPA
 
@@ -83,7 +84,7 @@
 
 ## 项目结构
 
-- `iOSApp/`：SwiftUI 页面、在线阅读器、Readium EPUB 阅读器和账号认证。
+- `iOSApp/`：SwiftUI 页面、在线阅读器、文库 EPUB 下载与导出和账号认证。
 - `Sources/NoveliaIOSCore/`：网络小说与文库模型、样例数据、Novelia API 客户端和 Keychain 令牌存储。
 - `NoveliaIOS.xcodeproj/`：Xcode 工程。
 

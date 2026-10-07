@@ -843,7 +843,7 @@ struct NovelDetailView: View {
                    let providerId = displayNovel.providerId,
                    let novelId = displayNovel.novelId {
                     NavigationLink {
-                        NovelCommentsView(novel: displayNovel, providerId: providerId, novelId: novelId)
+                        NovelCommentsView(title: displayNovel.title, subjectKey: "web-\(providerId)-\(novelId)")
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "text.bubble")
@@ -1027,11 +1027,10 @@ struct NovelDetailView: View {
     }
 }
 
-private struct NovelCommentsView: View {
+struct NovelCommentsView: View {
     @EnvironmentObject private var auth: AccountAuthStore
-    let novel: Novel
-    let providerId: String
-    let novelId: String
+    let title: String
+    let subjectKey: String
 
     @State private var commentPage: NoveliaCommentPage?
     @State private var page = 1
@@ -1050,7 +1049,7 @@ private struct NovelCommentsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(novel.title)
+                    Text(title)
                         .font(.system(size: 19, weight: .bold, design: .rounded))
                         .foregroundStyle(NoveliaStyle.ink)
                     Text("与 Novelia 网页端实时同步")
@@ -1128,7 +1127,7 @@ private struct NovelCommentsView: View {
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle("评论区")
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: "\(providerId)/\(novelId)") { await loadComments() }
+        .task(id: subjectKey) { await loadComments() }
         .alert("操作未完成", isPresented: Binding(get: { sendError != nil }, set: { if !$0 { sendError = nil } })) {
             Button("好", role: .cancel) { sendError = nil }
             if auth.username == nil { Button("登录") { auth.isLoginPresented = true } }
@@ -1278,7 +1277,7 @@ private struct NovelCommentsView: View {
         do {
             let token = NoveliaSessionTokenVault.read()
             let api = NoveliaAPIClient(tokenProvider: { token })
-            let result = try await api.novelComments(providerId: providerId, novelId: novelId, page: targetPage, pageSize: pageSize)
+            let result = try await api.novelComments(subjectKey: subjectKey, page: targetPage, pageSize: pageSize)
             commentPage = result
             page = targetPage
         } catch {
@@ -1299,7 +1298,7 @@ private struct NovelCommentsView: View {
         do {
             let token = NoveliaSessionTokenVault.read()
             let api = NoveliaAPIClient(tokenProvider: { token })
-            try await api.postNovelComment(providerId: providerId, novelId: novelId, content: content, rootID: replyRoot?.id)
+            try await api.postNovelComment(subjectKey: subjectKey, content: content, rootID: replyRoot?.id)
             draft = ""
             replyRoot = nil
             await loadComments(page: 1)
@@ -1317,8 +1316,7 @@ private struct NovelCommentsView: View {
             let api = NoveliaAPIClient(tokenProvider: { token })
             let nextPage = loadedCount / 20 + 1
             let result = try await api.novelCommentReplies(
-                providerId: providerId,
-                novelId: novelId,
+                subjectKey: subjectKey,
                 rootID: comment.id,
                 page: nextPage,
                 pageSize: 20

@@ -246,50 +246,9 @@ final class WenkuLocalLibraryStore: ObservableObject {
         }
     }
 
-    func importEPUB(from source: URL) async throws {
-        let accessed = source.startAccessingSecurityScopedResource()
-        defer { if accessed { source.stopAccessingSecurityScopedResource() } }
-        guard source.pathExtension.lowercased() == "epub" else { throw WenkuLocalLibraryError.unsupportedFile }
-
-        // Copy through NSFileCoordinator while the security scope is active. Reading
-        // directly into Data can fail for Files/iCloud provider URLs and needlessly
-        // holds the whole book in memory.
-        let stagingURL = directory.appendingPathComponent("import-\(UUID().uuidString).epub")
-        var coordinatedError: NSError?
-        var copyError: Error?
-        NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinatedError) { readableURL in
-            do {
-                try fileManager.copyItem(at: readableURL, to: stagingURL)
-            } catch {
-                copyError = error
-            }
-        }
-        if let coordinatedError {
-            try? fileManager.removeItem(at: stagingURL)
-            throw coordinatedError
-        }
-        if let copyError {
-            try? fileManager.removeItem(at: stagingURL)
-            throw copyError
-        }
-        let title = source.deletingPathExtension().lastPathComponent
-        do {
-            try await registerDownloadedFile(at: stagingURL, title: title)
-        } catch {
-            try? fileManager.removeItem(at: stagingURL)
-            throw error
-        }
-    }
-
     func remove(_ book: LocalWenkuEPUB) {
         try? fileManager.removeItem(at: fileURL(for: book))
         books.removeAll { $0.id == book.id }
-        try? persistIndex()
-    }
-
-    func updateReadingLocation(bookID: UUID, locatorJSON: String) {
-        guard let index = books.firstIndex(where: { $0.id == bookID }) else { return }
-        books[index].lastLocatorJSON = locatorJSON
         try? persistIndex()
     }
 

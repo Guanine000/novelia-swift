@@ -90,11 +90,8 @@ struct ReaderView: View {
         guard let translations = chapter.translationsBySource else { return nil }
         return translations[translationSource] ?? []
     }
-    private var displayedTranslation: String {
-        if let selectedTranslationParagraphs {
-            return selectedTranslationParagraphs.joined(separator: "\n\n")
-        }
-        return chapter.translatedText
+    private var displayedTranslation: [String] {
+        selectedTranslationParagraphs ?? chapter.translatedText.components(separatedBy: "\n\n")
     }
     private var bilingualParagraphs: [NovelBilingualParagraph] {
         if let selectedTranslationParagraphs {
@@ -123,7 +120,7 @@ struct ReaderView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 25) {
+                LazyVStack(alignment: .leading, spacing: 25) {
                     VStack(alignment: .leading, spacing: 9) {
                         Text("\(novel.title.uppercased())  ·  \(chapterIndex + 1) / \(novel.chapters.count)")
                             .font(.system(size: 10, weight: .bold, design: .rounded))
@@ -169,14 +166,14 @@ struct ReaderView: View {
 
                     HStack {
                         Button {
-                            changeChapter(by: -1, proxy: proxy)
+                            changeChapter(by: -1)
                         } label: {
                             Label("上一章", systemImage: "chevron.left")
                         }
                         .disabled(chapterIndex == 0)
                         Spacer()
                         Button {
-                            changeChapter(by: 1, proxy: proxy)
+                            changeChapter(by: 1)
                         } label: {
                             Label("下一章", systemImage: "chevron.right")
                                 .labelStyle(.titleAndIcon)
@@ -263,28 +260,42 @@ struct ReaderView: View {
         case .original:
             Paragraphs(text: chapter.originalText, fontSize: fontSize, color: readerPrimaryText)
         case .translated:
-            if displayedTranslation.isEmpty {
+            if displayedTranslation.allSatisfy(\.isEmpty) {
                 unavailableTranslationMessage
             } else {
-                Paragraphs(text: displayedTranslation, fontSize: fontSize, color: readerPrimaryText)
+                Paragraphs(paragraphs: displayedTranslation, fontSize: fontSize, color: readerPrimaryText)
             }
         case .bilingual:
-            VStack(alignment: .leading, spacing: 35) {
-                ForEach(Array(bilingualParagraphs.enumerated()), id: \.offset) { _, paragraph in
-                    VStack(alignment: .leading, spacing: 8) {
-                        if !paragraph.original.isEmpty {
-                            Paragraphs(text: paragraph.original, fontSize: fontSize, color: readerPrimaryText)
-                        }
-                        if !paragraph.translation.isEmpty {
-                            Paragraphs(text: paragraph.translation, fontSize: fontSize, color: readerSecondaryText)
-                        }
+            bilingualReaderText
+        }
+    }
+
+    private var bilingualReaderText: some View {
+        let paragraphs = bilingualParagraphs
+        return LazyVStack(alignment: .leading, spacing: 35) {
+            ForEach(paragraphs.indices, id: \.self) { index in
+                let paragraph = paragraphs[index]
+                VStack(alignment: .leading, spacing: 8) {
+                    if !paragraph.original.isEmpty {
+                        Text(paragraph.original)
+                            .font(.system(size: CGFloat(fontSize), weight: .regular, design: .serif))
+                            .lineSpacing(fontSize * 0.48)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .foregroundStyle(readerPrimaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if !paragraph.translation.isEmpty {
+                        Text(paragraph.translation)
+                            .font(.system(size: CGFloat(fontSize), weight: .regular, design: .serif))
+                            .lineSpacing(fontSize * 0.48)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .foregroundStyle(readerSecondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                if bilingualParagraphs.isEmpty {
-                    unavailableTranslationMessage
-                } else if selectedTranslationParagraphs?.allSatisfy({ $0.isEmpty }) == true {
-                    unavailableTranslationMessage
-                }
+            }
+            if paragraphs.isEmpty || selectedTranslationParagraphs?.allSatisfy({ $0.isEmpty }) == true {
+                unavailableTranslationMessage
             }
         }
     }
@@ -295,14 +306,11 @@ struct ReaderView: View {
             .foregroundStyle(readerSecondaryText)
     }
 
-    private func changeChapter(by offset: Int, proxy: ScrollViewProxy) {
+    private func changeChapter(by offset: Int) {
         let next = chapterIndex + offset
         guard novel.chapters.indices.contains(next) else { return }
-        withAnimation(.easeInOut(duration: 0.2)) {
-            chapterIndex = next
-            savedChapterIndex = next
-        }
-        proxy.scrollTo(novel.chapters[next].id, anchor: .top)
+        chapterIndex = next
+        savedChapterIndex = next
     }
 
     private func toggleBookmark() {
@@ -378,14 +386,24 @@ private struct ChapterDirectoryView: View {
 }
 
 private struct Paragraphs: View {
-    let text: String
+    let paragraphs: [String]
     let fontSize: Double
     let color: Color
 
+    init(text: String, fontSize: Double, color: Color) {
+        self.init(paragraphs: text.components(separatedBy: "\n\n"), fontSize: fontSize, color: color)
+    }
+
+    init(paragraphs: [String], fontSize: Double, color: Color) {
+        self.paragraphs = paragraphs
+        self.fontSize = fontSize
+        self.color = color
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            ForEach(Array(text.components(separatedBy: "\n\n").enumerated()), id: \.offset) { _, paragraph in
-                Text(paragraph)
+        LazyVStack(alignment: .leading, spacing: 15) {
+            ForEach(paragraphs.indices, id: \.self) { index in
+                Text(paragraphs[index])
                     .font(.system(size: CGFloat(fontSize), weight: .regular, design: .serif))
                     .lineSpacing(fontSize * 0.48)
                     .fixedSize(horizontal: false, vertical: true)

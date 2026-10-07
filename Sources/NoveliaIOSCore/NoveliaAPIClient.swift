@@ -204,7 +204,10 @@ public struct NoveliaAPIClient: Sendable {
     }
 
     public func novelComments(providerId: String, novelId: String, page: Int = 1, pageSize: Int = 10) async throws -> NoveliaCommentPage {
-        let subjectKey = "web-\(providerId)-\(novelId)"
+        try await novelComments(subjectKey: "web-\(providerId)-\(novelId)", page: page, pageSize: pageSize)
+    }
+
+    public func novelComments(subjectKey: String, page: Int = 1, pageSize: Int = 10) async throws -> NoveliaCommentPage {
         return try await get(
             path: ["api", "v1", "external", "comment", "novel", subjectKey],
             query: [
@@ -216,7 +219,10 @@ public struct NoveliaAPIClient: Sendable {
     }
 
     public func novelCommentReplies(providerId: String, novelId: String, rootID: Int, page: Int = 1, pageSize: Int = 20) async throws -> NoveliaCommentPage {
-        let subjectKey = "web-\(providerId)-\(novelId)"
+        try await novelCommentReplies(subjectKey: "web-\(providerId)-\(novelId)", rootID: rootID, page: page, pageSize: pageSize)
+    }
+
+    public func novelCommentReplies(subjectKey: String, rootID: Int, page: Int = 1, pageSize: Int = 20) async throws -> NoveliaCommentPage {
         return try await get(
             path: ["api", "v1", "external", "comment", "novel", subjectKey, String(rootID), "reply"],
             query: [
@@ -229,7 +235,11 @@ public struct NoveliaAPIClient: Sendable {
 
     @discardableResult
     public func postNovelComment(providerId: String, novelId: String, content: String, rootID: Int? = nil) async throws -> NoveliaComment {
-        let subjectKey = "web-\(providerId)-\(novelId)"
+        try await postNovelComment(subjectKey: "web-\(providerId)-\(novelId)", content: content, rootID: rootID)
+    }
+
+    @discardableResult
+    public func postNovelComment(subjectKey: String, content: String, rootID: Int? = nil) async throws -> NoveliaComment {
         var body: [String: Any] = ["content": content]
         if let rootID { body["rootId"] = rootID }
         let bodyData = try JSONSerialization.data(withJSONObject: body)
