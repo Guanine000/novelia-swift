@@ -18,13 +18,14 @@ public struct NoveliaAPIClient: Sendable {
         self.tokenProvider = tokenProvider
     }
 
-    public func searchNovels(query: String, page: Int = 1) async throws -> [Novel] {
+    public func searchNovels(query: String, page: Int = 1, exactTag: Bool = false) async throws -> [Novel] {
+        let searchQuery = exactTag ? "\(query)$" : query
         let response: APIPage<APIWebOutline> = try await get(
             path: ["novel"],
             query: [
                 URLQueryItem(name: "page", value: String(page)),
                 URLQueryItem(name: "pageSize", value: "20"),
-                URLQueryItem(name: "query", value: query),
+                URLQueryItem(name: "query", value: searchQuery),
                 URLQueryItem(name: "provider", value: Self.providers.joined(separator: ",")),
                 URLQueryItem(name: "type", value: "0"),
                 URLQueryItem(name: "level", value: "1"),

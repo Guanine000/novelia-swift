@@ -417,6 +417,38 @@ struct DiscoverView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                if store.isLoadingMore {
+                    ProgressView("正在加载更多作品…")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 18)
+                } else if let loadMoreError = store.loadMoreError {
+                    VStack(spacing: 8) {
+                        Text(loadMoreError)
+                            .font(.system(size: 13))
+                            .foregroundStyle(NoveliaStyle.muted)
+                        Button("重试加载") {
+                            Task { await store.loadMore() }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(NoveliaStyle.coral)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                } else if store.hasMore, let lastNovel = store.novels.last {
+                    Color.clear
+                        .frame(height: 1)
+                        .onAppear {
+                            Task { await store.loadMore() }
+                        }
+                        .accessibilityHidden(true)
+                        .id("search-page-trigger-\(lastNovel.id)")
+                } else if !store.novels.isEmpty {
+                    Text("已显示全部 \(store.novels.count) 部作品")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                }
                 if store.novels.isEmpty && store.errorMessage == nil && !store.isLoading {
                     ContentUnavailableView.search(text: query)
                         .padding(.top, 20)
@@ -429,6 +461,96 @@ struct DiscoverView: View {
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .task(id: query) { await store.search(query: query) }
+    }
+}
+
+private struct TagSearchResultsView: View {
+    let tag: String
+    @StateObject private var store = DiscoverStore()
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("按标签筛选")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(NoveliaStyle.coral)
+                    Text(tag)
+                        .font(.system(size: 25, weight: .bold, design: .rounded))
+                        .foregroundStyle(NoveliaStyle.ink)
+                    Text("精确匹配包含此标签的作品")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(NoveliaStyle.muted)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 4)
+
+                if store.isLoading && store.novels.isEmpty {
+                    HStack { Spacer(); ProgressView("正在搜索标签…"); Spacer() }
+                        .padding(.vertical, 28)
+                }
+
+                if let errorMessage = store.errorMessage {
+                    ContentUnavailableView {
+                        Label("标签搜索失败", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(errorMessage)
+                    } actions: {
+                        Button("重试") {
+                            Task { await store.search(query: tag, exactTag: true) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(NoveliaStyle.coral)
+                    }
+                }
+
+                ForEach(store.novels) { novel in
+                    NavigationLink {
+                        NovelDetailView(novel: novel)
+                    } label: {
+                        FeaturedNovelCard(novel: novel)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if store.isLoadingMore {
+                    ProgressView("正在加载更多作品…")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 18)
+                } else if let loadMoreError = store.loadMoreError {
+                    VStack(spacing: 8) {
+                        Text(loadMoreError)
+                            .font(.system(size: 13))
+                            .foregroundStyle(NoveliaStyle.muted)
+                        Button("重试加载") { Task { await store.loadMore() } }
+                            .buttonStyle(.bordered)
+                            .tint(NoveliaStyle.coral)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                } else if store.hasMore, let lastNovel = store.novels.last {
+                    Color.clear
+                        .frame(height: 1)
+                        .onAppear { Task { await store.loadMore() } }
+                        .accessibilityHidden(true)
+                        .id("tag-search-page-\(lastNovel.id)")
+                } else if !store.novels.isEmpty {
+                    Text("已显示全部 \(store.novels.count) 部作品")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                } else if !store.isLoading && store.errorMessage == nil {
+                    ContentUnavailableView.search(text: tag)
+                        .padding(.top, 8)
+                }
+            }
+            .padding(20)
+        }
+        .background(NoveliaStyle.paper.ignoresSafeArea())
+        .navigationTitle("标签搜索")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await store.search(query: tag, exactTag: true) }
     }
 }
 
@@ -499,6 +621,33 @@ struct NovelDetailView: View {
                         .font(.system(size: 15))
                         .lineSpacing(5)
                         .foregroundStyle(NoveliaStyle.muted)
+                }
+
+                if !displayNovel.genres.isEmpty {
+                    VStack(alignment: .leading, spacing: 11) {
+                        Text("标签 · 点击搜索")
+                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 92), alignment: .leading)],
+                            alignment: .leading,
+                            spacing: 9
+                        ) {
+                            ForEach(displayNovel.genres, id: \.self) { tag in
+                                NavigationLink {
+                                    TagSearchResultsView(tag: tag)
+                                } label: {
+                                    Text(tag)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(NoveliaStyle.accent(for: displayNovel.accent))
+                                        .lineLimit(1)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(.white, in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
                 }
 
                 if !displayNovel.chapters.isEmpty {
