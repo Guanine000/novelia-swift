@@ -54,6 +54,7 @@ struct ReaderView: View {
     @State private var chapterIndex: Int
     @AppStorage("readerAppearance") private var appearanceRaw = ReaderAppearance.system.rawValue
     @AppStorage("readerMode") private var modeRaw = ReaderMode.bilingual.rawValue
+    @AppStorage("readerTranslationSource") private var translationSourceRaw = NovelTranslationSource.gpt.rawValue
     @AppStorage("readerFontSize") private var fontSize = 20.0
     @AppStorage private var bookmarkIDsJSON: String
     @AppStorage private var savedChapterIndex: Int
@@ -75,6 +76,9 @@ struct ReaderView: View {
     }
     private var mode: ReaderMode { ReaderMode(rawValue: modeRaw) ?? .bilingual }
     private var appearance: ReaderAppearance { ReaderAppearance(rawValue: appearanceRaw) ?? .system }
+    private var translationSource: NovelTranslationSource {
+        NovelTranslationSource(rawValue: translationSourceRaw) ?? .gpt
+    }
     private var readerBackground: Color { appearance.background(system: systemColorScheme) }
     private var readerPrimaryText: Color { appearance.primaryText(system: systemColorScheme) }
     private var readerSecondaryText: Color { appearance.secondaryText(system: systemColorScheme) }
@@ -82,7 +86,28 @@ struct ReaderView: View {
         Set((try? JSONDecoder().decode([String].self, from: Data(bookmarkIDsJSON.utf8))) ?? [])
     }
     private var isBookmarked: Bool { bookmarkIDs.contains(chapter.id) }
+    private var selectedTranslationParagraphs: [String]? {
+        guard let translations = chapter.translationsBySource else { return nil }
+        return translations[translationSource] ?? []
+    }
+    private var displayedTranslation: String {
+        if let selectedTranslationParagraphs {
+            return selectedTranslationParagraphs.joined(separator: "\n\n")
+        }
+        return chapter.translatedText
+    }
     private var bilingualParagraphs: [NovelBilingualParagraph] {
+        if let selectedTranslationParagraphs {
+            let originals = chapter.originalText.components(separatedBy: "\n\n")
+            let count = max(originals.count, selectedTranslationParagraphs.count)
+            return (0..<count).compactMap { index in
+                let original = originals.indices.contains(index) ? originals[index] : ""
+                let translation = selectedTranslationParagraphs.indices.contains(index)
+                    ? selectedTranslationParagraphs[index] : ""
+                guard !original.isEmpty || !translation.isEmpty else { return nil }
+                return NovelBilingualParagraph(original: original, translation: translation)
+            }
+        }
         if let paragraphs = chapter.bilingualParagraphs, !paragraphs.isEmpty { return paragraphs }
         let originals = chapter.originalText.components(separatedBy: "\n\n")
         let translations = chapter.translatedText.components(separatedBy: "\n\n")
@@ -199,6 +224,12 @@ struct ReaderView: View {
                             }
                         }
                         Divider()
+                        Picker("译文来源", selection: $translationSourceRaw) {
+                            ForEach(NovelTranslationSource.allCases) { source in
+                                Text(source.title).tag(source.rawValue)
+                            }
+                        }
+                        Divider()
                         Picker("阅读外观", selection: $appearanceRaw) {
                             ForEach(ReaderAppearance.allCases) { option in
                                 Text(option.title).tag(option.rawValue)
@@ -232,7 +263,11 @@ struct ReaderView: View {
         case .original:
             Paragraphs(text: chapter.originalText, fontSize: fontSize, color: readerPrimaryText)
         case .translated:
-            Paragraphs(text: chapter.translatedText, fontSize: fontSize, color: readerPrimaryText)
+            if displayedTranslation.isEmpty {
+                unavailableTranslationMessage
+            } else {
+                Paragraphs(text: displayedTranslation, fontSize: fontSize, color: readerPrimaryText)
+            }
         case .bilingual:
             VStack(alignment: .leading, spacing: 35) {
                 ForEach(Array(bilingualParagraphs.enumerated()), id: \.offset) { _, paragraph in
@@ -246,12 +281,18 @@ struct ReaderView: View {
                     }
                 }
                 if bilingualParagraphs.isEmpty {
-                    Text("当前章节暂无正文。")
-                        .font(.system(size: 13))
-                        .foregroundStyle(readerSecondaryText)
+                    unavailableTranslationMessage
+                } else if selectedTranslationParagraphs?.allSatisfy({ $0.isEmpty }) == true {
+                    unavailableTranslationMessage
                 }
             }
         }
+    }
+
+    private var unavailableTranslationMessage: some View {
+        Text("当前章节暂无\(translationSource.title)译文。可在阅读设置中切换译源。")
+            .font(.system(size: 13))
+            .foregroundStyle(readerSecondaryText)
     }
 
     private func changeChapter(by offset: Int, proxy: ScrollViewProxy) {

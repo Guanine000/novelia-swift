@@ -733,9 +733,14 @@ struct NovelDetailView: View {
                         Text(displayNovel.title)
                             .font(.system(size: 29, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
-                        Text("著 · \(displayNovel.author)")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.82))
+                        HStack(spacing: 8) {
+                            Text("著 · \(displayNovel.author)")
+                            if let totalCharacters = displayNovel.totalCharacters, totalCharacters > 0 {
+                                Text("· \(totalCharacters.formatted()) 字")
+                            }
+                        }
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.82))
                     }
                     .padding(22)
                 }
@@ -749,6 +754,33 @@ struct NovelDetailView: View {
                         .font(.system(size: 15))
                         .lineSpacing(5)
                         .foregroundStyle(NoveliaStyle.muted)
+                }
+
+                if let translationCounts = displayNovel.translationChapterCounts {
+                    VStack(alignment: .leading, spacing: 11) {
+                        Text("译源进度")
+                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 9) {
+                            ForEach(NovelTranslationSource.allCases) { source in
+                                VStack(spacing: 5) {
+                                    Text(source.title)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(NoveliaStyle.ink)
+                                    Text("\(translationCounts[source] ?? 0) / \(displayNovel.chapters.count) 章")
+                                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(.white, in: RoundedRectangle(cornerRadius: 13))
+                            }
+                        }
+                        Text("阅读时可在右上角设置中切换译源。")
+                            .font(.system(size: 12))
+                            .foregroundStyle(NoveliaStyle.muted)
+                    }
                 }
 
                 if !displayNovel.genres.isEmpty {

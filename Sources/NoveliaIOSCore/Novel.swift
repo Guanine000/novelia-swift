@@ -11,6 +11,8 @@ public struct Novel: Identifiable, Hashable, Codable, Sendable {
     public let providerId: String?
     public let novelId: String?
     public let cloudFavoriteFolderID: String?
+    public let translationChapterCounts: [NovelTranslationSource: Int]?
+    public let totalCharacters: Int?
 
     public init(
         id: String,
@@ -22,7 +24,9 @@ public struct Novel: Identifiable, Hashable, Codable, Sendable {
         accent: NovelAccent,
         providerId: String? = nil,
         novelId: String? = nil,
-        cloudFavoriteFolderID: String? = nil
+        cloudFavoriteFolderID: String? = nil,
+        translationChapterCounts: [NovelTranslationSource: Int]? = nil,
+        totalCharacters: Int? = nil
     ) {
         self.id = id
         self.title = title
@@ -34,6 +38,8 @@ public struct Novel: Identifiable, Hashable, Codable, Sendable {
         self.providerId = providerId
         self.novelId = novelId
         self.cloudFavoriteFolderID = cloudFavoriteFolderID
+        self.translationChapterCounts = translationChapterCounts
+        self.totalCharacters = totalCharacters
     }
 
     public var isRemote: Bool { providerId != nil && novelId != nil }
@@ -49,7 +55,9 @@ public struct Novel: Identifiable, Hashable, Codable, Sendable {
             accent: accent,
             providerId: providerId,
             novelId: novelId,
-            cloudFavoriteFolderID: folderID
+            cloudFavoriteFolderID: folderID,
+            translationChapterCounts: translationChapterCounts,
+            totalCharacters: totalCharacters
         )
     }
 }
@@ -60,19 +68,42 @@ public struct NovelChapter: Identifiable, Hashable, Codable, Sendable {
     public let originalText: String
     public let translatedText: String
     public let bilingualParagraphs: [NovelBilingualParagraph]?
+    public let translationsBySource: [NovelTranslationSource: [String]]?
 
     public init(
         id: String,
         title: String,
         originalText: String,
         translatedText: String,
-        bilingualParagraphs: [NovelBilingualParagraph]? = nil
+        bilingualParagraphs: [NovelBilingualParagraph]? = nil,
+        translationsBySource: [NovelTranslationSource: [String]]? = nil
     ) {
         self.id = id
         self.title = title
         self.originalText = originalText
         self.translatedText = translatedText
         self.bilingualParagraphs = bilingualParagraphs
+        self.translationsBySource = translationsBySource
+    }
+
+    public func translation(for source: NovelTranslationSource) -> [String]? {
+        translationsBySource?[source]
+    }
+}
+
+public enum NovelTranslationSource: String, CaseIterable, Identifiable, Hashable, Codable, Sendable {
+    case youdao
+    case gpt
+    case sakura
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .youdao: "有道"
+        case .gpt: "GPT"
+        case .sakura: "Sakura"
+        }
     }
 }
 

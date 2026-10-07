@@ -151,7 +151,9 @@ final class FavoritesStore: ObservableObject {
             accent: novel.accent,
             providerId: novel.providerId,
             novelId: novel.novelId,
-            cloudFavoriteFolderID: folderID.isEmpty ? nil : folderID
+            cloudFavoriteFolderID: folderID.isEmpty ? nil : folderID,
+            translationChapterCounts: novel.translationChapterCounts,
+            totalCharacters: novel.totalCharacters
         )
     }
 

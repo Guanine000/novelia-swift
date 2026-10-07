@@ -18,6 +18,13 @@
 		A10000000000000000000009 /* FavoritesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* FavoritesStore.swift */; };
 		A10000000000000000000010 /* ReadingHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* ReadingHistoryStore.swift */; };
 		A10000000000000000000011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* Assets.xcassets */; };
+		A10000000000000000000012 /* WenkuViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* WenkuViews.swift */; };
+		A10000000000000000000013 /* WenkuStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* WenkuStore.swift */; };
+		A10000000000000000000014 /* WenkuNovel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* WenkuNovel.swift */; };
+		A10000000000000000000015 /* ReadiumShared in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000001 /* ReadiumShared */; };
+		A10000000000000000000016 /* ReadiumStreamer in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000002 /* ReadiumStreamer */; };
+		A10000000000000000000017 /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000003 /* ReadiumNavigator */; };
+		A10000000000000000000018 /* WenkuEPUBReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* WenkuEPUBReaderView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -33,6 +40,10 @@
 		B10000000000000000000010 /* FavoritesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStore.swift; sourceTree = "<group>"; };
 		B10000000000000000000011 /* ReadingHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingHistoryStore.swift; sourceTree = "<group>"; };
 		B10000000000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B10000000000000000000013 /* WenkuViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WenkuViews.swift; sourceTree = "<group>"; };
+		B10000000000000000000014 /* WenkuStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WenkuStore.swift; sourceTree = "<group>"; };
+		B10000000000000000000015 /* WenkuNovel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WenkuNovel.swift; sourceTree = "<group>"; };
+		B10000000000000000000016 /* WenkuEPUBReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WenkuEPUBReaderView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -40,6 +51,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000015 /* ReadiumShared in Frameworks */,
+				A10000000000000000000016 /* ReadiumStreamer in Frameworks */,
+				A10000000000000000000017 /* ReadiumNavigator in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -66,6 +80,9 @@
 				B10000000000000000000009 /* AccountAuth.swift */,
 				B10000000000000000000010 /* FavoritesStore.swift */,
 				B10000000000000000000011 /* ReadingHistoryStore.swift */,
+				B10000000000000000000013 /* WenkuViews.swift */,
+				B10000000000000000000014 /* WenkuStore.swift */,
+				B10000000000000000000016 /* WenkuEPUBReaderView.swift */,
 			);
 			path = iOSApp;
 			sourceTree = "<group>";
@@ -76,6 +93,7 @@
 				B10000000000000000000004 /* Novel.swift */,
 				B10000000000000000000005 /* DemoLibrary.swift */,
 				B10000000000000000000008 /* NoveliaAPIClient.swift */,
+				B10000000000000000000015 /* WenkuNovel.swift */,
 			);
 			path = Sources/NoveliaIOSCore;
 			sourceTree = "<group>";
@@ -102,6 +120,11 @@
 			buildRules = (
 			);
 			dependencies = (
+			);
+			packageProductDependencies = (
+				F31000000000000000000001 /* ReadiumShared */,
+				F31000000000000000000002 /* ReadiumStreamer */,
+				F31000000000000000000003 /* ReadiumNavigator */,
 			);
 			name = Novelia;
 			productName = Novelia;
@@ -139,8 +162,40 @@
 			targets = (
 				E10000000000000000000001 /* Novelia */,
 			);
+			packageReferences = (
+				F30000000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit" */,
+			);
 		};
 /* End PBXProject section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		F30000000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/readium/swift-toolkit.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.9.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F31000000000000000000001 /* ReadiumShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F30000000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit" */;
+			productName = ReadiumShared;
+		};
+		F31000000000000000000002 /* ReadiumStreamer */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F30000000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit" */;
+			productName = ReadiumStreamer;
+		};
+		F31000000000000000000003 /* ReadiumNavigator */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F30000000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit" */;
+			productName = ReadiumNavigator;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXResourcesBuildPhase section */
 		A20000000000000000000002 /* Resources */ = {
@@ -168,6 +223,10 @@
 				A10000000000000000000008 /* AccountAuth.swift in Sources */,
 				A10000000000000000000009 /* FavoritesStore.swift in Sources */,
 				A10000000000000000000010 /* ReadingHistoryStore.swift in Sources */,
+				A10000000000000000000012 /* WenkuViews.swift in Sources */,
+				A10000000000000000000013 /* WenkuStore.swift in Sources */,
+				A10000000000000000000014 /* WenkuNovel.swift in Sources */,
+				A10000000000000000000018 /* WenkuEPUBReaderView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

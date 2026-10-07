@@ -44,6 +44,11 @@ struct RootView: View {
             .tabItem { Label("发现", systemImage: "sparkle.magnifyingglass") }
 
             NavigationStack {
+                WenkuView()
+            }
+            .tabItem { Label("文库", systemImage: "books.vertical") }
+
+            NavigationStack {
                 SettingsView()
             }
             .tabItem { Label("我的", systemImage: "person.crop.circle") }

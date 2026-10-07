@@ -38,6 +38,24 @@ public struct NoveliaAPIClient: Sendable {
         return response.items.compactMap { $0.asNovel }
     }
 
+    public func searchWenku(query: String, page: Int = 0, pageSize: Int = 24, level: Int = 0) async throws -> WenkuNovelPage {
+        let response: APIPage<APIWenkuOutline> = try await get(
+            path: ["wenku"],
+            query: [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "pageSize", value: String(pageSize)),
+                URLQueryItem(name: "query", value: query),
+                URLQueryItem(name: "level", value: String(level))
+            ]
+        )
+        return WenkuNovelPage(novels: response.items.map(\.asOutline), pageCount: max(0, response.pageNumber ?? 0))
+    }
+
+    public func wenkuNovel(id: String) async throws -> WenkuNovelDetail {
+        let detail: APIWenkuDetail = try await get(path: ["wenku", id])
+        return detail.asDetail(id: id)
+    }
+
     public func siteRankedNovels(page: Int = 1) async throws -> NoveliaRankPage {
         let response: APIPage<APIWebOutline> = try await get(
             path: ["novel"],
@@ -73,6 +91,70 @@ public struct NoveliaAPIClient: Sendable {
     public func cloudFavoriteFolders() async throws -> [NoveliaCloudFolder] {
         let response: APICloudFolders = try await get(path: ["user", "favored"])
         return response.favoredWeb
+    }
+
+    public func cloudWenkuFavoriteFolders() async throws -> [NoveliaCloudFolder] {
+        let response: APICloudFolders = try await get(path: ["user", "favored"])
+        return response.favoredWenku
+    }
+
+    public func cloudWenkuFavorites(folderId: String, page: Int = 0, pageSize: Int = 24) async throws -> WenkuNovelPage {
+        let response: APIPage<APIWenkuOutline> = try await get(
+            path: ["user", "favored-wenku", folderId],
+            query: [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "pageSize", value: String(pageSize)),
+                URLQueryItem(name: "sort", value: "create")
+            ]
+        )
+        return WenkuNovelPage(novels: response.items.map(\.asOutline), pageCount: max(0, response.pageNumber ?? 0))
+    }
+
+    public func addCloudWenkuFavorite(novelId: String, folderId: String) async throws {
+        try await mutate(path: ["user", "favored-wenku", folderId, novelId], method: "PUT")
+    }
+
+    public func removeCloudWenkuFavorite(novelId: String, folderId: String) async throws {
+        try await mutate(path: ["user", "favored-wenku", folderId, novelId], method: "DELETE")
+    }
+
+    public func downloadWenkuEPUB(
+        novelId: String,
+        volumeId: String,
+        mode: WenkuEPUBMode,
+        translator: WenkuTranslator,
+        translationsMode: WenkuTranslationsMode = .priority
+    ) async throws -> Data {
+        guard mode != .original else { throw NoveliaAPIError.unsupportedWenkuOriginalDownload }
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            throw NoveliaAPIError.invalidURL
+        }
+        var basePath = components.percentEncodedPath
+        if !basePath.hasSuffix("/") { basePath += "/" }
+        let encodedPath = ["wenku", novelId, "file", volumeId].map {
+            $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#%"))) ?? $0
+        }.joined(separator: "/")
+        components.percentEncodedPath = basePath + encodedPath
+        components.queryItems = [
+            URLQueryItem(name: "mode", value: mode.rawValue),
+            URLQueryItem(name: "translationsMode", value: translationsMode.rawValue),
+            URLQueryItem(name: "type", value: "epub"),
+            URLQueryItem(name: "filename", value: "\(mode.rawValue).\(translator.rawValue).\(volumeId)"),
+            URLQueryItem(name: "translations", value: translator.rawValue)
+        ]
+        guard let url = components.url else { throw NoveliaAPIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.setValue("application/epub+zip, application/octet-stream", forHTTPHeaderField: "Accept")
+        if let token = tokenProvider(), !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.timeoutInterval = 120
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw NoveliaAPIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw NoveliaAPIError.httpStatus(http.statusCode, serverMessage(in: data))
+        }
+        return data
     }
 
     public func cloudFavorites(folderId: String, page: Int = 0) async throws -> [Novel] {
@@ -231,6 +313,20 @@ public struct NoveliaCloudFolder: Codable, Identifiable, Hashable, Sendable {
     public let title: String
 }
 
+public enum WenkuTranslationsMode: String, CaseIterable, Identifiable, Sendable {
+    case priority
+    case parallel
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .priority: "优先显示一种译源"
+        case .parallel: "并列显示所选译源"
+        }
+    }
+}
+
 public struct NoveliaRankPage: Sendable {
     public let novels: [Novel]
     public let pageCount: Int
@@ -302,12 +398,14 @@ public struct NoveliaCloudNovelDetail: Sendable {
 
 private struct APICloudFolders: Decodable {
     let favoredWeb: [NoveliaCloudFolder]
+    let favoredWenku: [NoveliaCloudFolder]
 
-    private enum CodingKeys: String, CodingKey { case favoredWeb }
+    private enum CodingKeys: String, CodingKey { case favoredWeb, favoredWenku }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         favoredWeb = try container.decodeIfPresent([NoveliaCloudFolder].self, forKey: .favoredWeb) ?? []
+        favoredWenku = try container.decodeIfPresent([NoveliaCloudFolder].self, forKey: .favoredWenku) ?? []
     }
 }
 
@@ -395,11 +493,13 @@ public enum NoveliaAPIError: LocalizedError {
     case invalidResponse
     case httpStatus(Int, String?)
     case decoding(String)
+    case unsupportedWenkuOriginalDownload
 
     public var errorDescription: String? {
         switch self {
         case .invalidURL: return "API 地址无效。"
         case .invalidResponse: return "服务器返回了无法识别的响应。"
+        case .unsupportedWenkuOriginalDownload: return "Novelia 上游暂不支持单独下载文库原文 EPUB。"
         case let .httpStatus(status, message):
             if let message, !message.isEmpty { return "Novelia API 错误（HTTP \(status)）：\(message)" }
             return "Novelia API 错误（HTTP \(status)）。"
@@ -413,6 +513,63 @@ private struct APIPage<Item: Decodable>: Decodable {
     let items: [Item]
 }
 
+private struct APIWenkuOutline: Decodable {
+    let id: String
+    let title: String
+    let titleZh: String
+    let cover: String?
+    let favored: String?
+
+    var asOutline: WenkuNovelOutline {
+        WenkuNovelOutline(id: id, title: title, titleZh: titleZh, cover: cover, favored: favored)
+    }
+}
+
+private struct APIWenkuDetail: Decodable {
+    let title: String
+    let titleZh: String
+    let cover: String?
+    let authors: [String]
+    let artists: [String]
+    let keywords: [String]
+    let publisher: String?
+    let imprint: String?
+    let latestPublishAt: Int64?
+    let level: String
+    let introduction: String
+    let webIds: [String]
+    let volumes: [WenkuVolumeMetadata]
+    let glossary: [String: String]
+    let visited: Int64
+    let favored: String?
+    let volumeZh: [String]
+    let volumeJp: [WenkuVolumeAvailability]
+
+    func asDetail(id: String) -> WenkuNovelDetail {
+        WenkuNovelDetail(
+            id: id,
+            title: title,
+            titleZh: titleZh,
+            cover: cover,
+            authors: authors,
+            artists: artists,
+            keywords: keywords,
+            publisher: publisher,
+            imprint: imprint,
+            latestPublishAt: latestPublishAt,
+            level: level,
+            introduction: introduction,
+            webIds: webIds,
+            volumes: volumes,
+            glossary: glossary,
+            visited: visited,
+            favored: favored,
+            volumeZh: volumeZh,
+            volumeJp: volumeJp
+        )
+    }
+}
+
 private struct APIWebOutline: Decodable {
     let providerId: String?
     let novelId: String?
@@ -421,6 +578,9 @@ private struct APIWebOutline: Decodable {
     let type: String?
     let keywords: [String]?
     let total: Int?
+    let youdao: Int?
+    let gpt: Int?
+    let sakura: Int?
     let favored: String?
     let lastReadAt: Int64?
 
@@ -436,7 +596,8 @@ private struct APIWebOutline: Decodable {
             accent: NovelAccent.forProvider(providerId),
             providerId: providerId,
             novelId: novelId,
-            cloudFavoriteFolderID: favored
+            cloudFavoriteFolderID: favored,
+            translationChapterCounts: translationCounts(youdao: youdao, gpt: gpt, sakura: sakura)
         )
     }
 
@@ -457,6 +618,10 @@ private struct APIWebDetail: Decodable {
     let toc: [APITocItem]?
     let favored: String?
     let lastReadChapterId: String?
+    let totalCharacters: Int?
+    let youdao: Int?
+    let gpt: Int?
+    let sakura: Int?
 }
 
 private struct APIAuthor: Decodable {
@@ -479,6 +644,11 @@ private struct APIChapter: Decodable {
 
     func asNovelChapter(id: String) -> NovelChapter {
         let originals = paragraphs ?? []
+        let translationsBySource: [NovelTranslationSource: [String]] = [
+            .youdao: youdaoParagraphs,
+            .gpt: gptParagraphs,
+            .sakura: sakuraParagraphs
+        ].compactMapValues { $0 }
         let translationSources = [gptParagraphs, sakuraParagraphs, youdaoParagraphs].compactMap { $0 }
         let paragraphCount = max(originals.count, translationSources.map(\.count).max() ?? 0)
         let bilingualParagraphs = (0..<paragraphCount).compactMap { index -> NovelBilingualParagraph? in
@@ -499,7 +669,8 @@ private struct APIChapter: Decodable {
             title: titleZh?.nonEmpty ?? titleJp?.nonEmpty ?? id,
             originalText: original,
             translatedText: translated,
-            bilingualParagraphs: bilingualParagraphs
+            bilingualParagraphs: bilingualParagraphs,
+            translationsBySource: translationsBySource
         )
     }
 }
@@ -526,9 +697,20 @@ private extension APIWebDetail {
             accent: NovelAccent.forProvider(providerId),
             providerId: providerId,
             novelId: novelId,
-            cloudFavoriteFolderID: favored
+            cloudFavoriteFolderID: favored,
+            translationChapterCounts: translationCounts(youdao: youdao, gpt: gpt, sakura: sakura),
+            totalCharacters: totalCharacters
         )
     }
+}
+
+private func translationCounts(youdao: Int?, gpt: Int?, sakura: Int?) -> [NovelTranslationSource: Int]? {
+    let counts: [NovelTranslationSource: Int] = [
+        .youdao: youdao,
+        .gpt: gpt,
+        .sakura: sakura
+    ].compactMapValues { $0 }
+    return counts.isEmpty ? nil : counts
 }
 
 private extension NovelAccent {
