@@ -6,13 +6,13 @@
 
 ## 当前版本
 
-**v0.4.0** · 最低支持 iOS 17
+**v0.4.1** · 最低支持 iOS 17
 
-[查看 GitHub Release 与下载 IPA](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.4.0) · [查看构建记录](https://github.com/Guanine000/novelia-ios-port/actions)
+[查看 GitHub Release 与下载 IPA](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.4.1) · [查看构建记录](https://github.com/Guanine000/novelia-ios-port/actions)
 
 当前 Release 提供 GitHub Actions 构建的未签名 IPA。此文件需自行签名后才能安装到常规真机或提交 App Store。
 
-v0.4.0 优化了网页阅读时的纵向滚动，并调整了文库 EPUB 下载文件的管理方式：下载后可在“下载列表”中查看、删除或通过系统分享导出。应用内 EPUB 阅读和导入目前不提供。
+v0.4.1 将网络小说下载切换为 Novelia 官网整本 EPUB 接口，支持选择原文或译源；下载文件可在“我的下载”中导出。另包含网页阅读滚动优化及文库 EPUB 下载文件管理调整。应用内 EPUB 阅读和导入目前不提供。
 
 ## 功能
 
