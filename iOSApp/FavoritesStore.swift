@@ -48,10 +48,16 @@ final class FavoritesStore: ObservableObject {
         do {
             let api = try apiClient(for: account)
             var fetched: [Novel] = []
-            for page in 0...100 {
-                let batch = try await api.cloudFavorites(page: page)
-                fetched.append(contentsOf: batch)
-                if batch.count < 20 { break }
+            let folders = try await api.cloudFavoriteFolders()
+            // The Android client exposes the aggregate "all" route only when
+            // there are multiple folders; a single-folder account uses its real ID.
+            let folderIDs = folders.count > 1 ? ["all"] : folders.map(\.id)
+            for folderID in folderIDs {
+                for page in 0...100 {
+                    let batch = try await api.cloudFavorites(folderId: folderID, page: page)
+                    fetched.append(contentsOf: batch)
+                    if batch.count < 20 { break }
+                }
             }
             guard generation == refreshGeneration, activeAccount == account else { return }
             novels = deduplicated(fetched)

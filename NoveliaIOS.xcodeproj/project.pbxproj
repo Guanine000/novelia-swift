@@ -16,6 +16,7 @@
 		A10000000000000000000007 /* NoveliaAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000008 /* NoveliaAPIClient.swift */; };
 		A10000000000000000000008 /* AccountAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* AccountAuth.swift */; };
 		A10000000000000000000009 /* FavoritesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* FavoritesStore.swift */; };
+		A10000000000000000000010 /* ReadingHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* ReadingHistoryStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,6 +30,7 @@
 		B10000000000000000000008 /* NoveliaAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoveliaAPIClient.swift; sourceTree = "<group>"; };
 		B10000000000000000000009 /* AccountAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountAuth.swift; sourceTree = "<group>"; };
 		B10000000000000000000010 /* FavoritesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStore.swift; sourceTree = "<group>"; };
+		B10000000000000000000011 /* ReadingHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingHistoryStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -60,6 +62,7 @@
 				B10000000000000000000007 /* DiscoverStore.swift */,
 				B10000000000000000000009 /* AccountAuth.swift */,
 				B10000000000000000000010 /* FavoritesStore.swift */,
+				B10000000000000000000011 /* ReadingHistoryStore.swift */,
 			);
 			path = iOSApp;
 			sourceTree = "<group>";
@@ -160,6 +163,7 @@
 				A10000000000000000000007 /* NoveliaAPIClient.swift in Sources */,
 				A10000000000000000000008 /* AccountAuth.swift in Sources */,
 				A10000000000000000000009 /* FavoritesStore.swift in Sources */,
+				A10000000000000000000010 /* ReadingHistoryStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

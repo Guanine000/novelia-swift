@@ -59,12 +59,30 @@ public struct NovelChapter: Identifiable, Hashable, Codable, Sendable {
     public let title: String
     public let originalText: String
     public let translatedText: String
+    public let bilingualParagraphs: [NovelBilingualParagraph]?
 
-    public init(id: String, title: String, originalText: String, translatedText: String) {
+    public init(
+        id: String,
+        title: String,
+        originalText: String,
+        translatedText: String,
+        bilingualParagraphs: [NovelBilingualParagraph]? = nil
+    ) {
         self.id = id
         self.title = title
         self.originalText = originalText
         self.translatedText = translatedText
+        self.bilingualParagraphs = bilingualParagraphs
+    }
+}
+
+public struct NovelBilingualParagraph: Hashable, Codable, Sendable {
+    public let original: String
+    public let translation: String
+
+    public init(original: String, translation: String) {
+        self.original = original
+        self.translation = translation
     }
 }
 

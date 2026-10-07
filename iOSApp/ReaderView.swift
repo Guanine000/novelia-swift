@@ -28,6 +28,18 @@ struct ReaderView: View {
         Set((try? JSONDecoder().decode([String].self, from: Data(bookmarkIDsJSON.utf8))) ?? [])
     }
     private var isBookmarked: Bool { bookmarkIDs.contains(chapter.id) }
+    private var bilingualParagraphs: [NovelBilingualParagraph] {
+        if let paragraphs = chapter.bilingualParagraphs, !paragraphs.isEmpty { return paragraphs }
+        let originals = chapter.originalText.components(separatedBy: "\n\n")
+        let translations = chapter.translatedText.components(separatedBy: "\n\n")
+        let count = max(originals.count, translations.count)
+        return (0..<count).compactMap { index in
+            let original = originals.indices.contains(index) ? originals[index] : ""
+            let translation = translations.indices.contains(index) ? translations[index] : ""
+            guard !original.isEmpty || !translation.isEmpty else { return nil }
+            return NovelBilingualParagraph(original: original, translation: translation)
+        }
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -102,7 +114,22 @@ struct ReaderView: View {
                 .frame(maxWidth: .infinity)
             }
             .background(NoveliaStyle.paper.ignoresSafeArea())
+            .onChange(of: chapterIndex) { _, newIndex in
+                guard novel.chapters.indices.contains(newIndex) else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    proxy.scrollTo(novel.chapters[newIndex].id, anchor: .top)
+                }
+            }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        ChapterDirectoryView(novel: novel, selectedIndex: $chapterIndex)
+                    } label: {
+                        Image(systemName: "list.bullet")
+                            .foregroundStyle(NoveliaStyle.ink)
+                    }
+                    .accessibilityLabel("章节目录")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: toggleBookmark) {
                         Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
@@ -146,20 +173,21 @@ struct ReaderView: View {
         case .translated:
             Paragraphs(text: chapter.translatedText, fontSize: fontSize, color: NoveliaStyle.ink)
         case .bilingual:
-            VStack(alignment: .leading, spacing: 21) {
-                Paragraphs(text: chapter.originalText, fontSize: fontSize, color: NoveliaStyle.ink.opacity(0.78))
-                if chapter.translatedText.isEmpty {
-                    Text("当前章节暂无译文。")
+            VStack(alignment: .leading, spacing: 35) {
+                ForEach(Array(bilingualParagraphs.enumerated()), id: \.offset) { _, paragraph in
+                    VStack(alignment: .leading, spacing: 8) {
+                        if !paragraph.original.isEmpty {
+                            Paragraphs(text: paragraph.original, fontSize: fontSize, color: NoveliaStyle.ink)
+                        }
+                        if !paragraph.translation.isEmpty {
+                            Paragraphs(text: paragraph.translation, fontSize: fontSize, color: NoveliaStyle.muted)
+                        }
+                    }
+                }
+                if bilingualParagraphs.isEmpty {
+                    Text("当前章节暂无正文。")
                         .font(.system(size: 13))
                         .foregroundStyle(NoveliaStyle.muted)
-                } else {
-                    Paragraphs(text: chapter.translatedText, fontSize: fontSize, color: NoveliaStyle.ink)
-                        .padding(.leading, 14)
-                        .overlay(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(NoveliaStyle.coral.opacity(0.52))
-                                .frame(width: 3)
-                        }
                 }
             }
         }
@@ -203,6 +231,45 @@ struct ReaderView: View {
             guard !Task.isCancelled else { return }
             chapterError = error.localizedDescription
         }
+    }
+}
+
+private struct ChapterDirectoryView: View {
+    @Environment(\.dismiss) private var dismiss
+    let novel: Novel
+    @Binding var selectedIndex: Int
+
+    var body: some View {
+        List(Array(novel.chapters.enumerated()), id: \.element.id) { index, chapter in
+            Button {
+                selectedIndex = index
+                dismiss()
+            } label: {
+                HStack(spacing: 12) {
+                    Text("\(index + 1)")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .frame(minWidth: 32, alignment: .trailing)
+                    Text(chapter.title)
+                        .font(.system(size: 14, weight: index == selectedIndex ? .semibold : .regular))
+                        .foregroundStyle(NoveliaStyle.ink)
+                        .lineLimit(2)
+                    Spacer(minLength: 8)
+                    if index == selectedIndex {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(NoveliaStyle.coral)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .listRowBackground(Color.white)
+        }
+        .scrollContentBackground(.hidden)
+        .background(NoveliaStyle.paper.ignoresSafeArea())
+        .navigationTitle("章节目录")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 

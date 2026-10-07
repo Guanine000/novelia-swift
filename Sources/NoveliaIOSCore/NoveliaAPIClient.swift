@@ -53,16 +53,40 @@ public struct NoveliaAPIClient: Sendable {
         return response.favoredWeb
     }
 
-    public func cloudFavorites(page: Int = 0) async throws -> [Novel] {
+    public func cloudFavorites(folderId: String, page: Int = 0) async throws -> [Novel] {
         let response: APIPage<APIWebOutline> = try await get(
-            path: ["user", "favored-web", "all"],
+            path: ["user", "favored-web", folderId],
             query: [
                 URLQueryItem(name: "page", value: String(page)),
                 URLQueryItem(name: "pageSize", value: "20"),
-                URLQueryItem(name: "sort", value: "update")
+                URLQueryItem(name: "sort", value: "update"),
+                URLQueryItem(name: "query", value: ""),
+                URLQueryItem(name: "provider", value: Self.providers.joined(separator: ",")),
+                URLQueryItem(name: "type", value: "0"),
+                URLQueryItem(name: "level", value: "0"),
+                URLQueryItem(name: "translate", value: "0")
             ]
         )
         return response.items.compactMap { $0.asNovel }
+    }
+
+    public func cloudReadingHistory(page: Int = 0) async throws -> [NoveliaCloudReadingHistoryItem] {
+        let response: APIPage<APIWebOutline> = try await get(
+            path: ["user", "read-history"],
+            query: [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "pageSize", value: "20")
+            ]
+        )
+        return response.items.compactMap { $0.asReadingHistoryItem }
+    }
+
+    public func novelForContinuation(providerId: String, novelId: String) async throws -> NoveliaCloudNovelDetail {
+        let detail: APIWebDetail = try await get(path: ["novel", providerId, novelId])
+        return NoveliaCloudNovelDetail(
+            novel: detail.asNovel(providerId: providerId, novelId: novelId),
+            lastReadChapterID: detail.lastReadChapterId
+        )
     }
 
     public func addCloudFavorite(providerId: String, novelId: String, folderId: String) async throws {
@@ -144,6 +168,27 @@ public struct NoveliaCloudFolder: Codable, Identifiable, Hashable, Sendable {
     public let title: String
 }
 
+public struct NoveliaCloudReadingHistoryItem: Codable, Identifiable, Hashable, Sendable {
+    public let novel: Novel
+    public let lastReadAt: Int64?
+    public var id: String { novel.id }
+
+    public init(novel: Novel, lastReadAt: Int64?) {
+        self.novel = novel
+        self.lastReadAt = lastReadAt
+    }
+}
+
+public struct NoveliaCloudNovelDetail: Sendable {
+    public let novel: Novel
+    public let lastReadChapterID: String?
+
+    public init(novel: Novel, lastReadChapterID: String?) {
+        self.novel = novel
+        self.lastReadChapterID = lastReadChapterID
+    }
+}
+
 private struct APICloudFolders: Decodable {
     let favoredWeb: [NoveliaCloudFolder]
 
@@ -160,15 +205,26 @@ private struct APICloudFolders: Decodable {
 public enum NoveliaSessionTokenVault {
     private static let service = "cc.novelia.ios.session"
     private static let account = "novel-access-token"
+#if targetEnvironment(simulator)
+    private static let simulatorFallbackKey = "novelia.session-token.simulator"
+#endif
 
     public static func read() -> String? {
         var query = baseQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        if SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+           let data = result as? Data,
+           let token = String(data: data, encoding: .utf8) {
+            return token
+        }
+#if targetEnvironment(simulator)
+        // Simulator builds may be ad-hoc signed without a Keychain access-group entitlement.
+        return UserDefaults.standard.string(forKey: simulatorFallbackKey)
+#else
+        return nil
+#endif
     }
 
     public static func save(_ token: String) throws {
@@ -179,14 +235,31 @@ public enum NoveliaSessionTokenVault {
             query[kSecValueData as String] = data
             query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             let addStatus = SecItemAdd(query as CFDictionary, nil)
-            guard addStatus == errSecSuccess else { throw NoveliaSessionError.keychain(addStatus) }
+            guard addStatus == errSecSuccess else {
+#if targetEnvironment(simulator)
+                if addStatus == errSecMissingEntitlement || addStatus == errSecNotAvailable {
+                    UserDefaults.standard.set(token, forKey: simulatorFallbackKey)
+                    return
+                }
+#endif
+                throw NoveliaSessionError.keychain(addStatus)
+            }
         } else if status != errSecSuccess {
+#if targetEnvironment(simulator)
+            if status == errSecMissingEntitlement || status == errSecNotAvailable {
+                UserDefaults.standard.set(token, forKey: simulatorFallbackKey)
+                return
+            }
+#endif
             throw NoveliaSessionError.keychain(status)
         }
     }
 
     public static func clear() {
         SecItemDelete(baseQuery as CFDictionary)
+#if targetEnvironment(simulator)
+        UserDefaults.standard.removeObject(forKey: simulatorFallbackKey)
+#endif
     }
 
     private static var baseQuery: [String: Any] {
@@ -201,7 +274,7 @@ public enum NoveliaSessionError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .keychain: "无法安全保存 Novelia 登录会话。"
+        case let .keychain(status): "无法安全保存 Novelia 登录会话（Keychain 错误 \(status)）。"
         }
     }
 }
@@ -238,6 +311,7 @@ private struct APIWebOutline: Decodable {
     let keywords: [String]?
     let total: Int?
     let favored: String?
+    let lastReadAt: Int64?
 
     var asNovel: Novel? {
         guard let providerId, let novelId else { return nil }
@@ -254,6 +328,11 @@ private struct APIWebOutline: Decodable {
             cloudFavoriteFolderID: favored
         )
     }
+
+    var asReadingHistoryItem: NoveliaCloudReadingHistoryItem? {
+        guard let novel = asNovel else { return nil }
+        return NoveliaCloudReadingHistoryItem(novel: novel, lastReadAt: lastReadAt)
+    }
 }
 
 private struct APIWebDetail: Decodable {
@@ -266,6 +345,7 @@ private struct APIWebDetail: Decodable {
     let introductionZh: String?
     let toc: [APITocItem]?
     let favored: String?
+    let lastReadChapterId: String?
 }
 
 private struct APIAuthor: Decodable {
@@ -287,15 +367,28 @@ private struct APIChapter: Decodable {
     let sakuraParagraphs: [String]?
 
     func asNovelChapter(id: String) -> NovelChapter {
-        let original = paragraphs?.joined(separator: "\n\n") ?? ""
-        let translated = [gptParagraphs, sakuraParagraphs, youdaoParagraphs]
-            .compactMap { $0?.joined(separator: "\n\n").nonEmpty }
-            .first ?? ""
+        let originals = paragraphs ?? []
+        let translationSources = [gptParagraphs, sakuraParagraphs, youdaoParagraphs].compactMap { $0 }
+        let paragraphCount = max(originals.count, translationSources.map(\.count).max() ?? 0)
+        let bilingualParagraphs = (0..<paragraphCount).compactMap { index -> NovelBilingualParagraph? in
+            let original = originals.indices.contains(index) ? originals[index] : ""
+            let translation = translationSources
+                .compactMap { $0.indices.contains(index) ? $0[index].nonEmpty : nil }
+                .first ?? ""
+            guard !original.isEmpty || !translation.isEmpty else { return nil }
+            return NovelBilingualParagraph(original: original, translation: translation)
+        }
+        let original = originals.joined(separator: "\n\n")
+        let translated = bilingualParagraphs
+            .map(\.translation)
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
         return NovelChapter(
             id: id,
             title: titleZh?.nonEmpty ?? titleJp?.nonEmpty ?? id,
             originalText: original,
-            translatedText: translated
+            translatedText: translated,
+            bilingualParagraphs: bilingualParagraphs
         )
     }
 }

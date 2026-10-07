@@ -1,0 +1,56 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    runs-on: macos-26
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build iOS app
+        run: >-
+          xcodebuild
+          -project NoveliaIOS.xcodeproj
+          -scheme Novelia
+          -configuration Release
+          -sdk iphoneos
+          -destination 'generic/platform=iOS'
+          -derivedDataPath "$RUNNER_TEMP/NoveliaDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="$RUNNER_TEMP/NoveliaDerivedData/Build/Products/Release-iphoneos/Novelia.app"
+          package_root="$RUNNER_TEMP/NoveliaIPAPackage"
+          ipa_path="$RUNNER_TEMP/Novelia-unsigned.ipa"
+
+          test -d "$app_path"
+          mkdir -p "$package_root/Payload"
+          ditto "$app_path" "$package_root/Payload/Novelia.app"
+          (cd "$package_root" && /usr/bin/zip -qry "$ipa_path" Payload)
+          test -s "$ipa_path"
+          shasum -a 256 "$ipa_path"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: Novelia-unsigned-ipa
+          path: ${{ runner.temp }}/Novelia-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
