@@ -121,6 +121,7 @@ struct WenkuView: View {
                         HStack(spacing: 12) {
                             NavigationLink {
                                 WenkuEPUBReaderView(book: book, url: localLibrary.fileURL(for: book))
+                                    .environmentObject(localLibrary)
                             } label: {
                                 HStack(spacing: 12) {
                                     Image(systemName: "book.closed.fill")
@@ -171,6 +172,7 @@ struct WenkuView: View {
                 ForEach(Array(novels.enumerated()), id: \.element.id) { index, novel in
                     NavigationLink {
                         WenkuDetailView(outline: novel)
+                            .environmentObject(localLibrary)
                     } label: {
                         WenkuNovelRow(novel: novel)
                     }
@@ -245,7 +247,7 @@ private struct WenkuDetailView: View {
     @State private var detail: WenkuNovelDetail?
     @State private var error: String?
     @State private var isLoading = true
-    @State private var selectedVolume: WenkuVolumeAvailability?
+    @State private var downloadRequest: WenkuDownloadRequest?
     @State private var favoriteError: String?
 
     private let api = NoveliaAPIClient()
@@ -281,8 +283,8 @@ private struct WenkuDetailView: View {
         .navigationTitle(detail?.displayTitle ?? outline.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: outline.id) { await loadDetail() }
-        .sheet(item: $selectedVolume) { volume in
-            WenkuDownloadSheet(detail: detail!, volume: volume)
+        .sheet(item: $downloadRequest) { request in
+            WenkuDownloadSheet(detail: request.detail, volume: request.volume)
                 .environmentObject(localLibrary)
         }
         .alert("收藏失败", isPresented: Binding(get: { favoriteError != nil }, set: { if !$0 { favoriteError = nil } })) {
@@ -353,7 +355,7 @@ private struct WenkuDetailView: View {
                             Text("原文章节 (volume.total)").font(.caption).foregroundStyle(NoveliaStyle.muted)
                         }
                         Spacer()
-                        Button { selectedVolume = volume } label: {
+                        Button { downloadRequest = WenkuDownloadRequest(detail: detail, volume: volume) } label: {
                             Label("下载 EPUB", systemImage: "arrow.down.to.line")
                                 .font(.system(size: 12, weight: .semibold))
                         }
@@ -384,6 +386,13 @@ private struct WenkuDetailView: View {
     private func withFavorite(_ old: WenkuNovelDetail, folderID: String?) -> WenkuNovelDetail {
         WenkuNovelDetail(id: old.id, title: old.title, titleZh: old.titleZh, cover: old.cover, authors: old.authors, artists: old.artists, keywords: old.keywords, publisher: old.publisher, imprint: old.imprint, latestPublishAt: old.latestPublishAt, level: old.level, introduction: old.introduction, webIds: old.webIds, volumes: old.volumes, glossary: old.glossary, visited: old.visited, favored: folderID, volumeZh: old.volumeZh, volumeJp: old.volumeJp)
     }
+}
+
+private struct WenkuDownloadRequest: Identifiable {
+    let detail: WenkuNovelDetail
+    let volume: WenkuVolumeAvailability
+
+    var id: String { "\(detail.id)/\(volume.volumeId)" }
 }
 
 private struct WenkuDownloadSheet: View {
@@ -461,17 +470,20 @@ private struct WenkuDownloadSheet: View {
         errorMessage = nil
         defer { isDownloading = false }
         do {
-            let data = try await api.downloadWenkuEPUB(novelId: detail.id, volumeId: volume.volumeId, mode: mode, translator: translator, translationsMode: translationsMode)
-            guard data.starts(with: [0x50, 0x4b]) else { throw WenkuDownloadError.invalidEPUB }
-            try localLibrary.save(data: data, title: "\(detail.displayTitle) · \(volume.volumeId)", filename: "\(detail.id)-\(volume.volumeId)-\(mode.rawValue)-\(translator.rawValue).epub")
+            let filename = "\(detail.id)-\(volume.volumeId)-\(mode.rawValue)-\(translator.rawValue).epub"
+            let destination = localLibrary.downloadDestination(for: filename)
+            try await api.downloadWenkuEPUB(
+                to: destination,
+                novelId: detail.id,
+                volumeId: volume.volumeId,
+                mode: mode,
+                translator: translator,
+                translationsMode: translationsMode
+            )
+            try localLibrary.registerDownloadedFile(at: destination, title: "\(detail.displayTitle) · \(volume.volumeId)")
             finished = true
         } catch { errorMessage = error.localizedDescription }
     }
-}
-
-private enum WenkuDownloadError: LocalizedError {
-    case invalidEPUB
-    var errorDescription: String? { "服务器返回的内容不是有效 EPUB 压缩包。" }
 }
 
 private extension Optional where Wrapped == String {

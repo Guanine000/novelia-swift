@@ -164,6 +164,40 @@ final class WenkuLocalLibraryStore: ObservableObject {
         directory.appendingPathComponent(book.filename)
     }
 
+    func downloadDestination(for filename: String) -> URL {
+        uniqueDestination(for: Self.safeFilename(filename))
+    }
+
+    func registerDownloadedFile(at fileURL: URL, title: String) throws {
+        guard fileURL.deletingLastPathComponent().standardizedFileURL == directory.standardizedFileURL else {
+            throw WenkuLocalLibraryError.invalidEPUB
+        }
+        guard let handle = try? FileHandle(forReadingFrom: fileURL) else {
+            throw WenkuLocalLibraryError.invalidEPUB
+        }
+        let signature = try? handle.read(upToCount: 2)
+        try? handle.close()
+        guard signature == Data([0x50, 0x4b]) else {
+            try? fileManager.removeItem(at: fileURL)
+            throw WenkuLocalLibraryError.invalidEPUB
+        }
+
+        let book = LocalWenkuEPUB(
+            id: UUID(),
+            title: title,
+            filename: fileURL.lastPathComponent,
+            addedAt: Date()
+        )
+        books.insert(book, at: 0)
+        do {
+            try persistIndex()
+        } catch {
+            books.removeAll { $0.id == book.id }
+            try? fileManager.removeItem(at: fileURL)
+            throw error
+        }
+    }
+
     func save(data: Data, title: String, filename: String) throws {
         guard data.starts(with: [0x50, 0x4b]) else { throw WenkuLocalLibraryError.invalidEPUB }
         let safeName = Self.safeFilename(filename)

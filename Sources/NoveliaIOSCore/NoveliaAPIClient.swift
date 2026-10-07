@@ -119,12 +119,13 @@ public struct NoveliaAPIClient: Sendable {
     }
 
     public func downloadWenkuEPUB(
+        to destinationURL: URL,
         novelId: String,
         volumeId: String,
         mode: WenkuEPUBMode,
         translator: WenkuTranslator,
         translationsMode: WenkuTranslationsMode = .priority
-    ) async throws -> Data {
+    ) async throws {
         guard mode != .original else { throw NoveliaAPIError.unsupportedWenkuOriginalDownload }
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw NoveliaAPIError.invalidURL
@@ -149,12 +150,13 @@ public struct NoveliaAPIClient: Sendable {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         request.timeoutInterval = 120
-        let (data, response) = try await session.data(for: request)
+        let (temporaryURL, response) = try await session.download(for: request)
         guard let http = response as? HTTPURLResponse else { throw NoveliaAPIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
-            throw NoveliaAPIError.httpStatus(http.statusCode, serverMessage(in: data))
+            let responseData = Self.responseData(from: temporaryURL)
+            throw NoveliaAPIError.httpStatus(http.statusCode, serverMessage(in: responseData))
         }
-        return data
+        try FileManager.default.moveItem(at: temporaryURL, to: destinationURL)
     }
 
     public func cloudFavorites(folderId: String, page: Int = 0) async throws -> [Novel] {
@@ -290,6 +292,12 @@ public struct NoveliaAPIClient: Sendable {
     private func serverMessage(in data: Data) -> String? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return object["message"] as? String ?? object["msg"] as? String ?? object["error"] as? String
+    }
+
+    private static func responseData(from url: URL) -> Data {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return Data() }
+        defer { try? handle.close() }
+        return (try? handle.read(upToCount: 64 * 1024)) ?? Data()
     }
 
     // Mirrors the provider order used by the Android client's public novel-list request.
