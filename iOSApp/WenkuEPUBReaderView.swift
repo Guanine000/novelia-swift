@@ -161,6 +161,7 @@ private final class WenkuEPUBReaderModel: NSObject, ObservableObject, EPUBNaviga
     @Published private(set) var tableOfContents: [WenkuEPUBTOCEntry] = []
     @Published private(set) var errorMessage: String?
     @Published private(set) var currentHref: String?
+    @Published private(set) var currentLocationTitle: String?
     @Published private(set) var totalProgression: Double?
     private var positionCount: Int?
     private var onLocationChanged: ((Locator) -> Void)?
@@ -168,6 +169,7 @@ private final class WenkuEPUBReaderModel: NSObject, ObservableObject, EPUBNaviga
     private var backgroundImageBase64: String?
     private var activePreferences = EPUBReaderPreferences()
     private var onPageTurn: ((Bool) -> Void)?
+    private var onCurlPan: ((UIPanGestureRecognizer) -> Void)?
     private var pageTurnPan: UIPanGestureRecognizer?
 
     func open(
@@ -176,12 +178,14 @@ private final class WenkuEPUBReaderModel: NSObject, ObservableObject, EPUBNaviga
         preferences: EPUBReaderPreferences,
         onTap: @escaping () -> Void,
         onPageTurn: @escaping (Bool) -> Void,
+        onCurlPan: @escaping (UIPanGestureRecognizer) -> Void,
         onLocationChanged: @escaping (Locator) -> Void
     ) async {
         errorMessage = nil
         self.onLocationChanged = onLocationChanged
         self.onTap = onTap
         self.onPageTurn = onPageTurn
+        self.onCurlPan = onCurlPan
         activePreferences = preferences
         backgroundImageBase64 = preferences.backgroundImageData?.base64EncodedString()
         do {
@@ -250,6 +254,7 @@ private final class WenkuEPUBReaderModel: NSObject, ObservableObject, EPUBNaviga
 
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
         currentHref = locator.href.string
+        currentLocationTitle = locator.title
         if let total = locator.locations.totalProgression {
             totalProgression = total
         } else if let position = locator.locations.position, let positionCount, positionCount > 0 {
@@ -356,6 +361,10 @@ private final class WenkuEPUBReaderModel: NSObject, ObservableObject, EPUBNaviga
     }
 
     @objc private func pagePanEnded(_ pan: UIPanGestureRecognizer) {
+        if activePreferences.animation == .simulation && activePreferences.layout == .paged {
+            onCurlPan?(pan)
+            return
+        }
         guard pan.state == .ended else { return }
         let distance = pan.translation(in: pan.view).x
         let velocity = pan.velocity(in: pan.view).x
@@ -363,6 +372,100 @@ private final class WenkuEPUBReaderModel: NSObject, ObservableObject, EPUBNaviga
         let direction = abs(distance) > 35 ? distance : velocity
         let rtl = activePreferences.readingDirection == "rtl"
         onPageTurn?(rtl ? direction > 0 : direction < 0)
+    }
+}
+
+@MainActor
+private final class EPUBInteractiveCurlView: UIView {
+    var onFinish: ((Bool) -> Void)?
+    private var strips: [UIView] = []
+    private let movesRight: Bool
+    private var progress: CGFloat = 0
+    private var ready = false
+    private var canTurn = false
+    private var pendingCommit: Bool?
+    private var finishing = false
+
+    init(frame: CGRect, snapshot: UIView, movesRight: Bool) {
+        self.movesRight = movesRight
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        clipsToBounds = true
+        snapshot.frame = bounds
+        addSubview(snapshot)
+        layoutIfNeeded()
+        // Narrow leaves form a curved paper surface; every leaf tracks drag progress.
+        let count = 48
+        for index in 0..<count {
+            let width = bounds.width / CGFloat(count)
+            let rect = CGRect(x: CGFloat(index) * width, y: 0, width: width + 0.5, height: bounds.height)
+            guard let strip = snapshot.resizableSnapshotView(from: rect, afterScreenUpdates: false, withCapInsets: .zero) else { continue }
+            strip.frame = rect
+            strip.layer.isDoubleSided = true
+            strips.append(strip)
+            addSubview(strip)
+        }
+        if strips.count == count { snapshot.removeFromSuperview() }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func prepareDestination(_ snapshot: UIView?, canTurn: Bool) {
+        if let snapshot {
+            snapshot.frame = bounds
+            insertSubview(snapshot, at: 0)
+        }
+        self.canTurn = canTurn && snapshot != nil
+        ready = true
+        if let pendingCommit { finish(committed: pendingCommit && self.canTurn) }
+    }
+
+    func drag(distance: CGFloat) {
+        guard !finishing else { return }
+        progress = min(1, max(0, (movesRight ? distance : -distance) / bounds.width))
+        render(progress)
+    }
+
+    func release(velocity: CGFloat, cancelled: Bool) {
+        let speed = movesRight ? velocity : -velocity
+        let commit = !cancelled && (progress > 0.35 || (progress > 0.03 && speed > 450))
+        pendingCommit = commit
+        if ready { finish(committed: commit && canTurn) }
+    }
+
+    private func render(_ value: CGFloat) {
+        let width = bounds.width
+        let radius = max(18, width * 0.12)
+        let crease = width * (1 - value * 1.25)
+        for (index, strip) in strips.enumerated() {
+            let center = (CGFloat(index) + 0.5) * width / 48
+            let coordinate = movesRight ? width - center : center
+            let distance = max(0, coordinate - crease)
+            let angle = min(CGFloat.pi, distance / radius)
+            let folded = distance < .pi * radius
+                ? crease + radius * sin(angle)
+                : crease - (distance - .pi * radius)
+            let target = distance > 0 ? folded : coordinate
+            var transform = CATransform3DIdentity
+            transform.m34 = -1 / (width * 3)
+            transform = CATransform3DTranslate(transform, (movesRight ? -1 : 1) * (target - coordinate), 0, radius * (1 - cos(angle)))
+            transform = CATransform3DRotate(transform, (movesRight ? -1 : 1) * angle, 0, 1, 0)
+            strip.layer.transform = transform
+            strip.layer.zPosition = radius * (1 - cos(angle))
+            strip.alpha = value >= 1 ? 0 : 1
+        }
+    }
+
+    private func finish(committed: Bool) {
+        guard !finishing else { return }
+        finishing = true
+        UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
+            self.render(committed ? 1 : 0)
+        } completion: { _ in
+            let completion = self.onFinish
+            self.onFinish = nil
+            completion?(committed)
+        }
     }
 }
 
@@ -384,6 +487,30 @@ struct WenkuEPUBReaderView: View {
     @State private var isShowingSettings = false
     @State private var isShowingControls = true
     @State private var isTurningPage = false
+    @State private var curlGesture: EPUBInteractiveCurlView?
+    @State private var batteryLevel = UIDevice.current.batteryLevel
+    private var readerBackground: SwiftUI.Color {
+        ReadiumNavigator.Color(hex: preferences.value.backgroundHex)?.color ?? .white
+    }
+    private var readerInk: SwiftUI.Color {
+        let color = ReadiumNavigator.Color(hex: preferences.value.backgroundHex)?.uiColor ?? .white
+        var red: CGFloat = 1, green: CGFloat = 1, blue: CGFloat = 1, alpha: CGFloat = 1
+        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return red * 0.299 + green * 0.587 + blue * 0.114 < 0.5 ? .white : .black
+    }
+    private var progressLabel: String {
+        model.totalProgression.map { String(format: "%.1f%%", $0 * 100) } ?? "—"
+    }
+
+    private var chapterTitle: String {
+        if let href = model.currentHref,
+           let entry = model.tableOfContents.first(where: { $0.link.href == href }),
+           let title = entry.link.title, !title.isEmpty { return title }
+        if let title = model.currentLocationTitle, !title.isEmpty { return title }
+        if let entry = model.tableOfContents.first(where: { Self.isCurrent($0.link.href, locatorHref: model.currentHref) }),
+           let title = entry.link.title, !title.isEmpty { return title }
+        return "当前章节"
+    }
 
     var body: some View {
         Group {
@@ -400,30 +527,63 @@ struct WenkuEPUBReaderView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
+        .background(readerBackground.ignoresSafeArea())
+        .statusBarHidden(true)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if model.navigator != nil {
-                HStack(spacing: 14) {
+                VStack(spacing: 0) {
+                    HStack {
                     Button { Task { await turnPage(forward: false) } } label: {
                         Image(systemName: pageArrow(forward: false)).frame(width: 36, height: 34)
                     }
                     .accessibilityLabel("上一页")
-                    ProgressView(value: model.totalProgression ?? 0)
-                        .tint(NoveliaStyle.coral)
-                    Text(model.totalProgression.map { "全书 \(Int(($0 * 100).rounded()))%" } ?? "—")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(NoveliaStyle.muted)
-                        .monospacedDigit()
+                    .opacity(isShowingControls ? 1 : 0)
+                    .allowsHitTesting(isShowingControls)
+                    .accessibilityHidden(!isShowingControls)
+                    ZStack {
+                        HStack(spacing: 12) {
+                            ProgressView(value: model.totalProgression ?? 0)
+                                .tint(NoveliaStyle.coral)
+                            Text(progressLabel)
+                                .monospacedDigit()
+                        }
+                        .opacity(isShowingControls ? 1 : 0)
+                        .accessibilityHidden(!isShowingControls)
+                        Text(progressLabel)
+                            .monospacedDigit()
+                            .opacity(isShowingControls ? 0 : 1)
+                            .accessibilityHidden(isShowingControls)
+                    }
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .frame(maxWidth: .infinity)
+                    .accessibilityLabel("全书进度 \(progressLabel)")
                     Button { Task { await turnPage(forward: true) } } label: {
                         Image(systemName: pageArrow(forward: true)).frame(width: 36, height: 34)
                     }
                     .accessibilityLabel("下一页")
+                    .opacity(isShowingControls ? 1 : 0)
+                    .allowsHitTesting(isShowingControls)
+                    .accessibilityHidden(!isShowingControls)
                 }
+                    HStack {
+                        TimelineView(.periodic(from: .now, by: 30)) { context in
+                            Text(context.date, format: .dateTime.hour().minute())
+                                .monospacedDigit()
+                        }
+                        Spacer()
+                        HStack(spacing: 3) {
+                            Image(systemName: batteryLevel > 0.8 ? "battery.100percent" : batteryLevel > 0.3 ? "battery.50percent" : "battery.25percent")
+                            Text(batteryLevel >= 0 ? "\(Int(batteryLevel * 100))%" : "—")
+                                .monospacedDigit()
+                        }
+                    }
+                    .font(.system(size: 10))
+                    .frame(height: 14)
+                }
+                .foregroundStyle(readerInk.opacity(0.6))
                 .padding(.horizontal, 18)
-                .padding(.vertical, 6)
-                .background(.regularMaterial)
-                .opacity(isShowingControls ? 1 : 0)
-                .allowsHitTesting(isShowingControls)
-                .accessibilityHidden(!isShowingControls)
+                .frame(height: 52)
+                .background(readerBackground)
             }
         }
         .background(alignment: .topLeading) {
@@ -435,13 +595,16 @@ struct WenkuEPUBReaderView: View {
             .allowsHitTesting(false)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 Button("完成") { dismiss() }
-                Spacer(minLength: 0)
-                Text(model.publication?.metadata.title ?? book.title)
-                    .font(.headline)
+                    .frame(width: 52)
+                    .opacity(isShowingControls ? 1 : 0)
+                    .allowsHitTesting(isShowingControls)
+                    .accessibilityHidden(!isShowingControls)
+                Text(chapterTitle)
+                    .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
-                Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity)
                 Menu {
                     Button { isShowingTOC = true } label: { Label("目录", systemImage: "list.bullet") }
                         .disabled(model.navigator == nil || model.tableOfContents.isEmpty)
@@ -449,14 +612,16 @@ struct WenkuEPUBReaderView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle").font(.title3)
                 }
+                .frame(width: 52)
                 .accessibilityLabel("阅读菜单")
+                .opacity(isShowingControls ? 1 : 0)
+                .allowsHitTesting(isShowingControls)
+                .accessibilityHidden(!isShowingControls)
             }
-            .frame(height: 44)
+            .foregroundStyle(readerInk.opacity(0.6))
+            .frame(height: 36)
             .padding(.horizontal, 18)
-            .background(.regularMaterial)
-            .opacity(isShowingControls ? 1 : 0)
-            .allowsHitTesting(isShowingControls)
-            .accessibilityHidden(!isShowingControls)
+            .background(readerBackground)
         }
         .sheet(isPresented: $isShowingSettings) {
             EPUBReaderSettingsView(store: preferences)
@@ -500,14 +665,63 @@ struct WenkuEPUBReaderView: View {
                 initialLocatorJSON: book.lastLocatorJSON,
                 preferences: preferences.value,
                 onTap: { isShowingControls.toggle() },
-                onPageTurn: { forward in Task { await turnPage(forward: forward) } }
+                onPageTurn: { forward in Task { await turnPage(forward: forward) } },
+                onCurlPan: { pan in handleCurlPan(pan) }
             ) { locator in
                     guard let json = try? locator.jsonString() else { return }
                     localLibrary.updateReadingLocation(bookID: book.id, locatorJSON: json)
                 }
         }
+        .onAppear {
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            batteryLevel = UIDevice.current.batteryLevel
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in
+            batteryLevel = UIDevice.current.batteryLevel
+        }
         .onChange(of: preferences.value) { _, newValue in
             Task { await model.apply(newValue) }
+        }
+    }
+
+    @MainActor
+    private func handleCurlPan(_ pan: UIPanGestureRecognizer) {
+        guard let navigator = model.navigator else { return }
+        switch pan.state {
+        case .began:
+            guard !isTurningPage, let snapshot = navigator.view.snapshotView(afterScreenUpdates: false) else { return }
+            isTurningPage = true
+            let movesRight = pan.velocity(in: pan.view).x > 0
+            let forward = preferences.value.readingDirection == "rtl" ? movesRight : !movesRight
+            let originalLocation = navigator.currentLocation
+            let curl = EPUBInteractiveCurlView(frame: navigator.view.bounds, snapshot: snapshot, movesRight: movesRight)
+            curlGesture = curl
+            navigator.view.addSubview(curl)
+            curl.onFinish = { committed in
+                Task { @MainActor in
+                    if !committed, let originalLocation {
+                        _ = await navigator.go(to: originalLocation, options: NavigatorGoOptions(animated: false))
+                    }
+                    curl.removeFromSuperview()
+                    curlGesture = nil
+                    isTurningPage = false
+                }
+            }
+            Task { @MainActor in
+                let moved = await advancePage(forward: forward, navigator: navigator, animated: false)
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                curl.isHidden = true
+                let next = navigator.view.snapshotView(afterScreenUpdates: true)
+                curl.isHidden = false
+                curl.prepareDestination(next, canTurn: moved)
+            }
+        case .changed:
+            curlGesture?.drag(distance: pan.translation(in: pan.view).x)
+        case .ended:
+            curlGesture?.release(velocity: pan.velocity(in: pan.view).x, cancelled: false)
+        case .cancelled, .failed:
+            curlGesture?.release(velocity: 0, cancelled: true)
+        default: break
         }
     }
 
