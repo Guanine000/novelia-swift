@@ -1,7 +1,16 @@
 import SwiftUI
+import OSLog
 
 @main
 struct NoveliaApp: App {
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "cc.novelia.ios.port", category: "lifecycle")
+
+    init() {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+        logger.notice("Application launched, version \(version, privacy: .public) (\(build, privacy: .public))")
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()

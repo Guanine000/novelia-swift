@@ -519,6 +519,10 @@ struct WenkuEPUBReaderView: View {
             return
         }
         guard await advancePage(forward: forward, navigator: navigator, animated: false) else { return }
+        // Readium's navigation promise can resolve before WKWebView has painted the
+        // destination locator. Let that render settle before capturing the new leaf.
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        navigator.view.layoutIfNeeded()
         guard let newPage = navigator.view.snapshotView(afterScreenUpdates: true) else { return }
 
         let bounds = navigator.view.bounds
@@ -544,18 +548,8 @@ struct WenkuEPUBReaderView: View {
             oldPage.removeFromSuperview()
             newPage.removeFromSuperview()
         case .simulation:
-            let pivotX: CGFloat = turnSign < 0 ? 0 : bounds.width
-            oldPage.layer.anchorPoint = CGPoint(x: pivotX / max(bounds.width, 1), y: 0.5)
-            oldPage.center = CGPoint(x: bounds.minX + pivotX, y: bounds.midY)
-            oldPage.layer.isDoubleSided = false
-            var perspective = CATransform3DIdentity
-            perspective.m34 = -1 / 900
-            oldPage.layer.transform = perspective
-            await animate(duration: 0.48) {
-                oldPage.layer.transform = CATransform3DRotate(perspective, turnSign * .pi / 2, 0, 1, 0)
-                oldPage.alpha = 0
-            }
-            oldPage.removeFromSuperview()
+            let curl: UIView.AnimationOptions = turnSign < 0 ? .transitionCurlUp : .transitionCurlDown
+            await animateCurl(from: oldPage, to: newPage, in: navigator.view, options: curl)
         case .none:
             oldPage.removeFromSuperview()
         }
@@ -567,6 +561,32 @@ struct WenkuEPUBReaderView: View {
             UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseInOut]) {
                 changes()
             } completion: { _ in continuation.resume() }
+        }
+    }
+
+    @MainActor
+    private func animateCurl(
+        from oldPage: UIView,
+        to newPage: UIView,
+        in container: UIView,
+        options: UIView.AnimationOptions
+    ) async {
+        oldPage.frame = container.bounds
+        newPage.frame = container.bounds
+        oldPage.isUserInteractionEnabled = false
+        newPage.isUserInteractionEnabled = false
+        container.addSubview(oldPage)
+        await withCheckedContinuation { continuation in
+            UIView.transition(
+                from: oldPage,
+                to: newPage,
+                duration: 0.62,
+                options: [options, .showHideTransitionViews, .curveEaseInOut]
+            ) { _ in
+                oldPage.removeFromSuperview()
+                newPage.removeFromSuperview()
+                continuation.resume()
+            }
         }
     }
 

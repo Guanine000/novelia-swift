@@ -250,17 +250,35 @@ final class WenkuLocalLibraryStore: ObservableObject {
         let accessed = source.startAccessingSecurityScopedResource()
         defer { if accessed { source.stopAccessingSecurityScopedResource() } }
         guard source.pathExtension.lowercased() == "epub" else { throw WenkuLocalLibraryError.unsupportedFile }
-        // Coordinate reads from Files providers (including iCloud Drive) while their
-        // security-scoped URL is active, then work only with the app-owned copy.
+
+        // Copy through NSFileCoordinator while the security scope is active. Reading
+        // directly into Data can fail for Files/iCloud provider URLs and needlessly
+        // holds the whole book in memory.
+        let stagingURL = directory.appendingPathComponent("import-\(UUID().uuidString).epub")
         var coordinatedError: NSError?
-        var importedData: Data?
+        var copyError: Error?
         NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinatedError) { readableURL in
-            importedData = try? Data(contentsOf: readableURL, options: .mappedIfSafe)
+            do {
+                try fileManager.copyItem(at: readableURL, to: stagingURL)
+            } catch {
+                copyError = error
+            }
         }
-        if let coordinatedError { throw coordinatedError }
-        guard let data = importedData else { throw CocoaError(.fileReadNoPermission) }
+        if let coordinatedError {
+            try? fileManager.removeItem(at: stagingURL)
+            throw coordinatedError
+        }
+        if let copyError {
+            try? fileManager.removeItem(at: stagingURL)
+            throw copyError
+        }
         let title = source.deletingPathExtension().lastPathComponent
-        try await save(data: data, title: title, filename: source.lastPathComponent)
+        do {
+            try await registerDownloadedFile(at: stagingURL, title: title)
+        } catch {
+            try? fileManager.removeItem(at: stagingURL)
+            throw error
+        }
     }
 
     func remove(_ book: LocalWenkuEPUB) {

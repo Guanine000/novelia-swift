@@ -1,4 +1,6 @@
 import SwiftUI
+import OSLog
+import UIKit
 
 struct ShelfView: View {
     @EnvironmentObject private var auth: AccountAuthStore
@@ -1486,6 +1488,14 @@ struct SettingsView: View {
     @EnvironmentObject private var auth: AccountAuthStore
     @AppStorage("readerFontSize") private var fontSize = 20.0
     @AppStorage("readerMode") private var modeRaw = ReaderMode.bilingual.rawValue
+    @State private var isExportingLogs = false
+    @State private var isShowingLogShare = false
+    @State private var logFileURL: URL?
+    @State private var logExportError: String?
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
+    }
 
     private var selectedMode: ReaderMode {
         ReaderMode(rawValue: modeRaw) ?? .bilingual
@@ -1529,8 +1539,23 @@ struct SettingsView: View {
             }
             Section("关于此移植") {
                 LabeledContent("平台", value: "iOS 17+")
-                LabeledContent("版本", value: "独立 MVP")
+                LabeledContent("版本", value: appVersion)
                 Text("发现、在线阅读和网页收藏已连接 Novelia API，账号登录使用官方统一认证页。云端书架文件夹管理、下载队列与 ECH 传输尚未接入。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(NoveliaStyle.muted)
+            }
+            Section("诊断") {
+                Button {
+                    exportLogs()
+                } label: {
+                    if isExportingLogs {
+                        Label("正在准备日志…", systemImage: "hourglass")
+                    } else {
+                        Label("导出应用日志", systemImage: "square.and.arrow.up")
+                    }
+                }
+                .disabled(isExportingLogs)
+                Text("导出最近 7 天本应用可读取的日志，可保存到“文件”或分享给支持人员。")
                     .font(.system(size: 13))
                     .foregroundStyle(NoveliaStyle.muted)
             }
@@ -1539,5 +1564,74 @@ struct SettingsView: View {
         .background(NoveliaStyle.paper)
         .navigationTitle("我的")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $isShowingLogShare) {
+            if let logFileURL {
+                LogActivitySheet(activityItems: [logFileURL])
+            }
+        }
+        .alert("无法导出日志", isPresented: Binding(
+            get: { logExportError != nil },
+            set: { if !$0 { logExportError = nil } }
+        )) {
+            Button("好", role: .cancel) { logExportError = nil }
+        } message: {
+            Text(logExportError ?? "")
+        }
     }
+
+    private func exportLogs() {
+        guard !isExportingLogs else { return }
+        isExportingLogs = true
+        Task {
+            do {
+                let url = try await Task.detached(priority: .userInitiated) {
+                    try ApplicationLogExporter.makeFile()
+                }.value
+                logFileURL = url
+                isShowingLogShare = true
+            } catch {
+                logExportError = error.localizedDescription
+            }
+            isExportingLogs = false
+        }
+    }
+}
+
+private enum ApplicationLogExporter {
+    static func makeFile() throws -> URL {
+        let store = try OSLogStore(scope: .currentProcessIdentifier)
+        let startDate = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? .distantPast
+        let entries = try store.getEntries(at: store.position(date: startDate))
+        let formatter = ISO8601DateFormatter()
+        let messages = entries.compactMap { entry -> String? in
+            guard let entry = entry as? OSLogEntryLog else { return nil }
+            return "\(formatter.string(from: entry.date)) [\(entry.level)] [\(entry.subsystem):\(entry.category)] \(entry.composedMessage)"
+        }
+        let recentMessages = Array(messages.suffix(5_000))
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "未知"
+        var lines = [
+            "Novelia iOS 应用日志",
+            "版本：\(version) (\(build))",
+            "导出时间：\(formatter.string(from: Date()))",
+            "范围：最近 7 天，最多 5000 条当前进程日志",
+            ""
+        ]
+        lines.append(contentsOf: recentMessages.isEmpty ? ["系统日志存储中没有可导出的应用日志。"] : recentMessages)
+
+        let filename = "Novelia-logs-\(Int(Date().timeIntervalSince1970)).txt"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+}
+
+private struct LogActivitySheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
