@@ -1,6 +1,12 @@
-# Novelia iOS 移植（基础版本）
+# Novelia iOS 移植（v0.2.0）
 
-这是一个独立的 SwiftUI iOS 项目，移植对照对象是第三方原生 Android 客户端 [nobYoQ/novelia](https://github.com/nobYoQ/novelia)。该 Android 客户端基于 [AutoNovel 网页版及服务端](https://github.com/auto-novel/auto-novel) 提供的服务开发。本 README 的功能差距清单以 Android 客户端为准，AutoNovel 是其上游网站/API 服务来源。**本 iOS 项目与这两个上游仓库分离，不会修改它们。**当前版本用于验证 iOS 上的基础发现、阅读和账号认证流程，尚未达到 Android 客户端的功能完整度。
+这是一个独立的 SwiftUI iOS 项目，移植对照对象是第三方原生 Android 客户端 [nobYoQ/novelia](https://github.com/nobYoQ/novelia)。该 Android 客户端基于 [AutoNovel 网页版及服务端](https://github.com/auto-novel/auto-novel) 提供的服务开发。本 README 的功能差距清单以 Android 客户端为准，AutoNovel 是其上游网站/API 服务来源。**本 iOS 项目与这两个上游仓库分离，不会修改它们。**当前版本包含基础发现、在线阅读、账号认证、站内热度榜和阅读外观设置，但尚未达到 Android 客户端的功能完整度。
+
+## 当前版本
+
+- 最新版本：**v0.2.0**（2026-10-07）。
+- [查看 GitHub Release](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.2.0)，可下载 [未签名 IPA](https://github.com/Guanine000/novelia-ios-port/releases/download/v0.2.0/Novelia-unsigned.ipa)。
+- 本版本排行榜仅提供 Novelia 站内点击热度榜；阅读器外观可选浅色、深色或跟随系统。
 
 ## 当前已实现
 
@@ -36,7 +42,7 @@
 
 ### 阅读器
 
-- 滚动/分页切换、电子纸模式、深色与阅读主题、行距和单本作品的独立设置。
+- 滚动/分页切换、电子纸模式、行距和单本作品的独立设置。
 - 选择译文引擎、更多译文排列与简繁显示选项。
 - 精确到段落的阅读位置、章内/全书搜索、插图查看。
 - 摘录、笔记、书签管理页和系统语音朗读。
@@ -60,13 +66,13 @@
 2. 选择 `Novelia` scheme 和 iPhone 模拟器。
 3. 点击 Run，或按 **⌘R**。
 
-项目最低部署版本是 iOS 17。`Package.swift` 单独提供平台无关的 `NoveliaIOSCore` 模型和样例数据。当前工程已通过 arm64 iOS Simulator Debug 构建；最新认证改动仍需在模拟器或设备上完整验证。
+项目最低部署版本是 iOS 17。`Package.swift` 单独提供平台无关的 `NoveliaIOSCore` 模型和样例数据。v0.2.0 已通过 iOS Simulator Debug 构建和 GitHub Actions 设备版构建；阅读界面的浅色、深色及跟随系统选项已手动验证。
 
 ## 使用 GitHub Actions 构建 IPA
 
 推送到 `main` 后，GitHub Actions 会自动构建 iOS 设备版并发布名为 `Novelia-unsigned-ipa` 的工件；也可以在仓库的 **Actions** 页面手动运行 **Build iOS IPA**。完成后从对应运行记录的 **Artifacts** 下载 `Novelia-unsigned.ipa`。
 
-此工作流产出未签名 IPA。要安装到实体 iPhone 或发布到 App Store，还需要 Apple 开发者签名证书及匹配的 provisioning profile，并在工作流中配置签名。
+此工作流产出未签名 IPA。当前 v0.2.0 的 IPA 已附在 GitHub Release 中。未签名 IPA 不能直接用于常规真机安装或发布到 App Store；这仍需要 Apple 开发者签名证书及匹配的 provisioning profile，并在工作流中配置签名。
 
 ## 项目结构
 
