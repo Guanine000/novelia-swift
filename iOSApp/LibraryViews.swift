@@ -860,10 +860,10 @@ struct NovelDetailView: View {
                                 }
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(progress == nil
-                                         ? (webNovelDownloads.isDownloaded(displayNovel.id) ? "重新下载全书" : "选择译源并下载")
-                                         : "正在下载 \(progress!.completed) / \(progress!.total) 章")
+                                         ? (webNovelDownloads.isDownloaded(displayNovel.id) ? "重新下载全书 EPUB" : "选择译源并下载")
+                                         : "正在下载整本 EPUB…")
                                         .font(.system(size: 15, weight: .bold, design: .rounded))
-                                    Text("下载后可在“我的 → 我的下载”离线阅读")
+                                    Text("使用 Novelia 官网整本接口，下载后可从“我的下载”导出")
                                         .font(.system(size: 12, weight: .medium)).opacity(0.82)
                                 }
                                 Spacer()
@@ -1108,7 +1108,7 @@ private struct WebNovelDownloadSheet: View {
             Form {
                 Section("下载内容") {
                     Text(novel.title).font(.headline)
-                    Text("共 \(novel.chapters.count) 章，下载完成后可离线阅读。")
+                    Text("将通过 Novelia 官方整本下载接口生成 EPUB 文件。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("翻译源") {
@@ -1125,7 +1125,7 @@ private struct WebNovelDownloadSheet: View {
                 if let progress {
                     Section("下载进度") {
                         ProgressView(value: progress.fraction)
-                        Text("已下载 \(progress.completed) / \(progress.total) 章")
+                        Text(progress.completed == progress.total ? "整本 EPUB 已下载" : "正在从 Novelia 获取整本 EPUB…")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
@@ -1133,7 +1133,7 @@ private struct WebNovelDownloadSheet: View {
                     Section { Text("下载失败：\(error)").font(.footnote).foregroundStyle(.red) }
                 }
                 if didFinish {
-                    Section { Label("下载完成，可在“我的下载”中阅读", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
+                    Section { Label("下载完成，可在“我的下载”中导出 EPUB", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
                 }
                 Section {
                     Button {
@@ -1150,7 +1150,7 @@ private struct WebNovelDownloadSheet: View {
                             Spacer()
                         }
                     }
-                    .disabled(isDownloading || progress != nil || novel.chapters.isEmpty)
+                    .disabled(isDownloading || progress != nil)
                 }
             }
             .navigationTitle("下载全书")
@@ -1662,37 +1662,24 @@ struct MyDownloadsView: View {
                 ContentUnavailableView {
                     Label("暂无网络小说下载", systemImage: "arrow.down.book")
                 } description: {
-                    Text("打开网络小说详情，选择“下载全书”后即可在这里离线阅读。")
+                    Text("打开网络小说详情，选择“下载全书”后即可在这里导出官网生成的 EPUB。")
                 }
             } else {
                 List {
                     ForEach(webNovelDownloads.books) { book in
-                        NavigationLink {
-                            DownloadedWebNovelReader(book: book)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(book.novel.title)
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(NoveliaStyle.ink)
-                                    .lineLimit(2)
-                                Text(book.novel.author)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(NoveliaStyle.muted)
-                                    .lineLimit(1)
-                                if let source = book.translationSource {
-                                    Text("译源：\(source.title)")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(NoveliaStyle.muted)
-                                } else {
-                                    Text("原文")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(NoveliaStyle.muted)
+                        Group {
+                            if let fileURL = webNovelDownloads.fileURL(for: book) {
+                                ShareLink(item: fileURL) {
+                                    networkDownloadRow(book, isFile: true)
                                 }
-                                Text("\(book.novel.chapters.count) 章 · \(book.downloadedAt.formatted(date: .numeric, time: .omitted))")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(NoveliaStyle.muted)
+                                .buttonStyle(.plain)
+                            } else {
+                                NavigationLink {
+                                    DownloadedWebNovelReader(book: book)
+                                } label: {
+                                    networkDownloadRow(book, isFile: false)
+                                }
                             }
-                            .padding(.vertical, 5)
                         }
                         .listRowBackground(Color.white)
                         .swipeActions {
@@ -1707,6 +1694,37 @@ struct MyDownloadsView: View {
                 .scrollContentBackground(.hidden)
             }
         }
+    }
+
+    @ViewBuilder
+    private func networkDownloadRow(_ book: DownloadedWebNovel, isFile: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(book.novel.title)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(NoveliaStyle.ink)
+                .lineLimit(2)
+            Text(book.novel.author)
+                .font(.system(size: 12))
+                .foregroundStyle(NoveliaStyle.muted)
+                .lineLimit(1)
+            if let source = book.translationSource {
+                Text("译源：\(source.title)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(NoveliaStyle.muted)
+            } else {
+                Text("原文")
+                    .font(.system(size: 11))
+                    .foregroundStyle(NoveliaStyle.muted)
+            }
+            HStack {
+                Text("\(book.novel.chapters.count) 章 · \(book.downloadedAt.formatted(date: .numeric, time: .omitted))")
+                Spacer()
+                if isFile { Image(systemName: "square.and.arrow.up") }
+            }
+            .font(.system(size: 11))
+            .foregroundStyle(NoveliaStyle.muted)
+        }
+        .padding(.vertical, 5)
     }
 
     private var wenkuDownloadsList: some View {

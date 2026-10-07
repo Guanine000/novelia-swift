@@ -339,7 +339,9 @@ struct WebNovelDownloadProgress: Equatable {
 
 struct DownloadedWebNovel: Codable, Identifiable, Hashable {
     let novel: Novel
-    let chapterDataFilename: String
+    /// Kept for migration of chapter-by-chapter downloads created by older app versions.
+    let chapterDataFilename: String?
+    let fileFilename: String?
     let downloadedAt: Date
     let translationSource: NovelTranslationSource?
 
@@ -365,7 +367,11 @@ final class WebNovelDownloadStore: ObservableObject {
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         if let data = try? Data(contentsOf: indexURL),
            let saved = try? JSONDecoder().decode([DownloadedWebNovel].self, from: data) {
-            books = saved.filter { fileManager.fileExists(atPath: directory.appendingPathComponent($0.chapterDataFilename).path) }
+            books = saved.filter { book in
+                [book.chapterDataFilename, book.fileFilename]
+                    .compactMap { $0 }
+                    .contains { fileManager.fileExists(atPath: directory.appendingPathComponent($0).path) }
+            }
         }
     }
 
@@ -374,7 +380,10 @@ final class WebNovelDownloadStore: ObservableObject {
     }
 
     func chapters(for book: DownloadedWebNovel) async throws -> [String: NovelChapter] {
-        let url = directory.appendingPathComponent(book.chapterDataFilename)
+        guard let chapterDataFilename = book.chapterDataFilename else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        let url = directory.appendingPathComponent(chapterDataFilename)
         return try await Task.detached(priority: .userInitiated) {
             let data = try Data(contentsOf: url)
             let chapters = try JSONDecoder().decode([NovelChapter].self, from: data)
@@ -386,34 +395,28 @@ final class WebNovelDownloadStore: ObservableObject {
         guard novel.isRemote,
               let providerId = novel.providerId,
               let novelId = novel.novelId,
-              !novel.chapters.isEmpty,
               progress[novel.id] == nil else { return }
 
         errors[novel.id] = nil
-        progress[novel.id] = WebNovelDownloadProgress(completed: 0, total: novel.chapters.count)
-        var chapters: [NovelChapter] = []
-        chapters.reserveCapacity(novel.chapters.count)
+        progress[novel.id] = WebNovelDownloadProgress(completed: 0, total: 1)
 
         do {
-            for (index, listedChapter) in novel.chapters.enumerated() {
-                try Task.checkCancellation()
-                let chapter = try await api.chapter(
-                    providerId: providerId,
-                    novelId: novelId,
-                    chapterId: listedChapter.id
-                )
-                chapters.append(Self.selecting(translationSource, in: chapter))
-                progress[novel.id] = WebNovelDownloadProgress(completed: index + 1, total: novel.chapters.count)
-            }
-
-            let filename = "chapters-\(UUID().uuidString).json"
-            let dataURL = directory.appendingPathComponent(filename)
-            let data = try JSONEncoder().encode(chapters)
-            try data.write(to: dataURL, options: .atomic)
+            try Task.checkCancellation()
+            let filename = Self.websiteDownloadFilename(title: novel.title, translationSource: translationSource)
+            let dataURL = uniqueDestination(for: filename)
+            try await api.downloadWebNovelEPUB(
+                to: dataURL,
+                providerId: providerId,
+                novelId: novelId,
+                title: novel.title,
+                translationSource: translationSource
+            )
+            progress[novel.id] = WebNovelDownloadProgress(completed: 1, total: 1)
 
             let record = DownloadedWebNovel(
                 novel: novel,
-                chapterDataFilename: filename,
+                chapterDataFilename: nil,
+                fileFilename: dataURL.lastPathComponent,
                 downloadedAt: Date(),
                 translationSource: translationSource
             )
@@ -428,7 +431,7 @@ final class WebNovelDownloadStore: ObservableObject {
                 throw error
             }
             if let old = previousBooks.first(where: { $0.id == novel.id }) {
-                try? fileManager.removeItem(at: directory.appendingPathComponent(old.chapterDataFilename))
+                removeStoredFile(for: old)
             }
         } catch {
             errors[novel.id] = error.localizedDescription
@@ -437,9 +440,37 @@ final class WebNovelDownloadStore: ObservableObject {
     }
 
     func remove(_ book: DownloadedWebNovel) {
-        try? fileManager.removeItem(at: directory.appendingPathComponent(book.chapterDataFilename))
+        removeStoredFile(for: book)
         books.removeAll { $0.id == book.id }
         try? persistIndex()
+    }
+
+    func fileURL(for book: DownloadedWebNovel) -> URL? {
+        book.fileFilename.map { directory.appendingPathComponent($0) }
+    }
+
+    private func removeStoredFile(for book: DownloadedWebNovel) {
+        for filename in [book.chapterDataFilename, book.fileFilename].compactMap({ $0 }) {
+            try? fileManager.removeItem(at: directory.appendingPathComponent(filename))
+        }
+    }
+
+    private func uniqueDestination(for filename: String) -> URL {
+        let base = URL(fileURLWithPath: filename).deletingPathExtension().lastPathComponent
+        let ext = URL(fileURLWithPath: filename).pathExtension
+        var candidate = directory.appendingPathComponent(filename)
+        var suffix = 2
+        while fileManager.fileExists(atPath: candidate.path) {
+            candidate = directory.appendingPathComponent("\(base)-\(suffix).\(ext)")
+            suffix += 1
+        }
+        return candidate
+    }
+
+    private static func websiteDownloadFilename(title: String, translationSource: NovelTranslationSource?) -> String {
+        let safeTitle = title.replacingOccurrences(of: "[\\/|\\\\:*?\"<>]", with: "", options: .regularExpression)
+        guard let translationSource else { return "jp.\(safeTitle).epub" }
+        return "zh.Y\(translationSource.rawValue.prefix(1)).\(safeTitle).epub"
     }
 
     private func persistIndex() throws {
@@ -447,33 +478,4 @@ final class WebNovelDownloadStore: ObservableObject {
         try data.write(to: indexURL, options: .atomic)
     }
 
-    private static func selecting(_ source: NovelTranslationSource?, in chapter: NovelChapter) -> NovelChapter {
-        guard let source else {
-            return NovelChapter(
-                id: chapter.id,
-                title: chapter.title,
-                originalText: chapter.originalText,
-                translatedText: "",
-                bilingualParagraphs: [],
-                translationsBySource: [:]
-            )
-        }
-        let translation = chapter.translation(for: source) ?? []
-        let count = max(chapter.originalText.components(separatedBy: "\n\n").count, translation.count)
-        let originals = chapter.originalText.components(separatedBy: "\n\n")
-        let pairs = (0..<count).map { index in
-            NovelBilingualParagraph(
-                original: originals.indices.contains(index) ? originals[index] : "",
-                translation: translation.indices.contains(index) ? translation[index] : ""
-            )
-        }
-        return NovelChapter(
-            id: chapter.id,
-            title: chapter.title,
-            originalText: chapter.originalText,
-            translatedText: translation.joined(separator: "\n\n"),
-            bilingualParagraphs: pairs,
-            translationsBySource: [source: translation]
-        )
-    }
 }

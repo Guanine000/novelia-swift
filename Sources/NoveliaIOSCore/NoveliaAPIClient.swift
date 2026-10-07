@@ -88,6 +88,54 @@ public struct NoveliaAPIClient: Sendable {
         return response.asNovelChapter(id: chapterId)
     }
 
+    /// Downloads a complete web novel using the same generated-file endpoint as the Novelia website.
+    public func downloadWebNovelEPUB(
+        to destinationURL: URL,
+        providerId: String,
+        novelId: String,
+        title: String,
+        translationSource: NovelTranslationSource?
+    ) async throws {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            throw NoveliaAPIError.invalidURL
+        }
+        var basePath = components.percentEncodedPath
+        if !basePath.hasSuffix("/") { basePath += "/" }
+        let encodedPath = ["novel", providerId, novelId, "file"].map {
+            $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/?#%"))) ?? $0
+        }.joined(separator: "/")
+        components.percentEncodedPath = basePath + encodedPath
+
+        let mode = translationSource == nil ? "jp" : "zh"
+        let translatorCode = translationSource.map { String($0.rawValue.prefix(1)) } ?? ""
+        let safeTitle = title.replacingOccurrences(of: "[\\/|\\\\:*?\"<>]", with: "", options: .regularExpression)
+        let filenameParts = [mode, translatorCode.isEmpty ? nil : "Y\(translatorCode)", safeTitle, "epub"].compactMap { $0 }
+        var queryItems = [
+            URLQueryItem(name: "mode", value: mode),
+            URLQueryItem(name: "translationsMode", value: "priority"),
+            URLQueryItem(name: "type", value: "epub"),
+            URLQueryItem(name: "filename", value: filenameParts.joined(separator: "."))
+        ]
+        if let translationSource {
+            queryItems.append(URLQueryItem(name: "translations", value: translationSource.rawValue))
+        }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw NoveliaAPIError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.setValue("application/epub+zip, application/octet-stream", forHTTPHeaderField: "Accept")
+        if let token = tokenProvider(), !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.timeoutInterval = 180
+        let (temporaryURL, response) = try await session.download(for: request)
+        guard let http = response as? HTTPURLResponse else { throw NoveliaAPIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            throw NoveliaAPIError.httpStatus(http.statusCode, serverMessage(in: Self.responseData(from: temporaryURL)))
+        }
+        try FileManager.default.moveItem(at: temporaryURL, to: destinationURL)
+    }
+
     public func cloudFavoriteFolders() async throws -> [NoveliaCloudFolder] {
         let response: APICloudFolders = try await get(path: ["user", "favored"])
         return response.favoredWeb
