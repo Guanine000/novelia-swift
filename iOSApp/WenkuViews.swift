@@ -42,13 +42,16 @@ struct WenkuView: View {
                 }
             }
         }
-        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.epub], allowsMultipleSelection: true) { result in
-            Task { @MainActor in
-                do {
-                    for url in try result.get() { try await localLibrary.importEPUB(from: url) }
-                    importError = nil
-                } catch {
-                    importError = error.localizedDescription
+        .sheet(isPresented: $isImporting) {
+            EPUBImportPicker { urls in
+                isImporting = false
+                Task { @MainActor in
+                    var failures: [String] = []
+                    for url in urls {
+                        do { try await localLibrary.importEPUB(from: url) }
+                        catch { failures.append("\(url.lastPathComponent)：\(error.localizedDescription)") }
+                    }
+                    importError = failures.isEmpty ? nil : failures.joined(separator: "\n")
                 }
             }
         }
@@ -211,6 +214,37 @@ struct WenkuView: View {
             .padding(.bottom, 20)
         }
         .refreshable { await loadMore() }
+    }
+}
+
+private struct EPUBImportPicker: UIViewControllerRepresentable {
+    let onSelect: ([URL]) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeCoordinator() -> Coordinator { Coordinator(onSelect: onSelect, onCancel: { dismiss() }) }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        // Some Files providers label EPUBs as generic data. The store still checks
+        // the extension and ZIP signature, while asCopy materializes cloud files.
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.epub, .data], asCopy: true)
+        picker.allowsMultipleSelection = true
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onSelect: ([URL]) -> Void
+        let onCancel: () -> Void
+        init(onSelect: @escaping ([URL]) -> Void, onCancel: @escaping () -> Void) {
+            self.onSelect = onSelect
+            self.onCancel = onCancel
+        }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            onSelect(urls)
+        }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { onCancel() }
     }
 }
 

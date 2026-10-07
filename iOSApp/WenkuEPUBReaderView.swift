@@ -155,7 +155,7 @@ private final class EPUBReaderPreferencesStore: ObservableObject {
 }
 
 @MainActor
-private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegate {
+private final class WenkuEPUBReaderModel: NSObject, ObservableObject, EPUBNavigatorDelegate, UIGestureRecognizerDelegate {
     @Published private(set) var navigator: EPUBNavigatorViewController?
     @Published private(set) var publication: Publication?
     @Published private(set) var tableOfContents: [WenkuEPUBTOCEntry] = []
@@ -167,17 +167,21 @@ private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegat
     private var onTap: (() -> Void)?
     private var backgroundImageBase64: String?
     private var activePreferences = EPUBReaderPreferences()
+    private var onPageTurn: ((Bool) -> Void)?
+    private var pageTurnPan: UIPanGestureRecognizer?
 
     func open(
         _ url: URL,
         initialLocatorJSON: String?,
         preferences: EPUBReaderPreferences,
         onTap: @escaping () -> Void,
+        onPageTurn: @escaping (Bool) -> Void,
         onLocationChanged: @escaping (Locator) -> Void
     ) async {
         errorMessage = nil
         self.onLocationChanged = onLocationChanged
         self.onTap = onTap
+        self.onPageTurn = onPageTurn
         activePreferences = preferences
         backgroundImageBase64 = preferences.backgroundImageData?.base64EncodedString()
         do {
@@ -321,8 +325,20 @@ private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegat
 
     private func configureVerticalPaging(for preferences: EPUBReaderPreferences) {
         guard let navigator else { return }
-        let shouldSnapByViewport = preferences.verticalText && preferences.layout == .paged
+        let shouldSnapByViewport = preferences.layout == .paged
+        let handlesPageGesture = shouldSnapByViewport &&
+            (preferences.verticalText || preferences.animation != .slide)
+        if pageTurnPan == nil {
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(pagePanEnded(_:)))
+            pan.delegate = self
+            navigator.view.addGestureRecognizer(pan)
+            pageTurnPan = pan
+        }
+        pageTurnPan?.isEnabled = handlesPageGesture
         func update(_ view: UIView) {
+            if let scrollView = view as? UIScrollView {
+                scrollView.panGestureRecognizer.isEnabled = !handlesPageGesture
+            }
             if let webView = view as? WKWebView {
                 webView.scrollView.isPagingEnabled = shouldSnapByViewport
                 webView.scrollView.decelerationRate = shouldSnapByViewport ? .fast : .normal
@@ -331,6 +347,22 @@ private final class WenkuEPUBReaderModel: ObservableObject, EPUBNavigatorDelegat
             view.subviews.forEach(update)
         }
         update(navigator.view)
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+        let velocity = pan.velocity(in: pan.view)
+        return abs(velocity.x) > abs(velocity.y)
+    }
+
+    @objc private func pagePanEnded(_ pan: UIPanGestureRecognizer) {
+        guard pan.state == .ended else { return }
+        let distance = pan.translation(in: pan.view).x
+        let velocity = pan.velocity(in: pan.view).x
+        guard abs(distance) > 35 || abs(velocity) > 250 else { return }
+        let direction = abs(distance) > 35 ? distance : velocity
+        let rtl = activePreferences.readingDirection == "rtl"
+        onPageTurn?(rtl ? direction > 0 : direction < 0)
     }
 }
 
@@ -351,6 +383,7 @@ struct WenkuEPUBReaderView: View {
     @State private var isShowingTOC = false
     @State private var isShowingSettings = false
     @State private var isShowingControls = true
+    @State private var isTurningPage = false
 
     var body: some View {
         Group {
@@ -454,7 +487,8 @@ struct WenkuEPUBReaderView: View {
                 url,
                 initialLocatorJSON: book.lastLocatorJSON,
                 preferences: preferences.value,
-                onTap: { isShowingControls.toggle() }
+                onTap: { isShowingControls.toggle() },
+                onPageTurn: { forward in Task { await turnPage(forward: forward) } }
             ) { locator in
                     guard let json = try? locator.jsonString() else { return }
                     localLibrary.updateReadingLocation(bookID: book.id, locatorJSON: json)
@@ -467,12 +501,18 @@ struct WenkuEPUBReaderView: View {
 
     @MainActor
     private func turnPage(forward: Bool) async {
-        guard let navigator = model.navigator else { return }
+        guard !isTurningPage, let navigator = model.navigator else { return }
+        isTurningPage = true
+        defer { isTurningPage = false }
         switch preferences.value.animation {
         case .none:
             _ = await advancePage(forward: forward, navigator: navigator, animated: false)
         case .slide:
-            _ = await advancePage(forward: forward, navigator: navigator, animated: true)
+            if preferences.value.verticalText && preferences.value.layout == .paged {
+                await turnPageWithSnapshot(forward: forward, navigator: navigator)
+            } else {
+                _ = await advancePage(forward: forward, navigator: navigator, animated: true)
+            }
         case .simulation, .cover:
             await turnPageWithSnapshot(forward: forward, navigator: navigator)
         }
@@ -494,7 +534,8 @@ struct WenkuEPUBReaderView: View {
               const root = document.scrollingElement || document.documentElement;
               const max = Math.max(0, root.scrollWidth - window.innerWidth);
               const current = Math.min(max, Math.abs(window.scrollX));
-              const next = Math.max(0, Math.min(max, current + (window.innerWidth * \(progression))));
+              const page = Math.round(current / window.innerWidth);
+              const next = Math.max(0, Math.min(max, (page + \(progression)) * window.innerWidth));
               if (Math.abs(next - current) < 1) return false;
               const targetX = \(rtl ? "-next" : "next");
               window.scrollTo({ left: targetX, behavior: '\(behavior)' });
@@ -518,38 +559,52 @@ struct WenkuEPUBReaderView: View {
             _ = await advancePage(forward: forward, navigator: navigator, animated: false)
             return
         }
+        // Keep the current page visible until the destination has finished drawing.
+        // The animation owns a separate container and never changes Readium's views.
+        let overlay = UIView(frame: navigator.view.bounds)
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        oldPage.frame = overlay.bounds
+        overlay.addSubview(oldPage)
+        navigator.view.addSubview(overlay)
+        defer { overlay.removeFromSuperview() }
         guard await advancePage(forward: forward, navigator: navigator, animated: false) else { return }
         // Readium's navigation promise can resolve before WKWebView has painted the
         // destination locator. Let that render settle before capturing the new leaf.
         try? await Task.sleep(nanoseconds: 120_000_000)
         navigator.view.layoutIfNeeded()
-        guard let newPage = navigator.view.snapshotView(afterScreenUpdates: true) else { return }
+        overlay.isHidden = true
+        let destination = navigator.view.snapshotView(afterScreenUpdates: true)
+        overlay.isHidden = false
+        guard let newPage = destination else { return }
 
         let bounds = navigator.view.bounds
         oldPage.frame = bounds
         newPage.frame = bounds
         oldPage.isUserInteractionEnabled = false
         newPage.isUserInteractionEnabled = false
-        navigator.view.addSubview(oldPage)
 
         let isRTL = preferences.value.readingDirection == "rtl"
         let turnSign: CGFloat = (forward == !isRTL) ? -1 : 1
 
         switch preferences.value.animation {
         case .slide:
+            newPage.frame = bounds.offsetBy(dx: -turnSign * bounds.width, dy: 0)
+            overlay.insertSubview(newPage, belowSubview: oldPage)
             await animate(duration: 0.28) {
                 oldPage.transform = CGAffineTransform(translationX: turnSign * bounds.width, y: 0)
+                newPage.frame = bounds
             }
             oldPage.removeFromSuperview()
+            newPage.removeFromSuperview()
         case .cover:
             newPage.frame = bounds.offsetBy(dx: -turnSign * bounds.width, dy: 0)
-            navigator.view.addSubview(newPage)
+            overlay.addSubview(newPage)
             await animate(duration: 0.32) { newPage.frame = bounds }
             oldPage.removeFromSuperview()
             newPage.removeFromSuperview()
         case .simulation:
             let curl: UIView.AnimationOptions = turnSign < 0 ? .transitionCurlUp : .transitionCurlDown
-            await animateCurl(from: oldPage, to: newPage, in: navigator.view, options: curl)
+            await animateCurl(from: oldPage, to: newPage, in: overlay, options: curl)
         case .none:
             oldPage.removeFromSuperview()
         }
@@ -578,10 +633,13 @@ struct WenkuEPUBReaderView: View {
         container.addSubview(oldPage)
         await withCheckedContinuation { continuation in
             UIView.transition(
-                from: oldPage,
-                to: newPage,
+                with: container,
                 duration: 0.62,
-                options: [options, .showHideTransitionViews, .curveEaseInOut]
+                options: [options, .curveEaseInOut],
+                animations: {
+                    oldPage.removeFromSuperview()
+                    container.addSubview(newPage)
+                }
             ) { _ in
                 oldPage.removeFromSuperview()
                 newPage.removeFromSuperview()
@@ -710,7 +768,7 @@ private struct EPUBReaderSettingsView: View {
                         ForEach(EPUBReadingLayout.allCases) { mode in Text(mode.title).tag(mode) }
                     }
                     if store.value.verticalText && store.value.layout == .paged {
-                        Text("Readium 的竖排内容采用横向滚动布局；分页模式会按屏幕宽度吸附，每次翻一屏。")
+                        Text("竖排分页时，横向滑动每次翻一屏。")
                             .font(.footnote).foregroundStyle(.secondary)
                     } else if store.value.verticalText {
                         Text("章节内滚动会连续横向滚动；翻页按钮和音量键仍按一屏移动。")
@@ -723,7 +781,7 @@ private struct EPUBReaderSettingsView: View {
                     Picker("翻页动画", selection: binding(\.animation)) {
                         ForEach(EPUBTurnAnimation.allCases) { animation in Text(animation.title).tag(animation) }
                     }
-                    Text("底部上一页/下一页按钮和音量键支持所选动画；直接滑动翻页仍由 Readium 的页面手势处理。")
+                    Text("分页阅读时，滑动、上一页/下一页按钮和音量键使用所选动画。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
