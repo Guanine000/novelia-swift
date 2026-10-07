@@ -3,6 +3,7 @@ import Security
 
 public struct NoveliaAPIClient: Sendable {
     public static let defaultBaseURL = URL(string: "https://n.novelia.cc/api/")!
+    public static let forumBaseURL = URL(string: "https://forum.novelia.cc/")!
 
     private let baseURL: URL
     private let session: URLSession
@@ -118,12 +119,50 @@ public struct NoveliaAPIClient: Sendable {
         try await mutate(path: ["user", "favored-web", folderId, providerId, novelId], method: "DELETE")
     }
 
+    public func novelComments(providerId: String, novelId: String, page: Int = 1, pageSize: Int = 10) async throws -> NoveliaCommentPage {
+        let subjectKey = "web-\(providerId)-\(novelId)"
+        return try await get(
+            path: ["api", "v1", "external", "comment", "novel", subjectKey],
+            query: [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "page_size", value: String(pageSize))
+            ],
+            baseURL: Self.forumBaseURL
+        )
+    }
+
+    public func novelCommentReplies(providerId: String, novelId: String, rootID: Int, page: Int = 1, pageSize: Int = 20) async throws -> NoveliaCommentPage {
+        let subjectKey = "web-\(providerId)-\(novelId)"
+        return try await get(
+            path: ["api", "v1", "external", "comment", "novel", subjectKey, String(rootID), "reply"],
+            query: [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "page_size", value: String(pageSize))
+            ],
+            baseURL: Self.forumBaseURL
+        )
+    }
+
+    @discardableResult
+    public func postNovelComment(providerId: String, novelId: String, content: String, rootID: Int? = nil) async throws -> NoveliaComment {
+        let subjectKey = "web-\(providerId)-\(novelId)"
+        var body: [String: Any] = ["content": content]
+        if let rootID { body["rootId"] = rootID }
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        return try await get(
+            path: ["api", "v1", "external", "comment", "novel", subjectKey],
+            method: "POST",
+            body: bodyData,
+            baseURL: Self.forumBaseURL
+        )
+    }
+
     private func mutate(path: [String], method: String) async throws {
         _ = try await request(path: path, method: method)
     }
 
-    private func get<T: Decodable>(path: [String], query: [URLQueryItem] = []) async throws -> T {
-        let data = try await request(path: path, query: query)
+    private func get<T: Decodable>(path: [String], method: String = "GET", query: [URLQueryItem] = [], body: Data? = nil, baseURL: URL? = nil) async throws -> T {
+        let data = try await request(path: path, method: method, query: query, body: body, baseURL: baseURL)
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
@@ -131,8 +170,8 @@ public struct NoveliaAPIClient: Sendable {
         }
     }
 
-    private func request(path: [String], method: String = "GET", query: [URLQueryItem] = []) async throws -> Data {
-        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+    private func request(path: [String], method: String = "GET", query: [URLQueryItem] = [], body: Data? = nil, baseURL requestBaseURL: URL? = nil) async throws -> Data {
+        guard var components = URLComponents(url: requestBaseURL ?? baseURL, resolvingAgainstBaseURL: false) else {
             throw NoveliaAPIError.invalidURL
         }
         var basePath = components.percentEncodedPath
@@ -147,7 +186,10 @@ public struct NoveliaAPIClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if method != "GET" && method != "HEAD" {
+        if let body {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        } else if method != "GET" && method != "HEAD" {
             request.httpBody = Data()
         }
         if let token = tokenProvider(), !token.isEmpty {
@@ -196,6 +238,44 @@ public struct NoveliaRankPage: Sendable {
     public init(novels: [Novel], pageCount: Int) {
         self.novels = novels
         self.pageCount = pageCount
+    }
+}
+
+public struct NoveliaCommentPage: Codable, Hashable, Sendable {
+    public let total: Int
+    public let items: [NoveliaComment]
+
+    public init(total: Int, items: [NoveliaComment]) {
+        self.total = total
+        self.items = items
+    }
+}
+
+public struct NoveliaComment: Codable, Identifiable, Hashable, Sendable {
+    public let id: Int
+    public let subjectKey: String
+    public let rootId: Int?
+    public let content: String
+    public let authorId: Int
+    public let authorUsername: String
+    public let status: Int
+    public let createdAt: String
+    public let updatedAt: String
+    public let replyCount: Int
+    public let replies: NoveliaCommentPage?
+
+    public init(id: Int, subjectKey: String, rootId: Int?, content: String, authorId: Int, authorUsername: String, status: Int, createdAt: String, updatedAt: String, replyCount: Int, replies: NoveliaCommentPage? = nil) {
+        self.id = id
+        self.subjectKey = subjectKey
+        self.rootId = rootId
+        self.content = content
+        self.authorId = authorId
+        self.authorUsername = authorUsername
+        self.status = status
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.replyCount = replyCount
+        self.replies = replies
     }
 }
 
