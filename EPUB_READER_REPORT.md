@@ -179,3 +179,30 @@
 ### 交付物
 
 - 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,102,430 bytes · SHA-256 `e56472361f2eb8c9c41810164f0eb04efafbebd0b7cf67653d8f26ea84dd5f9b`
+
+---
+
+## 追加：第七轮修复（提交 `ac0c856`）—— 透明度已支持
+
+### 结论
+
+**透明度可以显示了。** 引擎不支持 `opacity` 属性，但支持 `color: rgba(...)` 的 alpha 通道（源码 `parseColor` 确认）。本书用 `<p style="opacity:0.4">` 标记日文原文段落（每章 50–124 处），宿主现在在装载章节时把 `opacity:X` 等价改写为 `color:rgba(0,0,0,X)`（内联 style、`<style>` 块与外部 CSS 都覆盖），改写数量在目录页披露。
+
+### 验证（真实书模拟器实测）
+
+跳转到第一章（spine 12，26 页）：日文原文段落呈浅灰（40% alpha）、中文译文正常黑色，与书籍设计一致；进程稳定。
+
+### 限制（记录）
+
+- 改写按"米色底黑字"主题换算（当前原型唯一主题）；未来支持换主题/深色模式时，需把 `config.textColor` 传入换算逻辑。
+- 引擎仍不支持 8 位 hex（`#RRGGBBAA`）与 `opacity` 属性本身，遇到时维持当前改写策略。
+
+### 调试通道
+
+- `-prototypeBookPath <文件>`：直接打开任意 EPUB；
+- `-prototypeJumpSpine <n>`：打开后自动跳到指定 spine（本次目检即用）。
+
+### 交付物
+
+- 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,107,098 bytes · SHA-256 `dd25cb6caf728a42a8ac3593ff093704857de3340b61f7d0f8ac712c1fc41df1`
+- 真机验收项不变：连续翻页手感/预览一致性、目录跳转、注脚弹窗（模拟器已验证的部分见上）。
