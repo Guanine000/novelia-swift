@@ -49,6 +49,7 @@ final class PrototypePageBook {
     }
 
     private var chapters: [Int: ChapterLayout] = [:]
+    private var completedChapters = Set<Int>()
     private var renderedImages: [PrototypePageID: CGImage] = [:]
     /// 每排出一页回调一次（主线程）；宿主借此刷新"下一页已就绪"的可用性。
     var onPagesChanged: (() -> Void)?
@@ -95,7 +96,12 @@ final class PrototypePageBook {
         }
         layout.footnotes = session.pipelineFootnotes
         chapters[spineIndex] = layout
+        completedChapters.insert(spineIndex)
         onPagesChanged?()
+    }
+
+    func isChapterComplete(_ spineIndex: Int) -> Bool {
+        completedChapters.contains(spineIndex)
     }
 
     func hasChapter(_ spineIndex: Int) -> Bool {

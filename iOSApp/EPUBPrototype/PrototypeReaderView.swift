@@ -17,6 +17,8 @@ struct PrototypeReaderView: View {
     @State private var isShowingTOC = false
     @State private var isShowingImporter = false
     @State private var showChrome = true
+    @State private var isScrubbing = false
+    @State private var scrubProgress = 0.0
     let bookURL: URL?
 
     var body: some View {
@@ -176,9 +178,22 @@ struct PrototypeReaderView: View {
                 .accessibilityLabel("下一页")
             }
             HStack(spacing: 10) {
-                ProgressView(value: model.overallProgress)
+                Slider(value: Binding(
+                    get: { isScrubbing ? scrubProgress : model.overallProgress },
+                    set: { scrubProgress = $0 }
+                ), in: 0...1, onEditingChanged: { editing in
+                    if editing {
+                        scrubProgress = model.overallProgress
+                        isScrubbing = true
+                    } else {
+                        isScrubbing = false
+                        model.seek(to: scrubProgress)
+                    }
+                })
                     .tint(Color(red: 0.91, green: 0.31, blue: 0.34))
-                Text("\(Int(model.overallProgress * 100))%")
+                    .disabled(model.status != .ready || model.isAnimating || model.isLayingOut)
+                    .accessibilityLabel("阅读进度")
+                Text("\(Int((isScrubbing ? scrubProgress : model.overallProgress) * 100))%")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .frame(minWidth: 36, alignment: .trailing)

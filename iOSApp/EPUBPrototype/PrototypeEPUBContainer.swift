@@ -214,7 +214,7 @@ final class PrototypeEPUBContainer {
         var stripped = Self.stripScripts(from: text, counter: &strippedScriptCount)
         stripped = Self.rewriteOpacity(in: stripped, counter: &opacityRewriteCount,
                                        rgb: themeTextColor.rgbComponents)
-        return stripped
+        return Self.rewriteEightDigitColors(in: stripped)
     }
 
     /// `opacity:X` → `color:rgba(r,g,b,X)`（颜色取当前主题正文色）。
@@ -287,8 +287,9 @@ final class PrototypeEPUBContainer {
                 .replacingOccurrences(of: "]]>", with: "")
             cleaned = Self.filterMediaQueries(in: cleaned, aspectRatio: aspectRatio,
                                               counter: &mediaQueryRewriteCount)
-            texts.append(Self.rewriteOpacity(in: cleaned, counter: &opacityRewriteCount,
-                                             rgb: themeTextColor.rgbComponents))
+            cleaned = Self.rewriteOpacity(in: cleaned, counter: &opacityRewriteCount,
+                                          rgb: themeTextColor.rgbComponents)
+            texts.append(Self.rewriteEightDigitColors(in: cleaned))
         }
         return texts
     }
@@ -319,6 +320,29 @@ final class PrototypeEPUBContainer {
                                      rgb: themeTextColor.rgbComponents)
         result = Self.stripTableDisplayRules(in: result, counter: &tableDisplayStripCount)
         result = Self.rewriteTextShadow(in: result, counter: &textShadowRewriteCount)
+        return Self.rewriteEightDigitColors(in: result)
+    }
+
+    /// CSS4 #RGBA / #RRGGBBAA 转为引擎可解析的 rgba()。只匹配完整的颜色词，
+    /// 避免把更长的十六进制串截断成颜色。
+    static func rewriteEightDigitColors(in text: String) -> String {
+        guard let regex = try? NSRegularExpression(
+            pattern: "#[0-9a-fA-F]{8}(?![0-9a-fA-F])|#[0-9a-fA-F]{4}(?![0-9a-fA-F])") else { return text }
+        let ns = text as NSString
+        var result = text
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
+            let hex = String(ns.substring(with: match.range).dropFirst())
+            let expanded = hex.count == 4
+                ? hex.map { "\($0)\($0)" }.joined()
+                : hex
+            guard let value = UInt32(expanded, radix: 16),
+                  let range = Range(match.range, in: result) else { continue }
+            let red = (value >> 24) & 0xff
+            let green = (value >> 16) & 0xff
+            let blue = (value >> 8) & 0xff
+            let alpha = Double(value & 0xff) / 255.0
+            result.replaceSubrange(range, with: "rgba(\(red),\(green),\(blue),\(alpha))")
+        }
         return result
     }
 
@@ -402,25 +426,56 @@ final class PrototypeEPUBContainer {
     }
 
     private static func evaluateMediaQuery(_ raw: String, aspectRatio: CGFloat) -> Bool {
-        let query = raw.lowercased()
-        if query.contains("amzn-mobi") {
-            return query.contains("not amzn-mobi")
+        // 逗号为 OR；单项里的 and 条件全部满足才保留。
+        for alternative in raw.lowercased().split(separator: ",") {
+            var query = String(alternative).trimmingCharacters(in: .whitespacesAndNewlines)
+            if query.hasPrefix("not amzn-mobi") {
+                query.removeFirst("not amzn-mobi".count)
+            }
+            if query.contains("amzn-mobi") { continue }
+            if query.hasPrefix("not ") { continue }
+            if query.hasPrefix("only ") { query.removeFirst(5) }
+            if query == "print" || query.hasPrefix("print and ") ||
+               query == "speech" || query.hasPrefix("speech and ") { continue }
+            if query == "screen" || query == "all" { return true }
+            if query.hasPrefix("screen and ") { query.removeFirst("screen and ".count) }
+            if query.hasPrefix("all and ") { query.removeFirst("all and ".count) }
+            if query.hasPrefix(" and ") { query.removeFirst(" and ".count) }
+            let conditions = query.components(separatedBy: " and ")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if conditions.allSatisfy({ evaluateMediaCondition($0, aspectRatio: aspectRatio) }) {
+                return true
+            }
         }
-        if query.contains("print") && !query.contains("screen") {
-            return false
-        }
-        if let range = query.range(of: "device-aspect-ratio\\s*:\\s*([0-9]+)\\s*/\\s*([0-9]+)",
-                                   options: .regularExpression),
-           let a = Double(query[range][query[range].range(of: ":\\s*([0-9]+)", options: .regularExpression)!.upperBound...]
-                          .components(separatedBy: "/").first?.trimmingCharacters(in: .whitespaces) ?? ""),
-           let b = Double(query[range].components(separatedBy: "/").last?.filter { $0.isNumber || $0 == "." } ?? ""),
-           b > 0 {
-            let target = a / b
-            if query.contains("min-device-aspect-ratio") { return aspectRatio >= target }
-            if query.contains("max-device-aspect-ratio") { return aspectRatio <= target }
-        }
-        // 未知媒体查询：保守丢弃（基础样式仍在，设备变体样式丢失，数量已记录）。
         return false
+    }
+
+    private static func evaluateMediaCondition(_ condition: String, aspectRatio: CGFloat) -> Bool {
+        guard condition.hasPrefix("("), condition.hasSuffix(")") else { return false }
+        let body = condition.dropFirst().dropLast().trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = body.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return false }
+        let feature = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        if feature == "orientation" {
+            return value == (aspectRatio >= 1 ? "landscape" : "portrait")
+        }
+        guard ["aspect-ratio", "device-aspect-ratio", "min-aspect-ratio", "max-aspect-ratio",
+               "min-device-aspect-ratio", "max-device-aspect-ratio"].contains(feature) else { return false }
+        let ratioParts = value.split(separator: "/").map(String.init)
+        let target: Double?
+        if ratioParts.count == 2, let numerator = Double(ratioParts[0].trimmingCharacters(in: .whitespaces)),
+           let denominator = Double(ratioParts[1].trimmingCharacters(in: .whitespaces)), denominator > 0 {
+            target = numerator / denominator
+        } else {
+            target = Double(value)
+        }
+        guard let target else { return false }
+        let actual = Double(aspectRatio)
+        if feature.hasPrefix("min-") { return actual >= target }
+        if feature.hasPrefix("max-") { return actual <= target }
+        return abs(actual - target) < 0.001
     }
 
     /// 章节引用的位图图片：以 HTML 中的原始 src 为键（引擎按字面 src 查表）。

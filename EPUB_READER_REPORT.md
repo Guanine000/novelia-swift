@@ -1,5 +1,7 @@
 # EPUB 排版原型 · 交付报告（整合版）
 
+> 2026-10-08 本轮后续改动：阅读页底栏进度条改为可拖动，松手后按章及章内页定位；样式预处理增加 CSS4 `#RGBA` / `#RRGGBBAA` 转 `rgba()`，并扩展 `@media` 的 screen/all、orientation、宽高比、and/逗号组合求值。Release iPhoneOS 构建成功，未签名 IPA 为 `build/Novelia-unsigned-progress-styles.ipa`（7,153,075 bytes；SHA-256 `f5abdea02c71650888caec980f9fdef9f0bef05db63cb1dbdd4f6cb39073e1a8`），ZIP 结构校验通过；真机交互尚未验收。此轮不属于下方已合并 `main` 的 20 轮交付。复杂 CSS 仍受 YueduCoreText 当前支持范围限制，`text-shadow` 仍是颜色近似。
+
 - 仓库：`Guanine000/novelia-ios-port`（私密）· 分支 `prototype/yuedu-coretext-pager` → 已合并 `main`（PR #1，merge commit `679236a`）
 - 报告时间：2026-10-08 · 覆盖迭代：20 轮（样例书搭建 → 4 本真实 EPUB 真机反馈修复）
 - **术语约定**：本报告严格区分"模拟器实测 / 真机已验收 / 已构建待真机验收"三档，不以"已构建"冒充"已验收"。逐轮细节见 git 历史中本文件的前版（`00eb23e` 及更早）。

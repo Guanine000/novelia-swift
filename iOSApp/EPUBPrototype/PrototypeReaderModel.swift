@@ -306,6 +306,36 @@ final class PrototypeReaderModel: ObservableObject {
         return min((Double(location.spineIndex) + chapterProgress) / Double(container.spine.count), 1)
     }
 
+    /// 拖动进度条后才定位，避免手指移动时反复排版和重建分页位图。
+    func seek(to progress: Double) {
+        guard !isAnimating, !isLayingOut, status == .ready,
+              let container, let book = pageBook, !container.spine.isEmpty else { return }
+        let fraction = min(max(progress, 0), 1)
+        let position = fraction * Double(container.spine.count)
+        let spineIndex = min(Int(position), container.spine.count - 1)
+        let pageFraction = fraction >= 1 ? 1 : position - Double(spineIndex)
+        isLayingOut = true
+        Task {
+            defer { isLayingOut = false }
+            if !book.isChapterComplete(spineIndex) {
+                do {
+                    try await book.layoutChapter(spineIndex, container: container,
+                                                 config: makeConfig(), aspectRatio: viewportAspectRatio)
+                } catch {
+                    status = .failed(describeLayoutError(error))
+                    return
+                }
+            }
+            guard pageBook === book else { return }
+            let count = max(pageCount(spineIndex: spineIndex), 1)
+            location = PrototypeReadingLocation(
+                spineIndex: spineIndex,
+                pageIndex: min(Int(pageFraction * Double(count)), count - 1)
+            )
+            prefetchNeighbors(of: spineIndex)
+        }
+    }
+
     /// 与当前阅读位置对应的目录条目序号：最后一个 spineIndex ≤ 当前章的条目。
     var currentTOCIndex: Int? {
         guard let toc = container?.toc, !toc.isEmpty else { return nil }
