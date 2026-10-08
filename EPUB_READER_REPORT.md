@@ -271,3 +271,11 @@
 
 - 按用户要求："我的下载"右上角菜单**第一项改为"从'文件'导入 EPUB…"**（菜单标签也改为"导入 EPUB"），**移除测试样例书入口**（样例书生成器仅保留给调试启动参数使用）；本地书列表仍在导入项下方列出。
 - 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,109,172 bytes · SHA-256 `7259eef3283046d0a4326a428290d308a75aad708aaa458eaf43c47632240eb1`
+
+---
+
+## 追加：第十二轮调整（提交 `f3fbc36`）
+
+1. **导入无二级菜单**："我的下载"右上角按钮点击直接打开文件选择器（本地书点列表行即打开，菜单整体移除）。
+2. **选择器改 copy 导入模式**（`asCopy: true`）：系统把所选文件复制进应用沙箱后回调，绕开 open 模式的 UTI 启用规则与 iCloud 占位文件不可点的问题；回调 URL 已在沙箱内，无需安全作用域。
+- 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,109,449 bytes · SHA-256 `787d33a8cd73d72caa9e19fdd2f5fc169d13cab269cdfc11dd48d62617adf92e`
