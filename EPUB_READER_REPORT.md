@@ -317,3 +317,10 @@
 - **跟随系统深浅色**：浅色=米色纸面+黑字，深色=近黑底+近白字；切换主题触发代次重排（翻页动画期间冻结）。
 - **透明度换算跟随主题**：opacity 改写从固定黑色改为当前主题正文色（深色下日文原文呈暗白而非不可见），真实书模拟器实测正确（截图已附）。
 - 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,128,170 bytes · SHA-256 `084b994dcbe84f22cd39b09ef9f47c752ac540b4640fdb6a57abb11d7f1e8fde`
+
+---
+
+## 追加：第十六轮（提交见上一条 `feat: dark mode for app pages`）—— 全 App 深色适配
+
+- `NoveliaStyle` 的 ink/muted/paper/card 改为动态色（跟随系统深浅色）：书架、发现、文库、我的、我的下载列表全部生效；两处 `Color.white` 列表行背景改用动态 card 色；彩色按钮上的白色前景文案保持不变。
+- 模拟器深色截图验证（书架页正常）。新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,139,048 bytes · SHA-256 `7daa2841e172d28b3e0402e1459134bc625ea8419f75bd00b0e4eed6f028c720`
