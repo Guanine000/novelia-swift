@@ -318,6 +318,40 @@ final class PrototypeEPUBContainer {
         result = Self.rewriteOpacity(in: result, counter: &opacityRewriteCount,
                                      rgb: themeTextColor.rgbComponents)
         result = Self.stripTableDisplayRules(in: result, counter: &tableDisplayStripCount)
+        result = Self.rewriteTextShadow(in: result, counter: &textShadowRewriteCount)
+        return result
+    }
+
+    /// 已把含颜色的 `text-shadow` 改写为文字颜色的数量。
+    /// 多看风格台词是"白字+彩色阴影描边"；引擎不支持文字阴影，白字裸奔不可读。
+    /// 改写后 profile 类（在 char-quote 之后声明，同优先级后者胜）以阴影色作文字色。
+    private(set) var textShadowRewriteCount = 0
+
+    /// `text-shadow: <颜色> ...` → `color: <颜色>;`（同规则内、原声明位置）。
+    /// 无颜色分量的 text-shadow 直接删除（引擎不支持，删了也不丢正文）。
+    static func rewriteTextShadow(in css: String, counter: inout Int) -> String {
+        guard let regex = try? NSRegularExpression(
+            pattern: "text-shadow\\s*:\\s*(#[0-9a-fA-F]{3,8}|rgba?\\([^)]*\\)|[a-zA-Z]+)[^;}]*;?") else {
+            return css
+        }
+        let ns = css as NSString
+        let matches = regex.matches(in: css, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return css }
+        counter += matches.count
+        var result = css
+        for match in matches.reversed() {
+            let colorToken = ns.substring(with: match.range(at: 1))
+            // 阴影色是"currentColor/black"之类时无法近似，直接删除该声明。
+            let replacement: String
+            if colorToken.lowercased() == "currentcolor" {
+                replacement = ""
+            } else {
+                replacement = "color:\(colorToken);"
+            }
+            if let range = Range(match.range, in: result) {
+                result.replaceSubrange(range, with: replacement)
+            }
+        }
         return result
     }
 

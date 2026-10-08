@@ -233,6 +233,13 @@ struct PrototypeReaderView: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
+                            if let count = model.container?.textShadowRewriteCount, count > 0 {
+                                Section {
+                                    Text("本书包含 \(count) 处文字阴影（text-shadow），当前排版引擎不支持阴影，已改用阴影颜色作为文字颜色以保证可读。")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                             let tocEntries = model.container?.toc ?? []
                             ForEach(Array(tocEntries.enumerated()), id: \.offset) { index, entry in
                                 let isCurrent = model.currentTOCIndex == index
