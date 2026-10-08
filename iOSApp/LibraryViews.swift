@@ -1661,19 +1661,9 @@ struct MyDownloadsView: View {
         .task { await wenkuDownloads.refreshMissingMetadata() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button {
-                        isShowingFileImporter = true
-                    } label: {
-                        Label("从“文件”导入 EPUB…", systemImage: "square.and.arrow.down")
-                    }
-                    ForEach(wenkuDownloads.books) { book in
-                        Button("阅读：\(book.title)") {
-                            prototypeTarget = PrototypeDownloadTarget(
-                                url: wenkuDownloads.fileURL(for: book), title: book.title
-                            )
-                        }
-                    }
+                // 点击直接打开文件选择器（本地书点列表行即可打开，无需二级菜单）。
+                Button {
+                    isShowingFileImporter = true
                 } label: {
                     Label("导入 EPUB", systemImage: "square.and.arrow.down")
                 }

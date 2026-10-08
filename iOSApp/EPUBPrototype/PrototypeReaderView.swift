@@ -250,7 +250,9 @@ struct PrototypeFilePicker: UIViewControllerRepresentable {
     var onPick: (URL) -> Void
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: false)
+        // copy 导入模式：系统把所选文件复制进应用沙箱后回调，
+        // 不受 open 模式的 UTI 启用规则与 iCloud 占位文件影响，条目总能点选。
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: true)
         picker.delegate = context.coordinator
         picker.allowsMultipleSelection = false
         return picker
