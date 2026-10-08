@@ -71,7 +71,9 @@ struct PrototypeReaderView: View {
         .sheet(item: $model.activeNote) { note in noteSheet(note) }
         .fileImporter(
             isPresented: $isShowingImporter,
-            allowedContentTypes: [UTType(filenameExtension: "epub") ?? .data],
+            // .data 保证任意文件可选（epub 动态 UTI 未注册一致性时文件会灰掉）；
+            // 合法性由容器解析校验，失败有明确报错。
+            allowedContentTypes: [.data],
             allowsMultipleSelection: false
         ) { result in
             if case .success(let urls) = result, let url = urls.first {

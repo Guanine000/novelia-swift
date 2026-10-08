@@ -78,7 +78,7 @@ struct RootView: View {
         .sheet(isPresented: $auth.isLoginPresented) {
             NoveliaLoginSheet(auth: auth)
         }
-        .sheet(isPresented: .constant(opensPrototypeDirectly)) {
+        .fullScreenCover(isPresented: .constant(opensPrototypeDirectly)) {
             NavigationStack {
                 PrototypeReaderHost(initialURL: nil)
             }
