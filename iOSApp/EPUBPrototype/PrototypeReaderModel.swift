@@ -163,12 +163,34 @@ final class PrototypeReaderModel: ObservableObject {
                 location.spineIndex = spineIndex
                 location.pageIndex = 0
                 prefetchNeighbors(of: spineIndex)
+                applyDebugJumpIfNeeded()
             }
         } catch {
             if book.generation == generation {
                 status = .failed(describeLayoutError(error))
             }
         }
+    }
+
+    private var didApplyDebugJump = false
+
+    /// 调试：`-prototypeJumpSpine <n>` 打开后自动跳到指定 spine（0 起），供自动化目检。
+    private func applyDebugJumpIfNeeded() {
+        guard !didApplyDebugJump, let container else { return }
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-prototypeJumpSpine"),
+              index + 1 < arguments.count, let target = Int(arguments[index + 1]),
+              container.spine.indices.contains(target) else { return }
+        didApplyDebugJump = true
+        location.spineIndex = target
+        location.pageIndex = 0
+        Task {
+            isLayingOut = true
+            defer { isLayingOut = false }
+            guard let book = pageBook, container != nil, !book.hasChapter(target) else { return }
+            try? await book.layoutChapter(target, container: container, config: makeConfig())
+        }
+        prefetchNeighbors(of: target)
     }
 
     /// 空闲时预排前后相邻章，让跨章拖动时目标页位图已经就位。

@@ -190,6 +190,13 @@ struct PrototypeReaderView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                        if let count = model.container?.opacityRewriteCount, count > 0 {
+                            Section {
+                                Text("本书包含 \(count) 处 opacity 透明度，已转换为等价文字颜色（当前排版引擎不支持 opacity 属性）。")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                         ForEach(model.container?.toc ?? []) { entry in
                             Button {
                                 isShowingTOC = false

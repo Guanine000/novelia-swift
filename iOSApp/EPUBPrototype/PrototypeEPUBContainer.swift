@@ -189,6 +189,9 @@ final class PrototypeEPUBContainer {
     /// 已从章节中剥离的 `<script>` 数量（脚本无法渲染，剥离是回退策略而非丢正文；
     /// 数量在目录页的诊断区可见）。
     private(set) var strippedScriptCount = 0
+    /// 已把 `opacity:X` 改写为等价文字 alpha 颜色的数量（引擎不支持 opacity 属性、
+    /// 但支持 color 的 rgba alpha；当前主题为米色底黑字，故等价映射为黑色 alpha）。
+    private(set) var opacityRewriteCount = 0
 
     func chapterHTML(at index: Int) async throws -> String {
         guard spine.indices.contains(index) else { throw PrototypeEPUBError.emptySpine }
@@ -198,7 +201,30 @@ final class PrototypeEPUBContainer {
         let text = String(data: data, encoding: .utf8)
             ?? String(data: data, encoding: .isoLatin1)
             ?? String(decoding: data, as: UTF8.self)
-        return Self.stripScripts(from: text, counter: &strippedScriptCount)
+        var stripped = Self.stripScripts(from: text, counter: &strippedScriptCount)
+        stripped = Self.rewriteOpacity(in: stripped, counter: &opacityRewriteCount)
+        return stripped
+    }
+
+    /// `opacity:X` → `color:rgba(0,0,0,X)`。
+    /// 引擎 parseColor 支持 rgba 第 4 分量，但不支持 opacity 属性与 8 位 hex。
+    /// 限制：宿主当前固定米色底黑字主题，故按黑色换算；未来支持换主题时
+    /// 需传入 config.textColor 参与换算（见报告）。
+    static func rewriteOpacity(in html: String, counter: inout Int) -> String {
+        guard let regex = try? NSRegularExpression(
+            pattern: "opacity\\s*:\\s*([0-9.]+)", options: [.caseInsensitive]) else { return html }
+        let ns = html as NSString
+        let matches = regex.matches(in: html, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return html }
+        counter += matches.count
+        var result = html
+        for match in matches.reversed() {
+            let alpha = ns.substring(with: match.range(at: 1))
+            if let range = Range(match.range, in: result) {
+                result.replaceSubrange(range, with: "color:rgba(0,0,0,\(alpha))")
+            }
+        }
+        return result
     }
 
     /// 剥离 `<script>`（含自闭合写法）。脚本不产生可见正文，剥离后引擎的
@@ -247,7 +273,7 @@ final class PrototypeEPUBContainer {
             let cleaned = block
                 .replacingOccurrences(of: "<![CDATA[", with: "")
                 .replacingOccurrences(of: "]]>", with: "")
-            texts.append(cleaned)
+            texts.append(Self.rewriteOpacity(in: cleaned, counter: &opacityRewriteCount))
         }
         return texts
     }
@@ -269,6 +295,7 @@ final class PrototypeEPUBContainer {
             let imported = await cssText(atPath: importedPath, depth: depth + 1) ?? ""
             css = (css as NSString).replacingCharacters(in: match.range, with: imported)
         }
+        css = Self.rewriteOpacity(in: css, counter: &opacityRewriteCount)
         return css
     }
 
