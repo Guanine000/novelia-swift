@@ -341,3 +341,27 @@
 - 文库页是独立文件 `WenkuViews.swift`，有 3 处硬编码白色卡片背景（搜索框、作品行、分卷行），同法替换为动态 `NoveliaStyle.card`；行文字色本就走动态 ink/muted。
 - 全项目硬编码白色卡片背景已清零（LibraryViews 13+1 处、WenkuViews 3 处）。
 - 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,141,011 bytes · SHA-256 `f2424163666bb1b345a91a1593afd0b4efbd3f302dee0bcb5b94c7aa6e2e73a3`
+
+---
+
+## 追加：第十九轮（提交 `fix: duokan-style illustration pages`）—— 插图页空白修复
+
+### 现象（真机反馈）
+
+《这里是，终末停滞委员会。5》只能翻到第六页，之后全空白。
+
+### 根因（真实文件模拟器复现定位）
+
+"只能翻到第六页"是**连续的插图页（illus3/illus4）整页空白**造成的错觉。多看（duokan）风格插图页用 `display: table` + `display: table-cell` + `vertical-align: middle` 做垂直居中，该组合在当前排版引擎中会让**图片在布局阶段被整体丢弃**（`galleryImagePlace`/`pageImages` 日志中该图片完全缺席），页面显示空白且排版不报错。消元实验证明：先尝试的 `height:100%` 剥离无效，剥离 `display:table/table-cell` + `vertical-align:middle` 后图片立即进入显示列表。
+
+### 修复
+
+宿主 CSS 预处理剥离这三类声明（仅影响垂直居中装饰，图片改为按内容高度正常布局），剥离数量在目录页披露。同时保留了 `config.onDiagnostic` 引擎诊断日志（便于后续真实书籍排查）。
+
+### 验证（模拟器 + 真实文件实测）
+
+spine 7（人物群像插画）✓、spine 9（紫发少女插画）✓ 完整渲染。
+
+### 交付物
+
+- 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,143,886 bytes · SHA-256 `d0231a851d07d2566adb9f27ccdf08a17a6fa92c9c7a0967c0a5096f5330c208`
