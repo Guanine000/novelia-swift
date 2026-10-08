@@ -182,16 +182,25 @@ struct PrototypeReaderView: View {
                         Text(diagnostic)
                     }
                 } else {
-                    List(model.container?.toc ?? []) { entry in
-                        Button {
-                            isShowingTOC = false
-                            model.jump(to: entry)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(entry.title).foregroundStyle(.primary)
-                                if let spineIndex = entry.spineIndex {
-                                    Text("spine \(spineIndex + 1)")
-                                        .font(.caption2).foregroundStyle(.secondary)
+                    List {
+                        if let count = model.container?.strippedScriptCount, count > 0 {
+                            Section {
+                                Text("本书包含 \(count) 处脚本内容，已忽略（脚本不参与显示）。")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        ForEach(model.container?.toc ?? []) { entry in
+                            Button {
+                                isShowingTOC = false
+                                model.jump(to: entry)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(entry.title).foregroundStyle(.primary)
+                                    if let spineIndex = entry.spineIndex {
+                                        Text("spine \(spineIndex + 1)")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }

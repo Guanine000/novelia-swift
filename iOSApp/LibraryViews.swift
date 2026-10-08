@@ -1,6 +1,7 @@
 import SwiftUI
 import OSLog
 import UIKit
+import UniformTypeIdentifiers
 
 struct ShelfView: View {
     @EnvironmentObject private var auth: AccountAuthStore
@@ -1628,6 +1629,9 @@ struct MyDownloadsView: View {
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
     @State private var selectedTab: MyDownloadsTab
     @State private var prototypeTarget: PrototypeDownloadTarget?
+    @State private var isShowingFileImporter = false
+    @State private var isImporting = false
+    @State private var importError: String?
 
     init(initialTab: MyDownloadsTab = .network) {
         _selectedTab = State(initialValue: initialTab)
@@ -1661,6 +1665,11 @@ struct MyDownloadsView: View {
                     Button("打开排版原型（样例书）") {
                         prototypeTarget = PrototypeDownloadTarget(url: nil, title: "样例书")
                     }
+                    Button {
+                        isShowingFileImporter = true
+                    } label: {
+                        Label("从“文件”导入 EPUB…", systemImage: "square.and.arrow.down")
+                    }
                     ForEach(wenkuDownloads.books) { book in
                         Button("原型阅读：\(book.title)") {
                             prototypeTarget = PrototypeDownloadTarget(
@@ -1676,6 +1685,56 @@ struct MyDownloadsView: View {
         }
         .navigationDestination(item: $prototypeTarget) { target in
             PrototypeReaderHost(initialURL: target.url)
+        }
+        .fileImporter(
+            isPresented: $isShowingFileImporter,
+            allowedContentTypes: [UTType(filenameExtension: "epub") ?? .data],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                Task { await importAndOpen(url) }
+            }
+        }
+        .alert("导入", isPresented: .init(
+            get: { importError != nil },
+            set: { if !$0 { importError = nil } }
+        )) {
+            Button("好", role: .cancel) { importError = nil }
+        } message: {
+            Text(importError ?? "")
+        }
+        .overlay {
+            if isImporting { ProgressView("正在导入…").padding(20).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12)) }
+        }
+    }
+
+    /// 从 Files 导入：security-scoped + NSFileCoordinator 复制进文库本地书库并登记，
+    /// 然后直接进入排版原型阅读。
+    private func importAndOpen(_ pickedURL: URL) async {
+        isImporting = true
+        defer { isImporting = false }
+        let needsScope = pickedURL.startAccessingSecurityScopedResource()
+        defer { if needsScope { pickedURL.stopAccessingSecurityScopedResource() } }
+        do {
+            let destination = wenkuDownloads.downloadDestination(for: pickedURL.lastPathComponent)
+            var coordinatedError: NSError?
+            var copyError: Error?
+            NSFileCoordinator().coordinate(readingItemAt: pickedURL, options: .forUploading,
+                                           error: &coordinatedError) { sourceURL in
+                do {
+                    if FileManager.default.fileExists(atPath: destination.path) {
+                        try FileManager.default.removeItem(at: destination)
+                    }
+                    try FileManager.default.copyItem(at: sourceURL, to: destination)
+                } catch { copyError = error }
+            }
+            if let coordinatedError { throw coordinatedError }
+            if let copyError { throw copyError }
+            let title = pickedURL.deletingPathExtension().lastPathComponent
+            try await wenkuDownloads.registerDownloadedFile(at: destination, title: title)
+            prototypeTarget = PrototypeDownloadTarget(url: destination, title: title)
+        } catch {
+            importError = "导入失败：\(error.localizedDescription)"
         }
     }
 

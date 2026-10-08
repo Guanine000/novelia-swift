@@ -184,14 +184,46 @@ final class PrototypeEPUBContainer {
         return list
     }
 
+    /// 已从章节中剥离的 `<script>` 数量（脚本无法渲染，剥离是回退策略而非丢正文；
+    /// 数量在目录页的诊断区可见）。
+    private(set) var strippedScriptCount = 0
+
     func chapterHTML(at index: Int) async throws -> String {
         guard spine.indices.contains(index) else { throw PrototypeEPUBError.emptySpine }
         guard let data = await entryData(atPath: spine[index].href) else {
             throw PrototypeEPUBError.missingOPF
         }
-        return String(data: data, encoding: .utf8)
+        let text = String(data: data, encoding: .utf8)
             ?? String(data: data, encoding: .isoLatin1)
             ?? String(decoding: data, as: UTF8.self)
+        return Self.stripScripts(from: text, counter: &strippedScriptCount)
+    }
+
+    /// 剥离 `<script>`（含自闭合写法）。脚本不产生可见正文，剥离后引擎的
+    /// scripted-interactive 检查可通过；数量被记录，不静默。
+    static func stripScripts(from html: String, counter: inout Int) -> String {
+        var result = html
+        let blockRegex = try? NSRegularExpression(pattern: "<script\\b[^>]*>[\\s\\S]*?</script\\s*>", options: [.caseInsensitive])
+        let selfClosingRegex = try? NSRegularExpression(pattern: "<script\\b[^>]*/>", options: [.caseInsensitive])
+        if let blockRegex {
+            let ns = result as NSString
+            let matches = blockRegex.matches(in: result, range: NSRange(location: 0, length: ns.length))
+            if !matches.isEmpty {
+                counter += matches.count
+                result = blockRegex.stringByReplacingMatches(
+                    in: result, range: NSRange(location: 0, length: ns.length), withTemplate: "")
+            }
+        }
+        if let selfClosingRegex {
+            let ns = result as NSString
+            let matches = selfClosingRegex.matches(in: result, range: NSRange(location: 0, length: ns.length))
+            if !matches.isEmpty {
+                counter += matches.count
+                result = selfClosingRegex.stringByReplacingMatches(
+                    in: result, range: NSRange(location: 0, length: ns.length), withTemplate: "")
+            }
+        }
+        return result
     }
 
     /// 章节需要的外部 CSS 文本：按 <link rel=stylesheet> 顺序 + 内联 <style>，@import 递归展开（深度 3）。
@@ -358,9 +390,11 @@ final class PrototypeEPUBContainer {
         guard let data = await entryData(atPath: path) else {
             throw PrototypeEPUBError.missingOPF
         }
-        return String(data: data, encoding: .utf8)
+        let text = String(data: data, encoding: .utf8)
             ?? String(data: data, encoding: .isoLatin1)
             ?? String(decoding: data, as: UTF8.self)
+        var discarded = 0
+        return Self.stripScripts(from: text, counter: &discarded)
     }
 
     // MARK: nav 目录解析（正则提取 <a href>，原型限制见文件头）
