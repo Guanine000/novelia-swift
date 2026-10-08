@@ -74,3 +74,35 @@
 3. 改字号后阅读位置按章首页首近似恢复，未做精确位置映射。
 4. 容器解析仍为正则提取（原型限制见 DEPENDENCIES.md）；排版为整章一次完成，超大章节的内存/耗时未压测。
 5. 仿真翻页动画按约定未开始，待翻页一致性真机验收通过后再做。
+
+---
+
+## 追加：第三轮修复（真机反馈后，提交 `312a58a`）
+
+### 现象（用户真机截图）
+
+真实 EPUB《どうせ、この夏は終わる》（spine 1/27，容器解析成功）打开即报：
+"无法排版：未能完成操作。（YueduCoreText.HTMLLayoutError 错误 1。）"
+
+### 根因
+
+1. **错误信息不可读**：`relayout` 的 catch 直接显示 `localizedDescription`，而 `HTMLLayoutError` 未实现 `LocalizedError`，只剩枚举序号。"错误 1" 按枚举声明顺序即 `.resourceFailure(String)`（缺失图片/CSS 资源），但具体缺哪个文件被吞掉了。
+2. **资源装载的三类盲区**（对照引擎源码 `HTMLResourceReferences.imageSources` 确认引擎只要求 `<img src>` 与 SVG 包裹图片、且把非空 src 一律视为待装载资源）：
+   - `data:` URI 图片被我的 `isRelative` 过滤直接跳过 → 引擎查不到 → resourceFailure；
+   - 包内绝对路径（`src="/OEBPS/images/x.png"`）同样被过滤；
+   - 日文 EPUB 常见的百分号编码路径（HTML 里 `%E3%81%82.png`，ZIP 内是解码后的名字）查表失败。
+
+### 修复
+
+- 错误映射：`unsupported` 列出不支持特性清单、`resourceFailure` 点名缺失文件、`layoutFailure` 显示细节（`PrototypeReaderModel.swift` 顶层 `describeLayoutError`）。
+- 资源查找：精确路径 → 百分号解码（最多两层）→ 大小写不敏感扫描全部 ZIP 条目（带缓存）；支持包内绝对路径与 `data:` base64 图片（按引擎字面 src 键入）。
+
+### 验证状态
+
+- 模拟器：样例书冒烟通过（进程存活、排版正常）。
+- **真实 EPUB：未验证** —— 需要用新 IPA 在真机重开该书。若仍报错，新错误信息会明确写出缺失的资源文件名或不支持特性清单，截图发我即可继续定位。
+
+### 交付物更新
+
+- 新未签名 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,079,450 bytes · SHA-256 `64b2dff272248bed69f1505725a015cf107073f9091a960aa70bf809432f1de3`
+- 提交 `312a58a` 已推送至 `Guanine000/novelia-ios-port`（未动 main）。
