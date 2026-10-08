@@ -59,8 +59,9 @@ final class PrototypePageBook {
     func layoutChapter(_ spineIndex: Int, container: PrototypeEPUBContainer,
                        config: BrowserLayoutConfig) async throws {
         let html = try await container.chapterHTML(at: spineIndex)
-        let css = await container.cssTexts(forChapterHTML: html)
-        let images = await container.images(forChapterHTML: html)
+        let chapterHref = container.spine[spineIndex].href
+        let css = await container.cssTexts(forChapterHTML: html, chapterHref: chapterHref)
+        let images = await container.images(forChapterHTML: html, chapterHref: chapterHref)
 
         let document = HTMLLayoutDocument(
             html: html,

@@ -195,12 +195,17 @@ final class PrototypeEPUBContainer {
     }
 
     /// 章节需要的外部 CSS 文本：按 <link rel=stylesheet> 顺序 + 内联 <style>，@import 递归展开（深度 3）。
-    func cssTexts(forChapterHTML html: String) async -> [String] {
+    /// 相对 href 一律相对**章节文件所在目录**解析（章节常在 OPF 子目录里，如 OEBPS/Text/）。
+    func cssTexts(forChapterHTML html: String, chapterHref: String) async -> [String] {
+        let chapterDirectory = Self.directory(of: chapterHref)
         var texts: [String] = []
         for attributes in XMLValueParser.openTagAttributes("link", in: html) {
             let rel = (attributes["rel"] ?? "").lowercased()
             guard rel.contains("stylesheet"), let href = attributes["href"] else { continue }
-            if let css = await cssText(atHref: href, depth: 0) {
+            let path = Self.isAbsoluteInPackage(href)
+                ? Self.normalizePath(String(href.dropFirst()))
+                : Self.normalizePath(chapterDirectory + href)
+            if let css = await cssText(atPath: path, depth: 0) {
                 texts.append(css)
             }
         }
@@ -213,9 +218,8 @@ final class PrototypeEPUBContainer {
         return texts
     }
 
-    private func cssText(atHref href: String, depth: Int) async -> String? {
+    private func cssText(atPath path: String, depth: Int) async -> String? {
         guard depth < 3 else { return nil }
-        let path = Self.normalizePath(opfDirectory + href)
         guard let data = await entryData(atPath: path),
               var css = String(data: data, encoding: .utf8) else { return nil }
         guard let regex = try? NSRegularExpression(pattern: "@import\\s+(?:url\\(\\s*)?[\"']?([^\"')\\s;]+)") else {
@@ -225,19 +229,19 @@ final class PrototypeEPUBContainer {
         let matches = regex.matches(in: css, range: NSRange(location: 0, length: ns.length)).reversed()
         for match in matches {
             let importedHref = ns.substring(with: match.range(at: 1))
-            let base = Self.isRelative(importedHref)
-                ? Self.directory(of: href) + importedHref
-                : importedHref
-            let imported = await cssText(atHref: base, depth: depth + 1) ?? ""
+            let importedPath = Self.isAbsoluteInPackage(importedHref)
+                ? Self.normalizePath(String(importedHref.dropFirst()))
+                : Self.normalizePath(Self.directory(of: path) + importedHref)
+            let imported = await cssText(atPath: importedPath, depth: depth + 1) ?? ""
             css = (css as NSString).replacingCharacters(in: match.range, with: imported)
         }
         return css
     }
 
     /// 章节引用的位图图片：以 HTML 中的原始 src 为键（引擎按字面 src 查表）。
-    /// 覆盖：相对路径、包内绝对路径（/OEBPS/...）、百分号编码路径、data: URI。
-    /// 远程 http(s) 图片无法本地装载，缺失时由引擎报 resourceFailure 并在错误信息中点名。
-    func images(forChapterHTML html: String) async -> [String: UIImage] {
+    /// 相对 src 一律相对**章节文件所在目录**解析；另支持包内绝对路径、百分号编码、data: URI。
+    func images(forChapterHTML html: String, chapterHref: String) async -> [String: UIImage] {
+        let chapterDirectory = Self.directory(of: chapterHref)
         var images: [String: UIImage] = [:]
         guard let tagRegex = try? NSRegularExpression(
                   pattern: "<(?:img|image)\\b[^>]*>", options: [.caseInsensitive]),
@@ -262,10 +266,10 @@ final class PrototypeEPUBContainer {
                 }
 
                 guard Self.isRelative(src) || Self.isAbsoluteInPackage(src) else { continue }
-                // 相对路径拼章节目录；包内绝对路径去掉开头 / 后从包根解析。
+                // 相对路径拼章节文件目录；包内绝对路径去掉开头 / 后从包根解析。
                 let joined = Self.isAbsoluteInPackage(src)
                     ? String(src.dropFirst())
-                    : Self.normalizePath(opfDirectory + src)
+                    : Self.normalizePath(chapterDirectory + src)
                 if let data = await entryData(atPath: joined), let image = UIImage(data: data) {
                     images[src] = image
                 }
