@@ -22,6 +22,8 @@ struct PrototypeReaderView: View {
     @State private var isScrubbing = false
     @State private var scrubProgress = 0.0
     @State private var draftStyle = PrototypeReaderStyle()
+    @State private var batteryLevel: Float = -1
+    @State private var wasBatteryMonitoringEnabled = false
     let bookURL: URL?
 
     var body: some View {
@@ -56,7 +58,12 @@ struct PrototypeReaderView: View {
                         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
                 }
             }
-            .overlay(alignment: .top) { topBar }
+            .overlay(alignment: .top) {
+                VStack(spacing: 0) {
+                    if showChrome { topBar }
+                    chapterHeader
+                }
+            }
             .overlay(alignment: .bottom) { bottomBar }
             .overlay(alignment: .bottom) {
                 // 常驻细进度条：工具栏隐藏时仍可见当前阅读进度。
@@ -74,6 +81,9 @@ struct PrototypeReaderView: View {
                 model.setDarkMode(newScheme == .dark)
             }
             .onAppear {
+                wasBatteryMonitoringEnabled = UIDevice.current.isBatteryMonitoringEnabled
+                UIDevice.current.isBatteryMonitoringEnabled = true
+                updateBatteryLevel()
                 model.setDarkMode(colorScheme == .dark)
                 if model.viewportSize != geometry.size {
                     model.viewportSize = geometry.size
@@ -81,6 +91,14 @@ struct PrototypeReaderView: View {
                 if model.status == .idle, let bookURL {
                     Task { await model.open(url: bookURL) }
                 }
+            }
+            .onDisappear {
+                if !wasBatteryMonitoringEnabled {
+                    UIDevice.current.isBatteryMonitoringEnabled = false
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in
+                updateBatteryLevel()
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -161,54 +179,98 @@ struct PrototypeReaderView: View {
         .disabled(!showChrome)
     }
 
+    private var chapterHeader: some View {
+        Text(currentChapterTitle)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 18)
+            .padding(.top, 6)
+            .padding(.bottom, 4)
+            .background(model.pageBackgroundColor.opacity(0.92))
+            .allowsHitTesting(false)
+    }
+
+    private var currentChapterTitle: String {
+        guard let container = model.container else { return "" }
+        if let index = model.currentTOCIndex {
+            return container.toc[index].title
+        }
+        return container.bookTitle
+    }
+
     // MARK: 底部状态栏（页码 + 进度条）
 
     private var bottomBar: some View {
         VStack(spacing: 8) {
-            HStack {
-                Button {
-                    model.commitTurn(forward: false)
-                } label: { Image(systemName: "chevron.left") }
-                .disabled(!model.canTurn(forward: false))
-                .accessibilityLabel("上一页")
-                Spacer()
-                Text(model.locationDescription)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    model.commitTurn(forward: true)
-                } label: { Image(systemName: "chevron.right") }
-                .disabled(!model.canTurn(forward: true))
-                .accessibilityLabel("下一页")
+            if showChrome {
+                HStack {
+                    Button {
+                        model.commitTurn(forward: false)
+                    } label: { Image(systemName: "chevron.left") }
+                    .disabled(!model.canTurn(forward: false))
+                    .accessibilityLabel("上一页")
+                    Spacer()
+                    Text(model.locationDescription)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        model.commitTurn(forward: true)
+                    } label: { Image(systemName: "chevron.right") }
+                    .disabled(!model.canTurn(forward: true))
+                    .accessibilityLabel("下一页")
+                }
             }
-            HStack(spacing: 10) {
-                Slider(value: Binding(
-                    get: { isScrubbing ? scrubProgress : model.overallProgress },
-                    set: { scrubProgress = $0 }
-                ), in: 0...1, onEditingChanged: { editing in
-                    if editing {
-                        scrubProgress = model.overallProgress
-                        isScrubbing = true
-                    } else {
-                        isScrubbing = false
-                        model.seek(to: scrubProgress)
-                    }
-                })
+            HStack {
+                Text(batteryLevel >= 0 ? "电量 \(Int((batteryLevel * 100).rounded()))%" : "电量 —")
+                Spacer()
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Text(context.date, format: .dateTime.hour().minute())
+                }
+            }
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .allowsHitTesting(false)
+            if showChrome {
+                HStack(spacing: 10) {
+                    Slider(value: Binding(
+                        get: { isScrubbing ? scrubProgress : model.overallProgress },
+                        set: { scrubProgress = $0 }
+                    ), in: 0...1, onEditingChanged: { editing in
+                        if editing {
+                            scrubProgress = model.overallProgress
+                            isScrubbing = true
+                        } else {
+                            isScrubbing = false
+                            model.seek(to: scrubProgress)
+                        }
+                    })
                     .tint(Color(red: 0.91, green: 0.31, blue: 0.34))
                     .disabled(model.status != .ready || model.isAnimating || model.isLayingOut)
                     .accessibilityLabel("阅读进度")
-                Text("\(Int((isScrubbing ? scrubProgress : model.overallProgress) * 100))%")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 36, alignment: .trailing)
+                    Text("\(Int((isScrubbing ? scrubProgress : model.overallProgress) * 100))%")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 36, alignment: .trailing)
+                }
             }
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 10)
-        .background(.thinMaterial)
-        .opacity(showChrome ? 1 : 0)
-        .disabled(!showChrome)
+        .padding(.top, showChrome ? 10 : 4)
+        .padding(.bottom, 10)
+        .background {
+            if showChrome {
+                Rectangle().fill(.thinMaterial)
+            } else {
+                model.pageBackgroundColor.opacity(0.92)
+            }
+        }
+    }
+
+    private func updateBatteryLevel() {
+        batteryLevel = UIDevice.current.batteryLevel
     }
 
     // MARK: 目录
