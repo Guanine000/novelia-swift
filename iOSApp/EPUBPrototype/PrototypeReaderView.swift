@@ -13,6 +13,7 @@ import UniformTypeIdentifiers
 struct PrototypeReaderView: View {
     @StateObject private var model = PrototypeReaderModel()
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
     @State private var isShowingTOC = false
     @State private var isShowingImporter = false
     @State private var showChrome = true
@@ -21,7 +22,7 @@ struct PrototypeReaderView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                Color(red: 0.97, green: 0.95, blue: 0.91).ignoresSafeArea()
+                model.pageBackgroundColor.ignoresSafeArea()
                 switch model.status {
                 case .idle, .opening:
                     ProgressView("正在解析 EPUB…")
@@ -64,7 +65,11 @@ struct PrototypeReaderView: View {
             .onChange(of: geometry.size) { _, newSize in
                 model.viewportSize = newSize
             }
+            .onChange(of: colorScheme) { _, newScheme in
+                model.setDarkMode(newScheme == .dark)
+            }
             .onAppear {
+                model.setDarkMode(colorScheme == .dark)
                 if model.viewportSize != geometry.size {
                     model.viewportSize = geometry.size
                 }

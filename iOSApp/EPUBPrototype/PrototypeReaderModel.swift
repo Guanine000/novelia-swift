@@ -130,7 +130,34 @@ final class PrototypeReaderModel: ObservableObject {
         }
     }
 
-    // MARK: 排版配置
+    // MARK: 主题与排版配置
+
+    /// 跟随系统深浅色（由视图在 colorScheme 变化时同步）。变化触发代次重排。
+    @Published private(set) var isDarkMode = false
+
+    /// 页面底色（浅色=米色纸面，深色=近黑）。
+    var pageBackground: UIColor {
+        isDarkMode
+            ? UIColor(red: 0.10, green: 0.10, blue: 0.11, alpha: 1)
+            : UIColor(red: 0.97, green: 0.95, blue: 0.91, alpha: 1)
+    }
+
+    /// 正文颜色（浅色=黑，深色=近白）。
+    var pageTextColor: UIColor {
+        isDarkMode ? UIColor(white: 0.92, alpha: 1) : .black
+    }
+
+    /// 页面底色（SwiftUI 视图背景用）。
+    var pageBackgroundColor: Color {
+        Color(pageBackground)
+    }
+
+    func setDarkMode(_ dark: Bool) {
+        guard dark != isDarkMode, !isAnimating else { return }
+        isDarkMode = dark
+        container?.themeTextColor = pageTextColor
+        Task { await relayout(keepingCurrentSpine: true) }
+    }
 
     private func makeConfig() -> BrowserLayoutConfig {
         let contentWidth = max(1, viewportSize.width - contentInsets.left - contentInsets.right)
@@ -140,7 +167,8 @@ final class PrototypeReaderModel: ObservableObject {
         config.renderHeight = contentHeight
         config.rootFontSize = fontSize
         config.contentInsets = contentInsets
-        config.backgroundColor = UIColor(red: 0.97, green: 0.95, blue: 0.91, alpha: 1)
+        config.textColor = pageTextColor
+        config.backgroundColor = pageBackground
         config.defaultTextAlignment = .natural
         return config
     }
@@ -148,6 +176,7 @@ final class PrototypeReaderModel: ObservableObject {
     /// 重排当前章（以及前后相邻章的预取）。generation 递增使旧页面全部失效。
     private func relayout(keepingCurrentSpine: Bool) async {
         guard let container else { return }
+        container.themeTextColor = pageTextColor
         relayoutTask?.cancel()
         generation += 1
         let book = PrototypePageBook(generation: generation)
@@ -229,7 +258,7 @@ final class PrototypeReaderModel: ObservableObject {
     /// 空闲渲染相邻页位图，避免拖动开始/落页提交瞬间同步解码大图造成卡顿。
     private func schedulePrerender(around spineIndex: Int, pageIndex: Int) {
         guard let pageBook, let container else { return }
-        let background = UIColor(red: 0.97, green: 0.95, blue: 0.91, alpha: 1)
+        let background = pageBackground
         var ids: [PrototypePageID] = [
             pageID(spineIndex, pageIndex - 1),
             pageID(spineIndex, pageIndex + 1),
@@ -292,7 +321,7 @@ final class PrototypeReaderModel: ObservableObject {
         guard let pageBook else { return .init(previous: nil, current: nil, next: nil) }
         let size = viewportSize
         guard size.width > 0 else { return .init(previous: nil, current: nil, next: nil) }
-        let background = UIColor(red: 0.97, green: 0.95, blue: 0.91, alpha: 1)
+        let background = pageBackground
 
         var result = PrototypePagerView.PageImages(
             previous: cachedImage(location.spineIndex, location.pageIndex - 1, background: background),

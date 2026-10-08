@@ -186,6 +186,9 @@ final class PrototypeEPUBContainer {
         return list
     }
 
+    /// 主题正文色：opacity 改写按其 RGB 换算（浅色黑、深色近白，由模型在换主题时同步）。
+    var themeTextColor: UIColor = .black
+
     /// 已从章节中剥离的 `<script>` 数量（脚本无法渲染，剥离是回退策略而非丢正文；
     /// 数量在目录页的诊断区可见）。
     private(set) var strippedScriptCount = 0
@@ -205,15 +208,15 @@ final class PrototypeEPUBContainer {
             ?? String(data: data, encoding: .isoLatin1)
             ?? String(decoding: data, as: UTF8.self)
         var stripped = Self.stripScripts(from: text, counter: &strippedScriptCount)
-        stripped = Self.rewriteOpacity(in: stripped, counter: &opacityRewriteCount)
+        stripped = Self.rewriteOpacity(in: stripped, counter: &opacityRewriteCount,
+                                       rgb: themeTextColor.rgbComponents)
         return stripped
     }
 
-    /// `opacity:X` → `color:rgba(0,0,0,X)`。
+    /// `opacity:X` → `color:rgba(r,g,b,X)`（颜色取当前主题正文色）。
     /// 引擎 parseColor 支持 rgba 第 4 分量，但不支持 opacity 属性与 8 位 hex。
-    /// 限制：宿主当前固定米色底黑字主题，故按黑色换算；未来支持换主题时
-    /// 需传入 config.textColor 参与换算（见报告）。
-    static func rewriteOpacity(in html: String, counter: inout Int) -> String {
+    static func rewriteOpacity(in html: String, counter: inout Int,
+                               rgb: (Int, Int, Int)) -> String {
         guard let regex = try? NSRegularExpression(
             pattern: "opacity\\s*:\\s*([0-9.]+)", options: [.caseInsensitive]) else { return html }
         let ns = html as NSString
@@ -224,7 +227,7 @@ final class PrototypeEPUBContainer {
         for match in matches.reversed() {
             let alpha = ns.substring(with: match.range(at: 1))
             if let range = Range(match.range, in: result) {
-                result.replaceSubrange(range, with: "color:rgba(0,0,0,\(alpha))")
+                result.replaceSubrange(range, with: "color:rgba(\(rgb.0),\(rgb.1),\(rgb.2),\(alpha))")
             }
         }
         return result
@@ -280,7 +283,8 @@ final class PrototypeEPUBContainer {
                 .replacingOccurrences(of: "]]>", with: "")
             cleaned = Self.filterMediaQueries(in: cleaned, aspectRatio: aspectRatio,
                                               counter: &mediaQueryRewriteCount)
-            texts.append(Self.rewriteOpacity(in: cleaned, counter: &opacityRewriteCount))
+            texts.append(Self.rewriteOpacity(in: cleaned, counter: &opacityRewriteCount,
+                                             rgb: themeTextColor.rgbComponents))
         }
         return texts
     }
@@ -307,7 +311,8 @@ final class PrototypeEPUBContainer {
 
     private func finish(css: String, aspectRatio: CGFloat, mediaCounter: inout Int) -> String {
         var result = Self.filterMediaQueries(in: css, aspectRatio: aspectRatio, counter: &mediaCounter)
-        result = Self.rewriteOpacity(in: result, counter: &opacityRewriteCount)
+        result = Self.rewriteOpacity(in: result, counter: &opacityRewriteCount,
+                                     rgb: themeTextColor.rgbComponents)
         return result
     }
 
@@ -695,5 +700,21 @@ enum NCXParser {
                 currentHref = nil
             }
         }
+    }
+}
+
+// MARK: - UIColor 工具
+
+extension UIColor {
+    /// RGB 整数分量（0-255），用于宿主级 CSS 颜色改写。
+    var rgbComponents: (Int, Int, Int) {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return (0, 0, 0)
+        }
+        return (Int(round(red * 255)), Int(round(green * 255)), Int(round(blue * 255)))
     }
 }
