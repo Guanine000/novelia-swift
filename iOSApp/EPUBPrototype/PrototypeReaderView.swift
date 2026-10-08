@@ -246,6 +246,14 @@ struct PrototypeReaderHost: View {
     let initialURL: URL?
     @State private var resolvedURL: URL?
 
+    /// 调试：`-prototypeBookPath <路径>` 直接打开指定 EPUB（自动化/真机排查用）。
+    private var debugBookURL: URL? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-prototypeBookPath"),
+              index + 1 < arguments.count else { return nil }
+        return URL(fileURLWithPath: arguments[index + 1])
+    }
+
     var body: some View {
         Group {
             if let resolvedURL {
@@ -256,7 +264,9 @@ struct PrototypeReaderHost: View {
         }
         .task {
             if resolvedURL == nil {
-                if let initialURL {
+                if let debugBookURL {
+                    resolvedURL = debugBookURL
+                } else if let initialURL {
                     resolvedURL = initialURL
                 } else {
                     resolvedURL = try? await PrototypeSampleBook.sampleURL()

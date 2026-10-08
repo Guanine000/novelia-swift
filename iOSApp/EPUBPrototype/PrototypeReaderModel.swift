@@ -146,6 +146,9 @@ final class PrototypeReaderModel: ObservableObject {
         relayoutTask?.cancel()
         generation += 1
         let book = PrototypePageBook(generation: generation)
+        book.onPagesChanged = { [weak self] in
+            self?.objectWillChange.send()
+        }
         pageBook = book
         let spineIndex = keepingCurrentSpine ? location.spineIndex : 0
         location.pageIndex = 0
@@ -188,6 +191,39 @@ final class PrototypeReaderModel: ObservableObject {
         PrototypePageID(generation: generation, spineIndex: spineIndex, pageIndex: pageIndex)
     }
 
+    /// 已缓存页面位图的读取（不触发渲染，供预览槽位使用）。
+    private func cachedImage(_ spineIndex: Int, _ pageIndex: Int, background: UIColor) -> CGImage? {
+        pageBook?.cachedRenderedImage(for: pageID(spineIndex, pageIndex))
+    }
+
+    /// 空闲渲染相邻页位图，避免拖动开始/落页提交瞬间同步解码大图造成卡顿。
+    private func schedulePrerender(around spineIndex: Int, pageIndex: Int) {
+        guard let pageBook, let container else { return }
+        let background = UIColor(red: 0.97, green: 0.95, blue: 0.91, alpha: 1)
+        var ids: [PrototypePageID] = [
+            pageID(spineIndex, pageIndex - 1),
+            pageID(spineIndex, pageIndex + 1),
+        ]
+        if pageIndex == 0, spineIndex > 0, pageCount(spineIndex: spineIndex - 1) > 0 {
+            ids.append(pageID(spineIndex - 1, pageCount(spineIndex: spineIndex - 1) - 1))
+        }
+        if pageIndex + 1 >= pageCount(spineIndex: spineIndex),
+           spineIndex + 1 < container.spine.count {
+            ids.append(pageID(spineIndex + 1, 0))
+        }
+        for id in ids where !(pageBook.isRendered(id)) && !scheduledRenders.contains(id) {
+            scheduledRenders.insert(id)
+            Task { [weak self] in
+                guard let self else { return }
+                _ = self.pageBook?.renderedImage(for: id, scale: self.displayScale, background: background)
+                self.scheduledRenders.remove(id)
+                self.objectWillChange.send()
+            }
+        }
+    }
+
+    private var scheduledRenders = Set<PrototypePageID>()
+
     func pageCount(spineIndex: Int) -> Int {
         pageBook?.pageCount(spineIndex: spineIndex) ?? 0
     }
@@ -199,30 +235,32 @@ final class PrototypeReaderModel: ObservableObject {
     }
 
     /// 三页位图（同一份缓存结果，预览与落页共用）。
+    /// 当前页同步渲染（保证首屏立即可见）；相邻页只用缓存并异步预渲染，
+    /// 渲染完成后再刷新——拖动开始瞬间不再有解码大图造成的卡顿。
     func pagerImages() -> PrototypePagerView.PageImages {
         guard let pageBook else { return .init(previous: nil, current: nil, next: nil) }
         let size = viewportSize
         guard size.width > 0 else { return .init(previous: nil, current: nil, next: nil) }
-        func image(_ spineIndex: Int, _ pageIndex: Int) -> CGImage? {
-            pageBook.renderedImage(for: pageID(spineIndex, pageIndex),
-                                   scale: displayScale,
-                                   background: UIColor(red: 0.97, green: 0.95, blue: 0.91, alpha: 1))
-        }
+        let background = UIColor(red: 0.97, green: 0.95, blue: 0.91, alpha: 1)
+
         var result = PrototypePagerView.PageImages(
-            previous: image(location.spineIndex, location.pageIndex - 1),
-            current: image(location.spineIndex, location.pageIndex),
-            next: image(location.spineIndex, location.pageIndex + 1)
+            previous: cachedImage(location.spineIndex, location.pageIndex - 1, background: background),
+            current: pageBook.renderedImage(for: pageID(location.spineIndex, location.pageIndex),
+                                            scale: displayScale, background: background),
+            next: cachedImage(location.spineIndex, location.pageIndex + 1, background: background)
         )
         result.size = size
         // 跨章边界：上一章末页 / 下一章首页。
         if result.previous == nil, location.spineIndex > 0,
            pageCount(spineIndex: location.spineIndex - 1) > 0 {
-            result.previous = image(location.spineIndex - 1, pageCount(spineIndex: location.spineIndex - 1) - 1)
+            result.previous = cachedImage(location.spineIndex - 1,
+                                          pageCount(spineIndex: location.spineIndex - 1) - 1,
+                                          background: background)
         }
-        if result.next == nil, container != nil,
-           location.spineIndex + 1 < (container?.spine.count ?? 0) {
-            result.next = image(location.spineIndex + 1, 0)
+        if result.next == nil, let container, location.spineIndex + 1 < container.spine.count {
+            result.next = cachedImage(location.spineIndex + 1, 0, background: background)
         }
+        schedulePrerender(around: location.spineIndex, pageIndex: location.pageIndex)
         return result
     }
 

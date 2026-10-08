@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import ReadiumZIPFoundation
 import UIKit
 
@@ -41,6 +42,7 @@ enum PrototypeEPUBError: LocalizedError {
 }
 
 final class PrototypeEPUBContainer {
+    static let tocLog = Logger(subsystem: "cc.novelia.ios.port", category: "epubcontainer")
     let fileURL: URL
     let bookTitle: String
     let author: String?
@@ -330,12 +332,14 @@ final class PrototypeEPUBContainer {
 
     private func buildTOC() async {
         // 1) EPUB3 nav：manifest 中 properties 含 "nav" 的条目。
+        //    注意：nav 里的 href 相对 nav 文档所在目录解析（通常在 OPF 子目录）。
         let navItems = manifestByID.values.filter { $0.properties.contains("nav") }
         for navItem in navItems {
             guard let html = try? await chapterHTML(path: navItem.href) else { continue }
             let entries = Self.parseNavTOC(html: html)
             if !entries.isEmpty {
-                let mapped = mapToSpine(entries)
+                let mapped = mapToSpine(entries, baseDirectory: Self.directory(of: navItem.href))
+                Self.tocLog.fault("TOC nav entries=\(entries.count) mapped=\(mapped.filter { $0.spineIndex != nil }.count) navHref=\(navItem.href, privacy: .public)")
                 if !mapped.isEmpty {
                     toc = mapped
                     return
@@ -357,7 +361,7 @@ final class PrototypeEPUBContainer {
                   let xml = String(data: data, encoding: .utf8) else { continue }
             let parsed = NCXParser.parse(xml: xml)
             if !parsed.isEmpty {
-                let mapped = mapToSpine(parsed)
+                let mapped = mapToSpine(parsed, baseDirectory: Self.directory(of: ncxItem.href))
                 if !mapped.isEmpty {
                     toc = mapped
                     return
@@ -376,9 +380,13 @@ final class PrototypeEPUBContainer {
         }
     }
 
-    private func mapToSpine(_ entries: [(title: String, href: String)]) -> [PrototypeTOCEntry] {
+    /// 目录 href 相对其文档所在目录解析后映射到 spine。
+    private func mapToSpine(_ entries: [(title: String, href: String)],
+                            baseDirectory: String) -> [PrototypeTOCEntry] {
         entries.map { entry in
-            let target = Self.normalizePath(opfDirectory + entry.href)
+            let target = Self.isAbsoluteInPackage(entry.href)
+                ? Self.normalizePath(String(entry.href.dropFirst()))
+                : Self.normalizePath(baseDirectory + entry.href)
             let index = spine.firstIndex {
                 Self.stripFragment($0.href) == Self.stripFragment(target)
             }

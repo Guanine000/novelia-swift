@@ -50,12 +50,16 @@ final class PrototypePageBook {
 
     private var chapters: [Int: ChapterLayout] = [:]
     private var renderedImages: [PrototypePageID: CGImage] = [:]
+    /// 每排出一页回调一次（主线程）；宿主借此刷新"下一页已就绪"的可用性。
+    var onPagesChanged: (() -> Void)?
 
     init(generation: Int) {
         self.generation = generation
     }
 
-    /// 把一章交给 YueduCoreText 完整排版成连续页面（原型先整章排完，性能验证后再改增量）。
+    /// 把一章交给 YueduCoreText 逐页排版。
+    /// 每页之间让路主线程（yield）并立即发布已完成的页——真实书籍整章一次排完
+    /// 会冻结 UI 数秒（卡顿），逐页增量让第一页立即可用、翻页预览尽早就绪。
     func layoutChapter(_ spineIndex: Int, container: PrototypeEPUBContainer,
                        config: BrowserLayoutConfig) async throws {
         let html = try await container.chapterHTML(at: spineIndex)
@@ -70,25 +74,27 @@ final class PrototypePageBook {
             images: images
         )
         let session = try document.makePageSession()
-        var pages: [PageFragments] = []
-        var displayLists: [DisplayList] = []
-        var linkRegions: [LinkInteractionRegionSet] = []
+        // 先构建流水线（不排版页面），使 sourceText 就绪——DisplayList 文本切片依赖它。
+        _ = try await session.prepare()
+        var layout = ChapterLayout(
+            pages: [], sourceText: session.sourceText, displayLists: [], linkRegions: [], footnotes: [:]
+        )
         while let page = try await session.layoutNextPage() {
-            pages.append(page)
             let list = DisplayListBuilder.build(for: page, sourceText: session.sourceText)
-            displayLists.append(list)
-            linkRegions.append(LinkInteractionRegionSet.build(
+            layout.pages.append(page)
+            layout.displayLists.append(list)
+            layout.linkRegions.append(LinkInteractionRegionSet.build(
                 from: list, spineIndex: spineIndex, anchors: session.pipelineLinkAnchors
             ))
+            // 渐进发布：即使本章尚未排完，已完成的页即可用于显示与预览。
+            chapters[spineIndex] = layout
+            onPagesChanged?()
+            await Task.yield()
+            try Task.checkCancellation()
         }
-        // 空章也允许（保留零页记录，翻页时跨过）。
-        chapters[spineIndex] = ChapterLayout(
-            pages: pages,
-            sourceText: session.sourceText,
-            displayLists: displayLists,
-            linkRegions: linkRegions,
-            footnotes: session.pipelineFootnotes
-        )
+        layout.footnotes = session.pipelineFootnotes
+        chapters[spineIndex] = layout
+        onPagesChanged?()
     }
 
     func hasChapter(_ spineIndex: Int) -> Bool {
@@ -131,6 +137,15 @@ final class PrototypePageBook {
         guard let chapter = chapters[id.spineIndex],
               chapter.pages.indices.contains(id.pageIndex) else { return nil }
         return chapter.pages[id.pageIndex].pageRect.rawValue.size
+    }
+
+    /// 只读已缓存的位图（不触发渲染）；预览槽位用，避免 body 更新时同步解码大图。
+    func cachedRenderedImage(for id: PrototypePageID) -> CGImage? {
+        renderedImages[id]
+    }
+
+    func isRendered(_ id: PrototypePageID) -> Bool {
+        renderedImages[id] != nil
     }
 
     /// 渲染并缓存页面位图。预览与落页取同一缓存键，天然是同一份结果。
