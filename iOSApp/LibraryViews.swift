@@ -1627,6 +1627,8 @@ struct MyDownloadsView: View {
     @EnvironmentObject private var webNovelDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
     @State private var selectedTab: MyDownloadsTab
+    @State private var showPrototype = false
+    @State private var prototypeURL: URL?
 
     init(initialTab: MyDownloadsTab = .network) {
         _selectedTab = State(initialValue: initialTab)
@@ -1654,6 +1656,30 @@ struct MyDownloadsView: View {
         .navigationTitle("我的下载")
         .navigationBarTitleDisplayMode(.inline)
         .task { await wenkuDownloads.refreshMissingMetadata() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("打开样例书") {
+                        prototypeURL = nil
+                        showPrototype = true
+                    }
+                    ForEach(wenkuDownloads.books) { book in
+                        Button("打开：\(book.title)") {
+                            prototypeURL = wenkuDownloads.fileURL(for: book)
+                            showPrototype = true
+                        }
+                    }
+                } label: {
+                    Label("排版原型", systemImage: "book.pages")
+                }
+                .accessibilityLabel("打开排版原型")
+            }
+        }
+        .sheet(isPresented: $showPrototype) {
+            NavigationStack {
+                PrototypeReaderHost(initialURL: prototypeURL)
+            }
+        }
     }
 
     private var networkDownloads: some View {

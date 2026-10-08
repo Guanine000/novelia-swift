@@ -42,6 +42,11 @@ struct RootView: View {
     @StateObject private var wenkuDownloads = WenkuLocalLibraryStore()
     @StateObject private var webNovelDownloads = WebNovelDownloadStore()
 
+    /// 调试/自动化入口：`-openEPUBPrototype` 启动参数直接打开排版原型。
+    private var opensPrototypeDirectly: Bool {
+        ProcessInfo.processInfo.arguments.contains("-openEPUBPrototype")
+    }
+
     var body: some View {
         TabView {
             NavigationStack {
@@ -72,6 +77,11 @@ struct RootView: View {
         .environmentObject(webNovelDownloads)
         .sheet(isPresented: $auth.isLoginPresented) {
             NoveliaLoginSheet(auth: auth)
+        }
+        .sheet(isPresented: .constant(opensPrototypeDirectly)) {
+            NavigationStack {
+                PrototypeReaderHost(initialURL: nil)
+            }
         }
     }
 }
