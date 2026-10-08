@@ -206,7 +206,7 @@ private struct ShelfNovelCard: View {
         }
         .frame(width: 126, alignment: .topLeading)
         .padding(8)
-        .background(.white, in: RoundedRectangle(cornerRadius: 17))
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 17))
     }
 }
 
@@ -400,7 +400,7 @@ struct DiscoverView: View {
                             .foregroundStyle(NoveliaStyle.muted)
                     }
                     .padding(13)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 17))
+                    .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 17))
                 }
                 .buttonStyle(.plain)
 
@@ -412,7 +412,7 @@ struct DiscoverView: View {
                         .autocorrectionDisabled()
                 }
                 .padding(14)
-                .background(.white, in: RoundedRectangle(cornerRadius: 15))
+                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
 
                 HStack(alignment: .firstTextBaseline) {
                     Text(query.isEmpty ? "热门作品" : "搜索结果")
@@ -523,7 +523,7 @@ private struct RankingView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.white, in: RoundedRectangle(cornerRadius: 17))
+                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 17))
 
                 if store.isLoading && store.novels.isEmpty {
                     HStack { Spacer(); ProgressView("正在加载排行榜…"); Spacer() }
@@ -784,7 +784,7 @@ struct NovelDetailView: View {
                                 }
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
-                                .background(.white, in: RoundedRectangle(cornerRadius: 13))
+                                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 13))
                             }
                         }
                         Text("阅读时可在右上角设置中切换译源。")
@@ -812,7 +812,7 @@ struct NovelDetailView: View {
                                         .lineLimit(1)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 8)
-                                        .background(.white, in: Capsule())
+                                        .background(NoveliaStyle.card, in: Capsule())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -910,7 +910,7 @@ struct NovelDetailView: View {
                         .foregroundStyle(NoveliaStyle.ink)
                         .padding(.horizontal, 17)
                         .padding(.vertical, 14)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 15))
+                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
                     }
                     .buttonStyle(.plain)
                 }
@@ -963,7 +963,7 @@ struct NovelDetailView: View {
                                 .foregroundStyle(NoveliaStyle.muted.opacity(0.6))
                         }
                         .padding(13)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 15))
+                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
                     }
                     .buttonStyle(.plain)
                 }
@@ -1288,7 +1288,7 @@ struct NovelCommentsView: View {
                 .frame(minHeight: 86)
                 .padding(7)
                 .scrollContentBackground(.hidden)
-                .background(.white, in: RoundedRectangle(cornerRadius: 12))
+                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(alignment: .topLeading) {
                     if draft.isEmpty {
                         Text(replyRoot == nil ? "写下你的评论…" : "写下你的回复…")
@@ -1400,7 +1400,7 @@ struct NovelCommentsView: View {
         }
         .padding(15)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white, in: RoundedRectangle(cornerRadius: 15))
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
     }
 
     @MainActor
@@ -1516,7 +1516,7 @@ private struct ContinueReadingCard: View {
             Spacer(minLength: 0)
         }
         .padding(14)
-        .background(.white, in: RoundedRectangle(cornerRadius: 21))
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 21))
         .overlay(alignment: .trailing) {
             Image(systemName: "sparkle")
                 .font(.system(size: 19, weight: .light))
@@ -1552,7 +1552,7 @@ private struct FeaturedNovelCard: View {
             Spacer(minLength: 0)
         }
         .padding(13)
-        .background(.white, in: RoundedRectangle(cornerRadius: 19))
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 19))
     }
 }
 
@@ -1579,7 +1579,7 @@ private struct NovelRow: View {
                 .foregroundStyle(NoveliaStyle.muted.opacity(0.5))
         }
         .padding(11)
-        .background(.white, in: RoundedRectangle(cornerRadius: 17))
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 17))
     }
 }
 
