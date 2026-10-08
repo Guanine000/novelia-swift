@@ -147,8 +147,41 @@ final class PrototypeEPUBContainer {
     }
 
     func entryData(atPath path: String) async -> Data? {
-        guard let entry = try? await archive.get(path) else { return nil }
+        guard let entry = await resolveEntry(path) else { return nil }
         return try? await Self.entryData(entry, from: archive)
+    }
+
+    /// 稳健的条目解析：精确路径 → 百分号解码 → 大小写不敏感匹配。
+    /// 真实 EPUB（尤其日文书）常用 URL 编码的图片路径，ZIP 内条目名是解码后的。
+    private func resolveEntry(_ path: String) async -> Entry? {
+        let normalized = Self.normalizePath(path)
+        if let entry = try? await archive.get(normalized) { return entry }
+        // 百分号解码回退（逐层尝试，防止双重编码）。
+        var decoded = normalized
+        for _ in 0..<2 {
+            guard let step = decoded.removingPercentEncoding, step != decoded else { break }
+            decoded = step
+            if let entry = try? await archive.get(decoded) { return entry }
+        }
+        // 大小写不敏感回退：扫描全部条目（缓存）。
+        let entries = await allEntries()
+        let lowered = normalized.lowercased()
+        if let match = entries.first(where: { $0.path.lowercased() == lowered }) {
+            return match
+        }
+        let loweredDecoded = decoded.lowercased()
+        if let match = entries.first(where: { $0.path.lowercased() == loweredDecoded }) {
+            return match
+        }
+        return nil
+    }
+
+    private var entryPathCache: [Entry]?
+    private func allEntries() async -> [Entry] {
+        if let entryPathCache { return entryPathCache }
+        let list = (try? await archive.entries()) ?? []
+        entryPathCache = list
+        return list
     }
 
     func chapterHTML(at index: Int) async throws -> String {
@@ -202,12 +235,14 @@ final class PrototypeEPUBContainer {
     }
 
     /// 章节引用的位图图片：以 HTML 中的原始 src 为键（引擎按字面 src 查表）。
+    /// 覆盖：相对路径、包内绝对路径（/OEBPS/...）、百分号编码路径、data: URI。
+    /// 远程 http(s) 图片无法本地装载，缺失时由引擎报 resourceFailure 并在错误信息中点名。
     func images(forChapterHTML html: String) async -> [String: UIImage] {
         var images: [String: UIImage] = [:]
         guard let tagRegex = try? NSRegularExpression(
                   pattern: "<(?:img|image)\\b[^>]*>", options: [.caseInsensitive]),
               let srcRegex = try? NSRegularExpression(
-                  pattern: "(?:\\bsrc|xlink:href)\\s*=\\s*[\"']([^\"']+)[\"']", options: [.caseInsensitive]) else {
+                  pattern: "(?:\\bsrc|xlink:href|\\bhref)\\s*=\\s*[\"']([^\"']+)[\"']", options: [.caseInsensitive]) else {
             return images
         }
         let nsHTML = html as NSString
@@ -216,13 +251,41 @@ final class PrototypeEPUBContainer {
             let nsTag = tag as NSString
             for srcMatch in srcRegex.matches(in: tag, range: NSRange(location: 0, length: nsTag.length)) {
                 let src = XMLValueParser.decodeEntities(nsTag.substring(with: srcMatch.range(at: 1)))
-                guard Self.isRelative(src), images[src] == nil else { continue }
-                guard let data = await entryData(atPath: Self.normalizePath(opfDirectory + src)),
-                      let image = UIImage(data: data) else { continue }
-                images[src] = image
+                guard images[src] == nil else { continue }
+
+                // data: URI（引擎把非空 src 一律视为待装载资源）。
+                if src.lowercased().hasPrefix("data:") {
+                    if let image = Self.image(fromDataURI: src) {
+                        images[src] = image
+                    }
+                    continue
+                }
+
+                guard Self.isRelative(src) || Self.isAbsoluteInPackage(src) else { continue }
+                // 相对路径拼章节目录；包内绝对路径去掉开头 / 后从包根解析。
+                let joined = Self.isAbsoluteInPackage(src)
+                    ? String(src.dropFirst())
+                    : Self.normalizePath(opfDirectory + src)
+                if let data = await entryData(atPath: joined), let image = UIImage(data: data) {
+                    images[src] = image
+                }
             }
         }
         return images
+    }
+
+    /// 解析 data:image/...;base64,xxx 形式的内嵌图片。
+    private static func image(fromDataURI uri: String) -> UIImage? {
+        guard let commaIndex = uri.firstIndex(of: ",") else { return nil }
+        let metadata = uri[uri.startIndex..<commaIndex].lowercased()
+        let payload = String(uri[uri.index(after: commaIndex)])
+        guard metadata.contains(";base64") else { return nil }
+        guard let data = Data(base64Encoded: payload, options: [.ignoreUnknownCharacters]) else { return nil }
+        return UIImage(data: data)
+    }
+
+    static func isAbsoluteInPackage(_ href: String) -> Bool {
+        href.hasPrefix("/")
     }
 
     // MARK: 目录

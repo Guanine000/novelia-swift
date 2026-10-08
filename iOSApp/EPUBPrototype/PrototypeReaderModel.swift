@@ -88,7 +88,7 @@ final class PrototypeReaderModel: ObservableObject {
             location = PrototypeReadingLocation(spineIndex: 0, pageIndex: 0)
             await relayout(keepingCurrentSpine: false)
         } catch {
-            status = .failed(error.localizedDescription)
+            status = .failed(describeLayoutError(error))
         }
     }
 
@@ -163,7 +163,7 @@ final class PrototypeReaderModel: ObservableObject {
             }
         } catch {
             if book.generation == generation {
-                status = .failed(error.localizedDescription)
+                status = .failed(describeLayoutError(error))
             }
         }
     }
@@ -296,4 +296,25 @@ final class PrototypeReaderModel: ObservableObject {
 struct PrototypeNote: Identifiable, Equatable {
     let id = UUID()
     let text: String
+}
+
+/// 把 YueduCoreText 的排版错误翻译成可诊断的中文信息（真实 EPUB 排查必需）。
+private func describeLayoutError(_ error: Error) -> String {
+    if let layoutError = error as? HTMLLayoutError {
+        switch layoutError {
+        case .unsupported(let features):
+            let names = features.map(\.description).joined(separator: "、")
+            return "本章包含当前排版引擎不支持的内容（\(names)），需要回退策略后才能显示。"
+        case .resourceFailure(let detail):
+            return "章节资源缺失：\(detail)。已尝试精确路径、百分号解码与大小写回退查找。"
+        case .layoutFailure(let detail):
+            return "排版失败：\(detail)"
+        case .cancelled:
+            return "排版已取消。"
+        }
+    }
+    if let prototypeError = error as? PrototypeEPUBError {
+        return prototypeError.localizedDescription
+    }
+    return error.localizedDescription
 }
