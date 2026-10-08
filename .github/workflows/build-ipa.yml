@@ -32,6 +32,11 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           build
 
+      - name: Verify third-party notices
+        run: >-
+          python3 scripts/verify_third_party_notices.py
+          --source-packages "$RUNNER_TEMP/NoveliaDerivedData/SourcePackages/checkouts"
+
       - name: Package unsigned IPA
         shell: bash
         run: |
