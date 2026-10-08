@@ -324,3 +324,12 @@
 
 - `NoveliaStyle` 的 ink/muted/paper/card 改为动态色（跟随系统深浅色）：书架、发现、文库、我的、我的下载列表全部生效；两处 `Color.white` 列表行背景改用动态 card 色；彩色按钮上的白色前景文案保持不变。
 - 模拟器深色截图验证（书架页正常）。新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,139,048 bytes · SHA-256 `7daa2841e172d28b3e0402e1459134bc625ea8419f75bd00b0e4eed6f028c720`
+
+---
+
+## 追加：第十七轮（提交 `fix: replace hardcoded white card backgrounds`）—— 发现页深色修复
+
+- **现象（真机截图）**：深色模式下发现页卡片仍是白底、标题白字（白上加白不可读）。
+- **根因**：卡片容器硬编码 `.background(.white)`，文字走动态 ink（深色下近白）→ 白底白字。
+- **修复**：全文件 13 处圆角 + 1 处胶囊白色背景统一替换为动态 `NoveliaStyle.card`（浅色白/深色深灰）。
+- 验证：书架页深色截图正常（发现页需你真机确认，simctl 无法点选 Tab）。新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,141,080 bytes · SHA-256 `c8e73af7530dfc0879c15b19e6d32bd52655448769309902ea80be09a80780d7`
