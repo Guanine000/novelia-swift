@@ -1,6 +1,7 @@
 import SwiftUI
 import OSLog
 import UIKit
+import UniformTypeIdentifiers
 
 struct ShelfView: View {
     @EnvironmentObject private var auth: AccountAuthStore
@@ -205,7 +206,7 @@ private struct ShelfNovelCard: View {
         }
         .frame(width: 126, alignment: .topLeading)
         .padding(8)
-        .background(.white, in: RoundedRectangle(cornerRadius: 17))
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 17))
     }
 }
 
@@ -399,7 +400,7 @@ struct DiscoverView: View {
                             .foregroundStyle(NoveliaStyle.muted)
                     }
                     .padding(13)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 17))
+                    .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 17))
                 }
                 .buttonStyle(.plain)
 
@@ -411,7 +412,7 @@ struct DiscoverView: View {
                         .autocorrectionDisabled()
                 }
                 .padding(14)
-                .background(.white, in: RoundedRectangle(cornerRadius: 15))
+                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
 
                 HStack(alignment: .firstTextBaseline) {
                     Text(query.isEmpty ? "热门作品" : "搜索结果")
@@ -522,7 +523,7 @@ private struct RankingView: View {
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.white, in: RoundedRectangle(cornerRadius: 17))
+                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 17))
 
                 if store.isLoading && store.novels.isEmpty {
                     HStack { Spacer(); ProgressView("正在加载排行榜…"); Spacer() }
@@ -783,7 +784,7 @@ struct NovelDetailView: View {
                                 }
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
-                                .background(.white, in: RoundedRectangle(cornerRadius: 13))
+                                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 13))
                             }
                         }
                         Text("阅读时可在右上角设置中切换译源。")
@@ -811,7 +812,7 @@ struct NovelDetailView: View {
                                         .lineLimit(1)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 8)
-                                        .background(.white, in: Capsule())
+                                        .background(NoveliaStyle.card, in: Capsule())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -909,7 +910,7 @@ struct NovelDetailView: View {
                         .foregroundStyle(NoveliaStyle.ink)
                         .padding(.horizontal, 17)
                         .padding(.vertical, 14)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 15))
+                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
                     }
                     .buttonStyle(.plain)
                 }
@@ -962,7 +963,7 @@ struct NovelDetailView: View {
                                 .foregroundStyle(NoveliaStyle.muted.opacity(0.6))
                         }
                         .padding(13)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 15))
+                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
                     }
                     .buttonStyle(.plain)
                 }
@@ -1287,7 +1288,7 @@ struct NovelCommentsView: View {
                 .frame(minHeight: 86)
                 .padding(7)
                 .scrollContentBackground(.hidden)
-                .background(.white, in: RoundedRectangle(cornerRadius: 12))
+                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(alignment: .topLeading) {
                     if draft.isEmpty {
                         Text(replyRoot == nil ? "写下你的评论…" : "写下你的回复…")
@@ -1399,7 +1400,7 @@ struct NovelCommentsView: View {
         }
         .padding(15)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white, in: RoundedRectangle(cornerRadius: 15))
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
     }
 
     @MainActor
@@ -1515,7 +1516,7 @@ private struct ContinueReadingCard: View {
             Spacer(minLength: 0)
         }
         .padding(14)
-        .background(.white, in: RoundedRectangle(cornerRadius: 21))
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 21))
         .overlay(alignment: .trailing) {
             Image(systemName: "sparkle")
                 .font(.system(size: 19, weight: .light))
@@ -1551,7 +1552,7 @@ private struct FeaturedNovelCard: View {
             Spacer(minLength: 0)
         }
         .padding(13)
-        .background(.white, in: RoundedRectangle(cornerRadius: 19))
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 19))
     }
 }
 
@@ -1578,7 +1579,7 @@ private struct NovelRow: View {
                 .foregroundStyle(NoveliaStyle.muted.opacity(0.5))
         }
         .padding(11)
-        .background(.white, in: RoundedRectangle(cornerRadius: 17))
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 17))
     }
 }
 
@@ -1627,6 +1628,10 @@ struct MyDownloadsView: View {
     @EnvironmentObject private var webNovelDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
     @State private var selectedTab: MyDownloadsTab
+    @State private var prototypeTarget: PrototypeDownloadTarget?
+    @State private var isShowingFileImporter = false
+    @State private var isImporting = false
+    @State private var importError: String?
 
     init(initialTab: MyDownloadsTab = .network) {
         _selectedTab = State(initialValue: initialTab)
@@ -1654,6 +1659,67 @@ struct MyDownloadsView: View {
         .navigationTitle("我的下载")
         .navigationBarTitleDisplayMode(.inline)
         .task { await wenkuDownloads.refreshMissingMetadata() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                // 点击直接打开文件选择器（本地书点列表行即可打开，无需二级菜单）。
+                Button {
+                    isShowingFileImporter = true
+                } label: {
+                    Label("导入 EPUB", systemImage: "square.and.arrow.down")
+                }
+                .accessibilityLabel("导入 EPUB")
+            }
+        }
+        .navigationDestination(item: $prototypeTarget) { target in
+            PrototypeReaderHost(initialURL: target.url)
+        }
+        .fullScreenCover(isPresented: $isShowingFileImporter) {
+            PrototypeFilePicker { url in
+                Task { await importAndOpen(url) }
+            }
+            .ignoresSafeArea()
+        }
+        .alert("导入", isPresented: .init(
+            get: { importError != nil },
+            set: { if !$0 { importError = nil } }
+        )) {
+            Button("好", role: .cancel) { importError = nil }
+        } message: {
+            Text(importError ?? "")
+        }
+        .overlay {
+            if isImporting { ProgressView("正在导入…").padding(20).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12)) }
+        }
+    }
+
+    /// 从 Files 导入：security-scoped + NSFileCoordinator 复制进文库本地书库并登记，
+    /// 然后直接进入排版原型阅读。
+    private func importAndOpen(_ pickedURL: URL) async {
+        isImporting = true
+        defer { isImporting = false }
+        let needsScope = pickedURL.startAccessingSecurityScopedResource()
+        defer { if needsScope { pickedURL.stopAccessingSecurityScopedResource() } }
+        do {
+            let destination = wenkuDownloads.downloadDestination(for: pickedURL.lastPathComponent)
+            var coordinatedError: NSError?
+            var copyError: Error?
+            NSFileCoordinator().coordinate(readingItemAt: pickedURL, options: .forUploading,
+                                           error: &coordinatedError) { sourceURL in
+                do {
+                    if FileManager.default.fileExists(atPath: destination.path) {
+                        try FileManager.default.removeItem(at: destination)
+                    }
+                    try FileManager.default.copyItem(at: sourceURL, to: destination)
+                } catch { copyError = error }
+            }
+            if let coordinatedError { throw coordinatedError }
+            if let copyError { throw copyError }
+            let title = pickedURL.deletingPathExtension().lastPathComponent
+            try await wenkuDownloads.registerDownloadedFile(at: destination, title: title)
+            prototypeTarget = PrototypeDownloadTarget(url: destination, title: title)
+        } catch {
+            importError = "导入失败：\(error.localizedDescription)"
+        }
     }
 
     private var networkDownloads: some View {
@@ -1669,8 +1735,17 @@ struct MyDownloadsView: View {
                     ForEach(webNovelDownloads.books) { book in
                         Group {
                             if let fileURL = webNovelDownloads.fileURL(for: book) {
-                                ShareLink(item: fileURL) {
-                                    networkDownloadRow(book, isFile: true)
+                                // EPUB 文件：正文行进排版原型，行尾保留导出。
+                                Button {
+                                    prototypeTarget = PrototypeDownloadTarget(url: fileURL, title: book.novel.title)
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        networkDownloadRow(book, isFile: true)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        Image(systemName: "chevron.right")
+                                            .font(.footnote)
+                                            .foregroundStyle(NoveliaStyle.muted)
+                                    }
                                 }
                                 .buttonStyle(.plain)
                             } else {
@@ -1681,8 +1756,14 @@ struct MyDownloadsView: View {
                                 }
                             }
                         }
-                        .listRowBackground(Color.white)
+                        .listRowBackground(NoveliaStyle.card)
                         .swipeActions {
+                            if webNovelDownloads.fileURL(for: book) != nil {
+                                ShareLink(item: webNovelDownloads.fileURL(for: book)!) {
+                                    Label("导出", systemImage: "square.and.arrow.up")
+                                }
+                                .tint(.blue)
+                            }
                             Button(role: .destructive) {
                                 webNovelDownloads.remove(book)
                             } label: {
@@ -1738,35 +1819,45 @@ struct MyDownloadsView: View {
             } else {
                 List {
                     ForEach(wenkuDownloads.books) { book in
-                        ShareLink(item: wenkuDownloads.fileURL(for: book)) {
-                            HStack(spacing: 12) {
-                                if let coverURL = wenkuDownloads.coverURL(for: book),
-                                   let image = UIImage(contentsOfFile: coverURL.path) {
-                                    Image(uiImage: image).resizable().scaledToFill()
-                                        .frame(width: 52, height: 72)
-                                        .clipShape(RoundedRectangle(cornerRadius: 7))
-                                } else {
-                                    Image(systemName: "book.closed.fill")
-                                        .font(.title2).foregroundStyle(NoveliaStyle.coral)
-                                        .frame(width: 52, height: 72)
-                                        .background(NoveliaStyle.coral.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
-                                }
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(book.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
-                                    if let author = book.author, !author.isEmpty {
-                                        Text(author).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
+                        HStack(spacing: 12) {
+                            Button {
+                                prototypeTarget = PrototypeDownloadTarget(
+                                    url: wenkuDownloads.fileURL(for: book), title: book.title
+                                )
+                            } label: {
+                                HStack(spacing: 12) {
+                                    if let coverURL = wenkuDownloads.coverURL(for: book),
+                                       let image = UIImage(contentsOfFile: coverURL.path) {
+                                        Image(uiImage: image).resizable().scaledToFill()
+                                            .frame(width: 52, height: 72)
+                                            .clipShape(RoundedRectangle(cornerRadius: 7))
+                                    } else {
+                                        Image(systemName: "book.closed.fill")
+                                            .font(.title2).foregroundStyle(NoveliaStyle.coral)
+                                            .frame(width: 52, height: 72)
+                                            .background(NoveliaStyle.coral.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
                                     }
-                                    if let description = book.bookDescription, !description.isEmpty {
-                                        Text(description).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(2)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(book.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
+                                        if let author = book.author, !author.isEmpty {
+                                            Text(author).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
+                                        }
+                                        if let description = book.bookDescription, !description.isEmpty {
+                                            Text(description).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(2)
+                                        }
                                     }
+                                    Spacer(minLength: 4)
                                 }
-                                Spacer(minLength: 4)
-                                Image(systemName: "square.and.arrow.up").foregroundStyle(NoveliaStyle.coral)
+                                .contentShape(Rectangle())
                             }
-                            .padding(.vertical, 4)
+                            .buttonStyle(.plain)
+                            ShareLink(item: wenkuDownloads.fileURL(for: book)) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .foregroundStyle(NoveliaStyle.coral)
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .listRowBackground(Color.white)
+                        .padding(.vertical, 4)
+                        .listRowBackground(NoveliaStyle.card)
                         .swipeActions {
                             ShareLink(item: wenkuDownloads.fileURL(for: book)) {
                                 Label("导出", systemImage: "square.and.arrow.up")
@@ -1967,4 +2058,13 @@ private struct LogActivitySheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - 排版原型导航目标
+
+/// 从“我的下载”推入排版原型的目标书；url 为 nil 时使用样例书。
+struct PrototypeDownloadTarget: Identifiable, Hashable {
+    let id = UUID()
+    let url: URL?
+    let title: String
 }

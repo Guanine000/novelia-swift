@@ -54,7 +54,7 @@ struct WenkuView: View {
                 }
             }
             .padding(12)
-            .background(.white, in: RoundedRectangle(cornerRadius: 14))
+            .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
             novelList(store.novels, loading: store.isLoading, error: store.errorMessage, loadMore: store.loadMore)
@@ -167,7 +167,7 @@ private struct WenkuNovelRow: View {
         }
         .frame(minHeight: 112)
         .padding(10)
-        .background(.white, in: RoundedRectangle(cornerRadius: 14))
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
         .padding(.vertical, 5)
     }
 }
@@ -321,7 +321,7 @@ private struct WenkuDetailView: View {
                         }
                     }
                 }
-                .padding(12).background(.white, in: RoundedRectangle(cornerRadius: 12))
+                .padding(12).background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 12))
             }
         }
     }

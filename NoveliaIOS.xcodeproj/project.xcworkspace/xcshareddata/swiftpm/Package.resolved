@@ -1,5 +1,5 @@
 {
-  "originHash" : "14b46f42cb821f6a724bf97b4f0934138d5657736c3fa49e7f435436abed729a",
+  "originHash" : "8286360bc7d440fccaaadff1555c44a36b008b1cfa1e4ac2a64023c073b4baa0",
   "pins" : [
     {
       "identity" : "cryptoswift",
@@ -60,8 +60,17 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/scinfu/SwiftSoup.git",
       "state" : {
-        "revision" : "18b80329749eca5ea29fc50211dca5c7eff5bfec",
-        "version" : "2.13.9"
+        "revision" : "8d6ad267714cac3ae747cefdd21f7a6665006e1f",
+        "version" : "2.13.7"
+      }
+    },
+    {
+      "identity" : "yueducoretext",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/CHANG-JUI-LIN/YueduCoreText.git",
+      "state" : {
+        "revision" : "783ce903d5faf4ff5d15c546e32a107537ba5efe",
+        "version" : "0.8.0"
       }
     },
     {

@@ -23,6 +23,14 @@
 		A10000000000000000000014 /* WenkuNovel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* WenkuNovel.swift */; };
 		A10000000000000000000015 /* ReadiumShared in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000001 /* ReadiumShared */; };
 		A10000000000000000000016 /* ReadiumStreamer in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000002 /* ReadiumStreamer */; };
+		A10000000000000000000017 /* YueduCoreText in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000003 /* YueduCoreText */; };
+		A10000000000000000000018 /* ReadiumZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000004 /* ReadiumZIPFoundation */; };
+		A10000000000000000000019 /* PrototypeEPUBContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* PrototypeEPUBContainer.swift */; };
+		A10000000000000000000020 /* PrototypePageBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* PrototypePageBook.swift */; };
+		A10000000000000000000021 /* PrototypePagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000018 /* PrototypePagerView.swift */; };
+		A10000000000000000000022 /* PrototypeReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* PrototypeReaderModel.swift */; };
+		A10000000000000000000023 /* PrototypeReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* PrototypeReaderView.swift */; };
+		A10000000000000000000024 /* PrototypeSampleBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000021 /* PrototypeSampleBook.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -41,6 +49,12 @@
 		B10000000000000000000013 /* WenkuViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WenkuViews.swift; sourceTree = "<group>"; };
 		B10000000000000000000014 /* WenkuStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WenkuStore.swift; sourceTree = "<group>"; };
 		B10000000000000000000015 /* WenkuNovel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WenkuNovel.swift; sourceTree = "<group>"; };
+		B10000000000000000000016 /* PrototypeEPUBContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeEPUBContainer.swift; sourceTree = "<group>"; };
+		B10000000000000000000017 /* PrototypePageBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypePageBook.swift; sourceTree = "<group>"; };
+		B10000000000000000000018 /* PrototypePagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypePagerView.swift; sourceTree = "<group>"; };
+		B10000000000000000000019 /* PrototypeReaderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeReaderModel.swift; sourceTree = "<group>"; };
+		B10000000000000000000020 /* PrototypeReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeReaderView.swift; sourceTree = "<group>"; };
+		B10000000000000000000021 /* PrototypeSampleBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeSampleBook.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -50,6 +64,8 @@
 			files = (
 				A10000000000000000000015 /* ReadiumShared in Frameworks */,
 				A10000000000000000000016 /* ReadiumStreamer in Frameworks */,
+				A10000000000000000000017 /* YueduCoreText in Frameworks */,
+				A10000000000000000000018 /* ReadiumZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -61,9 +77,23 @@
 			children = (
 				D10000000000000000000002 /* iOSApp */,
 				D10000000000000000000003 /* Sources/NoveliaIOSCore */,
+				D10000000000000000000005 /* EPUBPrototype */,
 				B10000000000000000000012 /* Assets.xcassets */,
 				D10000000000000000000004 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		D10000000000000000000005 /* EPUBPrototype */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000016 /* PrototypeEPUBContainer.swift */,
+				B10000000000000000000017 /* PrototypePageBook.swift */,
+				B10000000000000000000018 /* PrototypePagerView.swift */,
+				B10000000000000000000019 /* PrototypeReaderModel.swift */,
+				B10000000000000000000020 /* PrototypeReaderView.swift */,
+				B10000000000000000000021 /* PrototypeSampleBook.swift */,
+			);
+			path = iOSApp/EPUBPrototype;
 			sourceTree = "<group>";
 		};
 		D10000000000000000000002 /* iOSApp */ = {
@@ -119,6 +149,8 @@
 			packageProductDependencies = (
 				F31000000000000000000001 /* ReadiumShared */,
 				F31000000000000000000002 /* ReadiumStreamer */,
+				F31000000000000000000003 /* YueduCoreText */,
+				F31000000000000000000004 /* ReadiumZIPFoundation */,
 			);
 			name = Novelia;
 			productName = Novelia;
@@ -158,6 +190,8 @@
 			);
 			packageReferences = (
 				F30000000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit" */,
+				F30000000000000000000002 /* XCRemoteSwiftPackageReference "YueduCoreText" */,
+				F30000000000000000000003 /* XCRemoteSwiftPackageReference "ReadiumZIPFoundation" */,
 			);
 		};
 /* End PBXProject section */
@@ -169,6 +203,22 @@
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 3.9.0;
+			};
+		};
+		F30000000000000000000002 /* XCRemoteSwiftPackageReference "YueduCoreText" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/CHANG-JUI-LIN/YueduCoreText.git";
+			requirement = {
+				kind = exactVersion;
+				version = 0.8.0;
+			};
+		};
+		F30000000000000000000003 /* XCRemoteSwiftPackageReference "ReadiumZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/readium/ZIPFoundation.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.0.1;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -183,6 +233,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F30000000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit" */;
 			productName = ReadiumStreamer;
+		};
+		F31000000000000000000003 /* YueduCoreText */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F30000000000000000000002 /* XCRemoteSwiftPackageReference "YueduCoreText" */;
+			productName = YueduCoreText;
+		};
+		F31000000000000000000004 /* ReadiumZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F30000000000000000000003 /* XCRemoteSwiftPackageReference "ReadiumZIPFoundation" */;
+			productName = ReadiumZIPFoundation;
 		};
 
 /* End XCSwiftPackageProductDependency section */
@@ -216,6 +276,12 @@
 				A10000000000000000000012 /* WenkuViews.swift in Sources */,
 				A10000000000000000000013 /* WenkuStore.swift in Sources */,
 				A10000000000000000000014 /* WenkuNovel.swift in Sources */,
+				A10000000000000000000019 /* PrototypeEPUBContainer.swift in Sources */,
+				A10000000000000000000020 /* PrototypePageBook.swift in Sources */,
+				A10000000000000000000021 /* PrototypePagerView.swift in Sources */,
+				A10000000000000000000022 /* PrototypeReaderModel.swift in Sources */,
+				A10000000000000000000023 /* PrototypeReaderView.swift in Sources */,
+				A10000000000000000000024 /* PrototypeSampleBook.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -325,6 +391,7 @@
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = iOSApp/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -347,6 +414,7 @@
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = iOSApp/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
