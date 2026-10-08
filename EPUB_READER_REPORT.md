@@ -1,0 +1,76 @@
+# EPUB 阅读原型 · 第二轮修复报告
+
+- 分支：`prototype/yuedu-coretext-pager`（私密仓库 `Guanine000/novelia-ios-port`）
+- 本轮提交：`3b5358d`（修复轮，6 个文件）；上一轮：`2827417`（初版切片）
+- 状态：**已构建、已模拟器验证；真机验收未做**。文中所有"真机待验"项目均不能视为已通过。
+- 依赖：YueduCoreText **0.8.0（exact）**、ReadiumZIPFoundation 3.0.1、SwiftSoup 2.13.7（传递），见 `iOSApp/EPUBPrototype/DEPENDENCIES.md`。未复制/修改 YueduCoreText 或 Yuedu-reader 源码，未使用其品牌素材。
+
+## 一、修改的文件
+
+| 文件 | 变更 |
+| --- | --- |
+| `iOSApp/EPUBPrototype/PrototypePagerView.swift` | 翻页时序守卫（T1）、CF 安全的位图判等（修复启动崩溃）、链接/注脚命中优先于翻页（T5）、中部点击回调（T3） |
+| `iOSApp/EPUBPrototype/PrototypePageBook.swift` | 每页缓存 DisplayList 与 `LinkInteractionRegionSet`、注脚文本表；命中与渲染共用同一份结果 |
+| `iOSApp/EPUBPrototype/PrototypeEPUBContainer.swift` | 保存 manifest；nav/NCX 改从 manifest 定位；空目录诊断原因（T4） |
+| `iOSApp/EPUBPrototype/PrototypeReaderModel.swift` | 链接命中解析（noteref→注脚文本）、注脚弹窗状态、Files 导入（security-scoped + NSFileCoordinator）、目录诊断暴露 |
+| `iOSApp/EPUBPrototype/PrototypeReaderView.swift` | 全屏阅读页（覆盖式工具栏、点中部显隐）、注脚底部弹层、导入入口与失败提示、目录空诊断展示 |
+| `iOSApp/LibraryViews.swift` | "我的下载"：文库/网络小说 EPUB 正文行点击推入原型（`navigationDestination`），导出改为行尾图标；菜单入口保留 |
+
+## 二、各问题根因与修复
+
+### 1. 翻页闪动 / 落页后偶尔跳回
+- **根因（以探针日志确认时序）**：SwiftUI 任何 body 重算（`isAnimating` 切换、`isLayingOut`、落页提交等）都会重放 `updateUIView → apply(images:)`，其中 `layoutStripContent()` 无条件把 strip 归零——发生在拖动/吸附中即表现为闪动；发生在"动画结束→新内容到达"的窗口内则显示旧内容并复位，表现为跳回。
+- **修复**：拖动中/吸附动画中 `apply` 只缓存不布局；三个槽位位图（`CFEqual` 判等）未变化时完全跳过；动画结束回调中先应用缓存内容保证 strip 归零且像素一致。
+- **附带修复（本轮真机必崩）**：第一页 `previous == nil` 时 `CFEqual(nil, nil)` 触发 Core Foundation 断言（SIGTRAP，进程启动后约 1 秒退出）。已改为空槽位单独比较。该崩溃导致上一轮 IPA 在打开样例书时必崩，已用探针日志逐级定位确认。
+- **验证**：模拟器 4 次连续启动（3 次原型 + 1 次普通）进程全部存活；探针时序显示提交窗口内的重放被正确跳过。**拖动手感与真机连续翻页待你复验。**
+
+### 2. 无法导入 EPUB
+- 阅读页顶部新增导入按钮（Files `fileImporter`），security-scoped 资源经 `NSFileCoordinator(.forUploading)` 复制到 `Documents/PrototypeImports/` 后进入同一阅读流程；失败以弹窗显示具体原因（非 ZIP/无 OPF/spine 为空等在容器解析层就有明确错误文案）。
+- "我的下载"中文库 EPUB 与网络小说 EPUB 文件行点击直接进原型。
+- **验证**：代码路径构建通过；fileImporter 为系统 UI，模拟器未做自动化点击。**导入真实 EPUB 待你真机验证。**
+
+### 3. 阅读界面为浮窗
+- 已改为从"我的下载"`navigationDestination` 推入的**全屏阅读页**：隐藏导航栏与 Tab 栏；顶部为覆盖式工具栏（返回 / 书名 / 导入 / 目录 / 字号），底部为页码与翻页箭头；点击正文中部显隐工具栏（参考 Yuedu-reader 的交互行为；仅参考布局与交互，未复制源码）。工具栏是覆盖层，显隐**不改变正文视口**，因此不会触发重排。
+- **验证**：模拟器截图确认全屏布局与排版正常。真机交互待你复验。
+
+### 4. 目录不显示
+- **根因**：上一版只在 `spine` 中找 `properties="nav"` 的章节，而真实 EPUB 的 nav.xhtml（EPUB3）与 toc.ncx（EPUB2）通常**只在 manifest 中、不在 spine**——样例书同样中招，所以你看到目录为空。
+- **修复**：从 OPF manifest 定位 nav（`properties` 含 `nav`）与 NCX（`media-type=application/x-dtbncx+xml`），解析后把目录 href 映射到 spine 序号；目录仍为空时显示可诊断原因（"manifest 中没有 nav/NCX 条目" / "nav 解析出 N 个条目但无法映射到 spine" 等）。
+- **验证**：修复路径已构建通过；样例书目录项与 spine 的映射逻辑未变（此前已验证跳转可用），**真实 EPUB 的 EPUB3 nav / EPUB2 NCX 两种结构待你真机确认**。
+
+### 5. 注释点击无弹窗、反而翻页
+- **根因**：上一版点击只按左/中/右分区处理，没有链接命中。
+- **修复**：排版时为每页构建 `LinkInteractionRegionSet`（YueduCoreText 官方命中 API，含 `epub:type=noteref` 语义），点击时先用页本地点命中：命中 noteref 且能找到注脚文本（`session.pipelineFootnotes`）→ 底部弹层显示注释，关闭后阅读位置不变（无翻页、无重排）；命中普通链接 → 弹提示"原型暂不支持链接跳转"（按未答复时的保守默认处理，未实现书内跳转）；未命中才进入翻页判定。
+- **验证**：命中优先级在代码路径上先于翻页；**样例书两个注脚与真实 EPUB 注脚的点击弹窗待你真机确认**。
+
+## 三、验收项状态（明确区分实测方式）
+
+| 验收项 | 状态 | 说明 |
+| --- | --- | --- |
+| 打开样例书并渲染分页 | ✅ 模拟器实测 | 第一章 16 页（本轮字号/视口下），CJK/缩进/边距正常 |
+| 启动稳定性（含修复的启动崩溃） | ✅ 模拟器实测 | 4 次启动全部存活；崩溃根因已定位并修复 |
+| 全屏阅读界面 | ✅ 模拟器截图 | 真机交互待验 |
+| 连续前后翻页不闪不跳 | ⏳ 真机待验 | 时序守卫已实现并经日志确认；拖动手感需真机 |
+| 拖动预览与落页一致 | ⏳ 真机待验 | 架构不变量未变（同一份位图） |
+| 目录显示并可跳转 | ⏳ 真机待验 | manifest 定位已实现；样例书可测，真实 EPUB 未验 |
+| 注脚点击弹窗且不翻页 | ⏳ 真机待验 | 样例书含 2 个注脚可测；真实 EPUB 未验 |
+| Files 导入 | ⏳ 真机待验 | 系统文件选择器未自动化 |
+| 已下载 EPUB 打开 | ⏳ 真机待验 | 入口已接，走同一流程 |
+| **真实 EPUB（你报告问题的书）** | ❌ **未验证** | 我手上没有该文件；不能以样例书代替 |
+
+## 四、构建与交付
+
+- 模拟器 Debug 构建：通过（iPhone 18 Pro 模拟器实测运行）。
+- 未签名 IPA（真机自签后安装）：`novelia-ios-port/build/Novelia-unsigned-prototype.ipa`
+  - 7,078,360 bytes · SHA-256 `b3085038b2d6e2304a719098b30a50b97e21cb787beaeeb377fb8eef36528b8e`
+  - Release 配置 + `CODE_SIGNING_ALLOWED=NO`，与 CI 流程一致
+- 推送：`prototype/yuedu-coretext-pager` 已推送至私密仓库 `Guanine000/novelia-ios-port`（`2827417`；本轮 `3b5358d` 提交后随即推送）。未动 `main`，未触碰其他任何仓库。
+- CI：如需可在 Actions 手动 dispatch 该分支构建（上一轮 run 37757793663 为旧代码）。
+
+## 五、遗留问题与边界
+
+1. 真实 EPUB 全项验收未做（缺文件）——这是下一轮唯一入口任务。
+2. 普通链接（书内 `<a href>`）本轮只提示不导航；外部 URL 链接同样。
+3. 改字号后阅读位置按章首页首近似恢复，未做精确位置映射。
+4. 容器解析仍为正则提取（原型限制见 DEPENDENCIES.md）；排版为整章一次完成，超大章节的内存/耗时未压测。
+5. 仿真翻页动画按约定未开始，待翻页一致性真机验收通过后再做。
