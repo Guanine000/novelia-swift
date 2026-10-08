@@ -226,6 +226,13 @@ struct PrototypeReaderView: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
+                            if let count = model.container?.tableDisplayStripCount, count > 0 {
+                                Section {
+                                    Text("本书包含 \(count) 处表格化垂直居中声明（display:table/vertical-align:middle），已剥离以正常显示图片，插图不再垂直居中。")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                             let tocEntries = model.container?.toc ?? []
                             ForEach(Array(tocEntries.enumerated()), id: \.offset) { index, entry in
                                 let isCurrent = model.currentTOCIndex == index

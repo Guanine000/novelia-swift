@@ -1,3 +1,4 @@
+import OSLog
 import SwiftUI
 import UIKit
 import YueduCoreText
@@ -170,6 +171,9 @@ final class PrototypeReaderModel: ObservableObject {
         config.textColor = pageTextColor
         config.backgroundColor = pageBackground
         config.defaultTextAlignment = .natural
+        config.onDiagnostic = { diagnostic in
+            engineDiagLog.fault("ENGINE_DIAG \(String(describing: diagnostic), privacy: .public)")
+        }
         return config
     }
 
@@ -436,6 +440,8 @@ struct PrototypeNote: Identifiable, Equatable {
 }
 
 /// 把 YueduCoreText 的排版错误翻译成可诊断的中文信息（真实 EPUB 排查必需）。
+private let engineDiagLog = Logger(subsystem: "cc.novelia.ios.port", category: "enginediag")
+
 private func describeLayoutError(_ error: Error) -> String {
     if let layoutError = error as? HTMLLayoutError {
         switch layoutError {
