@@ -27,9 +27,9 @@
 1. **MPL-2.0（YueduCoreText）**：以库形式链接不要求整个 App 开源，但需：
    - 在 App 内或随附文档中保留 MPL-2.0 许可声明并注明 YueduCoreText 来源；
    - 若修改其源码再分发，修改的文件须以 MPL-2.0 提供。本项目未修改其源码。
-   - 上游源码地址须可获取（引用上方 URL 即满足"可获取源码"的常见做法）。
+   - 分发可执行文件时，须让接收者以合理方式取得对应 MPL 覆盖源码；本次锁定的准确提交和取得方式见应用随附的 `ThirdPartyLicenses/INDEX.md`。
 2. **MIT（ReadiumZIPFoundation、SwiftSoup）**：保留版权与许可声明即可。
-3. **不得使用** Yuedu / Yuedu-reader 的名称、图标、Logo 或其他品牌素材；本原型未使用，后续迁移亦不得引入。
+3. 许可不授予 Yuedu / Yuedu-reader 的商标、Logo 或其他品牌素材使用权；清单中为说明软件来源而列出项目名称。本原型未使用其图标或 Logo。
 4. 仓库内现有 Readium（swift-toolkit）依赖及其许可义务不在本切片范围内变更。
 
 ## 验证记录

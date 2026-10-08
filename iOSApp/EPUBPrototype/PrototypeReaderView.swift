@@ -315,7 +315,13 @@ struct PrototypeReaderView: View {
             Form {
                 Section("字体") {
                     NavigationLink {
-                        PrototypeFontPicker(selection: $draftStyle.fontFamily)
+                        PrototypeFontPicker(selection: $draftStyle.fontFamily) { deletedFamily in
+                            if model.style.fontFamily == deletedFamily {
+                                var fallback = model.style
+                                fallback.fontFamily = nil
+                                model.applyStyle(fallback)
+                            }
+                        }
                     } label: {
                         HStack {
                             Text("字体选择")
@@ -351,6 +357,13 @@ struct PrototypeReaderView: View {
                     styleSlider("下", value: $draftStyle.bottomMargin, range: 0...120)
                     styleSlider("左", value: $draftStyle.leftMargin, range: 0...80)
                     styleSlider("右", value: $draftStyle.rightMargin, range: 0...80)
+                }
+                Section {
+                    Button("恢复默认样式", systemImage: "arrow.counterclockwise") {
+                        draftStyle = PrototypeReaderStyle()
+                    }
+                    Text("恢复后点击右上角“应用”才会重新排版并保存。")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section {
                     Text("点击“应用”后重新分页，并按当前章节的页数比例恢复位置；文字位置可能略有变化。缩进选择“沿用书籍”可恢复原排版。")
@@ -410,10 +423,9 @@ struct PrototypeReaderView: View {
 /// UIFont 列出的字体族包含系统字体以及已安装且对本 App 可见的设备字体。
 private struct PrototypeFontPicker: View {
     @Binding var selection: String?
+    var onDeleteImportedFamily: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
-    @State private var isImportingFont = false
-    @State private var importError: String?
 
     private var families: [String] {
         UIFont.familyNames.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
@@ -422,10 +434,11 @@ private struct PrototypeFontPicker: View {
 
     var body: some View {
         List {
-            Button {
-                isImportingFont = true
+            NavigationLink {
+                PrototypeImportedFontsView(selection: $selection,
+                                           onDeleteImportedFamily: onDeleteImportedFamily)
             } label: {
-                Label("从“文件”导入字体", systemImage: "square.and.arrow.down")
+                Label("管理导入的字体", systemImage: "square.and.arrow.down")
             }
             Button {
                 selection = nil
@@ -454,13 +467,76 @@ private struct PrototypeFontPicker: View {
         }
         .navigationTitle("本机字体")
         .searchable(text: $query, prompt: "搜索字体")
-        .fileImporter(isPresented: $isImportingFont, allowedContentTypes: [.font]) { result in
-            do {
-                let url = try result.get()
-                selection = try PrototypeLocalFonts.importFont(from: url)
-                dismiss()
-            } catch {
-                importError = error.localizedDescription
+    }
+}
+
+private struct PrototypeImportedFontsView: View {
+    @Binding var selection: String?
+    var onDeleteImportedFamily: (String) -> Void
+    @State private var fonts: [PrototypeLocalFonts.ImportedFont] = []
+    @State private var isImportingFont = false
+    @State private var importError: String?
+    @State private var importedFamily: String?
+    @State private var fontToDelete: PrototypeLocalFonts.ImportedFont?
+
+    var body: some View {
+        List {
+            Button {
+                isImportingFont = true
+            } label: {
+                Label("从“文件”导入字体", systemImage: "plus")
+            }
+            if let importedFamily {
+                Text("已导入并选中：\(importedFamily)。返回阅读样式后点击“应用”生效。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if fonts.isEmpty {
+                ContentUnavailableView("尚未导入字体", systemImage: "textformat",
+                                       description: Text("支持从“文件”导入 TTF、OTF、TTC 字体。"))
+            } else {
+                ForEach(fonts) { font in
+                    HStack {
+                        Button {
+                            selection = font.family
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(font.family)
+                                    Text(font.format).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if selection == font.family { Image(systemName: "checkmark") }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        Button(role: .destructive) {
+                            fontToDelete = font
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("删除 \(font.family)")
+                    }
+                    .swipeActions {
+                        Button("删除", role: .destructive) { fontToDelete = font }
+                    }
+                }
+            }
+        }
+        .navigationTitle("导入的字体")
+        .onAppear { reload() }
+        .sheet(isPresented: $isImportingFont) {
+            PrototypeFilePicker(contentTypes: [.item]) { url in
+                isImportingFont = false
+                do {
+                    let family = try PrototypeLocalFonts.importFont(from: url)
+                    selection = family
+                    importedFamily = family
+                    reload()
+                } catch {
+                    importError = error.localizedDescription
+                }
             }
         }
         .alert("字体导入失败", isPresented: Binding(
@@ -471,18 +547,47 @@ private struct PrototypeFontPicker: View {
         } message: {
             Text(importError ?? "")
         }
+        .confirmationDialog("删除导入的字体？", isPresented: Binding(
+            get: { fontToDelete != nil },
+            set: { if !$0 { fontToDelete = nil } }
+        ), titleVisibility: .visible) {
+            Button("删除字体文件", role: .destructive) {
+                if let fontToDelete { delete(fontToDelete) }
+                fontToDelete = nil
+            }
+            Button("取消", role: .cancel) { fontToDelete = nil }
+        } message: {
+            Text("删除后如需再次使用，请重新导入字体文件。")
+        }
+    }
+
+    private func reload() {
+        fonts = PrototypeLocalFonts.importedFonts()
+    }
+
+    private func delete(_ font: PrototypeLocalFonts.ImportedFont) {
+        do {
+            try PrototypeLocalFonts.deleteFont(font)
+            if selection == font.family { selection = nil }
+            onDeleteImportedFamily(font.family)
+            if importedFamily == font.family { importedFamily = nil }
+            reload()
+        } catch {
+            importError = error.localizedDescription
+        }
     }
 }
 
 // MARK: - 文件选择（UIKit 文档选择器：iCloud 按需下载可靠，任意文件可选）
 
 struct PrototypeFilePicker: UIViewControllerRepresentable {
+    var contentTypes: [UTType] = [.data]
     var onPick: (URL) -> Void
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         // copy 导入模式：系统把所选文件复制进应用沙箱后回调，
         // 不受 open 模式的 UTI 启用规则与 iCloud 占位文件影响，条目总能点选。
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: true)
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: contentTypes, asCopy: true)
         picker.delegate = context.coordinator
         picker.allowsMultipleSelection = false
         return picker

@@ -37,6 +37,13 @@ struct PrototypeReaderStyle: Codable, Equatable {
 
 @MainActor
 enum PrototypeLocalFonts {
+    struct ImportedFont: Identifiable {
+        let url: URL
+        let family: String
+        var id: URL { url }
+        var format: String { url.pathExtension.uppercased() }
+    }
+
     private static var directory: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("EPUBReaderFonts", isDirectory: true)
@@ -63,20 +70,44 @@ enum PrototypeLocalFonts {
         let registered = CTFontManagerRegisterFontsForURL(destination as CFURL, .process, nil)
         guard let descriptors = CTFontManagerCreateFontDescriptorsFromURL(destination as CFURL) as? [CTFontDescriptor],
               let family = descriptors.compactMap({ CTFontDescriptorCopyAttribute($0, kCTFontFamilyNameAttribute) as? String }).first else {
+            try? FileManager.default.removeItem(at: destination)
             throw FontImportError.registrationFailed
         }
         guard registered || UIFont.familyNames.contains(family) else {
+            try? FileManager.default.removeItem(at: destination)
             throw FontImportError.registrationFailed
         }
         return family
     }
 
+    static func importedFonts() -> [ImportedFont] {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil) else { return [] }
+        return files.compactMap { file in
+            guard ["ttf", "otf", "ttc"].contains(file.pathExtension.lowercased()),
+                  let descriptors = CTFontManagerCreateFontDescriptorsFromURL(file as CFURL) as? [CTFontDescriptor],
+                  let family = descriptors.compactMap({
+                      CTFontDescriptorCopyAttribute($0, kCTFontFamilyNameAttribute) as? String
+                  }).first else { return nil }
+            return ImportedFont(url: file, family: family)
+        }.sorted { $0.family.localizedStandardCompare($1.family) == .orderedAscending }
+    }
+
+    static func deleteFont(_ font: ImportedFont) throws {
+        guard font.url.deletingLastPathComponent().standardizedFileURL == directory.standardizedFileURL else {
+            throw FontImportError.invalidLocation
+        }
+        CTFontManagerUnregisterFontsForURL(font.url as CFURL, .process, nil)
+        try FileManager.default.removeItem(at: font.url)
+    }
+
     private enum FontImportError: LocalizedError {
-        case unsupportedFormat, registrationFailed
+        case unsupportedFormat, registrationFailed, invalidLocation
         var errorDescription: String? {
             switch self {
             case .unsupportedFormat: "请选择 TTF、OTF 或 TTC 字体文件。"
             case .registrationFailed: "无法注册该字体文件，请确认文件完整且格式受 iOS 支持。"
+            case .invalidLocation: "只能删除本应用导入的字体。"
             }
         }
     }

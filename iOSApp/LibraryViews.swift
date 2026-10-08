@@ -2109,6 +2109,7 @@ private struct ThirdPartyLicensesView: View {
                 NavigationLink("YueduCoreText NOTICE / Unicode License v3") {
                     licenseText("YueduCoreText-NOTICE.txt", title: "附加声明")
                 }
+                Link("YueduCoreText 0.8.0 对应源码", destination: URL(string: "https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/783ce903d5faf4ff5d15c546e32a107537ba5efe")!)
             }
         }
         .navigationTitle("开源许可")
