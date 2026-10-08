@@ -246,3 +246,21 @@
 
 - 模拟器冒烟：真实书打开 ✓、目录 10/10 ✓、进程稳定 ✓。链接跳转与文件选择器为系统 UI，自动化点击不可行，**待真机复验**。
 - 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,110,072 bytes · SHA-256 `797734b9197ad1e9b94e47f0c06dbd63d4a14cda92567e3e3c8ab64fe4846a6a`
+
+---
+
+## 追加：第十轮修复（提交 `b5aa815`）
+
+### 用户真机反馈
+
+文档选择器能打开，但文件无法点选，右上角也没有确认/导入按钮。
+
+### 根因与修复
+
+1. **选择器内嵌 sheet 失效**：UIDocumentPickerViewController 包在 SwiftUI `.sheet` 里，在用户的系统版本上工具栏按钮缺失、条目不可点。改为 **`fullScreenCover` 直接全屏呈现**（"我的下载"与阅读页两处入口一致）。
+2. **EPUB 类型未注册**：应用此前未声明可打开 EPUB，"打开型"文档选择器对 .epub 的启用不可靠。新增正式 `iOSApp/Info.plist`（与 GENERATE_INFOPLIST_FILE 生成键合并，已验证产物 plist 含声明）：`UTImportedTypeDeclarations`（org.idpf.epub-container，conforms public.data，扩展名 epub）+ `CFBundleDocumentTypes`。
+
+### 验证状态与交付物
+
+- 构建 ✓、产物 plist 已验证含 UT 声明 ✓、模拟器真实书冒烟 ✓。选择器交互需真机复验。
+- 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,111,204 bytes · SHA-256 `5e4ce1d7f8802ce916de9f6d9db445bef5ddd0dee9edaf4975bcd1f500e27696`
