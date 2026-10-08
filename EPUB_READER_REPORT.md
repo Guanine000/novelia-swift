@@ -365,3 +365,23 @@ spine 7（人物群像插画）✓、spine 9（紫发少女插画）✓ 完整�
 ### 交付物
 
 - 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,143,886 bytes · SHA-256 `d0231a851d07d2566adb9f27ccdf08a17a6fa92c9c7a0967c0a5096f5330c208`
+
+---
+
+## 追加：第二十轮（提交 `fix: white-on-beige dialogue text`）—— 白字台词修复
+
+### 现象与回答用户问题
+
+用户问"字看不清，是书本来就这样吗"——**书的设定确实是白字**：`.char-quote { color:#FFFFFF }` + `.profile-*-quote { text-shadow: #A65EB5 ... }`（多看风格"白字+彩色阴影描边"台词）。但当前排版引擎不支持 text-shadow，阴影不渲染，只剩白字落在米色底上几乎不可见。所以半是书的设定、半是引擎支持边界，并非我们的 opacity 改写造成（该书无 opacity）。
+
+### 修复
+
+宿主预处理把**带颜色的 `text-shadow` 声明改写为 `color: <阴影色>`**：profile 类在 char-quote 之后声明、同优先级后者胜，白字被覆盖为角色配色（紫色/樱色等）；无颜色分量的阴影直接删除。数量在目录页披露。
+
+### 验证（模拟器 + 真实文件实测）
+
+illus4.1 页的两段台词由不可见白字变为紫色可读文字（截图与用户截图同位置同内容）。
+
+### 交付物
+
+- 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,144,206 bytes · SHA-256 `c748008fe7473c2e4e9289a0f49afba20f25ff0fa70baf14affbd71bea665e6d`
