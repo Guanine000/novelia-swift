@@ -61,10 +61,11 @@ final class PrototypePageBook {
     /// 每页之间让路主线程（yield）并立即发布已完成的页——真实书籍整章一次排完
     /// 会冻结 UI 数秒（卡顿），逐页增量让第一页立即可用、翻页预览尽早就绪。
     func layoutChapter(_ spineIndex: Int, container: PrototypeEPUBContainer,
-                       config: BrowserLayoutConfig) async throws {
+                       config: BrowserLayoutConfig, aspectRatio: CGFloat = 0.5) async throws {
         let html = try await container.chapterHTML(at: spineIndex)
         let chapterHref = container.spine[spineIndex].href
-        let css = await container.cssTexts(forChapterHTML: html, chapterHref: chapterHref)
+        let css = await container.cssTexts(forChapterHTML: html, chapterHref: chapterHref,
+                                           aspectRatio: aspectRatio)
         let images = await container.images(forChapterHTML: html, chapterHref: chapterHref)
 
         let document = HTMLLayoutDocument(

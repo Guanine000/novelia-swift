@@ -192,6 +192,9 @@ final class PrototypeEPUBContainer {
     /// 已把 `opacity:X` 改写为等价文字 alpha 颜色的数量（引擎不支持 opacity 属性、
     /// 但支持 color 的 rgba alpha；当前主题为米色底黑字，故等价映射为黑色 alpha）。
     private(set) var opacityRewriteCount = 0
+    /// 已按设备条件求值的 @media 规则块数量（引擎不支持 media queries；
+    /// print/amzn-mobi 丢弃，not amzn-mobi 保留内容，aspect-ratio 按视口求值）。
+    private(set) var mediaQueryRewriteCount = 0
 
     func chapterHTML(at index: Int) async throws -> String {
         guard spine.indices.contains(index) else { throw PrototypeEPUBError.emptySpine }
@@ -256,7 +259,9 @@ final class PrototypeEPUBContainer {
 
     /// 章节需要的外部 CSS 文本：按 <link rel=stylesheet> 顺序 + 内联 <style>，@import 递归展开（深度 3）。
     /// 相对 href 一律相对**章节文件所在目录**解析（章节常在 OPF 子目录里，如 OEBPS/Text/）。
-    func cssTexts(forChapterHTML html: String, chapterHref: String) async -> [String] {
+    /// aspectRatio（宽/高）用于对 @media 的 device-aspect-ratio 条件求值。
+    func cssTexts(forChapterHTML html: String, chapterHref: String,
+                  aspectRatio: CGFloat) async -> [String] {
         let chapterDirectory = Self.directory(of: chapterHref)
         var texts: [String] = []
         for attributes in XMLValueParser.openTagAttributes("link", in: html) {
@@ -265,25 +270,27 @@ final class PrototypeEPUBContainer {
             let path = Self.isAbsoluteInPackage(href)
                 ? Self.normalizePath(String(href.dropFirst()))
                 : Self.normalizePath(chapterDirectory + href)
-            if let css = await cssText(atPath: path, depth: 0) {
+            if let css = await cssText(atPath: path, depth: 0, aspectRatio: aspectRatio) {
                 texts.append(css)
             }
         }
         for block in XMLValueParser.elementBlocks("style", in: html) {
-            let cleaned = block
+            var cleaned = block
                 .replacingOccurrences(of: "<![CDATA[", with: "")
                 .replacingOccurrences(of: "]]>", with: "")
+            cleaned = Self.filterMediaQueries(in: cleaned, aspectRatio: aspectRatio,
+                                              counter: &mediaQueryRewriteCount)
             texts.append(Self.rewriteOpacity(in: cleaned, counter: &opacityRewriteCount))
         }
         return texts
     }
 
-    private func cssText(atPath path: String, depth: Int) async -> String? {
+    private func cssText(atPath path: String, depth: Int, aspectRatio: CGFloat) async -> String? {
         guard depth < 3 else { return nil }
         guard let data = await entryData(atPath: path),
               var css = String(data: data, encoding: .utf8) else { return nil }
         guard let regex = try? NSRegularExpression(pattern: "@import\\s+(?:url\\(\\s*)?[\"']?([^\"')\\s;]+)") else {
-            return css
+            return finish(css: css, aspectRatio: aspectRatio, mediaCounter: &mediaQueryRewriteCount)
         }
         let ns = css as NSString
         let matches = regex.matches(in: css, range: NSRange(location: 0, length: ns.length)).reversed()
@@ -292,11 +299,69 @@ final class PrototypeEPUBContainer {
             let importedPath = Self.isAbsoluteInPackage(importedHref)
                 ? Self.normalizePath(String(importedHref.dropFirst()))
                 : Self.normalizePath(Self.directory(of: path) + importedHref)
-            let imported = await cssText(atPath: importedPath, depth: depth + 1) ?? ""
+            let imported = await cssText(atPath: importedPath, depth: depth + 1, aspectRatio: aspectRatio) ?? ""
             css = (css as NSString).replacingCharacters(in: match.range, with: imported)
         }
-        css = Self.rewriteOpacity(in: css, counter: &opacityRewriteCount)
-        return css
+        return finish(css: css, aspectRatio: aspectRatio, mediaCounter: &mediaQueryRewriteCount)
+    }
+
+    private func finish(css: String, aspectRatio: CGFloat, mediaCounter: inout Int) -> String {
+        var result = Self.filterMediaQueries(in: css, aspectRatio: aspectRatio, counter: &mediaCounter)
+        result = Self.rewriteOpacity(in: result, counter: &opacityRewriteCount)
+        return result
+    }
+
+    /// @media 按设备条件求值：匹配的规则块替换为其内容，不匹配的整块移除。
+    /// 支持 print（丢弃）、amzn-mobi（Kindle 专用，丢弃）、not amzn-mobi（保留）、
+    /// (min|max)-device-aspect-ratio:A/B（按视口宽高比求值）；未知查询保守丢弃（基础样式保留）。
+    static func filterMediaQueries(in css: String, aspectRatio: CGFloat,
+                                   counter: inout Int) -> String {
+        var result = css
+        while let mediaStart = result.range(of: "@media", options: .caseInsensitive) {
+            // prelude 到 {，再用括号深度找配对的 }。
+            guard let braceStart = result[mediaStart.lowerBound...].firstIndex(of: "{") else { break }
+            let query = String(result[mediaStart.upperBound..<braceStart]).trimmingCharacters(in: .whitespacesAndNewlines)
+            var depth = 0
+            var closeIndex: String.Index?
+            var cursor = braceStart
+            while cursor < result.endIndex {
+                let ch = result[cursor]
+                if ch == "{" { depth += 1 }
+                if ch == "}" {
+                    depth -= 1
+                    if depth == 0 { closeIndex = cursor; break }
+                }
+                cursor = result.index(after: cursor)
+            }
+            guard let close = closeIndex else { break }
+            let inner = String(result[result.index(after: braceStart)..<close])
+            counter += 1
+            let replacement = Self.evaluateMediaQuery(query, aspectRatio: aspectRatio) ? inner : ""
+            result.replaceSubrange(mediaStart.lowerBound...close, with: replacement)
+        }
+        return result
+    }
+
+    private static func evaluateMediaQuery(_ raw: String, aspectRatio: CGFloat) -> Bool {
+        let query = raw.lowercased()
+        if query.contains("amzn-mobi") {
+            return query.contains("not amzn-mobi")
+        }
+        if query.contains("print") && !query.contains("screen") {
+            return false
+        }
+        if let range = query.range(of: "device-aspect-ratio\\s*:\\s*([0-9]+)\\s*/\\s*([0-9]+)",
+                                   options: .regularExpression),
+           let a = Double(query[range][query[range].range(of: ":\\s*([0-9]+)", options: .regularExpression)!.upperBound...]
+                          .components(separatedBy: "/").first?.trimmingCharacters(in: .whitespaces) ?? ""),
+           let b = Double(query[range].components(separatedBy: "/").last?.filter { $0.isNumber || $0 == "." } ?? ""),
+           b > 0 {
+            let target = a / b
+            if query.contains("min-device-aspect-ratio") { return aspectRatio >= target }
+            if query.contains("max-device-aspect-ratio") { return aspectRatio <= target }
+        }
+        // 未知媒体查询：保守丢弃（基础样式仍在，设备变体样式丢失，数量已记录）。
+        return false
     }
 
     /// 章节引用的位图图片：以 HTML 中的原始 src 为键（引擎按字面 src 查表）。

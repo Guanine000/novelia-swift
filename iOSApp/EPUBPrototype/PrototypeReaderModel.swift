@@ -45,6 +45,11 @@ final class PrototypeReaderModel: ObservableObject {
 
     var displayScale: CGFloat = UIScreen.main.scale
 
+    /// 视口宽高比（宽/高），用于 @media 的 device-aspect-ratio 条件求值。
+    private var viewportAspectRatio: CGFloat {
+        viewportSize.width / max(viewportSize.height, 1)
+    }
+
     private var relayoutTask: Task<Void, Never>?
     private var contentInsets = UIEdgeInsets(top: 24, left: 20, bottom: 24, right: 20)
 
@@ -157,7 +162,8 @@ final class PrototypeReaderModel: ObservableObject {
         isLayingOut = true
         defer { isLayingOut = false }
         do {
-            try await book.layoutChapter(spineIndex, container: container, config: makeConfig())
+            try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
+                                   aspectRatio: viewportAspectRatio)
             if book.generation == generation {
                 status = .ready
                 location.spineIndex = spineIndex
@@ -188,7 +194,8 @@ final class PrototypeReaderModel: ObservableObject {
             isLayingOut = true
             defer { isLayingOut = false }
             guard let book = pageBook, container != nil, !book.hasChapter(target) else { return }
-            try? await book.layoutChapter(target, container: container, config: makeConfig())
+            try? await book.layoutChapter(target, container: container, config: makeConfig(),
+                                   aspectRatio: viewportAspectRatio)
         }
         prefetchNeighbors(of: target)
     }
@@ -201,7 +208,8 @@ final class PrototypeReaderModel: ObservableObject {
             guard !book.hasChapter(neighbor) else { continue }
             let config = makeConfig()
             Task {
-                try? await book.layoutChapter(neighbor, container: container, config: config)
+                try? await book.layoutChapter(neighbor, container: container, config: config,
+                                aspectRatio: viewportAspectRatio)
                 _ = generationSnapshot // 预取结果挂在当前 book 上，代次切换即整体作废
             }
         }
@@ -356,7 +364,8 @@ final class PrototypeReaderModel: ObservableObject {
             isLayingOut = true
             defer { isLayingOut = false }
             guard let container, let book = pageBook, !book.hasChapter(spineIndex) else { return }
-            try? await book.layoutChapter(spineIndex, container: container, config: makeConfig())
+            try? await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
+                                    aspectRatio: viewportAspectRatio)
         }
     }
 

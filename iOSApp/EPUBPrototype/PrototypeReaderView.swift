@@ -194,6 +194,13 @@ struct PrototypeReaderView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
+                        if let count = model.container?.mediaQueryRewriteCount, count > 0 {
+                            Section {
+                                Text("本书包含 \(count) 个 @media 规则块，已按设备条件求值（当前排版引擎不支持媒体查询；不匹配的规则被忽略）。")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                         ForEach(model.container?.toc ?? []) { entry in
                             Button {
                                 isShowingTOC = false
