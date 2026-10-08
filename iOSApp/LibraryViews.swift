@@ -1686,7 +1686,7 @@ struct MyDownloadsView: View {
         .navigationDestination(item: $prototypeTarget) { target in
             PrototypeReaderHost(initialURL: target.url)
         }
-        .sheet(isPresented: $isShowingFileImporter) {
+        .fullScreenCover(isPresented: $isShowingFileImporter) {
             PrototypeFilePicker { url in
                 Task { await importAndOpen(url) }
             }

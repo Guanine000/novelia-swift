@@ -69,7 +69,7 @@ struct PrototypeReaderView: View {
         .statusBarHidden(!showChrome)
         .sheet(isPresented: $isShowingTOC) { tocSheet }
         .sheet(item: $model.activeNote) { note in noteSheet(note) }
-        .sheet(isPresented: $isShowingImporter) {
+        .fullScreenCover(isPresented: $isShowingImporter) {
             PrototypeFilePicker { url in
                 Task { await model.importEPUB(from: url) }
             }
