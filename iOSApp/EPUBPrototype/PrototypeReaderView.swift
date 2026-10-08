@@ -52,6 +52,15 @@ struct PrototypeReaderView: View {
             }
             .overlay(alignment: .top) { topBar }
             .overlay(alignment: .bottom) { bottomBar }
+            .overlay(alignment: .bottom) {
+                // 常驻细进度条：工具栏隐藏时仍可见当前阅读进度。
+                Rectangle()
+                    .fill(Color(red: 0.91, green: 0.31, blue: 0.34).opacity(0.8))
+                    .frame(width: max(4, geometry.size.width * model.overallProgress), height: 2.5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .ignoresSafeArea(edges: .bottom)
+            }
             .onChange(of: geometry.size) { _, newSize in
                 model.viewportSize = newSize
             }
@@ -140,25 +149,35 @@ struct PrototypeReaderView: View {
         .disabled(!showChrome)
     }
 
-    // MARK: 底部状态栏
+    // MARK: 底部状态栏（页码 + 进度条）
 
     private var bottomBar: some View {
-        HStack {
-            Button {
-                model.commitTurn(forward: false)
-            } label: { Image(systemName: "chevron.left") }
-            .disabled(!model.canTurn(forward: false))
-            .accessibilityLabel("上一页")
-            Spacer()
-            Text(model.locationDescription)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button {
-                model.commitTurn(forward: true)
-            } label: { Image(systemName: "chevron.right") }
-            .disabled(!model.canTurn(forward: true))
-            .accessibilityLabel("下一页")
+        VStack(spacing: 8) {
+            HStack {
+                Button {
+                    model.commitTurn(forward: false)
+                } label: { Image(systemName: "chevron.left") }
+                .disabled(!model.canTurn(forward: false))
+                .accessibilityLabel("上一页")
+                Spacer()
+                Text(model.locationDescription)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    model.commitTurn(forward: true)
+                } label: { Image(systemName: "chevron.right") }
+                .disabled(!model.canTurn(forward: true))
+                .accessibilityLabel("下一页")
+            }
+            HStack(spacing: 10) {
+                ProgressView(value: model.overallProgress)
+                    .tint(Color(red: 0.91, green: 0.31, blue: 0.34))
+                Text("\(Int(model.overallProgress * 100))%")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 36, alignment: .trailing)
+            }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
@@ -179,40 +198,61 @@ struct PrototypeReaderView: View {
                         Text(diagnostic)
                     }
                 } else {
-                    List {
-                        if let count = model.container?.strippedScriptCount, count > 0 {
-                            Section {
-                                Text("本书包含 \(count) 处脚本内容，已忽略（脚本不参与显示）。")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                    ScrollViewReader { proxy in
+                        List {
+                            if let count = model.container?.strippedScriptCount, count > 0 {
+                                Section {
+                                    Text("本书包含 \(count) 处脚本内容，已忽略（脚本不参与显示）。")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
-                        }
-                        if let count = model.container?.opacityRewriteCount, count > 0 {
-                            Section {
-                                Text("本书包含 \(count) 处 opacity 透明度，已转换为等价文字颜色（当前排版引擎不支持 opacity 属性）。")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                            if let count = model.container?.opacityRewriteCount, count > 0 {
+                                Section {
+                                    Text("本书包含 \(count) 处 opacity 透明度，已转换为等价文字颜色（当前排版引擎不支持 opacity 属性）。")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
-                        }
-                        if let count = model.container?.mediaQueryRewriteCount, count > 0 {
-                            Section {
-                                Text("本书包含 \(count) 个 @media 规则块，已按设备条件求值（当前排版引擎不支持媒体查询；不匹配的规则被忽略）。")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                            if let count = model.container?.mediaQueryRewriteCount, count > 0 {
+                                Section {
+                                    Text("本书包含 \(count) 个 @media 规则块，已按设备条件求值（当前排版引擎不支持媒体查询；不匹配的规则被忽略）。")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
-                        }
-                        ForEach(model.container?.toc ?? []) { entry in
-                            Button {
-                                isShowingTOC = false
-                                model.jump(to: entry)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(entry.title).foregroundStyle(.primary)
-                                    if let spineIndex = entry.spineIndex {
-                                        Text("spine \(spineIndex + 1)")
-                                            .font(.caption2).foregroundStyle(.secondary)
+                            let tocEntries = model.container?.toc ?? []
+                            ForEach(Array(tocEntries.enumerated()), id: \.offset) { index, entry in
+                                let isCurrent = model.currentTOCIndex == index
+                                Button {
+                                    isShowingTOC = false
+                                    model.jump(to: entry)
+                                } label: {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(entry.title)
+                                                .foregroundStyle(isCurrent
+                                                    ? Color(red: 0.91, green: 0.31, blue: 0.34) : .primary)
+                                                .fontWeight(isCurrent ? .semibold : .regular)
+                                            if let spineIndex = entry.spineIndex {
+                                                Text("spine \(spineIndex + 1)")
+                                                    .font(.caption2).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        Spacer()
+                                        if isCurrent {
+                                            Image(systemName: "book.fill")
+                                                .font(.caption)
+                                                .foregroundStyle(Color(red: 0.91, green: 0.31, blue: 0.34))
+                                        }
                                     }
                                 }
+                                .id(index)
+                            }
+                        }
+                        .onAppear {
+                            if let current = model.currentTOCIndex {
+                                proxy.scrollTo(current, anchor: .center)
                             }
                         }
                     }

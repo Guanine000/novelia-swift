@@ -264,6 +264,27 @@ final class PrototypeReaderModel: ObservableObject {
         return "spine \(location.spineIndex + 1)/\(container.spine.count) · 第 \(min(location.pageIndex + 1, max(total, 1)))/\(max(total, 1)) 页 · gen \(generation)"
     }
 
+    /// 全书进度估计（0...1）：spine 粒度 + 当前章内页进度。
+    /// 章节尚未全部排版时无法精确总页数，按章节平均权重近似。
+    var overallProgress: Double {
+        guard let container, !container.spine.isEmpty else { return 0 }
+        let chapterTotal = max(pageCount(spineIndex: location.spineIndex), 1)
+        let chapterProgress = min(Double(location.pageIndex + 1), Double(chapterTotal)) / Double(chapterTotal)
+        return min((Double(location.spineIndex) + chapterProgress) / Double(container.spine.count), 1)
+    }
+
+    /// 与当前阅读位置对应的目录条目序号：最后一个 spineIndex ≤ 当前章的条目。
+    var currentTOCIndex: Int? {
+        guard let toc = container?.toc, !toc.isEmpty else { return nil }
+        var match: Int?
+        for (index, entry) in toc.enumerated() {
+            if let spineIndex = entry.spineIndex, spineIndex <= location.spineIndex {
+                match = index
+            }
+        }
+        return match
+    }
+
     /// 三页位图（同一份缓存结果，预览与落页共用）。
     /// 当前页同步渲染（保证首屏立即可见）；相邻页只用缓存并异步预渲染，
     /// 渲染完成后再刷新——拖动开始瞬间不再有解码大图造成的卡顿。
