@@ -27,6 +27,12 @@ final class PrototypeReaderModel: ObservableObject {
     @Published private(set) var fontSize: CGFloat = 21
     @Published private(set) var isAnimating = false
     @Published private(set) var isLayingOut = false
+    /// 当前展示的注脚弹窗；nil = 无弹窗。关闭弹层不改变阅读位置。
+    @Published var activeNote: PrototypeNote?
+    /// 普通链接点击提示（本轮不导航）。
+    @Published var plainLinkMessage: String?
+    /// Files 导入等产生的提示。
+    @Published var importMessage: String?
 
     /// 视口内容区尺寸（由界面测量后注入；变化即触发重排）。
     var viewportSize: CGSize = .zero {
@@ -47,6 +53,31 @@ final class PrototypeReaderModel: ObservableObject {
         return ""
     }
 
+    /// 目录为空时的诊断原因（来自容器解析）。
+    var tocDiagnosticText: String? {
+        guard let container, container.toc.isEmpty else { return nil }
+        return container.tocDiagnostic ?? "目录为空，原因未知"
+    }
+
+    // MARK: 链接 / 注脚命中
+
+    /// 视图点击点 → 链接语义。注脚返回其文本；普通链接返回 href（本轮不导航）。
+    func linkHit(at point: CGPoint) -> PrototypeLinkHit? {
+        guard let pageBook else { return nil }
+        let id = pageID(location.spineIndex, location.pageIndex)
+        guard let region = pageBook.linkRegion(at: point, for: id) else { return nil }
+        switch region.semantic {
+        case .noteref:
+            if let text = pageBook.footnoteText(forHref: region.href, id: id), !text.isEmpty {
+                return .footnote(text)
+            }
+            // noteref 但找不到注脚正文：不翻页，给出提示而不是静默。
+            return .plain("未找到注脚正文（\(region.href)）")
+        case .plain:
+            return .plain(region.href)
+        }
+    }
+
     // MARK: 打开
 
     func open(url: URL) async {
@@ -58,6 +89,39 @@ final class PrototypeReaderModel: ObservableObject {
             await relayout(keepingCurrentSpine: false)
         } catch {
             status = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Files 导入：security-scoped 资源在 NSFileCoordinator 协调下复制到本地，
+    /// 再走同一打开流程。失败写入 importMessage。
+    func importEPUB(from pickedURL: URL) async {
+        let needsScope = pickedURL.startAccessingSecurityScopedResource()
+        defer { if needsScope { pickedURL.stopAccessingSecurityScopedResource() } }
+
+        let importsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("PrototypeImports", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: importsDirectory, withIntermediateDirectories: true)
+            let destination = importsDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("epub")
+            var coordinatedError: NSError?
+            var copyError: Error?
+            NSFileCoordinator().coordinate(readingItemAt: pickedURL, options: .forUploading,
+                                           error: &coordinatedError) { sourceURL in
+                // .forUploading 给出临时快照（目录/安全区外文件也可复制）。
+                do {
+                    try FileManager.default.copyItem(at: sourceURL, to: destination)
+                } catch {
+                    copyError = error
+                }
+            }
+            if let coordinatedError { throw coordinatedError }
+            if let copyError { throw copyError }
+            importMessage = nil
+            await open(url: destination)
+        } catch {
+            importMessage = "导入失败：\(error.localizedDescription)"
         }
     }
 
@@ -225,4 +289,11 @@ final class PrototypeReaderModel: ObservableObject {
         fontSize = clamped
         Task { await relayout(keepingCurrentSpine: true) }
     }
+}
+
+// MARK: - 注脚弹窗模型
+
+struct PrototypeNote: Identifiable, Equatable {
+    let id = UUID()
+    let text: String
 }

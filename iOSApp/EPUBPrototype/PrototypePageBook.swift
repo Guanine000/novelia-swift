@@ -40,6 +40,12 @@ final class PrototypePageBook {
     private struct ChapterLayout {
         var pages: [PageFragments]
         var sourceText: String
+        /// 每页的 DisplayList（渲染与链接命中共用，避免重复构建）。
+        var displayLists: [DisplayList]
+        /// 每页可点击链接区域（含 noteref 语义），页序号 → 区域集合。
+        var linkRegions: [LinkInteractionRegionSet]
+        /// 本章注脚文本：noteID（不含 #）→ 文本。
+        var footnotes: [String: String]
     }
 
     private var chapters: [Int: ChapterLayout] = [:]
@@ -64,11 +70,24 @@ final class PrototypePageBook {
         )
         let session = try document.makePageSession()
         var pages: [PageFragments] = []
+        var displayLists: [DisplayList] = []
+        var linkRegions: [LinkInteractionRegionSet] = []
         while let page = try await session.layoutNextPage() {
             pages.append(page)
+            let list = DisplayListBuilder.build(for: page, sourceText: session.sourceText)
+            displayLists.append(list)
+            linkRegions.append(LinkInteractionRegionSet.build(
+                from: list, spineIndex: spineIndex, anchors: session.pipelineLinkAnchors
+            ))
         }
         // 空章也允许（保留零页记录，翻页时跨过）。
-        chapters[spineIndex] = ChapterLayout(pages: pages, sourceText: session.sourceText)
+        chapters[spineIndex] = ChapterLayout(
+            pages: pages,
+            sourceText: session.sourceText,
+            displayLists: displayLists,
+            linkRegions: linkRegions,
+            footnotes: session.pipelineFootnotes
+        )
     }
 
     func hasChapter(_ spineIndex: Int) -> Bool {
@@ -86,9 +105,24 @@ final class PrototypePageBook {
 
     func displayList(for id: PrototypePageID) -> DisplayList? {
         guard let chapter = chapters[id.spineIndex],
-              chapter.pages.indices.contains(id.pageIndex) else { return nil }
-        let page = chapter.pages[id.pageIndex]
-        return DisplayListBuilder.build(for: page, sourceText: chapter.sourceText)
+              chapter.displayLists.indices.contains(id.pageIndex) else { return nil }
+        return chapter.displayLists[id.pageIndex]
+    }
+
+    // MARK: 链接与注脚命中
+
+    /// 页面本地点的链接命中；点为视图坐标（当前页槽位与视口重合，故直接同页本地坐标）。
+    func linkRegion(at point: CGPoint, for id: PrototypePageID) -> LinkInteractionRegion? {
+        guard let chapter = chapters[id.spineIndex],
+              chapter.linkRegions.indices.contains(id.pageIndex) else { return nil }
+        return chapter.linkRegions[id.pageIndex].hitTest(point)
+    }
+
+    /// 注脚链接对应的注释文本。href 形如 "#note1"；键为不含 "#" 的 noteID。
+    func footnoteText(forHref href: String, id: PrototypePageID) -> String? {
+        guard let chapter = chapters[id.spineIndex] else { return nil }
+        let noteID = href.hasPrefix("#") ? String(href.dropFirst()) : href
+        return chapter.footnotes[noteID] ?? chapter.footnotes[href]
     }
 
     /// 页面画布尺寸（含页边距的整页视口），用于渲染与翻页布局。
@@ -108,7 +142,9 @@ final class PrototypePageBook {
         let canvas = page.pageRect.rawValue
         guard canvas.width > 0, canvas.height > 0 else { return nil }
 
-        let list = DisplayListBuilder.build(for: page, sourceText: chapter.sourceText)
+        let list = chapter.displayLists.indices.contains(id.pageIndex)
+            ? chapter.displayLists[id.pageIndex]
+            : DisplayListBuilder.build(for: page, sourceText: chapter.sourceText)
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         format.opaque = true

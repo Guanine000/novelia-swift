@@ -1,15 +1,21 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-// MARK: - 原型阅读界面
+// MARK: - 原型阅读界面（全屏阅读页）
 //
-// 纵向切片入口：打开一份本地 EPUB（默认生成样例书），用 CoreText 分页 +
-// 左右相接平移翻页验证"预览 = 落页"。工具栏提供目录跳转与字号调整，
-// 两者都会明确使当前分页代次失效并重排。
+// 布局与交互参考 Yuedu-reader 的阅读器行为（仅参考布局/交互，不复制源码、
+// 不使用其品牌素材）：全屏正文，点击中部显隐工具栏，左右侧点击翻页，
+// 注脚点击底部弹层显示注释文本。工具栏为覆盖层，显隐不改变正文视口，
+// 因此不会触发重排。
+//
+// 分页不变量见 PrototypePageBook：预览页与落页共用同一份排版结果。
 
 struct PrototypeReaderView: View {
     @StateObject private var model = PrototypeReaderModel()
+    @Environment(\.dismiss) private var dismiss
     @State private var isShowingTOC = false
+    @State private var isShowingImporter = false
+    @State private var showChrome = true
     let bookURL: URL?
 
     var body: some View {
@@ -28,6 +34,12 @@ struct PrototypeReaderView: View {
                             model.commitTurn(forward: forward)
                         },
                         onAnimatingChange: { animating in model.setAnimating(animating) },
+                        linkHitTest: { point in model.linkHit(at: point) },
+                        onNoteTap: { text in model.activeNote = PrototypeNote(text: text) },
+                        onPlainLinkTap: { href in
+                            model.plainLinkMessage = "原型暂不支持链接跳转（\(href)）"
+                        },
+                        onCenterTap: { withAnimation(.easeInOut(duration: 0.15)) { showChrome.toggle() } },
                         images: model.pagerImages()
                     )
                     .frame(width: geometry.size.width, height: geometry.size.height)
@@ -38,6 +50,8 @@ struct PrototypeReaderView: View {
                         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
                 }
             }
+            .overlay(alignment: .top) { topBar }
+            .overlay(alignment: .bottom) { bottomBar }
             .onChange(of: geometry.size) { _, newSize in
                 model.viewportSize = newSize
             }
@@ -50,68 +64,174 @@ struct PrototypeReaderView: View {
                 }
             }
         }
-        .navigationTitle(model.container?.bookTitle ?? "排版原型")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("目录") { isShowingTOC = true }
-                    .disabled(model.container == nil)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 14) {
-                    Button {
-                        model.setFontSize(model.fontSize - 1)
-                    } label: { Image(systemName: "textformat.size.smaller") }
-                    Button {
-                        model.setFontSize(model.fontSize + 1)
-                    } label: { Image(systemName: "textformat.size.larger") }
-                }
+        .toolbar(.hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
+        .statusBarHidden(!showChrome)
+        .sheet(isPresented: $isShowingTOC) { tocSheet }
+        .sheet(item: $model.activeNote) { note in noteSheet(note) }
+        .fileImporter(
+            isPresented: $isShowingImporter,
+            allowedContentTypes: [UTType(filenameExtension: "epub") ?? .data],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                Task { await model.importEPUB(from: url) }
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack {
-                Button {
-                    model.commitTurn(forward: false)
-                } label: { Image(systemName: "chevron.left") }
-                .disabled(!model.canTurn(forward: false))
-                Spacer()
-                Text(model.locationDescription)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    model.commitTurn(forward: true)
-                } label: { Image(systemName: "chevron.right") }
-                .disabled(!model.canTurn(forward: true))
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 8)
+        .alert("导入", isPresented: .init(
+            get: { model.importMessage != nil },
+            set: { if !$0 { model.importMessage = nil } }
+        )) {
+            Button("好", role: .cancel) { model.importMessage = nil }
+        } message: {
+            Text(model.importMessage ?? "")
         }
-        .sheet(isPresented: $isShowingTOC) {
-            NavigationStack {
-                List(model.container?.toc ?? []) { entry in
-                    Button {
-                        isShowingTOC = false
-                        model.jump(to: entry)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(entry.title).foregroundStyle(.primary)
-                            if let spineIndex = entry.spineIndex {
-                                Text("spine \(spineIndex + 1)")
-                                    .font(.caption2).foregroundStyle(.secondary)
+        .alert("链接", isPresented: .init(
+            get: { model.plainLinkMessage != nil },
+            set: { if !$0 { model.plainLinkMessage = nil } }
+        )) {
+            Button("好", role: .cancel) { model.plainLinkMessage = nil }
+        } message: {
+            Text(model.plainLinkMessage ?? "")
+        }
+    }
+
+    // MARK: 顶部工具栏（覆盖层，显隐不改视口）
+
+    private var topBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.title3)
+                    .frame(width: 40, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("返回")
+            Text(model.container?.bookTitle ?? "排版原型")
+                .font(.system(size: 14, weight: .medium))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+            Button {
+                isShowingImporter = true
+            } label: {
+                Image(systemName: "square.and.arrow.down")
+                    .frame(width: 36, height: 36)
+            }
+            .accessibilityLabel("导入 EPUB")
+            Button {
+                isShowingTOC = true
+            } label: {
+                Image(systemName: "list.bullet")
+                    .frame(width: 36, height: 36)
+            }
+            .accessibilityLabel("目录")
+            Button {
+                model.setFontSize(model.fontSize + 1)
+            } label: {
+                Image(systemName: "textformat.size")
+                    .frame(width: 36, height: 36)
+            }
+            .accessibilityLabel("放大字号")
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 10)
+        .frame(height: 48)
+        .background(.thinMaterial)
+        .opacity(showChrome ? 1 : 0)
+        .disabled(!showChrome)
+    }
+
+    // MARK: 底部状态栏
+
+    private var bottomBar: some View {
+        HStack {
+            Button {
+                model.commitTurn(forward: false)
+            } label: { Image(systemName: "chevron.left") }
+            .disabled(!model.canTurn(forward: false))
+            .accessibilityLabel("上一页")
+            Spacer()
+            Text(model.locationDescription)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+                model.commitTurn(forward: true)
+            } label: { Image(systemName: "chevron.right") }
+            .disabled(!model.canTurn(forward: true))
+            .accessibilityLabel("下一页")
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(.thinMaterial)
+        .opacity(showChrome ? 1 : 0)
+        .disabled(!showChrome)
+    }
+
+    // MARK: 目录
+
+    private var tocSheet: some View {
+        NavigationStack {
+            Group {
+                if let diagnostic = model.tocDiagnosticText {
+                    ContentUnavailableView {
+                        Label("没有目录", systemImage: "list.bullet.rectangle")
+                    } description: {
+                        Text(diagnostic)
+                    }
+                } else {
+                    List(model.container?.toc ?? []) { entry in
+                        Button {
+                            isShowingTOC = false
+                            model.jump(to: entry)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(entry.title).foregroundStyle(.primary)
+                                if let spineIndex = entry.spineIndex {
+                                    Text("spine \(spineIndex + 1)")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
                 }
-                .navigationTitle("目录")
-                .navigationBarTitleDisplayMode(.inline)
             }
-            .presentationDetents([.medium, .large])
+            .navigationTitle("目录")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭") { isShowingTOC = false }
+                }
+            }
         }
+        .presentationDetents([.medium, .large])
+    }
+
+    // MARK: 注脚弹层
+
+    private func noteSheet(_ note: PrototypeNote) -> some View {
+        NavigationStack {
+            ScrollView {
+                Text(note.text)
+                    .font(.system(size: 15))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(18)
+            }
+            .navigationTitle("注释")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭") { model.activeNote = nil }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 
-// MARK: - 打开入口（注入样例书或指定 EPUB）
+// MARK: - 打开入口（注入样例书或指定 EPUB；以全屏页方式呈现）
 
 struct PrototypeReaderHost: View {
     let initialURL: URL?

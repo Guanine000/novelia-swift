@@ -49,15 +49,20 @@ final class PrototypeEPUBContainer {
 
     private let archive: Archive
     private let opfDirectory: String      // ZIP 内 OPF 目录（含结尾 /，根为 ""）
+    private let manifestByID: [String: PrototypeSpineItem]
+    /// 目录为空时的可诊断原因。
+    private(set) var tocDiagnostic: String?
 
     private init(fileURL: URL, archive: Archive, opfDirectory: String,
-                 bookTitle: String, author: String?, spine: [PrototypeSpineItem]) {
+                 bookTitle: String, author: String?, spine: [PrototypeSpineItem],
+                 manifestByID: [String: PrototypeSpineItem]) {
         self.fileURL = fileURL
         self.archive = archive
         self.opfDirectory = opfDirectory
         self.bookTitle = bookTitle
         self.author = author
         self.spine = spine
+        self.manifestByID = manifestByID
     }
 
     static func open(fileURL: URL) async throws -> PrototypeEPUBContainer {
@@ -116,7 +121,8 @@ final class PrototypeEPUBContainer {
         let container = PrototypeEPUBContainer(
             fileURL: fileURL, archive: archive, opfDirectory: opfDirectory,
             bookTitle: bookTitle ?? fileURL.deletingPathExtension().lastPathComponent,
-            author: author, spine: readable
+            author: author, spine: readable,
+            manifestByID: manifest
         )
         await container.buildTOC()
         return container
@@ -220,35 +226,64 @@ final class PrototypeEPUBContainer {
     }
 
     // MARK: 目录
+    //
+    // nav/NCX 通常只出现在 manifest、不在 spine，因此一律从 manifest 定位。
 
     private func buildTOC() async {
-        if let navItem = spine.first(where: { $0.properties.contains("nav") }),
-           let html = try? await chapterHTML(path: navItem.href) {
+        // 1) EPUB3 nav：manifest 中 properties 含 "nav" 的条目。
+        let navItems = manifestByID.values.filter { $0.properties.contains("nav") }
+        for navItem in navItems {
+            guard let html = try? await chapterHTML(path: navItem.href) else { continue }
             let entries = Self.parseNavTOC(html: html)
             if !entries.isEmpty {
-                toc = entries.map { entry in
-                    let target = Self.normalizePath(opfDirectory + entry.href)
-                    let index = spine.firstIndex {
-                        Self.stripFragment($0.href) == Self.stripFragment(target)
-                    }
-                    return PrototypeTOCEntry(title: entry.title, spineIndex: index)
+                let mapped = mapToSpine(entries)
+                if !mapped.isEmpty {
+                    toc = mapped
+                    return
                 }
+                tocDiagnostic = "nav 文档解析出 \(entries.count) 个条目，但没有一个能映射到 spine 章节"
                 return
             }
         }
-        // EPUB2 NCX 回退：尝试常见位置。
-        for candidate in [opfDirectory + "toc.ncx", "toc.ncx"] {
-            guard let data = await entryData(atPath: candidate),
+        if !navItems.isEmpty {
+            tocDiagnostic = "manifest 含 nav 文档，但未解析出目录锚点（可能缺少 <nav epub:type=\"toc\">）"
+        }
+
+        // 2) EPUB2 NCX：manifest 中 media-type 为 application/x-dtbncx+xml 的条目。
+        let ncxItems = manifestByID.values.filter {
+            $0.mediaType.lowercased() == "application/x-dtbncx+xml"
+        }
+        for ncxItem in ncxItems {
+            guard let data = await entryData(atPath: ncxItem.href),
                   let xml = String(data: data, encoding: .utf8) else { continue }
             let parsed = NCXParser.parse(xml: xml)
             if !parsed.isEmpty {
-                toc = parsed.map { entry in
-                    let target = Self.normalizePath(opfDirectory + entry.href)
-                    let index = spine.firstIndex { Self.stripFragment($0.href) == Self.stripFragment(target) }
-                    return PrototypeTOCEntry(title: entry.title, spineIndex: index)
+                let mapped = mapToSpine(parsed)
+                if !mapped.isEmpty {
+                    toc = mapped
+                    return
                 }
+                tocDiagnostic = "NCX 解析出 \(parsed.count) 个条目，但没有一个能映射到 spine 章节"
                 return
             }
+        }
+
+        if toc.isEmpty {
+            if navItems.isEmpty && ncxItems.isEmpty {
+                tocDiagnostic = "manifest 中没有 nav（EPUB3）或 NCX（EPUB2）目录条目，本书可能没有内嵌目录"
+            } else if tocDiagnostic == nil {
+                tocDiagnostic = "目录文档存在但未能解析出条目"
+            }
+        }
+    }
+
+    private func mapToSpine(_ entries: [(title: String, href: String)]) -> [PrototypeTOCEntry] {
+        entries.map { entry in
+            let target = Self.normalizePath(opfDirectory + entry.href)
+            let index = spine.firstIndex {
+                Self.stripFragment($0.href) == Self.stripFragment(target)
+            }
+            return PrototypeTOCEntry(title: entry.title, spineIndex: index)
         }
     }
 

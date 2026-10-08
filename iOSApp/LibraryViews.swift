@@ -1627,8 +1627,7 @@ struct MyDownloadsView: View {
     @EnvironmentObject private var webNovelDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
     @State private var selectedTab: MyDownloadsTab
-    @State private var showPrototype = false
-    @State private var prototypeURL: URL?
+    @State private var prototypeTarget: PrototypeDownloadTarget?
 
     init(initialTab: MyDownloadsTab = .network) {
         _selectedTab = State(initialValue: initialTab)
@@ -1659,14 +1658,14 @@ struct MyDownloadsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button("打开样例书") {
-                        prototypeURL = nil
-                        showPrototype = true
+                    Button("打开排版原型（样例书）") {
+                        prototypeTarget = PrototypeDownloadTarget(url: nil, title: "样例书")
                     }
                     ForEach(wenkuDownloads.books) { book in
-                        Button("打开：\(book.title)") {
-                            prototypeURL = wenkuDownloads.fileURL(for: book)
-                            showPrototype = true
+                        Button("原型阅读：\(book.title)") {
+                            prototypeTarget = PrototypeDownloadTarget(
+                                url: wenkuDownloads.fileURL(for: book), title: book.title
+                            )
                         }
                     }
                 } label: {
@@ -1675,10 +1674,8 @@ struct MyDownloadsView: View {
                 .accessibilityLabel("打开排版原型")
             }
         }
-        .sheet(isPresented: $showPrototype) {
-            NavigationStack {
-                PrototypeReaderHost(initialURL: prototypeURL)
-            }
+        .navigationDestination(item: $prototypeTarget) { target in
+            PrototypeReaderHost(initialURL: target.url)
         }
     }
 
@@ -1695,8 +1692,17 @@ struct MyDownloadsView: View {
                     ForEach(webNovelDownloads.books) { book in
                         Group {
                             if let fileURL = webNovelDownloads.fileURL(for: book) {
-                                ShareLink(item: fileURL) {
-                                    networkDownloadRow(book, isFile: true)
+                                // EPUB 文件：正文行进排版原型，行尾保留导出。
+                                Button {
+                                    prototypeTarget = PrototypeDownloadTarget(url: fileURL, title: book.novel.title)
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        networkDownloadRow(book, isFile: true)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        Image(systemName: "chevron.right")
+                                            .font(.footnote)
+                                            .foregroundStyle(NoveliaStyle.muted)
+                                    }
                                 }
                                 .buttonStyle(.plain)
                             } else {
@@ -1709,6 +1715,12 @@ struct MyDownloadsView: View {
                         }
                         .listRowBackground(Color.white)
                         .swipeActions {
+                            if webNovelDownloads.fileURL(for: book) != nil {
+                                ShareLink(item: webNovelDownloads.fileURL(for: book)!) {
+                                    Label("导出", systemImage: "square.and.arrow.up")
+                                }
+                                .tint(.blue)
+                            }
                             Button(role: .destructive) {
                                 webNovelDownloads.remove(book)
                             } label: {
@@ -1764,34 +1776,44 @@ struct MyDownloadsView: View {
             } else {
                 List {
                     ForEach(wenkuDownloads.books) { book in
-                        ShareLink(item: wenkuDownloads.fileURL(for: book)) {
-                            HStack(spacing: 12) {
-                                if let coverURL = wenkuDownloads.coverURL(for: book),
-                                   let image = UIImage(contentsOfFile: coverURL.path) {
-                                    Image(uiImage: image).resizable().scaledToFill()
-                                        .frame(width: 52, height: 72)
-                                        .clipShape(RoundedRectangle(cornerRadius: 7))
-                                } else {
-                                    Image(systemName: "book.closed.fill")
-                                        .font(.title2).foregroundStyle(NoveliaStyle.coral)
-                                        .frame(width: 52, height: 72)
-                                        .background(NoveliaStyle.coral.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
-                                }
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(book.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
-                                    if let author = book.author, !author.isEmpty {
-                                        Text(author).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
+                        HStack(spacing: 12) {
+                            Button {
+                                prototypeTarget = PrototypeDownloadTarget(
+                                    url: wenkuDownloads.fileURL(for: book), title: book.title
+                                )
+                            } label: {
+                                HStack(spacing: 12) {
+                                    if let coverURL = wenkuDownloads.coverURL(for: book),
+                                       let image = UIImage(contentsOfFile: coverURL.path) {
+                                        Image(uiImage: image).resizable().scaledToFill()
+                                            .frame(width: 52, height: 72)
+                                            .clipShape(RoundedRectangle(cornerRadius: 7))
+                                    } else {
+                                        Image(systemName: "book.closed.fill")
+                                            .font(.title2).foregroundStyle(NoveliaStyle.coral)
+                                            .frame(width: 52, height: 72)
+                                            .background(NoveliaStyle.coral.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
                                     }
-                                    if let description = book.bookDescription, !description.isEmpty {
-                                        Text(description).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(2)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(book.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
+                                        if let author = book.author, !author.isEmpty {
+                                            Text(author).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
+                                        }
+                                        if let description = book.bookDescription, !description.isEmpty {
+                                            Text(description).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(2)
+                                        }
                                     }
+                                    Spacer(minLength: 4)
                                 }
-                                Spacer(minLength: 4)
-                                Image(systemName: "square.and.arrow.up").foregroundStyle(NoveliaStyle.coral)
+                                .contentShape(Rectangle())
                             }
-                            .padding(.vertical, 4)
+                            .buttonStyle(.plain)
+                            ShareLink(item: wenkuDownloads.fileURL(for: book)) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .foregroundStyle(NoveliaStyle.coral)
+                            }
                         }
-                        .buttonStyle(.plain)
+                        .padding(.vertical, 4)
                         .listRowBackground(Color.white)
                         .swipeActions {
                             ShareLink(item: wenkuDownloads.fileURL(for: book)) {
@@ -1993,4 +2015,13 @@ private struct LogActivitySheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - 排版原型导航目标
+
+/// 从“我的下载”推入排版原型的目标书；url 为 nil 时使用样例书。
+struct PrototypeDownloadTarget: Identifiable, Hashable {
+    let id = UUID()
+    let url: URL?
+    let title: String
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import YueduCoreText
 
 // MARK: - 平移翻页视图
 //
@@ -8,6 +9,19 @@ import UIKit
 // 左右相接。松手吸附动画也只移动 strip；动画结束后 SwiftUI 提交新的当前页，
 // 用同一组 PageID 的缓存位图替换内容并把 strip 归零。
 // 目标页位图在拖动开始前就已就位；落页即预览，无重排。
+//
+// 时序规则（修复闪动/跳回）：
+// 1. 拖动中或吸附动画中，apply(images:) 一律缓存不应用——SwiftUI 的任何
+//    body 重算都不能在翻页过程中重置 strip 位置；
+// 2. 内容未变化（三个槽位位图一致，按 CFEqual 判等）时跳过 layoutStripContent，
+//    避免“提交窗口内的旧内容重放”把 strip 归零造成视觉跳回；
+// 3. 点击先做链接/注脚命中，命中则不进入翻页判定。
+
+/// 点击命中的链接语义（由模型解析为注脚文本或普通链接提示）。
+enum PrototypeLinkHit: Equatable {
+    case footnote(String)
+    case plain(String)
+}
 
 struct PrototypePagerView: UIViewRepresentable {
     struct PageImages: Equatable {
@@ -23,6 +37,14 @@ struct PrototypePagerView: UIViewRepresentable {
     var onCommit: (Bool) -> Void
     /// 翻页动画开始/结束通知；宿主据此在动画期间冻结分页代次。
     var onAnimatingChange: (Bool) -> Void = { _ in }
+    /// 点击本地点（当前页本地坐标）的链接/注脚命中测试。
+    var linkHitTest: (CGPoint) -> PrototypeLinkHit? = { _ in nil }
+    /// 命中注脚。
+    var onNoteTap: (String) -> Void = { _ in }
+    /// 命中普通链接（本轮仅提示，不导航）。
+    var onPlainLinkTap: (String) -> Void = { _ in }
+    /// 点击页面中部（显隐工具栏）。
+    var onCenterTap: () -> Void = {}
 
     /// 三页位图由宿主从同一份排版缓存派生；每次 SwiftUI 更新都会重放。
     var images: PageImages
@@ -32,6 +54,10 @@ struct PrototypePagerView: UIViewRepresentable {
         view.canTurnProvider = canTurn
         view.commitHandler = onCommit
         view.animatingChangeHandler = onAnimatingChange
+        view.linkHitTestProvider = linkHitTest
+        view.noteTapHandler = onNoteTap
+        view.plainLinkTapHandler = onPlainLinkTap
+        view.centerTapHandler = onCenterTap
         view.apply(images: images)
         return view
     }
@@ -40,6 +66,10 @@ struct PrototypePagerView: UIViewRepresentable {
         view.canTurnProvider = canTurn
         view.commitHandler = onCommit
         view.animatingChangeHandler = onAnimatingChange
+        view.linkHitTestProvider = linkHitTest
+        view.noteTapHandler = onNoteTap
+        view.plainLinkTapHandler = onPlainLinkTap
+        view.centerTapHandler = onCenterTap
         view.apply(images: images)
     }
 }
@@ -48,6 +78,10 @@ final class PrototypePagerUIView: UIView {
     var canTurnProvider: ((Bool) -> Bool)?
     var commitHandler: ((Bool) -> Void)?
     var animatingChangeHandler: ((Bool) -> Void)?
+    var linkHitTestProvider: ((CGPoint) -> PrototypeLinkHit?)?
+    var noteTapHandler: ((String) -> Void)?
+    var plainLinkTapHandler: ((String) -> Void)?
+    var centerTapHandler: (() -> Void)?
 
     private let strip = UIView()
     private let previousImageView = UIImageView()
@@ -57,6 +91,7 @@ final class PrototypePagerUIView: UIView {
     private var pageSize: CGSize = .zero
     private var images: PrototypePagerView.PageImages = .init(previous: nil, current: nil, next: nil)
     private var isAnimating = false
+    private var isDragActive = false
     private var panBaseX: CGFloat = 0
 
     override init(frame: CGRect) {
@@ -65,7 +100,6 @@ final class PrototypePagerUIView: UIView {
         backgroundColor = .clear
 
         strip.frame = bounds
-        strip.autoresizingMask = []
         addSubview(strip)
 
         for imageView in [previousImageView, currentImageView, nextImageView] {
@@ -88,9 +122,33 @@ final class PrototypePagerUIView: UIView {
     // MARK: 内容更新
 
     func apply(images: PrototypePagerView.PageImages) {
+        // 1) 拖动/吸附中不重放内容，缓存待动画结束再应用。
+        if isDragActive || isAnimating {
+            self.images = images
+            return
+        }
+        // 2) 内容未变化时不触碰布局（提交窗口内的旧内容重放不再重置 strip）。
+        if Self.imagesEqual(images, self.images) { return }
         self.images = images
         pageSize = images.size
         layoutStripContent()
+    }
+
+    private static func imagesEqual(_ a: PrototypePagerView.PageImages,
+                                    _ b: PrototypePagerView.PageImages) -> Bool {
+        sameImage(a.previous, b.previous)
+            && sameImage(a.current, b.current)
+            && sameImage(a.next, b.next)
+            && a.size == b.size
+    }
+
+    /// CFEqual 不接受 NULL，空槽位单独比较。
+    private static func sameImage(_ a: CGImage?, _ b: CGImage?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case (let x?, let y?): return CFEqual(x, y)
+        default: return false
+        }
     }
 
     private func layoutStripContent() {
@@ -115,14 +173,12 @@ final class PrototypePagerUIView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        if !isDragging {
+        // 边界变化（旋转/首次布局）时同步槽位尺寸；拖动/动画中不动。
+        if !isDragActive, !isAnimating, bounds.width > 0, bounds.size != images.size {
+            images.size = bounds.size
+            pageSize = bounds.size
             layoutStripContent()
         }
-    }
-
-    private var isDragging: Bool {
-        (gestureRecognizers?.first(where: { $0 is UIPanGestureRecognizer })?.state == .began
-            || gestureRecognizers?.first(where: { $0 is UIPanGestureRecognizer })?.state == .changed) || isAnimating
     }
 
     // MARK: 手势
@@ -133,14 +189,15 @@ final class PrototypePagerUIView: UIView {
 
         switch gesture.state {
         case .began:
-            guard !isAnimating else {
+            if isAnimating {
                 gesture.state = .cancelled
                 return
             }
+            isDragActive = true
             panBaseX = -width
 
         case .changed:
-            guard !isAnimating else { return }
+            guard !isAnimating, isDragActive else { return }
             let translation = gesture.translation(in: self).x
             var offset = panBaseX + translation
             // 没有对应页位图（或不可翻）时，该方向停住不动。
@@ -155,7 +212,8 @@ final class PrototypePagerUIView: UIView {
             strip.frame.origin.x = offset
 
         case .ended, .cancelled:
-            guard !isAnimating else { return }
+            guard !isAnimating, isDragActive else { return }
+            isDragActive = false
             let translation = gesture.translation(in: self).x
             let velocity = gesture.velocity(in: self).x
             let threshold = width / 4
@@ -176,10 +234,29 @@ final class PrototypePagerUIView: UIView {
     }
 
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-        guard !isAnimating else { return }
+        guard !isAnimating, !isDragActive else { return }
         let location = gesture.location(in: self)
         let width = max(bounds.width, pageSize.width)
-        let forward = location.x > width / 2
+
+        // 1) 链接/注脚命中优先：当前页槽位与视口重合，视图坐标即页本地坐标。
+        if let hit = linkHitTestProvider?(location) {
+            switch hit {
+            case .footnote(let text):
+                noteTapHandler?(text)
+            case .plain(let href):
+                plainLinkTapHandler?(href)
+            }
+            return
+        }
+
+        // 2) 中部三分之一：显隐工具栏。
+        if location.x > width / 3, location.x < width * 2 / 3 {
+            centerTapHandler?()
+            return
+        }
+
+        // 3) 左右三分之一：翻页。
+        let forward = location.x >= width * 2 / 3
         guard (canTurnProvider?(forward) ?? false),
               (forward ? images.next : images.previous) != nil else { return }
         completeTurn(forward: forward)
@@ -194,6 +271,7 @@ final class PrototypePagerUIView: UIView {
         } completion: { _ in
             self.isAnimating = false
             self.animatingChangeHandler?(false)
+            self.apply(images: self.images)
         }
     }
 
@@ -211,6 +289,9 @@ final class PrototypePagerUIView: UIView {
             self.isAnimating = false
             self.animatingChangeHandler?(false)
             self.commitHandler?(forward)
+            // 提交引发的 SwiftUI 更新随后带来新内容；在此之前先按缓存应用一次，
+            // 保证 strip 归零（新旧中间槽位像素一致，不会闪）。
+            self.apply(images: self.images)
         }
     }
 }
