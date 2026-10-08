@@ -1756,7 +1756,7 @@ struct MyDownloadsView: View {
                                 }
                             }
                         }
-                        .listRowBackground(Color.white)
+                        .listRowBackground(NoveliaStyle.card)
                         .swipeActions {
                             if webNovelDownloads.fileURL(for: book) != nil {
                                 ShareLink(item: webNovelDownloads.fileURL(for: book)!) {
@@ -1857,7 +1857,7 @@ struct MyDownloadsView: View {
                             }
                         }
                         .padding(.vertical, 4)
-                        .listRowBackground(Color.white)
+                        .listRowBackground(NoveliaStyle.card)
                         .swipeActions {
                             ShareLink(item: wenkuDownloads.fileURL(for: book)) {
                                 Label("导出", systemImage: "square.and.arrow.up")

@@ -21,10 +21,42 @@ struct NoveliaApp: App {
 
 enum NoveliaStyle {
     static let coral = Color(red: 0.91, green: 0.31, blue: 0.34)
-    static let ink = Color(red: 0.15, green: 0.17, blue: 0.20)
-    static let muted = Color(red: 0.48, green: 0.49, blue: 0.52)
-    static let paper = Color(red: 0.98, green: 0.97, blue: 0.94)
-    static let card = Color.white
+
+    /// 主文字色（深色下近白）。
+    static var ink: Color {
+        Color(uiColor: UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(white: 0.92, alpha: 1)
+                : UIColor(red: 0.15, green: 0.17, blue: 0.20, alpha: 1)
+        })
+    }
+
+    /// 次要文字色（深色下提亮）。
+    static var muted: Color {
+        Color(uiColor: UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(white: 0.65, alpha: 1)
+                : UIColor(red: 0.48, green: 0.49, blue: 0.52, alpha: 1)
+        })
+    }
+
+    /// 页面底色（浅色=米色纸面，深色=近黑）。
+    static var paper: Color {
+        Color(uiColor: UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(red: 0.10, green: 0.10, blue: 0.11, alpha: 1)
+                : UIColor(red: 0.98, green: 0.97, blue: 0.94, alpha: 1)
+        })
+    }
+
+    /// 卡片/列表行底色（浅色=白，深色=深灰）。
+    static var card: Color {
+        Color(uiColor: UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(red: 0.17, green: 0.17, blue: 0.18, alpha: 1)
+                : UIColor.white
+        })
+    }
 
     static func accent(for value: NovelAccent) -> Color {
         switch value {
