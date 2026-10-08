@@ -40,6 +40,6 @@ Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名�
 
 App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完整依赖清单](iOSApp/Resources/ThirdPartyLicenses/INDEX.md)列出 `Package.resolved` 中全部 10 个 Swift Package 的版本、来源及许可文件。IPA 随附这些原始许可文本、YueduCoreText 的 MPL-2.0 许可和包含 Unicode License v3 的 NOTICE。YueduCoreText 对应源码为[精确锁定的提交](https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/783ce903d5faf4ff5d15c546e32a107537ba5efe)，本项目没有修改该依赖的上游源码。用户自行导入的字体保存在本机 App 文档目录，不随本项目 IPA 分发；字体文件仍受其自身许可约束。
 
-v0.5.0 Release 还附有该精确提交的 [`YueduCoreText-0.8.0-source-783ce903.zip`](https://github.com/Guanine000/novelia-ios-port/releases/download/v0.5.0/YueduCoreText-0.8.0-source-783ce903.zip)，包含上游 LICENSE 与 NOTICE，供 IPA 接收者取得对应 MPL 覆盖源码。构建流程使用 [`scripts/verify_third_party_notices.py`](scripts/verify_third_party_notices.py) 核对锁定依赖、许可清单和原始文件，并检查许可资源是否进入 IPA。
+v0.5.0 Release 还附有该精确提交的 [`YueduCoreText-0.8.0-source-783ce903.zip`](https://github.com/Guanine000/novelia-ios-port/releases/download/v0.5.0/YueduCoreText-0.8.0-source-783ce903.zip)，包含上游 LICENSE 与 NOTICE。私下转发 IPA 时，应同时提供此源码 ZIP 或告知接收者上方公开的上游提交链接；私密仓库的 Release 链接可能无法由未获访问权限的朋友打开。构建流程使用 [`scripts/verify_third_party_notices.py`](scripts/verify_third_party_notices.py) 核对锁定依赖、许可清单和原始文件，并检查许可资源是否进入 IPA。
 
 本仓库目前**没有声明覆盖自有代码的统一开源许可证**，且保持私密。维护者确认 App 图标由本人制作或使用 AI 生成，未直接取自 Android 对照项目或 Yuedu-reader；该说明不改变第三方代码和素材各自的许可。第三方软件许可不自动授权使用本项目其他代码、图标、小说内容或 Novelia 服务数据。发行包对第三方依赖的告知以随包的原始许可和 NOTICE 为准。
