@@ -279,3 +279,23 @@
 1. **导入无二级菜单**："我的下载"右上角按钮点击直接打开文件选择器（本地书点列表行即打开，菜单整体移除）。
 2. **选择器改 copy 导入模式**（`asCopy: true`）：系统把所选文件复制进应用沙箱后回调，绕开 open 模式的 UTI 启用规则与 iCloud 占位文件不可点的问题；回调 URL 已在沙箱内，无需安全作用域。
 - 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,109,449 bytes · SHA-256 `787d33a8cd73d72caa9e19fdd2f5fc169d13cab269cdfc11dd48d62617adf92e`
+
+---
+
+## 追加：第十三轮修复（提交 `6b9e9a7`，第二本真实书已实测）
+
+### 现象（用户真机截图）
+
+第二本真实 EPUB《玩乐关系 4》（39 章，Kindle 风格排版）报"不支持的内容（media-queries）"。
+
+### 根因与修复
+
+书的 CSS 含 5 个 @media 块（`amzn-mobi`、`not amzn-mobi`、`print`、`min/max-device-aspect-ratio`），YueduCoreText 0.8.0 不支持媒体查询。宿主现按设备条件求值：`print`/`amzn-mobi` 丢弃、`not amzn-mobi` 保留内容、aspect-ratio 按实际视口宽高比求值；未知查询保守丢弃（基础样式保留），求值数量在目录页披露。**保留正文与主样式，仅丢弃设备变体样式**。
+
+### 验证（模拟器 + 真实文件实测）
+
+《玩乐关系 4》打开成功：封面完整渲染、39 章解析、进程稳定（截图已附）。
+
+### 交付物
+
+- 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,110,676 bytes · SHA-256 `3881a130b62a5448b18f0bf3750ad1a9ecfb54fa3d01449747103f2a8ec4d82d`
