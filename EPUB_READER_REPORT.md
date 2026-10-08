@@ -333,3 +333,11 @@
 - **根因**：卡片容器硬编码 `.background(.white)`，文字走动态 ink（深色下近白）→ 白底白字。
 - **修复**：全文件 13 处圆角 + 1 处胶囊白色背景统一替换为动态 `NoveliaStyle.card`（浅色白/深色深灰）。
 - 验证：书架页深色截图正常（发现页需你真机确认，simctl 无法点选 Tab）。新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,141,080 bytes · SHA-256 `c8e73af7530dfc0879c15b19e6d32bd52655448769309902ea80be09a80780d7`
+
+---
+
+## 追加：第十八轮（提交 `fix: Wenku page dark mode`）—— 文库页深色修复
+
+- 文库页是独立文件 `WenkuViews.swift`，有 3 处硬编码白色卡片背景（搜索框、作品行、分卷行），同法替换为动态 `NoveliaStyle.card`；行文字色本就走动态 ink/muted。
+- 全项目硬编码白色卡片背景已清零（LibraryViews 13+1 处、WenkuViews 3 处）。
+- 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,141,011 bytes · SHA-256 `f2424163666bb1b345a91a1593afd0b4efbd3f302dee0bcb5b94c7aa6e2e73a3`
