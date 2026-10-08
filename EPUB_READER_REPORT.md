@@ -106,3 +106,24 @@
 
 - 新未签名 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,079,450 bytes · SHA-256 `64b2dff272248bed69f1505725a015cf107073f9091a960aa70bf809432f1de3`
 - 提交 `312a58a` 已推送至 `Guanine000/novelia-ios-port`（未动 main）。
+
+---
+
+## 追加：第四轮修复（提交 `9db453a`）
+
+### 现象（用户真机截图，新错误信息生效）
+
+另一本真实 EPUB（spine 1/48）报："章节资源缺失：../Images/i-000a.jpg"——可读错误信息已正确点名缺失资源。
+
+### 根因
+
+相对资源 href（`../Images/...`、`../Styles/...`）被拼接到 **OPF 目录**上解析，而它们应相对**章节文件所在目录**解析。章节存放在 OPF 子目录（如 `OEBPS/Text/`）的书全部中招：`OEBPS/ + ../Images/x.jpg` 归一化后变成包根 `Images/x.jpg`，找不到。样例书章节与图片同目录，因此未暴露。
+
+### 修复
+
+- 图片 src、CSS link、@import 链全部改为相对**章节文件目录**解析（`chapterHref` 传入容器）；包内绝对路径从包根解析；percent-decode 与大小写回退保留。
+
+### 验证状态与交付物
+
+- 模拟器样例书冒烟通过；**真实 EPUB 待用户用新 IPA 复验**。
+- 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,080,010 bytes · SHA-256 `2d055290de080a147c9747b0e197a854ac19a3684efa2797f726d4e275fb11d0`
