@@ -332,6 +332,24 @@ final class PrototypeReaderModel: ObservableObject {
 
     func jump(to entry: PrototypeTOCEntry) {
         guard !isAnimating, !isLayingOut, let spineIndex = entry.spineIndex else { return }
+        navigateToSpine(spineIndex)
+    }
+
+    /// 书内链接跳转：href 相对当前章节目录解析并映射到 spine；
+    /// 同章锚点暂不精确定位（停留原页），跨章跳到目标章首页。
+    func openLink(_ href: String) {
+        guard !isAnimating, !isLayingOut, let container else { return }
+        let chapterHref = container.spine[location.spineIndex].href
+        guard let targetSpine = container.spineIndex(forLinkHref: href, relativeTo: chapterHref) else {
+            plainLinkMessage = "链接目标不在本书章节列表内（\(href)）"
+            return
+        }
+        guard targetSpine != location.spineIndex else { return }
+        navigateToSpine(targetSpine)
+    }
+
+    /// 跳到指定章首页；目标章未排版时先排版（增量，首页即现）。
+    private func navigateToSpine(_ spineIndex: Int) {
         location.spineIndex = spineIndex
         location.pageIndex = 0
         Task {

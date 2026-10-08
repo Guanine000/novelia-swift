@@ -458,6 +458,20 @@ final class PrototypeEPUBContainer {
         return result
     }
 
+    /// 把书内链接 href（相对当前章节目录）解析为 spine 序号；解析不到返回 nil。
+    /// 锚点（#fragment）不影响章定位；章内精确定位留待后续。
+    func spineIndex(forLinkHref href: String, relativeTo chapterHref: String) -> Int? {
+        let target: String
+        if href.hasPrefix("#") {
+            target = chapterHref
+        } else if Self.isAbsoluteInPackage(href) {
+            target = Self.normalizePath(String(href.dropFirst()))
+        } else {
+            target = Self.normalizePath(Self.directory(of: chapterHref) + href)
+        }
+        return spine.firstIndex { Self.stripFragment($0.href) == Self.stripFragment(target) }
+    }
+
     // MARK: 路径工具
 
     static func isRelative(_ href: String) -> Bool {

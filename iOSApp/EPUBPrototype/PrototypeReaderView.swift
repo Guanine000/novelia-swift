@@ -37,7 +37,7 @@ struct PrototypeReaderView: View {
                         linkHitTest: { point in model.linkHit(at: point) },
                         onNoteTap: { text in model.activeNote = PrototypeNote(text: text) },
                         onPlainLinkTap: { href in
-                            model.plainLinkMessage = "原型暂不支持链接跳转（\(href)）"
+                            model.openLink(href)
                         },
                         onCenterTap: { withAnimation(.easeInOut(duration: 0.15)) { showChrome.toggle() } },
                         images: model.pagerImages()
@@ -69,16 +69,11 @@ struct PrototypeReaderView: View {
         .statusBarHidden(!showChrome)
         .sheet(isPresented: $isShowingTOC) { tocSheet }
         .sheet(item: $model.activeNote) { note in noteSheet(note) }
-        .fileImporter(
-            isPresented: $isShowingImporter,
-            // .data 保证任意文件可选（epub 动态 UTI 未注册一致性时文件会灰掉）；
-            // 合法性由容器解析校验，失败有明确报错。
-            allowedContentTypes: [.data],
-            allowsMultipleSelection: false
-        ) { result in
-            if case .success(let urls) = result, let url = urls.first {
+        .sheet(isPresented: $isShowingImporter) {
+            PrototypeFilePicker { url in
                 Task { await model.importEPUB(from: url) }
             }
+            .ignoresSafeArea()
         }
         .alert("导入", isPresented: .init(
             get: { model.importMessage != nil },
@@ -246,6 +241,34 @@ struct PrototypeReaderView: View {
             }
         }
         .presentationDetents([.medium])
+    }
+}
+
+// MARK: - 文件选择（UIKit 文档选择器：iCloud 按需下载可靠，任意文件可选）
+
+struct PrototypeFilePicker: UIViewControllerRepresentable {
+    var onPick: (URL) -> Void
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: false)
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = false
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick)
+    }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onPick: (URL) -> Void
+        init(onPick: @escaping (URL) -> Void) { self.onPick = onPick }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            if let url = urls.first { onPick(url) }
+        }
     }
 }
 

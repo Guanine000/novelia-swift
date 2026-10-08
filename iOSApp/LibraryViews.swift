@@ -1686,16 +1686,11 @@ struct MyDownloadsView: View {
         .navigationDestination(item: $prototypeTarget) { target in
             PrototypeReaderHost(initialURL: target.url)
         }
-        .fileImporter(
-            isPresented: $isShowingFileImporter,
-            // .data 保证任意文件可选（epub 动态 UTI 未注册一致性时文件会灰掉）；
-            // 合法性由容器解析校验，失败有明确报错。
-            allowedContentTypes: [.data],
-            allowsMultipleSelection: false
-        ) { result in
-            if case .success(let urls) = result, let url = urls.first {
+        .sheet(isPresented: $isShowingFileImporter) {
+            PrototypeFilePicker { url in
                 Task { await importAndOpen(url) }
             }
+            .ignoresSafeArea()
         }
         .alert("导入", isPresented: .init(
             get: { importError != nil },
