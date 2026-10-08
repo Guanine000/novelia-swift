@@ -264,3 +264,10 @@
 
 - 构建 ✓、产物 plist 已验证含 UT 声明 ✓、模拟器真实书冒烟 ✓。选择器交互需真机复验。
 - 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,111,204 bytes · SHA-256 `5e4ce1d7f8802ce916de9f6d9db445bef5ddd0dee9edaf4975bcd1f500e27696`
+
+---
+
+## 追加：第十一轮调整（提交 `eaa9a14`）
+
+- 按用户要求："我的下载"右上角菜单**第一项改为"从'文件'导入 EPUB…"**（菜单标签也改为"导入 EPUB"），**移除测试样例书入口**（样例书生成器仅保留给调试启动参数使用）；本地书列表仍在导入项下方列出。
+- 新 IPA：`build/Novelia-unsigned-prototype.ipa` · 7,109,172 bytes · SHA-256 `7259eef3283046d0a4326a428290d308a75aad708aaa458eaf43c47632240eb1`
