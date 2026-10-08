@@ -1662,25 +1662,22 @@ struct MyDownloadsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button("打开排版原型（样例书）") {
-                        prototypeTarget = PrototypeDownloadTarget(url: nil, title: "样例书")
-                    }
                     Button {
                         isShowingFileImporter = true
                     } label: {
                         Label("从“文件”导入 EPUB…", systemImage: "square.and.arrow.down")
                     }
                     ForEach(wenkuDownloads.books) { book in
-                        Button("原型阅读：\(book.title)") {
+                        Button("阅读：\(book.title)") {
                             prototypeTarget = PrototypeDownloadTarget(
                                 url: wenkuDownloads.fileURL(for: book), title: book.title
                             )
                         }
                     }
                 } label: {
-                    Label("排版原型", systemImage: "book.pages")
+                    Label("导入 EPUB", systemImage: "square.and.arrow.down")
                 }
-                .accessibilityLabel("打开排版原型")
+                .accessibilityLabel("导入 EPUB")
             }
         }
         .navigationDestination(item: $prototypeTarget) { target in
