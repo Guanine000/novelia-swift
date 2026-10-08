@@ -1,7 +1,86 @@
 import OSLog
+import CoreText
 import SwiftUI
 import UIKit
 import YueduCoreText
+
+/// 阅读器自己的排版偏好；字体名称来自设备当前可用的 UIFont 字体族。
+struct PrototypeReaderStyle: Codable, Equatable {
+    var fontSize: CGFloat = 21
+    var fontFamily: String? = nil
+    var lineSpacing: CGFloat = 0
+    var paragraphSpacing: CGFloat = 0
+    /// nil 保留书籍原样；0、1、2 等值覆盖段落首行缩进（em）。
+    var firstLineIndentEm: CGFloat? = nil
+    var topMargin: CGFloat = 64
+    var bottomMargin: CGFloat = 72
+    var leftMargin: CGFloat = 20
+    var rightMargin: CGFloat = 20
+
+    var contentInsets: UIEdgeInsets {
+        UIEdgeInsets(top: topMargin, left: leftMargin, bottom: bottomMargin, right: rightMargin)
+    }
+
+    var readerCSS: String? {
+        var rules: [String] = []
+        if let fontFamily {
+            let escaped = fontFamily.replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "'", with: "\\'")
+            rules.append("body, p { font-family: '\(escaped)' !important; }")
+        }
+        if let firstLineIndentEm {
+            rules.append("p { text-indent: \(firstLineIndentEm)em !important; }")
+        }
+        return rules.isEmpty ? nil : rules.joined(separator: "\n")
+    }
+}
+
+@MainActor
+enum PrototypeLocalFonts {
+    private static var directory: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("EPUBReaderFonts", isDirectory: true)
+    }
+
+    static func registerSavedFonts() {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil) else { return }
+        for file in files where ["ttf", "otf", "ttc"].contains(file.pathExtension.lowercased()) {
+            CTFontManagerRegisterFontsForURL(file as CFURL, .process, nil)
+        }
+    }
+
+    static func importFont(from sourceURL: URL) throws -> String {
+        let access = sourceURL.startAccessingSecurityScopedResource()
+        defer { if access { sourceURL.stopAccessingSecurityScopedResource() } }
+        guard ["ttf", "otf", "ttc"].contains(sourceURL.pathExtension.lowercased()) else {
+            throw FontImportError.unsupportedFormat
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let destination = directory.appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(sourceURL.pathExtension.lowercased())
+        try FileManager.default.copyItem(at: sourceURL, to: destination)
+        let registered = CTFontManagerRegisterFontsForURL(destination as CFURL, .process, nil)
+        guard let descriptors = CTFontManagerCreateFontDescriptorsFromURL(destination as CFURL) as? [CTFontDescriptor],
+              let family = descriptors.compactMap({ CTFontDescriptorCopyAttribute($0, kCTFontFamilyNameAttribute) as? String }).first else {
+            throw FontImportError.registrationFailed
+        }
+        guard registered || UIFont.familyNames.contains(family) else {
+            throw FontImportError.registrationFailed
+        }
+        return family
+    }
+
+    private enum FontImportError: LocalizedError {
+        case unsupportedFormat, registrationFailed
+        var errorDescription: String? {
+            switch self {
+            case .unsupportedFormat: "请选择 TTF、OTF 或 TTC 字体文件。"
+            case .registrationFailed: "无法注册该字体文件，请确认文件完整且格式受 iOS 支持。"
+            }
+        }
+    }
+}
 
 // MARK: - 原型阅读模型
 //
@@ -25,7 +104,7 @@ final class PrototypeReaderModel: ObservableObject {
     private(set) var pageBook: PrototypePageBook?
     @Published private(set) var location = PrototypeReadingLocation(spineIndex: 0, pageIndex: 0)
     @Published private(set) var generation = 0
-    @Published private(set) var fontSize: CGFloat = 21
+    @Published private(set) var style = PrototypeReaderStyle()
     @Published private(set) var isAnimating = false
     @Published private(set) var isLayingOut = false
     /// 当前展示的注脚弹窗；nil = 无弹窗。关闭弹层不改变阅读位置。
@@ -52,7 +131,15 @@ final class PrototypeReaderModel: ObservableObject {
     }
 
     private var relayoutTask: Task<Void, Never>?
-    private var contentInsets = UIEdgeInsets(top: 24, left: 20, bottom: 24, right: 20)
+    private static let styleDefaultsKey = "epubPrototype.readerStyle.v1"
+
+    init() {
+        PrototypeLocalFonts.registerSavedFonts()
+        if let data = UserDefaults.standard.data(forKey: Self.styleDefaultsKey),
+           let saved = try? JSONDecoder().decode(PrototypeReaderStyle.self, from: data) {
+            style = saved
+        }
+    }
 
     var statusMessage: String {
         if case .failed(let message) = status { return message }
@@ -161,12 +248,16 @@ final class PrototypeReaderModel: ObservableObject {
     }
 
     private func makeConfig() -> BrowserLayoutConfig {
+        let contentInsets = style.contentInsets
         let contentWidth = max(1, viewportSize.width - contentInsets.left - contentInsets.right)
         let contentHeight = max(1, viewportSize.height - contentInsets.top - contentInsets.bottom)
         var config = BrowserLayoutConfig()
         config.renderWidth = contentWidth
         config.renderHeight = contentHeight
-        config.rootFontSize = fontSize
+        config.rootFontSize = style.fontSize
+        config.fontFamilies = style.fontFamily.map { [$0] } ?? []
+        config.lineSpacing = style.lineSpacing
+        config.paragraphSpacing = style.paragraphSpacing
         config.contentInsets = contentInsets
         config.textColor = pageTextColor
         config.backgroundColor = pageBackground
@@ -182,13 +273,17 @@ final class PrototypeReaderModel: ObservableObject {
         guard let container else { return }
         container.themeTextColor = pageTextColor
         relayoutTask?.cancel()
+        let spineIndex = keepingCurrentSpine ? location.spineIndex : 0
+        let previousCount = max(pageCount(spineIndex: spineIndex), 1)
+        let previousFraction = keepingCurrentSpine
+            ? CGFloat(location.pageIndex) / CGFloat(previousCount)
+            : 0
         generation += 1
         let book = PrototypePageBook(generation: generation)
         book.onPagesChanged = { [weak self] in
             self?.objectWillChange.send()
         }
         pageBook = book
-        let spineIndex = keepingCurrentSpine ? location.spineIndex : 0
         location.pageIndex = 0
         location.spineIndex = spineIndex
 
@@ -196,11 +291,12 @@ final class PrototypeReaderModel: ObservableObject {
         defer { isLayingOut = false }
         do {
             try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
-                                   aspectRatio: viewportAspectRatio)
+                                   aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS)
             if book.generation == generation {
                 status = .ready
                 location.spineIndex = spineIndex
-                location.pageIndex = 0
+                location.pageIndex = min(Int(previousFraction * CGFloat(max(pageCount(spineIndex: spineIndex), 1))),
+                                         max(pageCount(spineIndex: spineIndex) - 1, 0))
                 prefetchNeighbors(of: spineIndex)
                 applyDebugJumpIfNeeded()
             }
@@ -228,7 +324,7 @@ final class PrototypeReaderModel: ObservableObject {
             defer { isLayingOut = false }
             guard let book = pageBook, container != nil, !book.hasChapter(target) else { return }
             try? await book.layoutChapter(target, container: container, config: makeConfig(),
-                                   aspectRatio: viewportAspectRatio)
+                                   aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS)
         }
         prefetchNeighbors(of: target)
     }
@@ -242,7 +338,7 @@ final class PrototypeReaderModel: ObservableObject {
             let config = makeConfig()
             Task {
                 try? await book.layoutChapter(neighbor, container: container, config: config,
-                                aspectRatio: viewportAspectRatio)
+                                aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS)
                 _ = generationSnapshot // 预取结果挂在当前 book 上，代次切换即整体作废
             }
         }
@@ -320,7 +416,8 @@ final class PrototypeReaderModel: ObservableObject {
             if !book.isChapterComplete(spineIndex) {
                 do {
                     try await book.layoutChapter(spineIndex, container: container,
-                                                 config: makeConfig(), aspectRatio: viewportAspectRatio)
+                                                 config: makeConfig(), aspectRatio: viewportAspectRatio,
+                                                 readerCSS: style.readerCSS)
                 } catch {
                     status = .failed(describeLayoutError(error))
                     return
@@ -449,15 +546,28 @@ final class PrototypeReaderModel: ObservableObject {
             defer { isLayingOut = false }
             guard let container, let book = pageBook, !book.hasChapter(spineIndex) else { return }
             try? await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
-                                    aspectRatio: viewportAspectRatio)
+                                    aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS)
         }
     }
 
-    func setFontSize(_ value: CGFloat) {
-        guard !isAnimating else { return }
-        let clamped = min(30, max(14, value))
-        guard clamped != fontSize else { return }
-        fontSize = clamped
+    func applyStyle(_ requested: PrototypeReaderStyle) {
+        guard !isAnimating, !isLayingOut else { return }
+        var updated = requested
+        updated.fontSize = min(36, max(12, requested.fontSize))
+        updated.lineSpacing = min(24, max(0, requested.lineSpacing))
+        updated.paragraphSpacing = min(40, max(0, requested.paragraphSpacing))
+        if let indent = requested.firstLineIndentEm {
+            updated.firstLineIndentEm = min(4, max(0, indent))
+        }
+        updated.topMargin = min(120, max(0, requested.topMargin))
+        updated.bottomMargin = min(120, max(0, requested.bottomMargin))
+        updated.leftMargin = min(80, max(0, requested.leftMargin))
+        updated.rightMargin = min(80, max(0, requested.rightMargin))
+        guard updated != style else { return }
+        style = updated
+        if let data = try? JSONEncoder().encode(updated) {
+            UserDefaults.standard.set(data, forKey: Self.styleDefaultsKey)
+        }
         Task { await relayout(keepingCurrentSpine: true) }
     }
 }

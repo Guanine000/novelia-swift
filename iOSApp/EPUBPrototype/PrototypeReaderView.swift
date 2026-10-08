@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 // MARK: - 原型阅读界面（全屏阅读页）
@@ -15,10 +16,12 @@ struct PrototypeReaderView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @State private var isShowingTOC = false
+    @State private var isShowingStyle = false
     @State private var isShowingImporter = false
     @State private var showChrome = true
     @State private var isScrubbing = false
     @State private var scrubProgress = 0.0
+    @State private var draftStyle = PrototypeReaderStyle()
     let bookURL: URL?
 
     var body: some View {
@@ -84,6 +87,7 @@ struct PrototypeReaderView: View {
         .toolbar(.hidden, for: .tabBar)
         .statusBarHidden(!showChrome)
         .sheet(isPresented: $isShowingTOC) { tocSheet }
+        .sheet(isPresented: $isShowingStyle) { styleSheet }
         .sheet(item: $model.activeNote) { note in noteSheet(note) }
         .fullScreenCover(isPresented: $isShowingImporter) {
             PrototypeFilePicker { url in
@@ -141,12 +145,13 @@ struct PrototypeReaderView: View {
             }
             .accessibilityLabel("目录")
             Button {
-                model.setFontSize(model.fontSize + 1)
+                draftStyle = model.style
+                isShowingStyle = true
             } label: {
                 Image(systemName: "textformat.size")
                     .frame(width: 36, height: 36)
             }
-            .accessibilityLabel("放大字号")
+            .accessibilityLabel("阅读样式")
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 10)
@@ -303,6 +308,83 @@ struct PrototypeReaderView: View {
         .presentationDetents([.medium, .large])
     }
 
+    // MARK: 阅读样式（二级面板；点击应用后一次性重排）
+
+    private var styleSheet: some View {
+        NavigationStack {
+            Form {
+                Section("字体") {
+                    NavigationLink {
+                        PrototypeFontPicker(selection: $draftStyle.fontFamily)
+                    } label: {
+                        HStack {
+                            Text("字体选择")
+                            Spacer()
+                            Text(draftStyle.fontFamily ?? "书籍默认")
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    HStack {
+                        Text("字号")
+                        Slider(value: $draftStyle.fontSize, in: 12...36, step: 1)
+                        Text("\(Int(draftStyle.fontSize))")
+                            .monospacedDigit().frame(width: 28, alignment: .trailing)
+                    }
+                }
+                Section("段落") {
+                    styleSlider("行间距", value: $draftStyle.lineSpacing, range: 0...24)
+                    styleSlider("段落间距", value: $draftStyle.paragraphSpacing, range: 0...40)
+                    Picker("首行缩进", selection: Binding(
+                        get: { Int(draftStyle.firstLineIndentEm ?? -1) },
+                        set: { draftStyle.firstLineIndentEm = $0 < 0 ? nil : CGFloat($0) }
+                    )) {
+                        Text("沿用书籍").tag(-1)
+                        Text("无").tag(0)
+                        ForEach(1...4, id: \.self) { value in
+                            Text("\(value) 字宽").tag(value)
+                        }
+                    }
+                }
+                Section("页面边距") {
+                    styleSlider("上", value: $draftStyle.topMargin, range: 0...120)
+                    styleSlider("下", value: $draftStyle.bottomMargin, range: 0...120)
+                    styleSlider("左", value: $draftStyle.leftMargin, range: 0...80)
+                    styleSlider("右", value: $draftStyle.rightMargin, range: 0...80)
+                }
+                Section {
+                    Text("点击“应用”后重新分页，并按当前章节的页数比例恢复位置；文字位置可能略有变化。缩进选择“沿用书籍”可恢复原排版。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("阅读样式")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") { isShowingStyle = false }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("应用") {
+                        model.applyStyle(draftStyle)
+                        isShowingStyle = false
+                    }
+                    .disabled(model.isAnimating || model.isLayingOut)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func styleSlider(_ label: String, value: Binding<CGFloat>,
+                             range: ClosedRange<CGFloat>) -> some View {
+        HStack {
+            Text(label).frame(width: 68, alignment: .leading)
+            Slider(value: value, in: range, step: 1)
+            Text("\(Int(value.wrappedValue))")
+                .monospacedDigit().frame(width: 30, alignment: .trailing)
+        }
+    }
+
     // MARK: 注脚弹层
 
     private func noteSheet(_ note: PrototypeNote) -> some View {
@@ -322,6 +404,73 @@ struct PrototypeReaderView: View {
             }
         }
         .presentationDetents([.medium])
+    }
+}
+
+/// UIFont 列出的字体族包含系统字体以及已安装且对本 App 可见的设备字体。
+private struct PrototypeFontPicker: View {
+    @Binding var selection: String?
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var isImportingFont = false
+    @State private var importError: String?
+
+    private var families: [String] {
+        UIFont.familyNames.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            .filter { query.isEmpty || $0.localizedStandardContains(query) }
+    }
+
+    var body: some View {
+        List {
+            Button {
+                isImportingFont = true
+            } label: {
+                Label("从“文件”导入字体", systemImage: "square.and.arrow.down")
+            }
+            Button {
+                selection = nil
+                dismiss()
+            } label: {
+                HStack {
+                    Text("书籍默认")
+                    Spacer()
+                    if selection == nil { Image(systemName: "checkmark") }
+                }
+            }
+            ForEach(families, id: \.self) { family in
+                Button {
+                    selection = family
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(family)
+                            .font(.custom(UIFont.fontNames(forFamilyName: family).first ?? family, size: 17))
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if selection == family { Image(systemName: "checkmark") }
+                    }
+                }
+            }
+        }
+        .navigationTitle("本机字体")
+        .searchable(text: $query, prompt: "搜索字体")
+        .fileImporter(isPresented: $isImportingFont, allowedContentTypes: [.font]) { result in
+            do {
+                let url = try result.get()
+                selection = try PrototypeLocalFonts.importFont(from: url)
+                dismiss()
+            } catch {
+                importError = error.localizedDescription
+            }
+        }
+        .alert("字体导入失败", isPresented: Binding(
+            get: { importError != nil },
+            set: { if !$0 { importError = nil } }
+        )) {
+            Button("好", role: .cancel) { importError = nil }
+        } message: {
+            Text(importError ?? "")
+        }
     }
 }
 

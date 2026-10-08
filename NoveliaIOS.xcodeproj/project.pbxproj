@@ -31,6 +31,7 @@
 		A10000000000000000000022 /* PrototypeReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* PrototypeReaderModel.swift */; };
 		A10000000000000000000023 /* PrototypeReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* PrototypeReaderView.swift */; };
 		A10000000000000000000024 /* PrototypeSampleBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000021 /* PrototypeSampleBook.swift */; };
+		A10000000000000000000025 /* ThirdPartyLicenses in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000022 /* ThirdPartyLicenses */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -55,6 +56,7 @@
 		B10000000000000000000019 /* PrototypeReaderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeReaderModel.swift; sourceTree = "<group>"; };
 		B10000000000000000000020 /* PrototypeReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeReaderView.swift; sourceTree = "<group>"; };
 		B10000000000000000000021 /* PrototypeSampleBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeSampleBook.swift; sourceTree = "<group>"; };
+		B10000000000000000000022 /* ThirdPartyLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; path = iOSApp/Resources/ThirdPartyLicenses; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -79,6 +81,7 @@
 				D10000000000000000000003 /* Sources/NoveliaIOSCore */,
 				D10000000000000000000005 /* EPUBPrototype */,
 				B10000000000000000000012 /* Assets.xcassets */,
+				B10000000000000000000022 /* ThirdPartyLicenses */,
 				D10000000000000000000004 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -253,6 +256,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000011 /* Assets.xcassets in Resources */,
+				A10000000000000000000025 /* ThirdPartyLicenses in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

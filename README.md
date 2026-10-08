@@ -74,3 +74,7 @@
 本项目是独立的 Swift 实现。Android 对照项目采用 GPL-3.0-only；AutoNovel 网站/API 仓库、第三方依赖和网站内容分别适用各自的许可证或权利声明。若后续复用上游代码或资源进行分发，请先核对对应条款。
 
 EPUB 预览版通过 Swift Package Manager 精确锁定 YueduCoreText 0.8.0（MPL-2.0），未复制或修改 YueduCoreText / Yuedu-reader 源码，也未使用其品牌素材。分发时的依赖和 MPL 说明义务记录在 [`DEPENDENCIES.md`](iOSApp/EPUBPrototype/DEPENDENCIES.md)。
+
+### 开源许可
+
+应用的“我的 → 开源许可”列出 Swift Package 依赖及许可原文；仓库中的 [`iOSApp/Resources/ThirdPartyLicenses/INDEX.md`](iOSApp/Resources/ThirdPartyLicenses/INDEX.md) 列出全部锁定包的版本、许可证和来源。YueduCoreText 的 MPL-2.0 许可及包含 Unicode License v3 的 NOTICE 随应用分发。GitHub Actions 在打包无签名 IPA 时核验这些文件。

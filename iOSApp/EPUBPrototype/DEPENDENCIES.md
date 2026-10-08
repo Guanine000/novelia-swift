@@ -36,3 +36,7 @@
 
 - 版本与许可核对日期：2026-10-08（对照各上游仓库的 Package.swift 与 LICENSE 文件）。
 - `Package.resolved` 由首次模拟器构建生成，构建通过后以仓库内实际 resolved 文件为准。
+
+## 应用级许可分发（2026-10-08 更新）
+
+上表只记录 EPUB 原型直接涉及的包。整个 App 的 **10 个锁定 Swift Package**、版本、许可证、源码地址及完整原始许可文件见 [`../Resources/ThirdPartyLicenses/INDEX.md`](../Resources/ThirdPartyLicenses/INDEX.md)。这些文本作为 Xcode 文件夹资源打入 IPA，并在“我的 → 开源许可”中可查看。YueduCoreText 的原始 `NOTICE`（含 Unicode License v3）一并提供。发布流水线检查全部文件确实进入 IPA。以上分发说明取代本文件此前仅列出原型三项依赖的简化说明。

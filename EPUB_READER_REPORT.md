@@ -1,5 +1,7 @@
 # EPUB 排版原型 · 交付报告（整合版）
 
+> 2026-10-08 本地后续改动（未提交/推送、未真机验收）：将阅读页右上角单向放大字号按钮改为“阅读样式”面板，提供字号、设备对本 App 可见的字体族、从“文件”导入 TTF/OTF/TTC 字体、行间距、段落间距、首行缩进以及上/下/左/右边距。导入字体复制到 App 文档目录，下次启动重新注册。点击“应用”后一次性重排，偏好写入本机 UserDefaults；按当前章内页数比例恢复阅读位置。iOS Simulator Debug 编译通过；真实 EPUB 中的字体覆盖效果和操作手感仍需真机确认。下方已发布预览版不含此改动。
+
 > 2026-10-08 本轮后续改动：阅读页底栏进度条改为可拖动，松手后按章及章内页定位；样式预处理增加 CSS4 `#RGBA` / `#RRGGBBAA` 转 `rgba()`，并扩展 `@media` 的 screen/all、orientation、宽高比、and/逗号组合求值。Release iPhoneOS 构建成功，未签名 IPA 为 `build/Novelia-unsigned-progress-styles.ipa`（7,153,075 bytes；SHA-256 `f5abdea02c71650888caec980f9fdef9f0bef05db63cb1dbdd4f6cb39073e1a8`），ZIP 结构校验通过；真机交互尚未验收。此轮不属于下方已合并 `main` 的 20 轮交付。复杂 CSS 仍受 YueduCoreText 当前支持范围限制，`text-shadow` 仍是颜色近似。
 
 - 仓库：`Guanine000/novelia-ios-port`（私密）· 分支 `prototype/yuedu-coretext-pager` → 已合并 `main`（PR #1，merge commit `679236a`）

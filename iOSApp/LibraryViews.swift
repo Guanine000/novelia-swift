@@ -1967,6 +1967,9 @@ struct SettingsView: View {
             Section("版本") {
                 LabeledContent("当前版本", value: appVersion)
                 LabeledContent("平台", value: "iOS 17+")
+                NavigationLink("开源许可") {
+                    ThirdPartyLicensesView()
+                }
             }
             Section("诊断") {
                 Button {
@@ -2067,4 +2070,61 @@ struct PrototypeDownloadTarget: Identifiable, Hashable {
     let id = UUID()
     let url: URL?
     let title: String
+}
+
+private struct ThirdPartyLicensesView: View {
+    private let packages: [(name: String, version: String, license: String, file: String)] = [
+        ("CryptoSwift", "1.10.0", "Zlib", "CryptoSwift-LICENSE.txt"),
+        ("DifferenceKit", "1.3.0", "Apache-2.0", "DifferenceKit-LICENSE.txt"),
+        ("Fuzi", "4.0.1", "MIT", "Fuzi-LICENSE.txt"),
+        ("GCDWebServer", "4.0.1", "BSD-3-Clause", "GCDWebServer-LICENSE.txt"),
+        ("SQLite.swift", "0.16.0", "MIT", "SQLite.swift-LICENSE.txt"),
+        ("swift-toolkit", "3.11.0", "BSD-3-Clause", "swift-toolkit-LICENSE.txt"),
+        ("SwiftSoup", "2.13.7", "MIT", "SwiftSoup-LICENSE.txt"),
+        ("YueduCoreText", "0.8.0", "MPL-2.0", "YueduCoreText-LICENSE.txt"),
+        ("Zip", "2.1.2", "MIT", "Zip-LICENSE.txt"),
+        ("ZIPFoundation", "3.0.1", "MIT", "ZIPFoundation-LICENSE.txt")
+    ]
+
+    var body: some View {
+        List {
+            Section {
+                Text("本应用使用的第三方软件及其原始许可文本。YueduCoreText 的 NOTICE 包含 Unicode License v3。")
+            }
+            Section("依赖") {
+                ForEach(packages, id: \.name) { package in
+                    NavigationLink {
+                        licenseText(package.file, title: package.name)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(package.name)
+                            Text("\(package.version) · \(package.license)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            Section("附加声明") {
+                NavigationLink("YueduCoreText NOTICE / Unicode License v3") {
+                    licenseText("YueduCoreText-NOTICE.txt", title: "附加声明")
+                }
+            }
+        }
+        .navigationTitle("开源许可")
+    }
+
+    private func licenseText(_ file: String, title: String) -> some View {
+        let url = Bundle.main.url(forResource: file, withExtension: nil, subdirectory: "ThirdPartyLicenses")
+        let content = url.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+        return ScrollView {
+            Text(content ?? "许可文件未找到：\(file)")
+                .font(.system(.footnote, design: .monospaced))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .textSelection(.enabled)
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
 }
