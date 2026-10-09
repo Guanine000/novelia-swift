@@ -73,6 +73,7 @@ struct RootView: View {
     @StateObject private var readingHistory = ReadingHistoryStore()
     @StateObject private var wenkuDownloads = WenkuLocalLibraryStore()
     @StateObject private var webNovelDownloads = WebNovelDownloadStore()
+    @StateObject private var webDAVSync = WebDAVSyncStore()
 
     /// 调试/自动化入口：`-openEPUBPrototype` 启动参数直接打开排版原型。
     private var opensPrototypeDirectly: Bool {
@@ -107,6 +108,7 @@ struct RootView: View {
         .environmentObject(readingHistory)
         .environmentObject(wenkuDownloads)
         .environmentObject(webNovelDownloads)
+        .environmentObject(webDAVSync)
         .sheet(isPresented: $auth.isLoginPresented) {
             NoveliaLoginSheet(auth: auth)
         }

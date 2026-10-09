@@ -133,7 +133,15 @@ final class PrototypeReaderModel: ObservableObject {
     @Published private(set) var status: Status = .idle
     @Published private(set) var container: PrototypeEPUBContainer?
     private(set) var pageBook: PrototypePageBook?
-    @Published private(set) var location = PrototypeReadingLocation(spineIndex: 0, pageIndex: 0)
+    @Published private(set) var location = PrototypeReadingLocation(spineIndex: 0, pageIndex: 0) {
+        didSet {
+            if !isRestoringPosition, let openedBookHash, status == .ready {
+                ReadingPositionSync.recordEPUB(hash: openedBookHash, fraction: overallProgress)
+            }
+        }
+    }
+    private var openedBookHash: String?
+    private var isRestoringPosition = false
     @Published private(set) var generation = 0
     @Published private(set) var style = PrototypeReaderStyle()
     @Published private(set) var isAnimating = false
@@ -142,8 +150,6 @@ final class PrototypeReaderModel: ObservableObject {
     @Published var activeNote: PrototypeNote?
     /// 普通链接点击提示（本轮不导航）。
     @Published var plainLinkMessage: String?
-    /// Files 导入等产生的提示。
-    @Published var importMessage: String?
 
     /// 视口内容区尺寸（由界面测量后注入；变化即触发重排）。
     var viewportSize: CGSize = .zero {
@@ -206,46 +212,23 @@ final class PrototypeReaderModel: ObservableObject {
 
     func open(url: URL) async {
         status = .opening
+        isRestoringPosition = true
         do {
+            let bookHash = try await Task.detached(priority: .utility) {
+                try WebDAVFileHash.sha256(url)
+            }.value
             let container = try await PrototypeEPUBContainer.open(fileURL: url)
             self.container = container
+            openedBookHash = bookHash
             location = PrototypeReadingLocation(spineIndex: 0, pageIndex: 0)
             await relayout(keepingCurrentSpine: false)
-        } catch {
-            status = .failed(describeLayoutError(error))
-        }
-    }
-
-    /// Files 导入：security-scoped 资源在 NSFileCoordinator 协调下复制到本地，
-    /// 再走同一打开流程。失败写入 importMessage。
-    func importEPUB(from pickedURL: URL) async {
-        let needsScope = pickedURL.startAccessingSecurityScopedResource()
-        defer { if needsScope { pickedURL.stopAccessingSecurityScopedResource() } }
-
-        let importsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("PrototypeImports", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: importsDirectory, withIntermediateDirectories: true)
-            let destination = importsDirectory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension("epub")
-            var coordinatedError: NSError?
-            var copyError: Error?
-            NSFileCoordinator().coordinate(readingItemAt: pickedURL, options: .forUploading,
-                                           error: &coordinatedError) { sourceURL in
-                // .forUploading 给出临时快照（目录/安全区外文件也可复制）。
-                do {
-                    try FileManager.default.copyItem(at: sourceURL, to: destination)
-                } catch {
-                    copyError = error
-                }
+            isRestoringPosition = false
+            if status == .ready, let saved = ReadingPositionSync.epubFraction(hash: bookHash), saved > 0 {
+                seek(to: saved)
             }
-            if let coordinatedError { throw coordinatedError }
-            if let copyError { throw copyError }
-            importMessage = nil
-            await open(url: destination)
         } catch {
-            importMessage = "导入失败：\(error.localizedDescription)"
+            isRestoringPosition = false
+            status = .failed(describeLayoutError(error))
         }
     }
 
@@ -302,6 +285,9 @@ final class PrototypeReaderModel: ObservableObject {
     /// 重排当前章（以及前后相邻章的预取）。generation 递增使旧页面全部失效。
     private func relayout(keepingCurrentSpine: Bool) async {
         guard let container else { return }
+        let wasRestoringPosition = isRestoringPosition
+        isRestoringPosition = true
+        defer { isRestoringPosition = wasRestoringPosition }
         container.themeTextColor = pageTextColor
         relayoutTask?.cancel()
         let spineIndex = keepingCurrentSpine ? location.spineIndex : 0

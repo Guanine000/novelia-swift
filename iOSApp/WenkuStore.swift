@@ -171,6 +171,40 @@ final class WenkuLocalLibraryStore: ObservableObject {
         directory.appendingPathComponent(book.filename)
     }
 
+    func syncFiles(for book: LocalWenkuEPUB) -> [String: URL] {
+        var files = [book.filename: fileURL(for: book)]
+        if let coverFilename = book.coverFilename, let coverURL = coverURL(for: book) {
+            files[coverFilename] = coverURL
+        }
+        return files
+    }
+
+    func restoreFromSync(_ book: LocalWenkuEPUB, files: [String: URL]) throws {
+        guard !books.contains(where: { $0.id == book.id }) else { return }
+        guard let source = files[book.filename] else { throw CocoaError(.fileReadNoSuchFile) }
+        let destination = uniqueDestination(for: Self.safeFilename(book.filename))
+        try fileManager.copyItem(at: source, to: destination)
+        var restored = LocalWenkuEPUB(id: book.id, title: book.title,
+                                  filename: destination.lastPathComponent, addedAt: book.addedAt,
+                                  lastLocatorJSON: book.lastLocatorJSON,
+                                  bookDescription: book.bookDescription, author: book.author,
+                                  coverFilename: nil, metadataLoaded: book.metadataLoaded)
+        do {
+            if let coverName = book.coverFilename, let coverSource = files[coverName] {
+                let coverDestination = directory.appendingPathComponent("cover-\(UUID().uuidString).jpg")
+                try fileManager.copyItem(at: coverSource, to: coverDestination)
+                restored.coverFilename = coverDestination.lastPathComponent
+            }
+            books.insert(restored, at: 0)
+            try persistIndex()
+        } catch {
+            books.removeAll { $0.id == book.id }
+            try? fileManager.removeItem(at: destination)
+            if let cover = restored.coverFilename { try? fileManager.removeItem(at: directory.appendingPathComponent(cover)) }
+            throw error
+        }
+    }
+
     func coverURL(for book: LocalWenkuEPUB) -> URL? {
         guard let coverFilename = book.coverFilename else { return nil }
         let url = directory.appendingPathComponent(coverFilename)
@@ -447,6 +481,48 @@ final class WebNovelDownloadStore: ObservableObject {
 
     func fileURL(for book: DownloadedWebNovel) -> URL? {
         book.fileFilename.map { directory.appendingPathComponent($0) }
+    }
+
+    func syncFiles(for book: DownloadedWebNovel) -> [String: URL] {
+        var files: [String: URL] = [:]
+        for filename in [book.chapterDataFilename, book.fileFilename].compactMap({ $0 }) {
+            let url = directory.appendingPathComponent(filename)
+            if fileManager.fileExists(atPath: url.path) { files[filename] = url }
+        }
+        return files
+    }
+
+    func restoreFromSync(_ book: DownloadedWebNovel, files: [String: URL]) throws {
+        guard !books.contains(where: { $0.id == book.id }) else { return }
+        guard book.chapterDataFilename != nil || book.fileFilename != nil else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        var copied: [URL] = []
+        do {
+            var names: [String: String] = [:]
+            for filename in [book.chapterDataFilename, book.fileFilename].compactMap({ $0 }) {
+                guard let source = files[filename] else { throw CocoaError(.fileReadNoSuchFile) }
+                let destination = uniqueDestination(for: filename)
+                try fileManager.copyItem(at: source, to: destination)
+                copied.append(destination)
+                names[filename] = destination.lastPathComponent
+            }
+            let restored = DownloadedWebNovel(
+                novel: book.novel,
+                chapterDataFilename: book.chapterDataFilename.flatMap { names[$0] },
+                fileFilename: book.fileFilename.flatMap { names[$0] },
+                downloadedAt: book.downloadedAt,
+                translationSource: book.translationSource
+            )
+            books.insert(restored, at: 0)
+            do { try persistIndex() } catch {
+                books.removeAll { $0.id == book.id }
+                throw error
+            }
+        } catch {
+            for url in copied { try? fileManager.removeItem(at: url) }
+            throw error
+        }
     }
 
     private func removeStoredFile(for book: DownloadedWebNovel) {

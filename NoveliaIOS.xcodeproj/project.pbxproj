@@ -32,6 +32,7 @@
 		A10000000000000000000023 /* PrototypeReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* PrototypeReaderView.swift */; };
 		A10000000000000000000024 /* PrototypeSampleBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000021 /* PrototypeSampleBook.swift */; };
 		A10000000000000000000025 /* ThirdPartyLicenses in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000022 /* ThirdPartyLicenses */; };
+		A10000000000000000000026 /* WebDAVSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000023 /* WebDAVSync.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,6 +58,7 @@
 		B10000000000000000000020 /* PrototypeReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeReaderView.swift; sourceTree = "<group>"; };
 		B10000000000000000000021 /* PrototypeSampleBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeSampleBook.swift; sourceTree = "<group>"; };
 		B10000000000000000000022 /* ThirdPartyLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; path = iOSApp/Resources/ThirdPartyLicenses; sourceTree = "<group>"; };
+		B10000000000000000000023 /* WebDAVSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVSync.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -111,6 +113,7 @@
 				B10000000000000000000011 /* ReadingHistoryStore.swift */,
 				B10000000000000000000013 /* WenkuViews.swift */,
 				B10000000000000000000014 /* WenkuStore.swift */,
+				B10000000000000000000023 /* WebDAVSync.swift */,
 			);
 			path = iOSApp;
 			sourceTree = "<group>";
@@ -279,6 +282,7 @@
 				A10000000000000000000010 /* ReadingHistoryStore.swift in Sources */,
 				A10000000000000000000012 /* WenkuViews.swift in Sources */,
 				A10000000000000000000013 /* WenkuStore.swift in Sources */,
+				A10000000000000000000026 /* WebDAVSync.swift in Sources */,
 				A10000000000000000000014 /* WenkuNovel.swift in Sources */,
 				A10000000000000000000019 /* PrototypeEPUBContainer.swift in Sources */,
 				A10000000000000000000020 /* PrototypePageBook.swift in Sources */,

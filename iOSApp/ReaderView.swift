@@ -206,6 +206,8 @@ struct ReaderView: View {
             .background(readerBackground.ignoresSafeArea())
             .onChange(of: chapterIndex) { _, newIndex in
                 guard novel.chapters.indices.contains(newIndex) else { return }
+                savedChapterIndex = newIndex
+                ReadingPositionSync.recordWeb(id: novel.id, chapterIndex: newIndex)
                 withAnimation(.easeInOut(duration: 0.2)) {
                     proxy.scrollTo(novel.chapters[newIndex].id, anchor: .top)
                 }
@@ -264,6 +266,7 @@ struct ReaderView: View {
             }
             .onAppear {
                 savedChapterIndex = chapterIndex
+                ReadingPositionSync.recordWeb(id: novel.id, chapterIndex: chapterIndex)
                 if let offlineTranslationSource { translationSourceRaw = offlineTranslationSource.rawValue }
             }
             .task(id: "\(chapter.id)-\(loadAttempt)") { await loadChapter() }

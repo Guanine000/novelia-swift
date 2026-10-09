@@ -1886,7 +1886,7 @@ private struct DownloadedWebNovelReader: View {
             if let chapters {
                 ReaderView(
                     novel: book.novel,
-                    startingAt: 0,
+                    startingAt: UserDefaults.standard.integer(forKey: "progress.\(book.id)"),
                     offlineChapters: chapters,
                     offlineTranslationSource: book.translationSource
                 )
@@ -1962,6 +1962,11 @@ struct SettingsView: View {
                     MyDownloadsView()
                 } label: {
                     Label("我的下载", systemImage: "arrow.down.circle")
+                }
+                NavigationLink {
+                    WebDAVSyncView()
+                } label: {
+                    Label("WebDAV 同步", systemImage: "arrow.triangle.2.circlepath")
                 }
             }
             Section("版本") {

@@ -17,7 +17,6 @@ struct PrototypeReaderView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var isShowingTOC = false
     @State private var isShowingStyle = false
-    @State private var isShowingImporter = false
     @State private var showChrome = true
     @State private var isScrubbing = false
     @State private var scrubProgress = 0.0
@@ -107,20 +106,6 @@ struct PrototypeReaderView: View {
         .sheet(isPresented: $isShowingTOC) { tocSheet }
         .sheet(isPresented: $isShowingStyle) { styleSheet }
         .sheet(item: $model.activeNote) { note in noteSheet(note) }
-        .fullScreenCover(isPresented: $isShowingImporter) {
-            PrototypeFilePicker { url in
-                Task { await model.importEPUB(from: url) }
-            }
-            .ignoresSafeArea()
-        }
-        .alert("导入", isPresented: .init(
-            get: { model.importMessage != nil },
-            set: { if !$0 { model.importMessage = nil } }
-        )) {
-            Button("好", role: .cancel) { model.importMessage = nil }
-        } message: {
-            Text(model.importMessage ?? "")
-        }
         .alert("链接", isPresented: .init(
             get: { model.plainLinkMessage != nil },
             set: { if !$0 { model.plainLinkMessage = nil } }
@@ -148,13 +133,6 @@ struct PrototypeReaderView: View {
                 .font(.system(size: 14, weight: .medium))
                 .lineLimit(1)
                 .frame(maxWidth: .infinity)
-            Button {
-                isShowingImporter = true
-            } label: {
-                Image(systemName: "square.and.arrow.down")
-                    .frame(width: 36, height: 36)
-            }
-            .accessibilityLabel("导入 EPUB")
             Button {
                 isShowingTOC = true
             } label: {
