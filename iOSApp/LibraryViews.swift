@@ -861,10 +861,10 @@ struct NovelDetailView: View {
                                 }
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(progress == nil
-                                         ? (webNovelDownloads.isDownloaded(displayNovel.id) ? "下载全书 EPUB / TXT" : "选择语言与格式")
+                                         ? (webNovelDownloads.isDownloaded(displayNovel.id) ? "重新下载全书 EPUB" : "下载全书 EPUB")
                                          : "正在下载整本小说…")
                                         .font(.system(size: 15, weight: .bold, design: .rounded))
-                                    Text("可下载 EPUB 或 TXT，下载后可在 App 内阅读")
+                                    Text("选择原文、译文或双语 EPUB，下载后可在 App 内阅读")
                                         .font(.system(size: 12, weight: .medium)).opacity(0.82)
                                 }
                                 Spacer()
@@ -1086,7 +1086,6 @@ private struct WebNovelDownloadSheet: View {
 
     @State private var selectedMode: WebNovelDownloadMode
     @State private var selectedSourceRaw: String
-    @State private var selectedFormat: WebNovelFileFormat = .epub
     @State private var isDownloading = false
     @State private var didFinish = false
 
@@ -1118,15 +1117,6 @@ private struct WebNovelDownloadSheet: View {
                     Text(novel.title).font(.headline)
                     Text("通过 Novelia 官方整本下载接口获取文件，可在“我的下载”中阅读或导出。")
                         .font(.footnote).foregroundStyle(.secondary)
-                }
-                Section("文件格式") {
-                    Picker("格式", selection: $selectedFormat) {
-                        ForEach(WebNovelFileFormat.allCases) { format in
-                            Text(format.title).tag(format)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(isDownloading)
                 }
                 Section("语言") {
                     Picker("下载内容", selection: $selectedMode) {
@@ -1162,15 +1152,14 @@ private struct WebNovelDownloadSheet: View {
                     Section { Text("下载失败：\(error)").font(.footnote).foregroundStyle(.red) }
                 }
                 if didFinish {
-                    Section { Label("\(selectedMode.title)下载完成，可在“我的下载”中阅读或导出 \(selectedFormat.title)", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
+                    Section { Label("\(selectedMode.title) EPUB 下载完成，可在“我的下载”中阅读或导出", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
                 }
                 Section {
                     Button {
                         isDownloading = true
                         Task {
                             await downloads.download(novel, mode: selectedMode,
-                                                     translationSource: effectiveSource,
-                                                     format: selectedFormat)
+                                                     translationSource: effectiveSource)
                             isDownloading = false
                             didFinish = downloads.isDownloaded(novel.id) && downloads.errors[novel.id] == nil
                         }
@@ -1850,7 +1839,7 @@ struct MyDownloadsView: View {
                 ContentUnavailableView {
                     Label("暂无网络小说下载", systemImage: "arrow.down.book")
                 } description: {
-                    Text("打开网络小说详情，选择 EPUB 或 TXT 下载后，即可在这里阅读或导出。")
+                    Text("网络小说 EPUB 下载和导入的 TXT 文件会显示在这里，可阅读或导出。")
                 }
             } else {
                 List {
@@ -2101,6 +2090,7 @@ private struct DownloadedWebNovelTXTReader: View {
         .background(appearance.background(system: systemColorScheme).ignoresSafeArea())
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if chapters != nil {
@@ -2551,7 +2541,7 @@ private enum ApplicationLogExporter {
             "\(formatter.string(from: $0.date)) [\($0.level)] [\($0.subsystem):\($0.category)] \($0.composedMessage)"
         }
         let txtDiagnosticCount = recentEntries.filter {
-            $0.subsystem == "cc.novelia.ios.port" && ["txt", "txt-download"].contains($0.category)
+            $0.subsystem == "cc.novelia.ios.port" && $0.category == "txt"
         }.count
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "未知"
@@ -2561,7 +2551,7 @@ private enum ApplicationLogExporter {
             "导出时间：\(formatter.string(from: Date()))",
             "范围：最近 7 天，最多 5000 条当前进程日志",
             "本次导出条数：\(recentEntries.count)",
-            "TXT 下载 / 导入 / 解码 / 分章诊断条数：\(txtDiagnosticCount)",
+            "TXT 导入 / 解码 / 分章诊断条数：\(txtDiagnosticCount)",
             ""
         ]
         lines.append(contentsOf: messages.isEmpty ? ["系统日志存储中没有可导出的应用日志。"] : messages)

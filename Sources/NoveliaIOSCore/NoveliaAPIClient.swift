@@ -5,7 +5,7 @@ import OSLog
 public struct NoveliaAPIClient: Sendable {
     public static let defaultBaseURL = URL(string: "https://n.novelia.cc/api/")!
     public static let forumBaseURL = URL(string: "https://forum.novelia.cc/")!
-    private static let downloadLogger = Logger(subsystem: "cc.novelia.ios.port", category: "txt-download")
+    private static let downloadLogger = Logger(subsystem: "cc.novelia.ios.port", category: "novel-download")
 
     private let baseURL: URL
     private let session: URLSession
@@ -99,27 +99,6 @@ public struct NoveliaAPIClient: Sendable {
         translationSource: NovelTranslationSource?,
         mode: WebNovelDownloadMode = .translated
     ) async throws {
-        try await downloadWebNovelFile(
-            to: destinationURL,
-            providerId: providerId,
-            novelId: novelId,
-            title: title,
-            translationSource: translationSource,
-            mode: mode,
-            fileType: "epub"
-        )
-    }
-
-    public func downloadWebNovelFile(
-        to destinationURL: URL,
-        providerId: String,
-        novelId: String,
-        title: String,
-        translationSource: NovelTranslationSource?,
-        mode: WebNovelDownloadMode = .translated,
-        fileType: String = "epub"
-    ) async throws {
-        guard ["epub", "txt"].contains(fileType) else { throw NoveliaAPIError.invalidURL }
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw NoveliaAPIError.invalidURL
         }
@@ -136,11 +115,11 @@ public struct NoveliaAPIClient: Sendable {
         let translatorCode = effectiveTranslationSource.map { String($0.rawValue.prefix(1)) } ?? ""
         let safeTitle = title.replacingOccurrences(of: "[\\/|\\\\:*?\"<>]", with: "", options: .regularExpression)
         let translationFilenamePrefix = mode == .bilingual ? "B" : "Y"
-        let filenameParts = [apiMode, translatorCode.isEmpty ? nil : "\(translationFilenamePrefix)\(translatorCode)", safeTitle, fileType].compactMap { $0 }
+        let filenameParts = [apiMode, translatorCode.isEmpty ? nil : "\(translationFilenamePrefix)\(translatorCode)", safeTitle, "epub"].compactMap { $0 }
         var queryItems = [
             URLQueryItem(name: "mode", value: apiMode),
             URLQueryItem(name: "translationsMode", value: translationsMode),
-            URLQueryItem(name: "type", value: fileType),
+            URLQueryItem(name: "type", value: "epub"),
             URLQueryItem(name: "filename", value: filenameParts.joined(separator: "."))
         ]
         if let effectiveTranslationSource {
@@ -150,13 +129,13 @@ public struct NoveliaAPIClient: Sendable {
         guard let url = components.url else { throw NoveliaAPIError.invalidURL }
 
         var request = URLRequest(url: url)
-        request.setValue(fileType == "txt" ? "text/plain, application/octet-stream" : "application/epub+zip, application/octet-stream", forHTTPHeaderField: "Accept")
+        request.setValue("application/epub+zip, application/octet-stream", forHTTPHeaderField: "Accept")
         if let token = tokenProvider(), !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         request.timeoutInterval = 180
         let downloadStartedAt = ProcessInfo.processInfo.systemUptime
-        Self.downloadLogger.info("Starting novel file download; format=\(fileType, privacy: .public), mode=\(apiMode, privacy: .public), translationsMode=\(translationsMode, privacy: .public)")
+        Self.downloadLogger.info("Starting novel EPUB download; mode=\(apiMode, privacy: .public), translationsMode=\(translationsMode, privacy: .public)")
         let temporaryURL: URL
         let response: URLResponse
         do {
@@ -164,13 +143,13 @@ public struct NoveliaAPIClient: Sendable {
         } catch {
             let nsError = error as NSError
             let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - downloadStartedAt) * 1_000)
-            Self.downloadLogger.error("Novel file request failed before receiving an HTTP response; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
+            Self.downloadLogger.error("Novel EPUB request failed before receiving an HTTP response; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
             throw error
         }
         guard let http = response as? HTTPURLResponse else { throw NoveliaAPIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
             let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - downloadStartedAt) * 1_000)
-            Self.downloadLogger.error("Novel file request returned HTTP \(http.statusCode, privacy: .public); elapsedMs=\(elapsedMS, privacy: .public)")
+            Self.downloadLogger.error("Novel EPUB request returned HTTP \(http.statusCode, privacy: .public); elapsedMs=\(elapsedMS, privacy: .public)")
             throw NoveliaAPIError.httpStatus(http.statusCode, serverMessage(in: Self.responseData(from: temporaryURL)))
         }
         let attributes = try? FileManager.default.attributesOfItem(atPath: temporaryURL.path)
@@ -181,7 +160,7 @@ public struct NoveliaAPIClient: Sendable {
             throw NoveliaAPIError.invalidResponse
         }
         let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - downloadStartedAt) * 1_000)
-        Self.downloadLogger.info("Novel file download completed; bytes=\(size, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
+        Self.downloadLogger.info("Novel EPUB download completed; bytes=\(size, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
         try FileManager.default.moveItem(at: temporaryURL, to: destinationURL)
     }
 

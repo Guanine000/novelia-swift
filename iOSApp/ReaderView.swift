@@ -273,6 +273,7 @@ struct ReaderView: View {
         }
         .navigationTitle("阅读")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .preferredColorScheme(appearance.preferredColorScheme)
     }
 

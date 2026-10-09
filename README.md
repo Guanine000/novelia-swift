@@ -1,6 +1,6 @@
 # Novelia iOS
 
-Novelia iOS 是使用 SwiftUI 编写的 iPhone 客户端，连接 Novelia 网站浏览网络小说与文库、阅读章节、管理收藏和下载 EPUB / TXT。项目还提供基于 YueduCoreText 的原生 EPUB 分页阅读器。最低系统版本为 **iOS 17**。
+Novelia iOS 是使用 SwiftUI 编写的 iPhone 客户端，连接 Novelia 网站浏览网络小说与文库、阅读章节、管理收藏和下载 EPUB，并支持导入 TXT / EPUB 文件。项目还提供基于 YueduCoreText 的原生 EPUB 分页阅读器。最低系统版本为 **iOS 17**。
 
 本项目参考 [nobYoQ/novelia](https://github.com/nobYoQ/novelia) 的产品功能；Novelia 网站与 API 来自 [AutoNovel](https://github.com/auto-novel/auto-novel)。这些项目及网站内容分别适用各自的权利与许可条件。
 
@@ -16,10 +16,10 @@ Novelia iOS 是使用 SwiftUI 编写的 iPhone 客户端，连接 Novelia 网站
 | EPUB 下载 | 使用 Novelia 官网整本接口下载网络小说 EPUB；下载文库译文或双语 EPUB；在“我的下载”中导出或删除。 |
 | 本地书籍导入 | 在“我的下载”中从“文件”多选导入 EPUB 和 TXT；浮窗显示批量处理进度，完成后加入本地书籍列表，可阅读、导出或删除。 |
 | EPUB 阅读 | 从“我的下载”打开 EPUB；解析 EPUB 2 NCX / EPUB 3 nav、图片与部分 ruby；左右相接的跟手平移翻页、目录跳转、注脚弹层、书内链接、可拖动进度条。 |
-| 网络小说 TXT | 通过官网整本接口下载 TXT，也可从“文件”导入；本地阅读支持常见中英文标题分章、卷标题、章节目录、字号与主题设置。“我的 → 阅读体验 → TXT 分章规则”可启停内置规则，并添加、编辑或删除自定义整行正则。分章规则设计参考 [Qingdu Reader](https://github.com/zengchen666/qingdu-reader)（Apache-2.0），本项目为独立 Swift 实现。 |
+| TXT 导入与阅读 | 从“文件”多选导入 TXT；本地阅读支持常见中英文标题分章、卷标题、章节目录、字号与主题设置。“我的 → 阅读体验 → TXT 分章规则”可启停内置规则，并添加、编辑或删除自定义整行正则。分章规则设计参考 [Qingdu Reader](https://github.com/zengchen666/qingdu-reader)（Apache-2.0），本项目为独立 Swift 实现。 |
 | 阅读样式 | 设置字号、字体、行间距、段落间距、首行缩进和四边边距；恢复默认；从“文件”导入 TTF/OTF/TTC，并在管理页选用或删除。 |
 | WebDAV 同步 | 在“我的 → WebDAV 同步”配置 HTTPS WebDAV，手动合并已下载的网络小说、文库 EPUB 和阅读位置；密码保存在 iOS 钥匙串。 |
-| 诊断 | 从“我的”页面导出最近 7 天的应用日志；包含 TXT 下载状态、导入阶段、解码字节数、分章数量与耗时、失败的系统错误域/代码。导出摘要会统计 TXT 诊断记录数。 |
+| 诊断 | 从“我的”页面导出最近 7 天的应用日志；包含 EPUB 下载状态、TXT 导入阶段、解码字节数、分章数量与耗时、失败的系统错误域/代码。导出摘要会统计 TXT 导入、解码与分章诊断记录数。 |
 
 EPUB 阅读器的容器解析、页面缓存、翻页界面和字体管理代码位于 [`iOSApp/EPUBPrototype/`](iOSApp/EPUBPrototype/)。排版依赖 [YueduCoreText 0.8.0](https://github.com/CHANG-JUI-LIN/YueduCoreText)。[阅读器报告](EPUB_READER_REPORT.md) 记录了实现过程、真实书样本和已知限制。
 
@@ -42,7 +42,7 @@ Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名�
 - EPUB 全书进度按章节和章内页数估算；样式改变或跨设备恢复阅读位置时也按比例近似定位。EPUB 书签和书内搜索尚未实现。
 - WebDAV 目前需手动点击“立即同步”，要求 HTTPS 与可写的 WebDAV 文件夹。同步只新增书籍、不传播删除；两端已有同一网络小说下载时保留各自本地文件，阅读位置按最后修改时间合并。尚无后台自动同步或冲突选择界面。
 - WebDAV 实现尚未用真实服务器及两台设备验证；不同服务端对条件写入与目录创建的支持可能有差异。
-- 文库 TXT 下载、SRT 阅读和后台下载队列尚未实现。本地导入的 TXT 支持 UTF-8、带 BOM 的 UTF-16/32、GB18030/GBK、Big5 和 Shift_JIS 编码。TXT 分章按常见标题格式保守识别，特殊作品格式可能需要手动处理；可信章节少于 3 个时会退回全文阅读。
+- 网络小说目前仅支持 EPUB 整本下载（原文、译文或双语）；TXT 通过本地文件导入阅读，不提供网络 TXT 下载。SRT 阅读和后台下载队列尚未实现。本地导入的 TXT 支持 UTF-8、带 BOM 的 UTF-16/32、GB18030/GBK、Big5 和 Shift_JIS 编码。TXT 分章按常见标题格式保守识别，特殊作品格式可能需要手动处理；可信章节少于 3 个时会退回全文阅读。
 
 ## 许可与第三方软件
 

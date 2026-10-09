@@ -517,7 +517,7 @@ final class WebNovelDownloadStore: ObservableObject {
         }.value
     }
 
-    func download(_ novel: Novel, mode: WebNovelDownloadMode, translationSource: NovelTranslationSource?, format: WebNovelFileFormat = .epub) async {
+    func download(_ novel: Novel, mode: WebNovelDownloadMode, translationSource: NovelTranslationSource?) async {
         guard novel.isRemote,
               let providerId = novel.providerId,
               let novelId = novel.novelId,
@@ -530,16 +530,15 @@ final class WebNovelDownloadStore: ObservableObject {
             try Task.checkCancellation()
             let effectiveSource = mode == .original ? nil : translationSource
             let filename = Self.websiteDownloadFilename(title: novel.title, mode: mode,
-                                                         translationSource: effectiveSource, format: format)
+                                                         translationSource: effectiveSource)
             let dataURL = uniqueDestination(for: filename)
-            try await api.downloadWebNovelFile(
+            try await api.downloadWebNovelEPUB(
                 to: dataURL,
                 providerId: providerId,
                 novelId: novelId,
                 title: novel.title,
                 translationSource: effectiveSource,
-                mode: mode,
-                fileType: format.rawValue
+                mode: mode
             )
             progress[novel.id] = WebNovelDownloadProgress(completed: 1, total: 1)
 
@@ -550,7 +549,7 @@ final class WebNovelDownloadStore: ObservableObject {
                 downloadedAt: Date(),
                 translationSource: effectiveSource,
                 downloadMode: mode,
-                fileFormat: format
+                fileFormat: .epub
             )
             let previousBooks = books
             books.removeAll { $0.id == novel.id }
@@ -671,10 +670,10 @@ final class WebNovelDownloadStore: ObservableObject {
     }
 
     private static func websiteDownloadFilename(title: String, mode: WebNovelDownloadMode,
-                                                translationSource: NovelTranslationSource?, format: WebNovelFileFormat) -> String {
+                                                translationSource: NovelTranslationSource?) -> String {
         let safeTitle = title.replacingOccurrences(of: "[\\/|\\\\:*?\"<>]", with: "", options: .regularExpression)
         let translator = translationSource.map { "Y\($0.rawValue.prefix(1))." } ?? ""
-        return "\(mode.apiValue).\(translator)\(safeTitle).\(format.fileExtension)"
+        return "\(mode.apiValue).\(translator)\(safeTitle).epub"
     }
 
     private func persistIndex() throws {
