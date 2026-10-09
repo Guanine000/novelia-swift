@@ -2699,7 +2699,7 @@ private struct ThirdPartyLicensesView: View {
                     licenseText("GPL-3.0-only.txt", title: "GNU GPL-3.0-only")
                 }
                 Text("本项目是参考 GPL-3.0-only 安卓客户端 nobYoQ/novelia 制作的 Swift iOS 移植版本，包含 iOS 平台实现及后续修改。上游版权声明：Copyright (C) 2026 Novelia Android contributors. 本 iOS 移植及新增部分：Copyright (C) 2026 Novelia iOS contributors。修改版本日期：2026-10-09。")
-                Link("查看对应版本的源码仓库", destination: URL(string: "https://github.com/Guanine000/novelia-ios-port")!)
+                Link("查看对应版本的源码仓库", destination: URL(string: "https://github.com/Guanine000/novelia-swift")!)
                 Text("仓库目前为私密仓库。分发 IPA 时，分发者应确保接收者可取得与该 IPA 对应的完整源代码。")
             }
             Section {
