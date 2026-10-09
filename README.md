@@ -15,7 +15,7 @@ Novelia iOS 是使用 SwiftUI 编写的 iPhone 客户端，连接 Novelia 网站
 | 评论 | 查看网络小说与文库的网页评论和回复；登录后发表与回复。 |
 | EPUB 下载 | 使用 Novelia 官网整本接口下载网络小说 EPUB；下载文库译文或双语 EPUB；在“我的下载”中导出或删除。 |
 | 本地书籍导入 | 在“我的下载”中从“文件”多选导入 EPUB 和 TXT；浮窗显示批量处理进度，完成后加入本地书籍列表，可阅读、导出或删除。 |
-| EPUB 阅读 | 从“我的下载”打开 EPUB；解析 EPUB 2 NCX / EPUB 3 nav、图片与部分 ruby；左右相接的跟手平移翻页、目录跳转、注脚弹层、书内链接、可拖动进度条。 |
+| EPUB 阅读 | 从“我的下载”打开 EPUB；解析 EPUB 2 NCX / EPUB 3 nav、图片与部分 ruby；左右相接的跟手平移翻页、目录跳转、注脚弹层、书内链接、可拖动进度条；目录提供可折叠、可复制的解析与排版诊断。 |
 | TXT 导入与阅读 | 从“文件”多选导入 TXT；本地阅读支持常见中英文标题分章、卷标题、章节目录、字号与主题设置。“我的 → 阅读体验 → TXT 分章规则”可启停内置规则，并添加、编辑或删除自定义整行正则。分章规则设计参考 [Qingdu Reader](https://github.com/zengchen666/qingdu-reader)（Apache-2.0），本项目为独立 Swift 实现。 |
 | 阅读样式 | 设置字号、字体、行间距、段落间距、首行缩进和四边边距；恢复默认；从“文件”导入 TTF/OTF/TTC，并在管理页选用或删除。 |
 | WebDAV 同步 | 在“我的 → WebDAV 同步”启用并配置 HTTPS WebDAV；在“我的下载”点同步开始，同步中再次点按可查看进度或取消；按书籍的下载/导入时间选择较新版本，阅读位置独立按更新时间合并；密码保存在 iOS 钥匙串。 |
@@ -38,6 +38,14 @@ Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名�
 与上一正式版 [v0.6.0](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.6.0) 相比，v0.6.2 新增本地 TXT 多选导入与阅读，并支持启停内置分章规则、管理自定义分章规则，以及跳转章节目录。TXT 解码新增对带 BOM 的 UTF-16/32、GB18030/GBK、Big5 和 Shift_JIS 的支持，同时补充导入、解码和分章错误诊断。在线小说与 TXT 阅读时会隐藏底部标签栏；网络小说整本下载提供 EPUB，TXT 通过本地文件导入。已有下载列表中的 TXT 文件仍可阅读。
 
 完整更新说明及未签名 IPA、对应源码和 YueduCoreText 锁定源码见[最新 Release](https://github.com/Guanine000/novelia-ios-port/releases/latest)。
+
+## 0.6.3 相较上一正式版的变化
+
+与 [v0.6.2](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.6.2) 相比，v0.6.3 优化了 EPUB 与在线阅读的滚动性能，改进 WebDAV 同步交互（同步开关、进度浮窗和取消操作），并按每本书的最新记录合并同步内容与阅读进度。EPUB 目录中的书内链接会以可点击样式呈现；当内嵌目录过于简略时，会尝试从正文标题生成备用目录。
+
+目录页中的解析与排版兼容性说明现在统一折叠展示，支持长按复制；首次打开有诊断信息的书时会显示说明弹窗，折叠或展开选择会按书保存。WebDAV 删除语义仍为保留云端副本，本地删除不会同步删除云端书籍。
+
+完整更新说明、未签名 IPA、本项目对应版本源码及 YueduCoreText 锁定版本源码与许可材料见[最新 Release](https://github.com/Guanine000/novelia-ios-port/releases/latest)。
 
 项目主要目录：`iOSApp/` 为 SwiftUI 应用与 EPUB 阅读器，`Sources/NoveliaIOSCore/` 为 API、模型和存储代码，`NoveliaIOS.xcodeproj/` 为 Xcode 工程。
 

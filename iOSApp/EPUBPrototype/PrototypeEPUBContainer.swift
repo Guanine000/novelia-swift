@@ -54,6 +54,8 @@ final class PrototypeEPUBContainer {
     private let manifestByID: [String: PrototypeSpineItem]
     /// 目录为空时的可诊断原因。
     private(set) var tocDiagnostic: String?
+    /// When a sparse embedded TOC was replaced with headings recovered from the spine.
+    private(set) var tocFallbackDiagnostic: String?
 
     private init(fileURL: URL, archive: Archive, opfDirectory: String,
                  bookTitle: String, author: String?, spine: [PrototypeSpineItem],
@@ -628,6 +630,8 @@ final class PrototypeEPUBContainer {
         guard embedded.count <= 1 else { return embedded }
         let generated = await generateTOCFromSpineHeadings()
         guard generated.count > embedded.count else { return embedded }
+        let embeddedTitle = embedded.map(\.title).joined(separator: "、")
+        tocFallbackDiagnostic = "原书内嵌目录只有 \(embedded.count) 项（\(embeddedTitle)），已根据正文标题生成备用目录，共 \(generated.count) 项。"
         Self.tocLog.info("TOC fallback generated entries=\(generated.count), embedded entries=\(embedded.count)")
         return generated
     }

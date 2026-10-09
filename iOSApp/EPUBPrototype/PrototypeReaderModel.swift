@@ -150,6 +150,15 @@ final class PrototypeReaderModel: ObservableObject {
     @Published var activeNote: PrototypeNote?
     /// 普通链接点击提示（本轮不导航）。
     @Published var plainLinkMessage: String?
+    @Published var isShowingTOCDiagnosticsPrompt = false
+    @Published var isTOCDiagnosticsExpanded = false {
+        didSet {
+            guard oldValue != isTOCDiagnosticsExpanded,
+                  let key = tocDiagnosticsPreferenceKey else { return }
+            UserDefaults.standard.set(isTOCDiagnosticsExpanded, forKey: "\(key).expanded")
+        }
+    }
+    private var tocDiagnosticsPreferenceKey: String?
 
     /// 视口内容区尺寸（由界面测量后注入；变化即触发重排）。
     var viewportSize: CGSize = .zero {
@@ -189,6 +198,41 @@ final class PrototypeReaderModel: ObservableObject {
         return container.tocDiagnostic ?? "目录为空，原因未知"
     }
 
+    var tocFallbackDiagnosticText: String? {
+        container?.tocFallbackDiagnostic
+    }
+
+    /// 目录上方统一展示并允许折叠、复制的 EPUB 兼容性诊断。
+    var tocDiagnosticMessages: [String] {
+        guard let container else { return [] }
+        var messages: [String] = []
+        if let fallback = container.tocFallbackDiagnostic {
+            messages.append(fallback)
+        }
+        if container.strippedScriptCount > 0 {
+            messages.append("本书包含 \(container.strippedScriptCount) 处脚本内容，已忽略（脚本不参与显示）。")
+        }
+        if container.opacityRewriteCount > 0 {
+            messages.append("本书包含 \(container.opacityRewriteCount) 处 opacity 透明度，已转换为等价文字颜色（当前排版引擎不支持 opacity 属性）。")
+        }
+        if container.mediaQueryRewriteCount > 0 {
+            messages.append("本书包含 \(container.mediaQueryRewriteCount) 个 @media 规则块，已按设备条件求值（当前排版引擎不支持媒体查询；不匹配的规则被忽略）。")
+        }
+        if container.tableDisplayStripCount > 0 {
+            messages.append("本书包含 \(container.tableDisplayStripCount) 处表格化垂直居中声明（display:table/vertical-align:middle），已剥离以正常显示图片，插图不再垂直居中。")
+        }
+        if container.flexGridRewriteCount > 0 {
+            messages.append("本书包含 \(container.flexGridRewriteCount) 处 Flex/Grid 布局声明，已回退为普通块布局以显示内容；相关内容的专属对齐和间距效果可能不同。")
+        }
+        if container.textShadowRewriteCount > 0 {
+            messages.append("本书包含 \(container.textShadowRewriteCount) 处文字阴影（text-shadow），当前排版引擎不支持阴影，已改用阴影颜色作为文字颜色以保证可读。")
+        }
+        if container.toc.isEmpty, let diagnostic = container.tocDiagnostic {
+            messages.append(diagnostic)
+        }
+        return messages
+    }
+
     // MARK: 链接 / 注脚命中
 
     /// 视图点击点 → 链接语义。注脚返回其文本；普通链接返回 href（本轮不导航）。
@@ -226,10 +270,28 @@ final class PrototypeReaderModel: ObservableObject {
             if status == .ready, let saved = ReadingPositionSync.epubFraction(hash: bookHash), saved > 0 {
                 seek(to: saved)
             }
+            if status == .ready {
+                prepareTOCDiagnosticsPrompt(bookHash: bookHash)
+            }
         } catch {
             isRestoringPosition = false
             status = .failed(describeLayoutError(error))
         }
+    }
+
+    private func prepareTOCDiagnosticsPrompt(bookHash: String) {
+        guard !tocDiagnosticMessages.isEmpty else { return }
+        let key = "epubPrototype.tocDiagnostics.v2.\(bookHash)"
+        tocDiagnosticsPreferenceKey = key
+        let defaults = UserDefaults.standard
+        if let savedExpansion = defaults.object(forKey: "\(key).expanded") as? Bool {
+            isTOCDiagnosticsExpanded = savedExpansion
+        } else {
+            isTOCDiagnosticsExpanded = false
+        }
+        guard !defaults.bool(forKey: "\(key).shown") else { return }
+        defaults.set(true, forKey: "\(key).shown")
+        isShowingTOCDiagnosticsPrompt = true
     }
 
     // MARK: 主题与排版配置

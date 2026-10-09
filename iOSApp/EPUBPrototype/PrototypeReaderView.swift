@@ -99,6 +99,7 @@ struct PrototypeReaderView: View {
             .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in
                 updateBatteryLevel()
             }
+            .sheet(isPresented: $model.isShowingTOCDiagnosticsPrompt) { tocDiagnosticsPrompt }
         }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
@@ -265,52 +266,22 @@ struct PrototypeReaderView: View {
                 } else {
                     ScrollViewReader { proxy in
                         List {
-                            if let count = model.container?.strippedScriptCount, count > 0 {
+                            if !model.tocDiagnosticMessages.isEmpty {
                                 Section {
-                                    Text("本书包含 \(count) 处脚本内容，已忽略（脚本不参与显示）。")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                        .textSelection(.enabled)
-                                }
-                            }
-                            if let count = model.container?.opacityRewriteCount, count > 0 {
-                                Section {
-                                    Text("本书包含 \(count) 处 opacity 透明度，已转换为等价文字颜色（当前排版引擎不支持 opacity 属性）。")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                        .textSelection(.enabled)
-                                }
-                            }
-                            if let count = model.container?.mediaQueryRewriteCount, count > 0 {
-                                Section {
-                                    Text("本书包含 \(count) 个 @media 规则块，已按设备条件求值（当前排版引擎不支持媒体查询；不匹配的规则被忽略）。")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                        .textSelection(.enabled)
-                                }
-                            }
-                            if let count = model.container?.tableDisplayStripCount, count > 0 {
-                                Section {
-                                    Text("本书包含 \(count) 处表格化垂直居中声明（display:table/vertical-align:middle），已剥离以正常显示图片，插图不再垂直居中。")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                        .textSelection(.enabled)
-                                }
-                            }
-                            if let count = model.container?.flexGridRewriteCount, count > 0 {
-                                Section {
-                                    Text("本书包含 \(count) 处 Flex/Grid 布局声明，已回退为普通块布局以显示内容；相关内容的专属对齐和间距效果可能不同。")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                        .textSelection(.enabled)
-                                }
-                            }
-                            if let count = model.container?.textShadowRewriteCount, count > 0 {
-                                Section {
-                                    Text("本书包含 \(count) 处文字阴影（text-shadow），当前排版引擎不支持阴影，已改用阴影颜色作为文字颜色以保证可读。")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                        .textSelection(.enabled)
+                                    DisclosureGroup(isExpanded: $model.isTOCDiagnosticsExpanded) {
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            ForEach(Array(model.tocDiagnosticMessages.enumerated()), id: \.offset) { _, message in
+                                                Text(message)
+                                                    .font(.footnote)
+                                                    .foregroundStyle(.secondary)
+                                                    .textSelection(.enabled)
+                                            }
+                                        }
+                                        .padding(.vertical, 4)
+                                    } label: {
+                                        Label("目录诊断说明（\(model.tocDiagnosticMessages.count)）", systemImage: "info.circle")
+                                            .font(.footnote)
+                                    }
                                 }
                             }
                             let tocEntries = model.container?.toc ?? []
@@ -359,6 +330,43 @@ struct PrototypeReaderView: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private var tocDiagnosticsPrompt: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 20) {
+                Label("本书有目录与排版说明", systemImage: "info.circle")
+                    .font(.headline)
+                Text("打开目录可以查看本书的目录解析和排版兼容性诊断。详情支持长按选择与复制。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                DisclosureGroup(isExpanded: $model.isTOCDiagnosticsExpanded) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(Array(model.tocDiagnosticMessages.enumerated()), id: \.offset) { _, message in
+                            Text(message)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .padding(.top, 6)
+                } label: {
+                    Text("诊断说明（\(model.tocDiagnosticMessages.count)）")
+                        .font(.subheadline.weight(.medium))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(24)
+            .navigationTitle("目录说明")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("知道了") { model.isShowingTOCDiagnosticsPrompt = false }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 
     // MARK: 阅读样式（二级面板；点击应用后一次性重排）
