@@ -107,6 +107,32 @@ public enum NovelTranslationSource: String, CaseIterable, Identifiable, Hashable
     }
 }
 
+/// Language content included in a generated web-novel download.
+public enum WebNovelDownloadMode: String, CaseIterable, Identifiable, Hashable, Codable, Sendable {
+    case original
+    case translated
+    case bilingual
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .original: "原文"
+        case .translated: "译文"
+        case .bilingual: "双语"
+        }
+    }
+
+    /// Mode values understood by the Novelia generated-file endpoint.
+    public var apiValue: String {
+        switch self {
+        case .original: "jp"
+        case .translated: "zh"
+        case .bilingual: "bi"
+        }
+    }
+}
+
 public struct NovelBilingualParagraph: Hashable, Codable, Sendable {
     public let original: String
     public let translation: String

@@ -35,6 +35,7 @@
 		A10000000000000000000026 /* WebDAVSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000023 /* WebDAVSync.swift */; };
 		A10000000000000000000027 /* ForumViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000024 /* ForumViews.swift */; };
 		A10000000000000000000028 /* ForumAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000025 /* ForumAPIClient.swift */; };
+		A10000000000000000000029 /* TXTChapterParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000026 /* TXTChapterParser.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -63,6 +64,7 @@
 		B10000000000000000000023 /* WebDAVSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVSync.swift; sourceTree = "<group>"; };
 		B10000000000000000000024 /* ForumViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumViews.swift; sourceTree = "<group>"; };
 		B10000000000000000000025 /* ForumAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumAPIClient.swift; sourceTree = "<group>"; };
+		B10000000000000000000026 /* TXTChapterParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChapterParser.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -119,6 +121,7 @@
 				B10000000000000000000014 /* WenkuStore.swift */,
 				B10000000000000000000023 /* WebDAVSync.swift */,
 				B10000000000000000000024 /* ForumViews.swift */,
+				B10000000000000000000026 /* TXTChapterParser.swift */,
 			);
 			path = iOSApp;
 			sourceTree = "<group>";
@@ -291,6 +294,7 @@
 				A10000000000000000000026 /* WebDAVSync.swift in Sources */,
 				A10000000000000000000027 /* ForumViews.swift in Sources */,
 				A10000000000000000000028 /* ForumAPIClient.swift in Sources */,
+				A10000000000000000000029 /* TXTChapterParser.swift in Sources */,
 				A10000000000000000000014 /* WenkuNovel.swift in Sources */,
 				A10000000000000000000019 /* PrototypeEPUBContainer.swift in Sources */,
 				A10000000000000000000020 /* PrototypePageBook.swift in Sources */,

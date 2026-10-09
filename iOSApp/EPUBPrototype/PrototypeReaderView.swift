@@ -293,6 +293,13 @@ struct PrototypeReaderView: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
+                            if let count = model.container?.flexGridRewriteCount, count > 0 {
+                                Section {
+                                    Text("本书包含 \(count) 处 Flex/Grid 布局声明，已回退为普通块布局以显示内容；相关内容的专属对齐和间距效果可能不同。")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                             if let count = model.container?.textShadowRewriteCount, count > 0 {
                                 Section {
                                     Text("本书包含 \(count) 处文字阴影（text-shadow），当前排版引擎不支持阴影，已改用阴影颜色作为文字颜色以保证可读。")
@@ -567,8 +574,9 @@ private struct PrototypeImportedFontsView: View {
         .navigationTitle("导入的字体")
         .onAppear { reload() }
         .sheet(isPresented: $isImportingFont) {
-            PrototypeFilePicker(contentTypes: [.item]) { url in
+            PrototypeFilePicker(contentTypes: [.item]) { urls in
                 isImportingFont = false
+                guard let url = urls.first else { return }
                 do {
                     let family = try PrototypeLocalFonts.importFont(from: url)
                     selection = family
@@ -622,14 +630,15 @@ private struct PrototypeImportedFontsView: View {
 
 struct PrototypeFilePicker: UIViewControllerRepresentable {
     var contentTypes: [UTType] = [.data]
-    var onPick: (URL) -> Void
+    var allowsMultipleSelection = false
+    var onPick: ([URL]) -> Void
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         // copy 导入模式：系统把所选文件复制进应用沙箱后回调，
         // 不受 open 模式的 UTI 启用规则与 iCloud 占位文件影响，条目总能点选。
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: contentTypes, asCopy: true)
         picker.delegate = context.coordinator
-        picker.allowsMultipleSelection = false
+        picker.allowsMultipleSelection = allowsMultipleSelection
         return picker
     }
 
@@ -640,11 +649,11 @@ struct PrototypeFilePicker: UIViewControllerRepresentable {
     }
 
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onPick: (URL) -> Void
-        init(onPick: @escaping (URL) -> Void) { self.onPick = onPick }
+        let onPick: ([URL]) -> Void
+        init(onPick: @escaping ([URL]) -> Void) { self.onPick = onPick }
 
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            if let url = urls.first { onPick(url) }
+            onPick(urls)
         }
     }
 }

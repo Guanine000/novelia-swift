@@ -94,8 +94,30 @@ public struct NoveliaAPIClient: Sendable {
         providerId: String,
         novelId: String,
         title: String,
-        translationSource: NovelTranslationSource?
+        translationSource: NovelTranslationSource?,
+        mode: WebNovelDownloadMode = .translated
     ) async throws {
+        try await downloadWebNovelFile(
+            to: destinationURL,
+            providerId: providerId,
+            novelId: novelId,
+            title: title,
+            translationSource: translationSource,
+            mode: mode,
+            fileType: "epub"
+        )
+    }
+
+    public func downloadWebNovelFile(
+        to destinationURL: URL,
+        providerId: String,
+        novelId: String,
+        title: String,
+        translationSource: NovelTranslationSource?,
+        mode: WebNovelDownloadMode = .translated,
+        fileType: String = "epub"
+    ) async throws {
+        guard ["epub", "txt"].contains(fileType) else { throw NoveliaAPIError.invalidURL }
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw NoveliaAPIError.invalidURL
         }
@@ -106,24 +128,25 @@ public struct NoveliaAPIClient: Sendable {
         }.joined(separator: "/")
         components.percentEncodedPath = basePath + encodedPath
 
-        let mode = translationSource == nil ? "jp" : "zh"
-        let translatorCode = translationSource.map { String($0.rawValue.prefix(1)) } ?? ""
+        let apiMode = mode.apiValue
+        let effectiveTranslationSource = mode == .original ? nil : translationSource
+        let translatorCode = effectiveTranslationSource.map { String($0.rawValue.prefix(1)) } ?? ""
         let safeTitle = title.replacingOccurrences(of: "[\\/|\\\\:*?\"<>]", with: "", options: .regularExpression)
-        let filenameParts = [mode, translatorCode.isEmpty ? nil : "Y\(translatorCode)", safeTitle, "epub"].compactMap { $0 }
+        let filenameParts = [apiMode, translatorCode.isEmpty ? nil : "Y\(translatorCode)", safeTitle, fileType].compactMap { $0 }
         var queryItems = [
-            URLQueryItem(name: "mode", value: mode),
+            URLQueryItem(name: "mode", value: apiMode),
             URLQueryItem(name: "translationsMode", value: "priority"),
-            URLQueryItem(name: "type", value: "epub"),
+            URLQueryItem(name: "type", value: fileType),
             URLQueryItem(name: "filename", value: filenameParts.joined(separator: "."))
         ]
-        if let translationSource {
-            queryItems.append(URLQueryItem(name: "translations", value: translationSource.rawValue))
+        if let effectiveTranslationSource {
+            queryItems.append(URLQueryItem(name: "translations", value: effectiveTranslationSource.rawValue))
         }
         components.queryItems = queryItems
         guard let url = components.url else { throw NoveliaAPIError.invalidURL }
 
         var request = URLRequest(url: url)
-        request.setValue("application/epub+zip, application/octet-stream", forHTTPHeaderField: "Accept")
+        request.setValue(fileType == "txt" ? "text/plain, application/octet-stream" : "application/epub+zip, application/octet-stream", forHTTPHeaderField: "Accept")
         if let token = tokenProvider(), !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }

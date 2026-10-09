@@ -1,6 +1,6 @@
 # Novelia iOS
 
-Novelia iOS 是使用 SwiftUI 编写的 iPhone 客户端，连接 Novelia 网站浏览网络小说与文库、阅读章节、管理收藏和下载 EPUB。项目还提供基于 YueduCoreText 的原生 EPUB 分页阅读器。最低系统版本为 **iOS 17**。
+Novelia iOS 是使用 SwiftUI 编写的 iPhone 客户端，连接 Novelia 网站浏览网络小说与文库、阅读章节、管理收藏和下载 EPUB / TXT。项目还提供基于 YueduCoreText 的原生 EPUB 分页阅读器。最低系统版本为 **iOS 17**。
 
 本项目参考 [nobYoQ/novelia](https://github.com/nobYoQ/novelia) 的产品功能；Novelia 网站与 API 来自 [AutoNovel](https://github.com/auto-novel/auto-novel)。这些项目及网站内容分别适用各自的权利与许可条件。
 
@@ -15,6 +15,7 @@ Novelia iOS 是使用 SwiftUI 编写的 iPhone 客户端，连接 Novelia 网站
 | 评论 | 查看网络小说与文库的网页评论和回复；登录后发表与回复。 |
 | EPUB 下载 | 使用 Novelia 官网整本接口下载网络小说 EPUB；下载文库译文或双语 EPUB；在“我的下载”中导出或删除。 |
 | EPUB 阅读 | 从“我的下载”打开 EPUB，或通过“文件”导入；解析 EPUB 2 NCX / EPUB 3 nav、图片与部分 ruby；左右相接的跟手平移翻页、目录跳转、注脚弹层、书内链接、可拖动进度条。 |
+| 网络小说 TXT | 通过官网整本接口下载 TXT；本地阅读支持常见中英文标题分章、卷标题、章节目录、字号与主题设置。“我的 → 阅读体验 → TXT 分章规则”可启停内置规则，并添加、编辑或删除自定义整行正则。 |
 | 阅读样式 | 设置字号、字体、行间距、段落间距、首行缩进和四边边距；恢复默认；从“文件”导入 TTF/OTF/TTC，并在管理页选用或删除。 |
 | WebDAV 同步 | 在“我的 → WebDAV 同步”配置 HTTPS WebDAV，手动合并已下载的网络小说、文库 EPUB 和阅读位置；密码保存在 iOS 钥匙串。 |
 | 诊断 | 从“我的”页面导出应用日志；阅读器对部分资源和排版失败给出可读错误。 |
@@ -40,11 +41,13 @@ Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名�
 - EPUB 全书进度按章节和章内页数估算；样式改变或跨设备恢复阅读位置时也按比例近似定位。EPUB 书签和书内搜索尚未实现。
 - WebDAV 目前需手动点击“立即同步”，要求 HTTPS 与可写的 WebDAV 文件夹。同步只新增书籍、不传播删除；两端已有同一网络小说下载时保留各自本地文件，阅读位置按最后修改时间合并。尚无后台自动同步或冲突选择界面。
 - WebDAV 实现尚未用真实服务器及两台设备验证；不同服务端对条件写入与目录创建的支持可能有差异。
-- TXT / SRT 阅读和后台下载队列尚未实现。
+- 文库 TXT 下载、用户自行导入 TXT、SRT 阅读和后台下载队列尚未实现。TXT 分章按常见标题格式保守识别，特殊作品格式可能需要手动处理；可信章节少于 3 个时会退回全文阅读。
 
 ## 许可与第三方软件
 
 App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完整依赖清单](iOSApp/Resources/ThirdPartyLicenses/INDEX.md)列出 `Package.resolved` 中全部 10 个 Swift Package 的版本、来源及许可文件。IPA 随附这些原始许可文本、YueduCoreText 的 MPL-2.0 许可和包含 Unicode License v3 的 NOTICE。YueduCoreText 对应源码为[精确锁定的提交](https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/783ce903d5faf4ff5d15c546e32a107537ba5efe)，本项目没有修改该依赖的上游源码。用户自行导入的字体保存在本机 App 文档目录，不随本项目 IPA 分发；字体文件仍受其自身许可约束。
+
+TXT 分章识别器是独立 Swift 实现，规则设计参考 [Qingdu Reader](https://github.com/zengchen666/qingdu-reader) 的公开说明（Apache-2.0）；没有复制或改写该项目的源代码。
 
 最新 Release 附有本项目对应版本源码归档，以及 YueduCoreText 锁定提交的源码和许可材料。由于仓库为私密仓库，分发 IPA 时应确保每位接收者能取得同一版本的完整对应源码。构建流程使用 [`scripts/verify_third_party_notices.py`](scripts/verify_third_party_notices.py) 核对锁定依赖、许可清单和原始文件，并检查许可资源是否进入 IPA。
 

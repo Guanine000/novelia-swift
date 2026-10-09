@@ -861,10 +861,10 @@ struct NovelDetailView: View {
                                 }
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(progress == nil
-                                         ? (webNovelDownloads.isDownloaded(displayNovel.id) ? "重新下载全书 EPUB" : "选择译源并下载")
-                                         : "正在下载整本 EPUB…")
+                                         ? (webNovelDownloads.isDownloaded(displayNovel.id) ? "下载全书 EPUB / TXT" : "选择语言与格式")
+                                         : "正在下载整本小说…")
                                         .font(.system(size: 15, weight: .bold, design: .rounded))
-                                    Text("使用 Novelia 官网整本接口，下载后可从“我的下载”导出")
+                                    Text("可下载 EPUB 或 TXT，下载后可在 App 内阅读")
                                         .font(.system(size: 12, weight: .medium)).opacity(0.82)
                                 }
                                 Spacer()
@@ -1084,13 +1084,16 @@ private struct WebNovelDownloadSheet: View {
     let novel: Novel
     let availableSources: [NovelTranslationSource]
 
+    @State private var selectedMode: WebNovelDownloadMode
     @State private var selectedSourceRaw: String
+    @State private var selectedFormat: WebNovelFileFormat = .epub
     @State private var isDownloading = false
     @State private var didFinish = false
 
     init(novel: Novel, availableSources: [NovelTranslationSource]) {
         self.novel = novel
         self.availableSources = availableSources
+        _selectedMode = State(initialValue: availableSources.isEmpty ? .original : .translated)
         let preferredSource = UserDefaults.standard.string(forKey: "readerTranslationSource")
         let initialSource = preferredSource.flatMap { value in
             availableSources.first(where: { $0.rawValue == value })?.rawValue
@@ -1102,6 +1105,10 @@ private struct WebNovelDownloadSheet: View {
         NovelTranslationSource(rawValue: selectedSourceRaw)
     }
 
+    private var effectiveSource: NovelTranslationSource? {
+        selectedMode == .original ? nil : selectedSource
+    }
+
     private var progress: WebNovelDownloadProgress? { downloads.progress[novel.id] }
 
     var body: some View {
@@ -1109,24 +1116,45 @@ private struct WebNovelDownloadSheet: View {
             Form {
                 Section("下载内容") {
                     Text(novel.title).font(.headline)
-                    Text("将通过 Novelia 官方整本下载接口生成 EPUB 文件。")
+                    Text("通过 Novelia 官方整本下载接口获取文件，可在“我的下载”中阅读或导出。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                Section("翻译源") {
-                    Picker("内容", selection: $selectedSourceRaw) {
-                        Text("原文").tag("original")
-                        ForEach(availableSources) { source in
-                            let count = novel.translationChapterCounts?[source] ?? 0
-                            Text("\(source.title)（\(count) 章）").tag(source.rawValue)
+                Section("文件格式") {
+                    Picker("格式", selection: $selectedFormat) {
+                        ForEach(WebNovelFileFormat.allCases) { format in
+                            Text(format.title).tag(format)
                         }
                     }
-                    Text("下载后会保存所选译源的内容。")
-                        .font(.footnote).foregroundStyle(.secondary)
+                    .pickerStyle(.segmented)
+                    .disabled(isDownloading)
+                }
+                Section("语言") {
+                    Picker("下载内容", selection: $selectedMode) {
+                        ForEach(WebNovelDownloadMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                                .disabled(mode != .original && availableSources.isEmpty)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(isDownloading)
+                    if selectedMode != .original {
+                        Picker("译源", selection: $selectedSourceRaw) {
+                            ForEach(availableSources) { source in
+                                let count = novel.translationChapterCounts?[source] ?? 0
+                                Text("\(source.title)（\(count) 章）").tag(source.rawValue)
+                            }
+                        }
+                        .disabled(isDownloading)
+                        Text(selectedMode == .bilingual
+                             ? "双语文件会同时包含原文和所选译源的译文。"
+                             : "下载文件只包含所选译源的译文。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
                 }
                 if let progress {
                     Section("下载进度") {
                         ProgressView(value: progress.fraction)
-                        Text(progress.completed == progress.total ? "整本 EPUB 已下载" : "正在从 Novelia 获取整本 EPUB…")
+                        Text(progress.completed == progress.total ? "整本小说已下载" : "正在从 Novelia 获取整本小说…")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
@@ -1134,13 +1162,15 @@ private struct WebNovelDownloadSheet: View {
                     Section { Text("下载失败：\(error)").font(.footnote).foregroundStyle(.red) }
                 }
                 if didFinish {
-                    Section { Label("下载完成，可在“我的下载”中导出 EPUB", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
+                    Section { Label("\(selectedMode.title)下载完成，可在“我的下载”中阅读或导出 \(selectedFormat.title)", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
                 }
                 Section {
                     Button {
                         isDownloading = true
                         Task {
-                            await downloads.download(novel, translationSource: selectedSource)
+                            await downloads.download(novel, mode: selectedMode,
+                                                     translationSource: effectiveSource,
+                                                     format: selectedFormat)
                             isDownloading = false
                             didFinish = downloads.isDownloaded(novel.id) && downloads.errors[novel.id] == nil
                         }
@@ -1151,7 +1181,7 @@ private struct WebNovelDownloadSheet: View {
                             Spacer()
                         }
                     }
-                    .disabled(isDownloading || progress != nil)
+                    .disabled(isDownloading || progress != nil || (selectedMode != .original && effectiveSource == nil))
                 }
             }
             .navigationTitle("下载全书")
@@ -1624,13 +1654,27 @@ enum MyDownloadsTab: String, CaseIterable, Identifiable {
     var title: String { self == .network ? "网络小说" : "文库" }
 }
 
+private enum MyDownloadsImportError: LocalizedError {
+    case unsupportedFile
+
+    var errorDescription: String? {
+        "只支持导入 .txt 或 .epub 文件。"
+    }
+}
+
 struct MyDownloadsView: View {
     @EnvironmentObject private var webNovelDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
+    @StateObject private var txtChapterRuleStore = TXTChapterRuleStore.shared
     @State private var selectedTab: MyDownloadsTab
     @State private var prototypeTarget: PrototypeDownloadTarget?
+    @State private var txtReaderTarget: DownloadedWebNovel?
+    @State private var wenkuTXTTarget: LocalWenkuEPUB?
+    @State private var moveError: String?
     @State private var isShowingFileImporter = false
     @State private var isImporting = false
+    @State private var importCompletedCount = 0
+    @State private var importTotalCount = 0
     @State private var importError: String?
 
     init(initialTab: MyDownloadsTab = .network) {
@@ -1665,17 +1709,30 @@ struct MyDownloadsView: View {
                 Button {
                     isShowingFileImporter = true
                 } label: {
-                    Label("导入 EPUB", systemImage: "square.and.arrow.down")
+                    Label("导入 TXT / EPUB", systemImage: "square.and.arrow.down")
                 }
-                .accessibilityLabel("导入 EPUB")
+                .accessibilityLabel("导入 TXT 或 EPUB")
             }
         }
         .navigationDestination(item: $prototypeTarget) { target in
             PrototypeReaderHost(initialURL: target.url)
         }
+        .navigationDestination(item: $txtReaderTarget) { book in
+            if let url = webNovelDownloads.fileURL(for: book) {
+                DownloadedWebNovelTXTReader(url: url, title: book.novel.title, rules: txtChapterRuleStore.configuration)
+            } else {
+                ContentUnavailableView("TXT 文件不存在", systemImage: "doc.text.magnifyingglass")
+            }
+        }
+        .navigationDestination(item: $wenkuTXTTarget) { book in
+            DownloadedWebNovelTXTReader(url: wenkuDownloads.fileURL(for: book), title: book.title, rules: txtChapterRuleStore.configuration)
+        }
         .fullScreenCover(isPresented: $isShowingFileImporter) {
-            PrototypeFilePicker { url in
-                Task { await importAndOpen(url) }
+            PrototypeFilePicker(contentTypes: [
+                UTType(filenameExtension: "txt") ?? .plainText,
+                UTType(filenameExtension: "epub") ?? .data
+            ], allowsMultipleSelection: true) { urls in
+                Task { await importFiles(urls) }
             }
             .ignoresSafeArea()
         }
@@ -1687,39 +1744,85 @@ struct MyDownloadsView: View {
         } message: {
             Text(importError ?? "")
         }
+        .alert("移动失败", isPresented: .init(
+            get: { moveError != nil }, set: { if !$0 { moveError = nil } }
+        )) {
+            Button("好", role: .cancel) { moveError = nil }
+        } message: { Text(moveError ?? "") }
         .overlay {
-            if isImporting { ProgressView("正在导入…").padding(20).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12)) }
+            if isImporting {
+                ZStack {
+                    Color.black.opacity(0.12).ignoresSafeArea()
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("正在导入书籍", systemImage: "books.vertical")
+                            .font(.system(size: 16, weight: .semibold))
+                        ProgressView(value: Double(importCompletedCount), total: Double(max(importTotalCount, 1)))
+                            .tint(NoveliaStyle.coral)
+                        Text("已处理 \(importCompletedCount) / \(importTotalCount) 个文件")
+                            .font(.system(size: 13))
+                            .foregroundStyle(NoveliaStyle.muted)
+                    }
+                    .padding(20)
+                    .frame(width: 280)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.45), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.16), radius: 22, y: 8)
+                }
+                .transition(.opacity)
+            }
         }
     }
 
-    /// 从 Files 导入：security-scoped + NSFileCoordinator 复制进文库本地书库并登记，
-    /// 然后直接进入排版原型阅读。
-    private func importAndOpen(_ pickedURL: URL) async {
+    /// 从 Files 批量导入：逐项复制并登记到本地书库，完成后留在列表页。
+    private func importFiles(_ pickedURLs: [URL]) async {
+        guard !pickedURLs.isEmpty else { return }
         isImporting = true
+        importCompletedCount = 0
+        importTotalCount = pickedURLs.count
         defer { isImporting = false }
+
+        var failures: [String] = []
+        for (index, pickedURL) in pickedURLs.enumerated() {
+            do {
+                try await importFile(pickedURL)
+            } catch {
+                failures.append("\(pickedURL.lastPathComponent)：\(error.localizedDescription)")
+            }
+            importCompletedCount = index + 1
+        }
+
+        if pickedURLs.count > failures.count {
+            selectedTab = .wenku
+        }
+        if !failures.isEmpty {
+            let succeeded = pickedURLs.count - failures.count
+            importError = "批量导入完成：成功 \(succeeded) 个，失败 \(failures.count) 个。\n" + failures.joined(separator: "\n")
+        }
+    }
+
+    private func importFile(_ pickedURL: URL) async throws {
+        let extensionName = pickedURL.pathExtension.lowercased()
+        guard extensionName == "txt" || extensionName == "epub" else {
+            throw MyDownloadsImportError.unsupportedFile
+        }
         let needsScope = pickedURL.startAccessingSecurityScopedResource()
         defer { if needsScope { pickedURL.stopAccessingSecurityScopedResource() } }
-        do {
-            let destination = wenkuDownloads.downloadDestination(for: pickedURL.lastPathComponent)
-            var coordinatedError: NSError?
-            var copyError: Error?
-            NSFileCoordinator().coordinate(readingItemAt: pickedURL, options: .forUploading,
-                                           error: &coordinatedError) { sourceURL in
-                do {
-                    if FileManager.default.fileExists(atPath: destination.path) {
-                        try FileManager.default.removeItem(at: destination)
-                    }
-                    try FileManager.default.copyItem(at: sourceURL, to: destination)
-                } catch { copyError = error }
-            }
-            if let coordinatedError { throw coordinatedError }
-            if let copyError { throw copyError }
-            let title = pickedURL.deletingPathExtension().lastPathComponent
-            try await wenkuDownloads.registerDownloadedFile(at: destination, title: title)
-            prototypeTarget = PrototypeDownloadTarget(url: destination, title: title)
-        } catch {
-            importError = "导入失败：\(error.localizedDescription)"
+        let destination = wenkuDownloads.downloadDestination(for: pickedURL.lastPathComponent)
+        var coordinatedError: NSError?
+        var copyError: Error?
+        NSFileCoordinator().coordinate(readingItemAt: pickedURL, options: .forUploading,
+                                       error: &coordinatedError) { sourceURL in
+            do {
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    try FileManager.default.removeItem(at: destination)
+                }
+                try FileManager.default.copyItem(at: sourceURL, to: destination)
+            } catch { copyError = error }
         }
+        if let coordinatedError { throw coordinatedError }
+        if let copyError { throw copyError }
+        let title = pickedURL.deletingPathExtension().lastPathComponent
+        try await wenkuDownloads.registerDownloadedFile(at: destination, title: title)
     }
 
     private var networkDownloads: some View {
@@ -1728,16 +1831,19 @@ struct MyDownloadsView: View {
                 ContentUnavailableView {
                     Label("暂无网络小说下载", systemImage: "arrow.down.book")
                 } description: {
-                    Text("打开网络小说详情，选择“下载全书”后即可在这里导出官网生成的 EPUB。")
+                    Text("打开网络小说详情，选择 EPUB 或 TXT 下载后，即可在这里阅读或导出。")
                 }
             } else {
                 List {
                     ForEach(webNovelDownloads.books) { book in
                         Group {
                             if let fileURL = webNovelDownloads.fileURL(for: book) {
-                                // EPUB 文件：正文行进排版原型，行尾保留导出。
                                 Button {
-                                    prototypeTarget = PrototypeDownloadTarget(url: fileURL, title: book.novel.title)
+                                    if book.resolvedFileFormat == .txt {
+                                        txtReaderTarget = book
+                                    } else {
+                                        prototypeTarget = PrototypeDownloadTarget(url: fileURL, title: book.novel.title)
+                                    }
                                 } label: {
                                     HStack(spacing: 12) {
                                         networkDownloadRow(book, isFile: true)
@@ -1758,6 +1864,12 @@ struct MyDownloadsView: View {
                         }
                         .listRowBackground(NoveliaStyle.card)
                         .swipeActions {
+                            Button {
+                                Task { await moveToWenku(book) }
+                            } label: {
+                                Label("移至文库", systemImage: "arrow.right.arrow.left")
+                            }
+                            .tint(.orange)
                             if webNovelDownloads.fileURL(for: book) != nil {
                                 ShareLink(item: webNovelDownloads.fileURL(for: book)!) {
                                     Label("导出", systemImage: "square.and.arrow.up")
@@ -1788,17 +1900,17 @@ struct MyDownloadsView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(NoveliaStyle.muted)
                 .lineLimit(1)
-            if let source = book.translationSource {
-                Text("译源：\(source.title)")
+            if book.resolvedDownloadMode == .original {
+                Text("原文")
                     .font(.system(size: 11))
                     .foregroundStyle(NoveliaStyle.muted)
             } else {
-                Text("原文")
+                Text("\(book.resolvedDownloadMode.title) · 译源：\(book.translationSource?.title ?? "未知")")
                     .font(.system(size: 11))
                     .foregroundStyle(NoveliaStyle.muted)
             }
             HStack {
-                Text("\(book.novel.chapters.count) 章 · \(book.downloadedAt.formatted(date: .numeric, time: .omitted))")
+                Text("\(book.resolvedFileFormat.title) · \(book.novel.chapters.count) 章 · \(book.downloadedAt.formatted(date: .numeric, time: .omitted))")
                 Spacer()
                 if isFile { Image(systemName: "square.and.arrow.up") }
             }
@@ -1812,18 +1924,22 @@ struct MyDownloadsView: View {
         Group {
             if wenkuDownloads.books.isEmpty {
                 ContentUnavailableView {
-                    Label("暂无文库下载", systemImage: "book.closed")
+                    Label("暂无本地书籍", systemImage: "book.closed")
                 } description: {
-                    Text("在文库作品详情下载 EPUB 后，可从这里导出到“文件”或其他阅读 App。")
+                    Text("导入 TXT 或 EPUB 后，可在这里阅读、导出或管理本地书籍。")
                 }
             } else {
                 List {
                     ForEach(wenkuDownloads.books) { book in
                         HStack(spacing: 12) {
                             Button {
-                                prototypeTarget = PrototypeDownloadTarget(
-                                    url: wenkuDownloads.fileURL(for: book), title: book.title
-                                )
+                                if book.resolvedFileFormat == .txt {
+                                    wenkuTXTTarget = book
+                                } else {
+                                    prototypeTarget = PrototypeDownloadTarget(
+                                        url: wenkuDownloads.fileURL(for: book), title: book.title
+                                    )
+                                }
                             } label: {
                                 HStack(spacing: 12) {
                                     if let coverURL = wenkuDownloads.coverURL(for: book),
@@ -1839,6 +1955,9 @@ struct MyDownloadsView: View {
                                     }
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(book.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
+                                        Text(book.resolvedFileFormat.title)
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundStyle(NoveliaStyle.coral)
                                         if let author = book.author, !author.isEmpty {
                                             Text(author).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
                                         }
@@ -1859,6 +1978,12 @@ struct MyDownloadsView: View {
                         .padding(.vertical, 4)
                         .listRowBackground(NoveliaStyle.card)
                         .swipeActions {
+                            Button {
+                                moveToNetwork(book)
+                            } label: {
+                                Label("移至网络小说", systemImage: "arrow.right.arrow.left")
+                            }
+                            .tint(.orange)
                             ShareLink(item: wenkuDownloads.fileURL(for: book)) {
                                 Label("导出", systemImage: "square.and.arrow.up")
                             }
@@ -1872,6 +1997,186 @@ struct MyDownloadsView: View {
                 .scrollContentBackground(.hidden)
             }
         }
+    }
+
+    private func moveToWenku(_ book: DownloadedWebNovel) async {
+        guard let source = webNovelDownloads.fileURL(for: book) else {
+            moveError = "这本旧版下载只有章节缓存，没有完整 EPUB/TXT 文件，无法移动。"
+            return
+        }
+        do {
+            let created = try await wenkuDownloads.importForMove(from: source, sourceBook: book)
+            do { try webNovelDownloads.removeForMove(book) }
+            catch { wenkuDownloads.remove(created); throw error }
+        } catch { moveError = error.localizedDescription }
+    }
+
+    private func moveToNetwork(_ book: LocalWenkuEPUB) {
+        do {
+            let created = try webNovelDownloads.importForMove(from: wenkuDownloads.fileURL(for: book), book: book)
+            do { try wenkuDownloads.removeForMove(book) }
+            catch { webNovelDownloads.remove(created); throw error }
+        } catch { moveError = error.localizedDescription }
+    }
+}
+
+private struct DownloadedWebNovelTXTReader: View {
+    @AppStorage("readerFontSize") private var fontSize = 20.0
+    @AppStorage("readerAppearance") private var appearanceRaw = ReaderAppearance.system.rawValue
+    @Environment(\.colorScheme) private var systemColorScheme
+    let url: URL
+    let title: String
+    let rules: TXTChapterRuleConfiguration
+    @State private var chapters: [TXTChapter]?
+    @State private var chapterIndex = 0
+    @State private var isShowingContents = false
+    @State private var errorMessage: String?
+
+    private var appearance: ReaderAppearance {
+        ReaderAppearance(rawValue: appearanceRaw) ?? .system
+    }
+
+    var body: some View {
+        Group {
+            if let chapters, chapters.indices.contains(chapterIndex) {
+                let chapter = chapters[chapterIndex]
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            Color.clear.frame(height: 1).id("txt-reader-top")
+                            if let volumeTitle = chapter.volumeTitle {
+                                Text(volumeTitle)
+                                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(NoveliaStyle.coral)
+                            }
+                            Text(chapter.title)
+                                .font(.system(size: 25, weight: .bold, design: .rounded))
+                                .foregroundStyle(appearance.primaryText(system: systemColorScheme))
+                            Text(chapter.body.isEmpty ? " " : chapter.body)
+                                .font(.system(size: fontSize, design: .serif))
+                                .lineSpacing(9)
+                                .foregroundStyle(appearance.primaryText(system: systemColorScheme))
+                                .textSelection(.enabled)
+                        }
+                        .frame(maxWidth: 720, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.horizontal, 22)
+                        .padding(.top, 20)
+                        .padding(.bottom, 36)
+                    }
+                    .onChange(of: chapterIndex) { _, _ in
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            proxy.scrollTo("txt-reader-top", anchor: .top)
+                        }
+                    }
+                    .safeAreaInset(edge: .bottom) {
+                        chapterControls(count: chapters.count)
+                    }
+                }
+            } else if let errorMessage {
+                ContentUnavailableView("无法读取 TXT", systemImage: "doc.text.magnifyingglass", description: Text(errorMessage))
+            } else {
+                ProgressView("正在打开 TXT…")
+            }
+        }
+        .background(appearance.background(system: systemColorScheme).ignoresSafeArea())
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if chapters != nil {
+                    Button { isShowingContents = true } label: {
+                        Image(systemName: "list.bullet")
+                    }
+                    .accessibilityLabel("章节目录")
+                }
+                Button { fontSize = max(16, fontSize - 1) } label: {
+                    Image(systemName: "textformat.size.smaller")
+                }
+                .accessibilityLabel("缩小字号")
+                Button { fontSize = min(30, fontSize + 1) } label: {
+                    Image(systemName: "textformat.size.larger")
+                }
+                .accessibilityLabel("放大字号")
+                Menu {
+                    Picker("阅读主题", selection: $appearanceRaw) {
+                        ForEach(ReaderAppearance.allCases) { option in
+                            Text(option.title).tag(option.rawValue)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "circle.lefthalf.filled")
+                }
+                .accessibilityLabel("阅读主题")
+            }
+        }
+        .sheet(isPresented: $isShowingContents) {
+            NavigationStack {
+                List {
+                    if let chapters {
+                        ForEach(chapters.indices, id: \.self) { index in
+                            Button {
+                                chapterIndex = index
+                                isShowingContents = false
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    if let volume = chapters[index].volumeTitle {
+                                        Text(volume).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Text(chapters[index].title)
+                                        .foregroundStyle(index == chapterIndex ? NoveliaStyle.coral : .primary)
+                                }
+                            }
+                        }
+                    }
+                }
+                .navigationTitle("章节目录")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("完成") { isShowingContents = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .task(id: url) {
+            do {
+                chapters = try await Task.detached(priority: .userInitiated) {
+                    let text = try String(contentsOf: url, encoding: .utf8)
+                    return TXTChapterParser.parse(text, rules: rules)
+                }.value
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func chapterControls(count: Int) -> some View {
+        HStack {
+            Button {
+                chapterIndex = max(0, chapterIndex - 1)
+            } label: {
+                Label("上一章", systemImage: "chevron.left")
+            }
+            .disabled(chapterIndex == 0)
+            Spacer()
+            Text("\(chapterIndex + 1) / \(count)")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(appearance.secondaryText(system: systemColorScheme))
+            Spacer()
+            Button {
+                chapterIndex = min(count - 1, chapterIndex + 1)
+            } label: {
+                Label("下一章", systemImage: "chevron.right")
+                    .labelStyle(.titleAndIcon)
+            }
+            .disabled(chapterIndex >= count - 1)
+        }
+        .font(.system(size: 13, weight: .semibold))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.regularMaterial)
     }
 }
 
@@ -1956,6 +2261,11 @@ struct SettingsView: View {
                     Slider(value: $fontSize, in: 16...30, step: 1)
                         .tint(NoveliaStyle.coral)
                 }
+                NavigationLink {
+                    TXTChapterRulesView()
+                } label: {
+                    Label("TXT 分章规则", systemImage: "text.alignleft")
+                }
             }
             Section("下载") {
                 NavigationLink {
@@ -2026,6 +2336,185 @@ struct SettingsView: View {
             }
             isExportingLogs = false
         }
+    }
+}
+
+private struct TXTChapterRulesView: View {
+    @StateObject private var ruleStore = TXTChapterRuleStore.shared
+    @State private var isShowingEditor = false
+    @State private var editingRule: TXTChapterRule?
+
+    private var builtInRules: [TXTChapterRule] { ruleStore.rules.filter(\.isBuiltIn) }
+    private var customRules: [TXTChapterRule] { ruleStore.rules.filter { !$0.isBuiltIn } }
+
+    var body: some View {
+        Form {
+            Section {
+                Text("规则按行匹配。关闭某条规则后，TXT 阅读器会忽略对应格式；自定义规则需匹配整行，并建议使用 ^ 和 $ 限定边界。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Section("内置规则") {
+                ForEach(builtInRules) { rule in
+                    ruleRow(rule, editable: false)
+                }
+            }
+            Section {
+                if customRules.isEmpty {
+                    Text("还没有自定义规则。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(customRules) { rule in
+                    ruleRow(rule, editable: true)
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                ruleStore.deleteCustomRule(rule)
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                        }
+                }
+                Button {
+                    editingRule = nil
+                    isShowingEditor = true
+                } label: {
+                    Label("添加自定义规则", systemImage: "plus")
+                }
+            } header: {
+                Text("自定义规则")
+            } footer: {
+                Text("自定义正则只检查整行。启用后重新打开 TXT，即可按新规则生成章节目录。")
+            }
+            Section("分章保护") {
+                Text("标题还会经过行长、句末标点、开头目录和编号顺序检查。若最终识别出的章节少于 3 个，阅读器会保留全文，不进行猜测切分。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("TXT 分章规则")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $isShowingEditor) {
+            TXTChapterRuleEditor(rule: editingRule) { rule in
+                ruleStore.saveCustomRule(rule)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func ruleRow(_ rule: TXTChapterRule, editable: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .center, spacing: 10) {
+                if editable {
+                    Button {
+                        editingRule = rule
+                        isShowingEditor = true
+                    } label: {
+                        Text(rule.name)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Text(rule.name)
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                Toggle("启用", isOn: Binding(
+                    get: { ruleStore.rules.first(where: { $0.id == rule.id })?.isEnabled ?? false },
+                    set: { ruleStore.setEnabled($0, for: rule.id) }
+                ))
+                .labelsHidden()
+            }
+            Text(rule.explanation)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            Text(rule.pattern)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct TXTChapterRuleEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let originalRule: TXTChapterRule?
+    let onSave: (TXTChapterRule) -> Void
+    @State private var name: String
+    @State private var pattern: String
+    @State private var errorMessage: String?
+
+    init(rule: TXTChapterRule?, onSave: @escaping (TXTChapterRule) -> Void) {
+        originalRule = rule
+        self.onSave = onSave
+        _name = State(initialValue: rule?.name ?? "")
+        _pattern = State(initialValue: rule?.pattern ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("规则名称") {
+                    TextField("例如：自定义章节格式", text: $name)
+                }
+                Section("整行正则表达式") {
+                    TextField(#"例如：^第\d+节.*$"#, text: $pattern, axis: .vertical)
+                        .font(.system(size: 13, design: .monospaced))
+                        .lineLimit(2...5)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Text("使用系统正则语法。规则必须匹配整行；推荐以 ^ 开始、以 $ 结束。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage).font(.footnote).foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle(originalRule == nil ? "新建分章规则" : "编辑分章规则")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("保存") { save() }
+                        .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    private func save() {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanPattern = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else {
+            errorMessage = "请填写规则名称。"
+            return
+        }
+        guard !cleanPattern.isEmpty else {
+            errorMessage = "请填写正则表达式。"
+            return
+        }
+        guard (try? NSRegularExpression(pattern: cleanPattern)) != nil else {
+            errorMessage = "正则表达式格式无效，请检查括号、方括号和转义符。"
+            return
+        }
+        let rule = TXTChapterRule(
+            id: originalRule?.id ?? UUID().uuidString,
+            name: cleanName,
+            pattern: cleanPattern,
+            explanation: "用户自定义规则。",
+            isEnabled: originalRule?.isEnabled ?? true,
+            isBuiltIn: false
+        )
+        onSave(rule)
+        dismiss()
     }
 }
 

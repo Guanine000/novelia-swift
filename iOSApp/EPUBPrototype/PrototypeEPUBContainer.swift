@@ -202,6 +202,9 @@ final class PrototypeEPUBContainer {
     /// 多看风格插图页用它们垂直居中；在当前引擎中会让图片整页丢失（实测定位），
     /// 去掉后图片按内容高度正常布局，仅失去"垂直居中"这一装饰效果。
     private(set) var tableDisplayStripCount = 0
+    /// 已将 Flex/Grid 布局降级为普通块布局的声明数量。
+    /// 内容仍会显示，但 Flex/Grid 专属的对齐与间距效果不保留。
+    private(set) var flexGridRewriteCount = 0
 
     func chapterHTML(at index: Int) async throws -> String {
         guard spine.indices.contains(index) else { throw PrototypeEPUBError.emptySpine }
@@ -214,6 +217,7 @@ final class PrototypeEPUBContainer {
         var stripped = Self.stripScripts(from: text, counter: &strippedScriptCount)
         stripped = Self.rewriteOpacity(in: stripped, counter: &opacityRewriteCount,
                                        rgb: themeTextColor.rgbComponents)
+        stripped = Self.rewriteUnsupportedFlexGrid(in: stripped, counter: &flexGridRewriteCount)
         return Self.rewriteEightDigitColors(in: stripped)
     }
 
@@ -289,6 +293,7 @@ final class PrototypeEPUBContainer {
                                               counter: &mediaQueryRewriteCount)
             cleaned = Self.rewriteOpacity(in: cleaned, counter: &opacityRewriteCount,
                                           rgb: themeTextColor.rgbComponents)
+            cleaned = Self.rewriteUnsupportedFlexGrid(in: cleaned, counter: &flexGridRewriteCount)
             texts.append(Self.rewriteEightDigitColors(in: cleaned))
         }
         return texts
@@ -319,8 +324,39 @@ final class PrototypeEPUBContainer {
         result = Self.rewriteOpacity(in: result, counter: &opacityRewriteCount,
                                      rgb: themeTextColor.rgbComponents)
         result = Self.stripTableDisplayRules(in: result, counter: &tableDisplayStripCount)
+        result = Self.rewriteUnsupportedFlexGrid(in: result, counter: &flexGridRewriteCount)
         result = Self.rewriteTextShadow(in: result, counter: &textShadowRewriteCount)
         return Self.rewriteEightDigitColors(in: result)
+    }
+
+    /// 将 Flex/Grid 容器降级为普通块布局，并移除引擎不支持的布局属性。
+    /// 子元素和内容保持不变，封面等内容可继续排版，只失去 Flex/Grid 对齐效果。
+    static func rewriteUnsupportedFlexGrid(in text: String, counter: inout Int) -> String {
+        guard let displayRegex = try? NSRegularExpression(
+            pattern: #"display\s*:\s*(?:-webkit-)?(?:inline-)?(?:flex|grid)\s*(?:!important\s*)?;?"#,
+            options: [.caseInsensitive]),
+              let layoutRegex = try? NSRegularExpression(
+                pattern: #"(?:flex(?:-(?:direction|wrap|basis|grow|shrink))?|justify-content|align-items|grid-[a-z-]+|gap)\s*:\s*[^;}]*;?"#,
+                options: [.caseInsensitive]) else { return text }
+
+        let ns = text as NSString
+        let displayMatches = displayRegex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        var result = text
+        for match in displayMatches.reversed() {
+            guard let range = Range(match.range, in: result) else { continue }
+            result.replaceSubrange(range, with: "display: block;")
+        }
+        counter += displayMatches.count
+
+        let layoutNS = result as NSString
+        let layoutMatches = layoutRegex.matches(
+            in: result, range: NSRange(location: 0, length: layoutNS.length))
+        for match in layoutMatches.reversed() {
+            guard let range = Range(match.range, in: result) else { continue }
+            result.replaceSubrange(range, with: "")
+        }
+        counter += layoutMatches.count
+        return result
     }
 
     /// CSS4 #RGBA / #RRGGBBAA 转为引擎可解析的 rgba()。只匹配完整的颜色词，

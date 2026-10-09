@@ -146,6 +146,11 @@ struct LocalWenkuEPUB: Codable, Identifiable, Hashable {
     var author: String? = nil
     var coverFilename: String? = nil
     var metadataLoaded: Bool? = nil
+    var fileFormat: WebNovelFileFormat? = nil
+    var sourceWebNovel: DownloadedWebNovel? = nil
+    var resolvedFileFormat: WebNovelFileFormat {
+        fileFormat ?? (filename.lowercased().hasSuffix(".txt") ? .txt : .epub)
+    }
 }
 
 @MainActor
@@ -219,7 +224,39 @@ final class WenkuLocalLibraryStore: ObservableObject {
         guard fileURL.deletingLastPathComponent().standardizedFileURL == directory.standardizedFileURL else {
             throw WenkuLocalLibraryError.invalidEPUB
         }
+        let format: WebNovelFileFormat
+        switch fileURL.pathExtension.lowercased() {
+        case "epub": format = .epub
+        case "txt": format = .txt
+        default:
+            try? fileManager.removeItem(at: fileURL)
+            throw WenkuLocalLibraryError.unsupportedFile
+        }
+
+        if format == .txt {
+            // Validate imported text before it enters the local library. The reader currently
+            // uses UTF-8 too, so accepting another encoding here would create an unreadable item.
+            guard let text = try? String(contentsOf: fileURL, encoding: .utf8), !text.isEmpty else {
+                try? fileManager.removeItem(at: fileURL)
+                throw WenkuLocalLibraryError.invalidTXT
+            }
+            let book = LocalWenkuEPUB(
+                id: UUID(), title: title, filename: fileURL.lastPathComponent,
+                addedAt: Date(), metadataLoaded: true, fileFormat: .txt
+            )
+            books.insert(book, at: 0)
+            do {
+                try persistIndex()
+            } catch {
+                books.removeAll { $0.id == book.id }
+                try? fileManager.removeItem(at: fileURL)
+                throw error
+            }
+            return
+        }
+
         guard let handle = try? FileHandle(forReadingFrom: fileURL) else {
+            try? fileManager.removeItem(at: fileURL)
             throw WenkuLocalLibraryError.invalidEPUB
         }
         let signature = try? handle.read(upToCount: 2)
@@ -240,7 +277,8 @@ final class WenkuLocalLibraryStore: ObservableObject {
             bookDescription: metadata.description,
             author: metadata.author,
             coverFilename: coverFilename,
-            metadataLoaded: true
+            metadataLoaded: true,
+            fileFormat: .epub
         )
         books.insert(book, at: 0)
         do {
@@ -250,6 +288,36 @@ final class WenkuLocalLibraryStore: ObservableObject {
             try? fileManager.removeItem(at: fileURL)
             throw error
         }
+    }
+
+    func importForMove(from source: URL, sourceBook: DownloadedWebNovel) async throws -> LocalWenkuEPUB {
+        let format: WebNovelFileFormat = source.pathExtension.lowercased() == "txt" ? .txt : .epub
+        let destination = uniqueDestination(for: Self.safeFilename(source.lastPathComponent, format: format))
+        try fileManager.copyItem(at: source, to: destination)
+        let metadata = format == .epub ? await Self.metadata(for: destination) : (title: nil, description: nil, author: nil, cover: nil)
+        let id = UUID()
+        let coverFilename = try? saveCover(metadata.cover, id: id)
+        let book = LocalWenkuEPUB(id: id, title: metadata.title ?? sourceBook.novel.title,
+            filename: destination.lastPathComponent, addedAt: Date(),
+            bookDescription: metadata.description, author: metadata.author ?? sourceBook.novel.author,
+            coverFilename: coverFilename, metadataLoaded: true, fileFormat: format,
+            sourceWebNovel: sourceBook)
+        books.insert(book, at: 0)
+        do { try persistIndex() } catch {
+            books.removeAll { $0.id == id }
+            try? fileManager.removeItem(at: destination)
+            if let coverFilename { try? fileManager.removeItem(at: directory.appendingPathComponent(coverFilename)) }
+            throw error
+        }
+        return book
+    }
+
+    func removeForMove(_ book: LocalWenkuEPUB) throws {
+        let previous = books
+        books.removeAll { $0.id == book.id }
+        do { try persistIndex() } catch { books = previous; throw error }
+        try? fileManager.removeItem(at: fileURL(for: book))
+        if let cover = coverURL(for: book) { try? fileManager.removeItem(at: cover) }
     }
 
     func save(data: Data, title: String, filename: String) async throws {
@@ -306,7 +374,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
         var suffix = 2
         while fileManager.fileExists(atPath: candidate.path) {
             let base = candidate.deletingPathExtension().lastPathComponent
-            candidate = directory.appendingPathComponent("\(base)-\(suffix).epub")
+            candidate = directory.appendingPathComponent("\(base)-\(suffix).\(URL(fileURLWithPath: filename).pathExtension)")
             suffix += 1
         }
         return candidate
@@ -344,23 +412,26 @@ final class WenkuLocalLibraryStore: ObservableObject {
         return (title?.isEmpty == false ? title : nil, description?.isEmpty == false ? description : nil, author.isEmpty ? nil : author, cover ?? nil)
     }
 
-    private static func safeFilename(_ filename: String) -> String {
+    private static func safeFilename(_ filename: String, format: WebNovelFileFormat? = nil) -> String {
+        let resolvedFormat = format ?? (URL(fileURLWithPath: filename).pathExtension.lowercased() == "txt" ? .txt : .epub)
         let base = URL(fileURLWithPath: filename).deletingPathExtension().lastPathComponent
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_ ."))
         let cleaned = String(base.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" })
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return "\(cleaned.isEmpty ? "wenku" : cleaned).epub"
+        return "\(cleaned.isEmpty ? "wenku" : cleaned).\(resolvedFormat.fileExtension)"
     }
 }
 
 private enum WenkuLocalLibraryError: LocalizedError {
     case invalidEPUB
+    case invalidTXT
     case unsupportedFile
 
     var errorDescription: String? {
         switch self {
         case .invalidEPUB: "该文件不是有效的 EPUB 压缩包。"
-        case .unsupportedFile: "目前只支持导入 .epub 文件。"
+        case .invalidTXT: "TXT 文件为空或不是 UTF-8 编码，暂时无法导入。"
+        case .unsupportedFile: "目前只支持导入 .epub 或 .txt 文件。"
         }
     }
 }
@@ -371,6 +442,15 @@ struct WebNovelDownloadProgress: Equatable {
     var fraction: Double { total == 0 ? 0 : Double(completed) / Double(total) }
 }
 
+enum WebNovelFileFormat: String, Codable, CaseIterable, Identifiable {
+    case epub
+    case txt
+
+    var id: String { rawValue }
+    var title: String { self == .epub ? "EPUB" : "TXT" }
+    var fileExtension: String { rawValue }
+}
+
 struct DownloadedWebNovel: Codable, Identifiable, Hashable {
     let novel: Novel
     /// Kept for migration of chapter-by-chapter downloads created by older app versions.
@@ -378,8 +458,18 @@ struct DownloadedWebNovel: Codable, Identifiable, Hashable {
     let fileFilename: String?
     let downloadedAt: Date
     let translationSource: NovelTranslationSource?
+    /// Optional so indexes created before language-mode selection remain readable.
+    let downloadMode: WebNovelDownloadMode?
+    /// Optional so the library index created by earlier app versions remains readable.
+    let fileFormat: WebNovelFileFormat?
 
     var id: String { novel.id }
+    var resolvedFileFormat: WebNovelFileFormat {
+        fileFormat ?? (fileFilename?.lowercased().hasSuffix(".txt") == true ? .txt : .epub)
+    }
+    var resolvedDownloadMode: WebNovelDownloadMode {
+        downloadMode ?? (translationSource == nil ? .original : .translated)
+    }
 }
 
 @MainActor
@@ -425,7 +515,7 @@ final class WebNovelDownloadStore: ObservableObject {
         }.value
     }
 
-    func download(_ novel: Novel, translationSource: NovelTranslationSource?) async {
+    func download(_ novel: Novel, mode: WebNovelDownloadMode, translationSource: NovelTranslationSource?, format: WebNovelFileFormat = .epub) async {
         guard novel.isRemote,
               let providerId = novel.providerId,
               let novelId = novel.novelId,
@@ -436,14 +526,18 @@ final class WebNovelDownloadStore: ObservableObject {
 
         do {
             try Task.checkCancellation()
-            let filename = Self.websiteDownloadFilename(title: novel.title, translationSource: translationSource)
+            let effectiveSource = mode == .original ? nil : translationSource
+            let filename = Self.websiteDownloadFilename(title: novel.title, mode: mode,
+                                                         translationSource: effectiveSource, format: format)
             let dataURL = uniqueDestination(for: filename)
-            try await api.downloadWebNovelEPUB(
+            try await api.downloadWebNovelFile(
                 to: dataURL,
                 providerId: providerId,
                 novelId: novelId,
                 title: novel.title,
-                translationSource: translationSource
+                translationSource: effectiveSource,
+                mode: mode,
+                fileType: format.rawValue
             )
             progress[novel.id] = WebNovelDownloadProgress(completed: 1, total: 1)
 
@@ -452,7 +546,9 @@ final class WebNovelDownloadStore: ObservableObject {
                 chapterDataFilename: nil,
                 fileFilename: dataURL.lastPathComponent,
                 downloadedAt: Date(),
-                translationSource: translationSource
+                translationSource: effectiveSource,
+                downloadMode: mode,
+                fileFormat: format
             )
             let previousBooks = books
             books.removeAll { $0.id == novel.id }
@@ -477,6 +573,33 @@ final class WebNovelDownloadStore: ObservableObject {
         removeStoredFile(for: book)
         books.removeAll { $0.id == book.id }
         try? persistIndex()
+    }
+
+    func importForMove(from source: URL, book: LocalWenkuEPUB) throws -> DownloadedWebNovel {
+        let format = book.resolvedFileFormat
+        let destination = uniqueDestination(for: source.lastPathComponent)
+        try fileManager.copyItem(at: source, to: destination)
+        let novel = book.sourceWebNovel?.novel ?? Novel(id: "local-\(book.id.uuidString)", title: book.title,
+            author: book.author ?? "", summary: book.bookDescription ?? "",
+            genres: [], chapters: [], accent: .plum)
+        let record = DownloadedWebNovel(novel: novel, chapterDataFilename: nil,
+            fileFilename: destination.lastPathComponent, downloadedAt: book.sourceWebNovel?.downloadedAt ?? Date(),
+            translationSource: book.sourceWebNovel?.translationSource,
+            downloadMode: book.sourceWebNovel?.downloadMode, fileFormat: format)
+        books.insert(record, at: 0)
+        do { try persistIndex() } catch {
+            books.removeAll { $0.id == record.id }
+            try? fileManager.removeItem(at: destination)
+            throw error
+        }
+        return record
+    }
+
+    func removeForMove(_ book: DownloadedWebNovel) throws {
+        let previous = books
+        books.removeAll { $0.id == book.id }
+        do { try persistIndex() } catch { books = previous; throw error }
+        removeStoredFile(for: book)
     }
 
     func fileURL(for book: DownloadedWebNovel) -> URL? {
@@ -512,7 +635,9 @@ final class WebNovelDownloadStore: ObservableObject {
                 chapterDataFilename: book.chapterDataFilename.flatMap { names[$0] },
                 fileFilename: book.fileFilename.flatMap { names[$0] },
                 downloadedAt: book.downloadedAt,
-                translationSource: book.translationSource
+                translationSource: book.translationSource,
+                downloadMode: book.downloadMode,
+                fileFormat: book.fileFormat
             )
             books.insert(restored, at: 0)
             do { try persistIndex() } catch {
@@ -543,10 +668,11 @@ final class WebNovelDownloadStore: ObservableObject {
         return candidate
     }
 
-    private static func websiteDownloadFilename(title: String, translationSource: NovelTranslationSource?) -> String {
+    private static func websiteDownloadFilename(title: String, mode: WebNovelDownloadMode,
+                                                translationSource: NovelTranslationSource?, format: WebNovelFileFormat) -> String {
         let safeTitle = title.replacingOccurrences(of: "[\\/|\\\\:*?\"<>]", with: "", options: .regularExpression)
-        guard let translationSource else { return "jp.\(safeTitle).epub" }
-        return "zh.Y\(translationSource.rawValue.prefix(1)).\(safeTitle).epub"
+        let translator = translationSource.map { "Y\($0.rawValue.prefix(1))." } ?? ""
+        return "\(mode.apiValue).\(translator)\(safeTitle).\(format.fileExtension)"
     }
 
     private func persistIndex() throws {
