@@ -701,7 +701,8 @@ private struct APIWebOutline: Decodable {
             providerId: providerId,
             novelId: novelId,
             cloudFavoriteFolderID: favored,
-            translationChapterCounts: translationCounts(youdao: youdao, gpt: gpt, sakura: sakura)
+            translationChapterCounts: translationCounts(youdao: youdao, gpt: gpt, sakura: sakura),
+            totalChapterCount: total
         )
     }
 
@@ -803,7 +804,8 @@ private extension APIWebDetail {
             novelId: novelId,
             cloudFavoriteFolderID: favored,
             translationChapterCounts: translationCounts(youdao: youdao, gpt: gpt, sakura: sakura),
-            totalCharacters: totalCharacters
+            totalCharacters: totalCharacters,
+            totalChapterCount: toc?.count
         )
     }
 }

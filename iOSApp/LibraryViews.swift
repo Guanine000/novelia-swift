@@ -1588,7 +1588,7 @@ private struct NovelRow: View {
                 Text(novel.author)
                     .font(.system(size: 12))
                     .foregroundStyle(NoveliaStyle.muted)
-                Text("\(novel.chapters.count) 章  ·  \(novel.genres.first ?? "小说")")
+                Text("\(novel.displayedChapterCount) 章  ·  \(novel.genres.first ?? "小说")")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(NoveliaStyle.muted.opacity(0.85))
             }

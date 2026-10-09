@@ -153,7 +153,8 @@ final class FavoritesStore: ObservableObject {
             novelId: novel.novelId,
             cloudFavoriteFolderID: folderID.isEmpty ? nil : folderID,
             translationChapterCounts: novel.translationChapterCounts,
-            totalCharacters: novel.totalCharacters
+            totalCharacters: novel.totalCharacters,
+            totalChapterCount: novel.totalChapterCount
         )
     }
 

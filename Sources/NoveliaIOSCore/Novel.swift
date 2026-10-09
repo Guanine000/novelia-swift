@@ -13,6 +13,8 @@ public struct Novel: Identifiable, Hashable, Codable, Sendable {
     public let cloudFavoriteFolderID: String?
     public let translationChapterCounts: [NovelTranslationSource: Int]?
     public let totalCharacters: Int?
+    /// Chapter total reported by outline APIs that do not include chapter data.
+    public let totalChapterCount: Int?
 
     public init(
         id: String,
@@ -26,7 +28,8 @@ public struct Novel: Identifiable, Hashable, Codable, Sendable {
         novelId: String? = nil,
         cloudFavoriteFolderID: String? = nil,
         translationChapterCounts: [NovelTranslationSource: Int]? = nil,
-        totalCharacters: Int? = nil
+        totalCharacters: Int? = nil,
+        totalChapterCount: Int? = nil
     ) {
         self.id = id
         self.title = title
@@ -40,9 +43,13 @@ public struct Novel: Identifiable, Hashable, Codable, Sendable {
         self.cloudFavoriteFolderID = cloudFavoriteFolderID
         self.translationChapterCounts = translationChapterCounts
         self.totalCharacters = totalCharacters
+        self.totalChapterCount = totalChapterCount
     }
 
     public var isRemote: Bool { providerId != nil && novelId != nil }
+
+    /// Uses outline metadata when available; detail/local models fall back to loaded chapters.
+    public var displayedChapterCount: Int { max(0, totalChapterCount ?? chapters.count) }
 
     public func settingCloudFavoriteFolder(_ folderID: String?) -> Novel {
         Novel(
@@ -57,7 +64,8 @@ public struct Novel: Identifiable, Hashable, Codable, Sendable {
             novelId: novelId,
             cloudFavoriteFolderID: folderID,
             translationChapterCounts: translationChapterCounts,
-            totalCharacters: totalCharacters
+            totalCharacters: totalCharacters,
+            totalChapterCount: totalChapterCount
         )
     }
 }

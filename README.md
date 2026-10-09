@@ -39,6 +39,12 @@ Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名�
 
 完整更新说明及未签名 IPA、对应源码和 YueduCoreText 锁定源码见[最新 Release](https://github.com/Guanine000/novelia-ios-port/releases/latest)。
 
+## 0.6.4 相较上一正式版的变化
+
+与 [v0.6.3](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.6.3) 相比，v0.6.4 修复了书架「最近阅读」和「已收藏」的「查看全部」列表把所有作品都显示为 0 章的问题。列表现在使用网页接口提供的作品总章数，并在收藏缓存中保留该数据；详情和本地作品仍按实际加载的章节数显示。
+
+完整更新说明、未签名 IPA、本项目对应版本源码及 YueduCoreText 锁定版本源码与许可材料见[最新 Release](https://github.com/Guanine000/novelia-ios-port/releases/latest)。
+
 ## 0.6.3 相较上一正式版的变化
 
 与 [v0.6.2](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.6.2) 相比，v0.6.3 优化了 EPUB 与在线阅读的滚动性能，改进 WebDAV 同步交互（同步开关、进度浮窗和取消操作），并按每本书的最新记录合并同步内容与阅读进度。EPUB 目录中的书内链接会以可点击样式呈现；当内嵌目录过于简略时，会尝试从正文标题生成备用目录。
