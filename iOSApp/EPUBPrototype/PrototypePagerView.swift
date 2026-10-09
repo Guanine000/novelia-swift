@@ -45,6 +45,12 @@ struct PrototypePagerView: UIViewRepresentable {
     var onPlainLinkTap: (String) -> Void = { _ in }
     /// 点击页面中部（显隐工具栏）。
     var onCenterTap: () -> Void = {}
+    /// 长按并拖动页面文字时，根据页面坐标返回 UTF-16 字符范围。
+    var selectionRangeAt: (CGPoint) -> NSRange? = { _ in nil }
+    /// 当前页中所选文字的高亮矩形。
+    var selectionRects: (NSRange) -> [CGRect] = { _ in [] }
+    /// 取得选中文本，供系统复制菜单使用。
+    var selectedText: (NSRange) -> String? = { _ in nil }
 
     /// 三页位图由宿主从同一份排版缓存派生；每次 SwiftUI 更新都会重放。
     var images: PageImages
@@ -58,6 +64,9 @@ struct PrototypePagerView: UIViewRepresentable {
         view.noteTapHandler = onNoteTap
         view.plainLinkTapHandler = onPlainLinkTap
         view.centerTapHandler = onCenterTap
+        view.selectionRangeProvider = selectionRangeAt
+        view.selectionRectsProvider = selectionRects
+        view.selectedTextProvider = selectedText
         view.apply(images: images)
         return view
     }
@@ -70,11 +79,14 @@ struct PrototypePagerView: UIViewRepresentable {
         view.noteTapHandler = onNoteTap
         view.plainLinkTapHandler = onPlainLinkTap
         view.centerTapHandler = onCenterTap
+        view.selectionRangeProvider = selectionRangeAt
+        view.selectionRectsProvider = selectionRects
+        view.selectedTextProvider = selectedText
         view.apply(images: images)
     }
 }
 
-final class PrototypePagerUIView: UIView {
+final class PrototypePagerUIView: UIView, UIGestureRecognizerDelegate {
     var canTurnProvider: ((Bool) -> Bool)?
     var commitHandler: ((Bool) -> Void)?
     var animatingChangeHandler: ((Bool) -> Void)?
@@ -82,17 +94,26 @@ final class PrototypePagerUIView: UIView {
     var noteTapHandler: ((String) -> Void)?
     var plainLinkTapHandler: ((String) -> Void)?
     var centerTapHandler: (() -> Void)?
+    var selectionRangeProvider: ((CGPoint) -> NSRange?)?
+    var selectionRectsProvider: ((NSRange) -> [CGRect])?
+    var selectedTextProvider: ((NSRange) -> String?)?
 
     private let strip = UIView()
     private let previousImageView = UIImageView()
     private let currentImageView = UIImageView()
     private let nextImageView = UIImageView()
+    private let selectionLayer = CAShapeLayer()
+    private var longPressGesture: UILongPressGestureRecognizer!
+    private var editMenuInteraction: UIEditMenuInteraction!
 
     private var pageSize: CGSize = .zero
     private var images: PrototypePagerView.PageImages = .init(previous: nil, current: nil, next: nil)
     private var isAnimating = false
     private var isDragActive = false
     private var panBaseX: CGFloat = 0
+    private var selectionAnchor: Int?
+    private var selectionFocus: Int?
+    private var selectedText: String?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -107,13 +128,26 @@ final class PrototypePagerUIView: UIView {
             imageView.clipsToBounds = true
             strip.addSubview(imageView)
         }
+        selectionLayer.fillColor = UIColor.systemBlue.withAlphaComponent(0.28).cgColor
+        currentImageView.layer.addSublayer(selectionLayer)
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1
+        pan.delegate = self
         addGestureRecognizer(pan)
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         addGestureRecognizer(tap)
+
+        longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+        longPressGesture.minimumPressDuration = 0.45
+        longPressGesture.allowableMovement = 28
+        longPressGesture.delegate = self
+        addGestureRecognizer(longPressGesture)
+        tap.require(toFail: longPressGesture)
+
+        editMenuInteraction = UIEditMenuInteraction(delegate: self)
+        addInteraction(editMenuInteraction)
     }
 
     @available(*, unavailable)
@@ -129,6 +163,7 @@ final class PrototypePagerUIView: UIView {
         }
         // 2) 内容未变化时不触碰布局（提交窗口内的旧内容重放不再重置 strip）。
         if Self.imagesEqual(images, self.images) { return }
+        clearSelection()
         self.images = images
         pageSize = images.size
         layoutStripContent()
@@ -167,6 +202,7 @@ final class PrototypePagerUIView: UIView {
                 UIImage(cgImage: $0, scale: UIScreen.main.scale, orientation: .up)
             }
         }
+        selectionLayer.frame = currentImageView.bounds
         // 当前页始终位于中间槽位。
         strip.frame = CGRect(x: -width, y: 0, width: width * 3, height: height)
     }
@@ -189,6 +225,10 @@ final class PrototypePagerUIView: UIView {
 
         switch gesture.state {
         case .began:
+            if selectionAnchor != nil {
+                gesture.state = .cancelled
+                return
+            }
             if isAnimating {
                 gesture.state = .cancelled
                 return
@@ -238,6 +278,11 @@ final class PrototypePagerUIView: UIView {
         let location = gesture.location(in: self)
         let width = max(bounds.width, pageSize.width)
 
+        if selectionAnchor != nil {
+            clearSelection()
+            return
+        }
+
         // 1) 链接/注脚命中优先：当前页槽位与视口重合，视图坐标即页本地坐标。
         if let hit = linkHitTestProvider?(location) {
             switch hit {
@@ -260,6 +305,60 @@ final class PrototypePagerUIView: UIView {
         guard (canTurnProvider?(forward) ?? false),
               (forward ? images.next : images.previous) != nil else { return }
         completeTurn(forward: forward)
+    }
+
+    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard !isAnimating, !isDragActive else { return }
+        let point = gesture.location(in: self)
+        switch gesture.state {
+        case .began:
+            guard let range = selectionRangeProvider?(point), range.length > 0 else { return }
+            selectionAnchor = range.location
+            selectionFocus = NSMaxRange(range) - 1
+            updateSelectionHighlight()
+        case .changed:
+            guard selectionAnchor != nil,
+                  let range = selectionRangeProvider?(point), range.length > 0 else { return }
+            selectionFocus = NSMaxRange(range) - 1
+            updateSelectionHighlight()
+        case .ended:
+            presentCopyMenu(at: point)
+        case .cancelled, .failed:
+            clearSelection()
+        default:
+            break
+        }
+    }
+
+    private func updateSelectionHighlight() {
+        guard let anchor = selectionAnchor, let focus = selectionFocus else {
+            selectionLayer.path = nil
+            selectedText = nil
+            return
+        }
+        let start = min(anchor, focus)
+        let range = NSRange(location: start, length: abs(focus - anchor) + 1)
+        selectedText = selectedTextProvider?(range)
+        let rects = selectionRectsProvider?(range) ?? []
+        let path = UIBezierPath()
+        for rect in rects {
+            path.append(UIBezierPath(roundedRect: rect, cornerRadius: 2))
+        }
+        selectionLayer.path = path.cgPath
+    }
+
+    private func presentCopyMenu(at point: CGPoint) {
+        guard selectedText?.isEmpty == false else { return }
+        let configuration = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
+        editMenuInteraction.presentEditMenu(with: configuration)
+    }
+
+    private func clearSelection() {
+        editMenuInteraction.dismissMenu()
+        selectionAnchor = nil
+        selectionFocus = nil
+        selectedText = nil
+        selectionLayer.path = nil
     }
 
     private func snapBack() {
@@ -293,5 +392,28 @@ final class PrototypePagerUIView: UIView {
             // 保证 strip 归零（新旧中间槽位像素一致，不会闪）。
             self.apply(images: self.images)
         }
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        (gestureRecognizer === longPressGesture && otherGestureRecognizer is UIPanGestureRecognizer)
+            || (otherGestureRecognizer === longPressGesture && gestureRecognizer is UIPanGestureRecognizer)
+    }
+}
+
+extension PrototypePagerUIView: UIEditMenuInteractionDelegate {
+    func editMenuInteraction(
+        _ interaction: UIEditMenuInteraction,
+        menuFor configuration: UIEditMenuConfiguration,
+        suggestedActions: [UIMenuElement]
+    ) -> UIMenu? {
+        guard let selectedText, !selectedText.isEmpty else { return nil }
+        let copy = UIAction(title: "拷贝", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+            guard let selectedText = self?.selectedText else { return }
+            UIPasteboard.general.string = selectedText
+        }
+        return UIMenu(children: [copy])
     }
 }

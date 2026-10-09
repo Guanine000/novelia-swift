@@ -47,6 +47,12 @@ Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名�
 
 完整更新说明、未签名 IPA、本项目对应版本源码及 YueduCoreText 锁定版本源码与许可材料见[最新 Release](https://github.com/Guanine000/novelia-ios-port/releases/latest)。
 
+## 0.6.5 相较上一正式版的变化
+
+与 [v0.6.4](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.6.4) 相比，v0.6.5 为 App 内的文字增加选取和复制支持。SwiftUI 页面中的标题、标签、简介和正文可使用系统文字选择；CoreText EPUB 阅读页支持长按拖选当前页文字，并从系统菜单复制。EPUB 选区目前限于当前分页。
+
+完整更新说明、未签名 IPA、本项目对应版本源码及 YueduCoreText 锁定版本源码与许可材料见[最新 Release](https://github.com/Guanine000/novelia-ios-port/releases/latest)。
+
 ## 0.6.4 相较上一正式版的变化
 
 与 [v0.6.3](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.6.3) 相比，v0.6.4 修复了书架「最近阅读」和「已收藏」列表行始终显示 0 章的问题。列表现在优先显示作品总字数；接口未提供字数时显示已加载章节数或作品类型。

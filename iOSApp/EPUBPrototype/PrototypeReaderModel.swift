@@ -554,6 +554,18 @@ final class PrototypeReaderModel: ObservableObject {
         return result
     }
 
+    func selectionRange(at point: CGPoint) -> NSRange? {
+        pageBook?.selectionRange(at: point, for: pageID(location.spineIndex, location.pageIndex))
+    }
+
+    func selectionRects(for range: NSRange) -> [CGRect] {
+        pageBook?.selectionRects(for: range, on: pageID(location.spineIndex, location.pageIndex)) ?? []
+    }
+
+    func selectedText(for range: NSRange) -> String? {
+        pageBook?.selectedText(for: range, on: pageID(location.spineIndex, location.pageIndex))
+    }
+
     // MARK: 翻页
 
     /// 目标页是否已经排版好（拖动开始的门槛：保证动画只移动已渲染结果）。

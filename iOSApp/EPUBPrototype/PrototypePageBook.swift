@@ -125,6 +125,32 @@ final class PrototypePageBook {
         return chapter.displayLists[id.pageIndex]
     }
 
+    func selectionRange(at point: CGPoint, for id: PrototypePageID) -> NSRange? {
+        guard let chapter = chapters[id.spineIndex],
+              chapter.displayLists.indices.contains(id.pageIndex) else { return nil }
+        return BrowserTextGeometry.range(
+            at: point,
+            in: chapter.displayLists[id.pageIndex],
+            source: chapter.sourceText as NSString,
+            nearest: true
+        )
+    }
+
+    func selectionRects(for range: NSRange, on id: PrototypePageID) -> [CGRect] {
+        guard let chapter = chapters[id.spineIndex],
+              chapter.displayLists.indices.contains(id.pageIndex) else { return [] }
+        return BrowserTextGeometry.rects(in: chapter.displayLists[id.pageIndex], range: range)
+    }
+
+    func selectedText(for range: NSRange, on id: PrototypePageID) -> String? {
+        guard let chapter = chapters[id.spineIndex] else { return nil }
+        let source = chapter.sourceText as NSString
+        guard range.location >= 0, range.length > 0,
+              range.location <= source.length,
+              range.length <= source.length - range.location else { return nil }
+        return source.substring(with: range)
+    }
+
     // MARK: 链接与注脚命中
 
     /// 页面本地点的链接命中；点为视图坐标（当前页槽位与视口重合，故直接同页本地坐标）。

@@ -47,6 +47,9 @@ struct PrototypeReaderView: View {
                             model.openLink(href)
                         },
                         onCenterTap: { withAnimation(.easeInOut(duration: 0.15)) { showChrome.toggle() } },
+                        selectionRangeAt: { point in model.selectionRange(at: point) },
+                        selectionRects: { range in model.selectionRects(for: range) },
+                        selectedText: { range in model.selectedText(for: range) },
                         images: model.pagerImages()
                     )
                     .frame(width: geometry.size.width, height: geometry.size.height)
