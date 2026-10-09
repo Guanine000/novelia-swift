@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import Security
 import SwiftUI
 import UIKit
 import WebKit
@@ -87,7 +88,7 @@ final class AccountAuthStore: ObservableObject {
         }
     }
 
-    private static func username(from token: String?) -> String? {
+    static func username(from token: String?) -> String? {
         guard let token else { return nil }
         let segments = token.split(separator: ".")
         guard segments.count == 3 else { return nil }
@@ -102,6 +103,141 @@ final class AccountAuthStore: ObservableObject {
               expiration.doubleValue > Date().timeIntervalSince1970 else { return nil }
         // JWT claims are used only for local display; authorization stays server-side.
         return subject
+    }
+}
+
+@MainActor
+final class ForumAuthStore: ObservableObject {
+    @Published private(set) var username: String?
+    @Published private(set) var isRefreshing = false
+    @Published var errorMessage: String?
+    @Published var isLoginPresented = false
+
+    private let cookieStore = WKWebsiteDataStore.default().httpCookieStore
+    private let siteOrigin = URL(string: "https://forum.novelia.cc")!
+    private let refreshURL = URL(string: "https://auth.novelia.cc/api/v1/auth/refresh?app=f")!
+
+    init() {
+        let savedToken = NoveliaForumSessionTokenVault.read()
+        username = AccountAuthStore.username(from: savedToken)
+        if savedToken != nil && username == nil { NoveliaForumSessionTokenVault.clear() }
+    }
+
+    func refreshSession() async -> Bool {
+        guard !isRefreshing else { return false }
+        isRefreshing = true
+        errorMessage = nil
+        defer { isRefreshing = false }
+        do {
+            let cookies = await cookiesForSite()
+            guard !cookies.isEmpty else {
+                errorMessage = "认证站点没有可用会话。请先在上方登录页面登录，再点“完成登录”。"
+                return false
+            }
+            var request = URLRequest(url: refreshURL)
+            request.httpMethod = "POST"
+            request.httpBody = Data()
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue(siteOrigin.absoluteString, forHTTPHeaderField: "Origin")
+            request.setValue(HTTPCookie.requestHeaderFields(with: cookies)["Cookie"], forHTTPHeaderField: "Cookie")
+            request.timeoutInterval = 30
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { throw AccountAuthError.invalidResponse }
+            guard (200..<300).contains(http.statusCode) else { throw AccountAuthError.refreshRejected(http.statusCode) }
+            let token = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let parsedUsername = AccountAuthStore.username(from: token) else { throw AccountAuthError.invalidToken }
+            try NoveliaForumSessionTokenVault.save(token)
+            username = parsedUsername
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func logout() {
+        NoveliaForumSessionTokenVault.clear()
+        username = nil
+        errorMessage = nil
+    }
+
+    private func cookiesForSite() async -> [HTTPCookie] {
+        let allCookies: [HTTPCookie] = await withCheckedContinuation { continuation in
+            cookieStore.getAllCookies { continuation.resume(returning: $0) }
+        }
+        let host = refreshURL.host ?? "auth.novelia.cc"
+        let path = refreshURL.path
+        return allCookies.filter { cookie in
+            let domain = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
+            let domainMatches = host == domain || host.hasSuffix(".\(domain)")
+            let pathMatches = path == cookie.path || path.hasPrefix(cookie.path.hasSuffix("/") ? cookie.path : "\(cookie.path)/")
+            return domainMatches && pathMatches && (!cookie.isSecure || refreshURL.scheme == "https")
+        }
+    }
+}
+
+enum NoveliaForumSessionTokenVault {
+    private static let service = "cc.novelia.ios.session"
+    private static let account = "forum-access-token"
+#if targetEnvironment(simulator)
+    private static let simulatorFallbackKey = "novelia.forum-session-token.simulator"
+#endif
+
+    static func read() -> String? {
+        var query = baseQuery
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else {
+#if targetEnvironment(simulator)
+            return UserDefaults.standard.string(forKey: simulatorFallbackKey)
+#else
+            return nil
+#endif
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func save(_ token: String) throws {
+        let data = Data(token.utf8)
+        let status = SecItemUpdate(baseQuery as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecItemNotFound {
+            var query = baseQuery
+            query[kSecValueData as String] = data
+            query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            let addStatus = SecItemAdd(query as CFDictionary, nil)
+            guard addStatus == errSecSuccess else {
+#if targetEnvironment(simulator)
+                if addStatus == errSecMissingEntitlement || addStatus == errSecNotAvailable {
+                    UserDefaults.standard.set(token, forKey: simulatorFallbackKey)
+                    return
+                }
+#endif
+                throw NoveliaSessionError.keychain(addStatus)
+            }
+        } else if status != errSecSuccess {
+#if targetEnvironment(simulator)
+            if status == errSecMissingEntitlement || status == errSecNotAvailable {
+                UserDefaults.standard.set(token, forKey: simulatorFallbackKey)
+                return
+            }
+#endif
+            throw NoveliaSessionError.keychain(status)
+        }
+    }
+
+    static func clear() {
+        SecItemDelete(baseQuery as CFDictionary)
+#if targetEnvironment(simulator)
+        UserDefaults.standard.removeObject(forKey: simulatorFallbackKey)
+#endif
+    }
+
+    private static var baseQuery: [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: service,
+         kSecAttrAccount as String: account]
     }
 }
 
@@ -136,6 +272,7 @@ struct NoveliaLoginSheet: View {
 
                 NoveliaAuthWebView(
                     webView: $webView,
+                    appID: "n",
                     onLoginSuccess: {
                         Task {
                             if await auth.refreshSession() { dismiss() }
@@ -176,8 +313,9 @@ struct NoveliaLoginSheet: View {
     }
 }
 
-private struct NoveliaAuthWebView: UIViewRepresentable {
+struct NoveliaAuthWebView: UIViewRepresentable {
     @Binding var webView: WKWebView?
+    let appID: String
     let onLoginSuccess: () -> Void
     let onLoadFailure: (String) -> Void
 
@@ -213,7 +351,7 @@ private struct NoveliaAuthWebView: UIViewRepresentable {
 
         var components = URLComponents(string: "https://auth.novelia.cc/")!
         components.queryItems = [
-            URLQueryItem(name: "app", value: "n"),
+            URLQueryItem(name: "app", value: appID),
             URLQueryItem(name: "theme", value: "system")
         ]
         view.load(URLRequest(url: components.url!))
@@ -280,6 +418,45 @@ private struct NoveliaAuthWebView: UIViewRepresentable {
                 return
             }
             decisionHandler(.allow)
+        }
+    }
+}
+
+struct ForumLoginSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var auth: ForumAuthStore
+    @State private var webView: WKWebView?
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Text("使用论坛账号登录。账号密码由 Novelia 认证网站直接处理，并与小说账号的 API 会话分开保存。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                NoveliaAuthWebView(webView: $webView, appID: "f", onLoginSuccess: {
+                    Task { if await auth.refreshSession() { dismiss() } }
+                }, onLoadFailure: { auth.errorMessage = $0 })
+            }
+            .navigationTitle("登录 Novelia 论坛")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(auth.isRefreshing ? "验证中…" : "完成登录") {
+                        Task { if await auth.refreshSession() { dismiss() } }
+                    }
+                    .disabled(auth.isRefreshing)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if let errorMessage = auth.errorMessage {
+                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16).padding(.vertical, 10).background(.regularMaterial)
+                }
+            }
         }
     }
 }

@@ -33,6 +33,8 @@
 		A10000000000000000000024 /* PrototypeSampleBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000021 /* PrototypeSampleBook.swift */; };
 		A10000000000000000000025 /* ThirdPartyLicenses in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000022 /* ThirdPartyLicenses */; };
 		A10000000000000000000026 /* WebDAVSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000023 /* WebDAVSync.swift */; };
+		A10000000000000000000027 /* ForumViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000024 /* ForumViews.swift */; };
+		A10000000000000000000028 /* ForumAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000025 /* ForumAPIClient.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -59,6 +61,8 @@
 		B10000000000000000000021 /* PrototypeSampleBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeSampleBook.swift; sourceTree = "<group>"; };
 		B10000000000000000000022 /* ThirdPartyLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; path = iOSApp/Resources/ThirdPartyLicenses; sourceTree = "<group>"; };
 		B10000000000000000000023 /* WebDAVSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVSync.swift; sourceTree = "<group>"; };
+		B10000000000000000000024 /* ForumViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumViews.swift; sourceTree = "<group>"; };
+		B10000000000000000000025 /* ForumAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumAPIClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -114,6 +118,7 @@
 				B10000000000000000000013 /* WenkuViews.swift */,
 				B10000000000000000000014 /* WenkuStore.swift */,
 				B10000000000000000000023 /* WebDAVSync.swift */,
+				B10000000000000000000024 /* ForumViews.swift */,
 			);
 			path = iOSApp;
 			sourceTree = "<group>";
@@ -125,6 +130,7 @@
 				B10000000000000000000005 /* DemoLibrary.swift */,
 				B10000000000000000000008 /* NoveliaAPIClient.swift */,
 				B10000000000000000000015 /* WenkuNovel.swift */,
+				B10000000000000000000025 /* ForumAPIClient.swift */,
 			);
 			path = Sources/NoveliaIOSCore;
 			sourceTree = "<group>";
@@ -283,6 +289,8 @@
 				A10000000000000000000012 /* WenkuViews.swift in Sources */,
 				A10000000000000000000013 /* WenkuStore.swift in Sources */,
 				A10000000000000000000026 /* WebDAVSync.swift in Sources */,
+				A10000000000000000000027 /* ForumViews.swift in Sources */,
+				A10000000000000000000028 /* ForumAPIClient.swift in Sources */,
 				A10000000000000000000014 /* WenkuNovel.swift in Sources */,
 				A10000000000000000000019 /* PrototypeEPUBContainer.swift in Sources */,
 				A10000000000000000000020 /* PrototypePageBook.swift in Sources */,
@@ -405,8 +413,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.5.2;
-				CURRENT_PROJECT_VERSION = 10;
+				MARKETING_VERSION = 0.6.0;
+				CURRENT_PROJECT_VERSION = 12;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -428,8 +436,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.5.2;
-				CURRENT_PROJECT_VERSION = 10;
+				MARKETING_VERSION = 0.6.0;
+				CURRENT_PROJECT_VERSION = 12;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;

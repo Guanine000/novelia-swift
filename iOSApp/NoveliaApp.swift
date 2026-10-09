@@ -69,6 +69,7 @@ enum NoveliaStyle {
 
 struct RootView: View {
     @StateObject private var auth = AccountAuthStore()
+    @StateObject private var forumAuth = ForumAuthStore()
     @StateObject private var favorites = FavoritesStore()
     @StateObject private var readingHistory = ReadingHistoryStore()
     @StateObject private var wenkuDownloads = WenkuLocalLibraryStore()
@@ -98,12 +99,18 @@ struct RootView: View {
             .tabItem { Label("文库", systemImage: "books.vertical") }
 
             NavigationStack {
+                ForumView()
+            }
+            .tabItem { Label("论坛", systemImage: "bubble.left.and.bubble.right") }
+
+            NavigationStack {
                 SettingsView()
             }
             .tabItem { Label("我的", systemImage: "person.crop.circle") }
         }
         .background(NoveliaStyle.paper)
         .environmentObject(auth)
+        .environmentObject(forumAuth)
         .environmentObject(favorites)
         .environmentObject(readingHistory)
         .environmentObject(wenkuDownloads)
