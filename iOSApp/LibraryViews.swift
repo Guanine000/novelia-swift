@@ -2292,6 +2292,7 @@ private struct DownloadedWebNovelReader: View {
 
 struct SettingsView: View {
     @EnvironmentObject private var auth: AccountAuthStore
+    @AppStorage("appThemeColor") private var themeColorRaw = AppThemeColor.novelia.rawValue
     @AppStorage("readerFontSize") private var fontSize = 20.0
     @AppStorage("readerMode") private var modeRaw = ReaderMode.bilingual.rawValue
     @State private var isExportingLogs = false
@@ -2327,6 +2328,17 @@ struct SettingsView: View {
                 }
             }
             Section("阅读体验") {
+                Picker(selection: $themeColorRaw) {
+                    ForEach(AppThemeColor.allCases) { option in
+                        HStack(spacing: 8) {
+                            Circle().fill(option.color).frame(width: 12, height: 12)
+                            Text(option.title)
+                        }
+                        .tag(option.rawValue)
+                    }
+                } label: {
+                    Label("主题色", systemImage: "paintpalette")
+                }
                 Picker("显示语言", selection: $modeRaw) {
                     ForEach(ReaderMode.allCases) { mode in
                         Text(mode.title).tag(mode.rawValue)

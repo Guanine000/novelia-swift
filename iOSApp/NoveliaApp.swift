@@ -14,14 +14,43 @@ struct NoveliaApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
-                .tint(NoveliaStyle.brandGreen)
                 .textSelection(.enabled)
         }
     }
 }
 
+enum AppThemeColor: String, CaseIterable, Identifiable {
+    case novelia
+    case ocean
+    case plum
+    case rose
+    case amber
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .novelia: "Novelia 绿"
+        case .ocean: "海洋蓝"
+        case .plum: "柔和紫"
+        case .rose: "莓果红"
+        case .amber: "琥珀棕"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .novelia: Color(red: 85 / 255, green: 151 / 255, blue: 117 / 255)
+        case .ocean: Color(red: 48 / 255, green: 112 / 255, blue: 153 / 255)
+        case .plum: Color(red: 112 / 255, green: 77 / 255, blue: 151 / 255)
+        case .rose: Color(red: 176 / 255, green: 70 / 255, blue: 92 / 255)
+        case .amber: Color(red: 145 / 255, green: 96 / 255, blue: 31 / 255)
+        }
+    }
+}
+
 enum NoveliaStyle {
-    static let brandGreen = Color(red: 85 / 255, green: 151 / 255, blue: 117 / 255)
+    static var brandGreen: Color { .accentColor }
 
     /// 主文字色（深色下近白）。
     static var ink: Color {
@@ -69,6 +98,7 @@ enum NoveliaStyle {
 }
 
 struct RootView: View {
+    @AppStorage("appThemeColor") private var appThemeColorRaw = AppThemeColor.novelia.rawValue
     @StateObject private var auth = AccountAuthStore()
     @StateObject private var forumAuth = ForumAuthStore()
     @StateObject private var favorites = FavoritesStore()
@@ -109,6 +139,7 @@ struct RootView: View {
             }
             .tabItem { Label("我的", systemImage: "person.crop.circle") }
         }
+        .tint(AppThemeColor(rawValue: appThemeColorRaw)?.color ?? AppThemeColor.novelia.color)
         .background(NoveliaStyle.paper)
         .environmentObject(auth)
         .environmentObject(forumAuth)
