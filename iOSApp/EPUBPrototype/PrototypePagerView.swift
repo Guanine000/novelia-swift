@@ -145,6 +145,9 @@ final class PrototypePagerUIView: UIView, UIGestureRecognizerDelegate {
         longPressGesture.delegate = self
         addGestureRecognizer(longPressGesture)
         tap.require(toFail: longPressGesture)
+        // Let a deliberate long press own the touch sequence so the paging pan
+        // cannot consume the drag before the selection focus has moved.
+        pan.require(toFail: longPressGesture)
 
         editMenuInteraction = UIEditMenuInteraction(delegate: self)
         addInteraction(editMenuInteraction)
@@ -398,8 +401,7 @@ final class PrototypePagerUIView: UIView, UIGestureRecognizerDelegate {
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
-        (gestureRecognizer === longPressGesture && otherGestureRecognizer is UIPanGestureRecognizer)
-            || (otherGestureRecognizer === longPressGesture && gestureRecognizer is UIPanGestureRecognizer)
+        false
     }
 }
 

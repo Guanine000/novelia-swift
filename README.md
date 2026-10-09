@@ -53,6 +53,12 @@ Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名�
 
 完整更新说明、未签名 IPA、本项目对应版本源码及 YueduCoreText 锁定版本源码与许可材料见[最新 Release](https://github.com/Guanine000/novelia-ios-port/releases/latest)。
 
+## 0.6.6 相较上一正式版的变化
+
+与 [v0.6.5](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.6.5) 相比，v0.6.6 修复了 EPUB 阅读中拖动选区只能选中单个字符的问题。长按识别器现在优先取得触摸序列，避免翻页手势抢走拖动输入。
+
+完整更新说明、未签名 IPA、本项目对应版本源码及 YueduCoreText 锁定版本源码与许可材料见[最新 Release](https://github.com/Guanine000/novelia-ios-port/releases/latest)。
+
 ## 0.6.4 相较上一正式版的变化
 
 与 [v0.6.3](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.6.3) 相比，v0.6.4 修复了书架「最近阅读」和「已收藏」列表行始终显示 0 章的问题。列表现在优先显示作品总字数；接口未提供字数时显示已加载章节数或作品类型。
