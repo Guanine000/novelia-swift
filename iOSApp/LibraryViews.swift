@@ -2293,6 +2293,7 @@ private struct DownloadedWebNovelReader: View {
 struct SettingsView: View {
     @EnvironmentObject private var auth: AccountAuthStore
     @AppStorage("appThemeColor") private var themeColorRaw = AppThemeColor.novelia.rawValue
+    @AppStorage("appThemeCustomHex") private var themeCustomHex = "559775"
     @AppStorage("readerFontSize") private var fontSize = 20.0
     @AppStorage("readerMode") private var modeRaw = ReaderMode.bilingual.rawValue
     @State private var isExportingLogs = false
@@ -2331,13 +2332,25 @@ struct SettingsView: View {
                 Picker(selection: $themeColorRaw) {
                     ForEach(AppThemeColor.allCases) { option in
                         HStack(spacing: 8) {
-                            Circle().fill(option.color).frame(width: 12, height: 12)
+                            Circle()
+                                .fill(option == .custom ? AppThemeColor.color(fromHex: themeCustomHex) : option.color)
+                                .frame(width: 12, height: 12)
                             Text(option.title)
                         }
                         .tag(option.rawValue)
                     }
                 } label: {
                     Label("主题色", systemImage: "paintpalette")
+                }
+                if AppThemeColor(rawValue: themeColorRaw) == .custom {
+                    ColorPicker(
+                        "自定义颜色",
+                        selection: Binding(
+                            get: { AppThemeColor.color(fromHex: themeCustomHex) },
+                            set: { themeCustomHex = AppThemeColor.hex(from: $0) }
+                        ),
+                        supportsOpacity: false
+                    )
                 }
                 Picker("显示语言", selection: $modeRaw) {
                     ForEach(ReaderMode.allCases) { mode in
