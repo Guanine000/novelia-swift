@@ -50,7 +50,7 @@ jobs:
           ditto "$app_path" "$package_root/Payload/Novelia.app"
           (cd "$package_root" && /usr/bin/zip -qry "$ipa_path" Payload)
           test -s "$ipa_path"
-          for file in INDEX.md CryptoSwift-LICENSE.txt DifferenceKit-LICENSE.txt Fuzi-LICENSE.txt GCDWebServer-LICENSE.txt SQLite.swift-LICENSE.txt swift-toolkit-LICENSE.txt SwiftSoup-LICENSE.txt YueduCoreText-LICENSE.txt YueduCoreText-NOTICE.txt Zip-LICENSE.txt ZIPFoundation-LICENSE.txt; do
+          for file in GPL-3.0-only.txt INDEX.md CryptoSwift-LICENSE.txt DifferenceKit-LICENSE.txt Fuzi-LICENSE.txt GCDWebServer-LICENSE.txt SQLite.swift-LICENSE.txt swift-toolkit-LICENSE.txt SwiftSoup-LICENSE.txt YueduCoreText-LICENSE.txt YueduCoreText-NOTICE.txt Zip-LICENSE.txt ZIPFoundation-LICENSE.txt; do
             test -s "$app_path/ThirdPartyLicenses/$file"
             unzip -Z1 "$ipa_path" | grep -Fx "Payload/Novelia.app/ThirdPartyLicenses/$file"
           done

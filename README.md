@@ -24,11 +24,11 @@ WebDAV 使用方法：在“我的 → WebDAV 同步”填入可写的 HTTPS Web
 
 ## 下载与运行
 
-[下载 v0.5.0 Release](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.5.0) · [查看发行记录](https://github.com/Guanine000/novelia-ios-port/releases)
+[下载最新 Release](https://github.com/Guanine000/novelia-ios-port/releases/latest) · [查看发行记录](https://github.com/Guanine000/novelia-ios-port/releases)
 
 Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名。要从源码运行，使用 Xcode 打开 `NoveliaIOS.xcodeproj`，选择 `Novelia` scheme 和 iPhone 模拟器或已配置签名的设备。依赖由 Swift Package Manager 解析，锁定版本见 `NoveliaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`。
 
-仓库保持私密，当前只保留 v0.5.0 的 GitHub Release；旧版本 Git 标签仍保留供历史追溯。若已下载较早的 IPA，请改用 v0.5.0。已经转交出去的旧文件不会因 Release 删除而消失。
+仓库保持私密。v0.5.0 的旧 IPA 已停止分发；请使用包含 GPL-3.0-only 许可告知及对应源码的新 Release。旧版本标签保留供历史追溯。已经转交出去的旧文件不会因 Release 附件下架而消失。
 
 项目主要目录：`iOSApp/` 为 SwiftUI 应用与 EPUB 阅读器，`Sources/NoveliaIOSCore/` 为 API、模型和存储代码，`NoveliaIOS.xcodeproj/` 为 Xcode 工程。
 
@@ -45,6 +45,8 @@ Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名�
 
 App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完整依赖清单](iOSApp/Resources/ThirdPartyLicenses/INDEX.md)列出 `Package.resolved` 中全部 10 个 Swift Package 的版本、来源及许可文件。IPA 随附这些原始许可文本、YueduCoreText 的 MPL-2.0 许可和包含 Unicode License v3 的 NOTICE。YueduCoreText 对应源码为[精确锁定的提交](https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/783ce903d5faf4ff5d15c546e32a107537ba5efe)，本项目没有修改该依赖的上游源码。用户自行导入的字体保存在本机 App 文档目录，不随本项目 IPA 分发；字体文件仍受其自身许可约束。
 
-v0.5.0 Release 还附有该精确提交的 [`YueduCoreText-0.8.0-source-783ce903.zip`](https://github.com/Guanine000/novelia-ios-port/releases/download/v0.5.0/YueduCoreText-0.8.0-source-783ce903.zip)，包含上游 LICENSE 与 NOTICE。私下转发 IPA 时，应同时提供此源码 ZIP 或告知接收者上方公开的上游提交链接；私密仓库的 Release 链接可能无法由未获访问权限的朋友打开。构建流程使用 [`scripts/verify_third_party_notices.py`](scripts/verify_third_party_notices.py) 核对锁定依赖、许可清单和原始文件，并检查许可资源是否进入 IPA。
+最新 Release 附有本项目对应版本源码归档，以及 YueduCoreText 锁定提交的源码和许可材料。由于仓库为私密仓库，分发 IPA 时应确保每位接收者能取得同一版本的完整对应源码。构建流程使用 [`scripts/verify_third_party_notices.py`](scripts/verify_third_party_notices.py) 核对锁定依赖、许可清单和原始文件，并检查许可资源是否进入 IPA。
 
-本仓库目前**没有声明覆盖自有代码的统一开源许可证**，且保持私密。维护者确认 App 图标由本人制作或使用 AI 生成，未直接取自 Android 对照项目或 Yuedu-reader；该说明不改变第三方代码和素材各自的许可。第三方软件许可不自动授权使用本项目其他代码、图标、小说内容或 Novelia 服务数据。发行包对第三方依赖的告知以随包的原始许可和 NOTICE 为准。
+本仓库中由项目维护者拥有授权权利的 App 源代码和项目文档采用 **GNU GPL-3.0-only**（SPDX：`GPL-3.0-only`），完整条款见根目录 [LICENSE](LICENSE)。本 iOS 项目是参考 [GPL-3.0-only 安卓客户端](https://github.com/nobYoQ/novelia) 制作的 Swift 移植版本，包含平台适配和后续修改；上游版权声明 `Copyright (C) 2026 Novelia Android contributors.` 予以保留。本 iOS 移植及新增部分版权声明为 `Copyright (C) 2026 Guanine000.`，修改版本日期为 2026-10-09。
+
+第三方组件、YueduCoreText、用户导入字体、Novelia 网站内容、小说与用户内容仍分别适用其自身许可证或权利声明，不被本仓库的 GPL 声明替代或重新授权。完整第三方清单、许可文本和 YueduCoreText 对应源码见上方清单及最新 Release 附件。App 图标由项目维护者制作或 AI 生成，未直接取自安卓对照项目或 Yuedu-reader；图标和其他非代码资源仍以其各自权利状态为准。
