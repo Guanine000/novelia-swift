@@ -2037,6 +2037,8 @@ private struct DownloadedWebNovelTXTReader: View {
     let rules: TXTChapterRuleConfiguration
     @State private var chapters: [TXTChapter]?
     @State private var chapterIndex = 0
+    @State private var bodyChunks: [String] = []
+    @State private var bodyChunksChapterIndex: Int?
     @State private var isShowingContents = false
     @State private var errorMessage: String?
 
@@ -2060,11 +2062,20 @@ private struct DownloadedWebNovelTXTReader: View {
                             Text(chapter.title)
                                 .font(.system(size: 25, weight: .bold, design: .rounded))
                                 .foregroundStyle(appearance.primaryText(system: systemColorScheme))
-                            Text(chapter.body.isEmpty ? " " : chapter.body)
-                                .font(.system(size: fontSize, design: .serif))
-                                .lineSpacing(9)
-                                .foregroundStyle(appearance.primaryText(system: systemColorScheme))
-                                .textSelection(.enabled)
+                            if bodyChunksChapterIndex == chapterIndex {
+                                LazyVStack(alignment: .leading, spacing: 0) {
+                                    ForEach(bodyChunks.indices, id: \.self) { index in
+                                        Text(bodyChunks[index])
+                                            .font(.system(size: fontSize, design: .serif))
+                                            .lineSpacing(9)
+                                            .foregroundStyle(appearance.primaryText(system: systemColorScheme))
+                                            .textSelection(.enabled)
+                                    }
+                                }
+                            } else {
+                                ProgressView("正在排版章节…")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
                         .frame(maxWidth: 720, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -2160,6 +2171,16 @@ private struct DownloadedWebNovelTXTReader: View {
                 TXTDiagnosticLog.logger.error("TXT reader load failed; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public)")
                 errorMessage = error.localizedDescription
             }
+        }
+        .task(id: "\(url.path)|\(chapterIndex)|\(chapters?.count ?? 0)") {
+            guard let chapters, chapters.indices.contains(chapterIndex) else { return }
+            let body = chapters[chapterIndex].body
+            let chunks = await Task.detached(priority: .userInitiated) {
+                ReaderTextChunker.chunks(body)
+            }.value
+            guard !Task.isCancelled else { return }
+            bodyChunks = chunks
+            bodyChunksChapterIndex = chapterIndex
         }
     }
 

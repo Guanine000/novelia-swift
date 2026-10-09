@@ -300,19 +300,11 @@ struct ReaderView: View {
                 let paragraph = paragraphs[index]
                 VStack(alignment: .leading, spacing: 8) {
                     if !paragraph.original.isEmpty {
-                        Text(paragraph.original)
-                            .font(.system(size: CGFloat(fontSize), weight: .regular, design: .serif))
-                            .lineSpacing(fontSize * 0.48)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .foregroundStyle(readerPrimaryText)
+                        ReaderTextBlock(text: paragraph.original, fontSize: fontSize, color: readerPrimaryText)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if !paragraph.translation.isEmpty {
-                        Text(paragraph.translation)
-                            .font(.system(size: CGFloat(fontSize), weight: .regular, design: .serif))
-                            .lineSpacing(fontSize * 0.48)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .foregroundStyle(readerSecondaryText)
+                        ReaderTextBlock(text: paragraph.translation, fontSize: fontSize, color: readerSecondaryText)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
@@ -427,13 +419,59 @@ private struct Paragraphs: View {
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 15) {
             ForEach(paragraphs.indices, id: \.self) { index in
-                Text(paragraphs[index])
+                ReaderTextBlock(text: paragraphs[index], fontSize: fontSize, color: color)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+private struct ReaderTextBlock: View {
+    let text: String
+    let fontSize: Double
+    let color: Color
+
+    private var chunks: [String] { ReaderTextChunker.chunks(text) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(chunks.indices, id: \.self) { index in
+                Text(chunks[index])
                     .font(.system(size: CGFloat(fontSize), weight: .regular, design: .serif))
                     .lineSpacing(fontSize * 0.48)
                     .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(color)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+}
+
+/// Limits the amount of text each SwiftUI Text view has to measure during scrolling.
+enum ReaderTextChunker {
+    static func chunks(_ text: String, maximumCharacters: Int = 2_400) -> [String] {
+        guard !text.isEmpty else { return [" "] }
+        guard maximumCharacters > 0 else { return [text] }
+
+        var result: [String] = []
+        var start = text.startIndex
+        while start < text.endIndex {
+            let limit = text.index(start, offsetBy: maximumCharacters, limitedBy: text.endIndex) ?? text.endIndex
+            if limit == text.endIndex {
+                result.append(String(text[start..<text.endIndex]))
+                break
+            }
+
+            let preferredBreak = text[start..<limit].lastIndex(of: "\n")
+            let minimumBreak = text.index(start, offsetBy: maximumCharacters / 2, limitedBy: limit) ?? limit
+            let boundary: String.Index
+            if let preferredBreak, preferredBreak >= minimumBreak {
+                boundary = text.index(after: preferredBreak)
+            } else {
+                boundary = limit
+            }
+            result.append(String(text[start..<boundary]))
+            start = boundary
+        }
+        return result
     }
 }
