@@ -104,7 +104,13 @@ private enum WebDAVSyncError: LocalizedError {
         switch self {
         case .invalidURL: "请输入 HTTPS WebDAV 文件夹地址。"
         case .missingCredentials: "请填写用户名和密码。"
-        case .unexpectedResponse(let status): "WebDAV 请求失败（HTTP \(status)）。请检查地址、账号和服务器权限。"
+        case .unexpectedResponse(401): "WebDAV 认证失败（HTTP 401）。坚果云请使用注册邮箱和单独生成的应用密码。"
+        case .unexpectedResponse(403): "WebDAV 拒绝访问（HTTP 403）。请确认应用密码有效且目标文件夹可写。"
+        case .unexpectedResponse(404): "WebDAV 路径不存在（HTTP 404）。请检查服务器地址是否包含 /dav/。"
+        case .unexpectedResponse(409): "WebDAV 目录冲突（HTTP 409）。请检查填写的父文件夹是否已存在。"
+        case .unexpectedResponse(429): "WebDAV 请求过于频繁（HTTP 429），请稍后再试。"
+        case .unexpectedResponse(507): "WebDAV 空间不足（HTTP 507）。"
+        case .unexpectedResponse(let status): "WebDAV 请求失败（HTTP \(status)）。"
         case .unsupportedManifest: "远端同步数据版本不受支持，未修改本地书籍。"
         case .invalidAsset: "远端书籍文件校验失败，未导入该文件。"
         case .concurrentChange: "另一台设备刚更新了同步数据，请重新同步。"
@@ -119,7 +125,8 @@ private final class WebDAVRedirectGuard: NSObject, URLSessionTaskDelegate {
                     completionHandler: @escaping (URLRequest?) -> Void) {
         guard let original = task.originalRequest?.url, let destination = request.url,
               destination.scheme?.lowercased() == "https",
-              destination.host == original.host, destination.port == original.port else {
+              destination.host == original.host,
+              (destination.port ?? 443) == (original.port ?? 443) else {
             completionHandler(nil)
             return
         }
@@ -128,6 +135,7 @@ private final class WebDAVRedirectGuard: NSObject, URLSessionTaskDelegate {
 }
 
 private struct WebDAVClient {
+    let base: URL
     let root: URL
     let authorization: String
     private let session = URLSession(configuration: .ephemeral, delegate: WebDAVRedirectGuard(), delegateQueue: nil)
@@ -136,6 +144,7 @@ private struct WebDAVClient {
         guard let url = URL(string: address), url.scheme?.lowercased() == "https",
               url.host != nil, url.user == nil, url.password == nil,
               url.query == nil, url.fragment == nil else { throw WebDAVSyncError.invalidURL }
+        base = url
         root = url.appendingPathComponent("NoveliaSync", isDirectory: true)
                   .appendingPathComponent("v1", isDirectory: true)
         authorization = "Basic " + Data("\(username):\(password)".utf8).base64EncodedString()
@@ -154,17 +163,50 @@ private struct WebDAVClient {
         return response.statusCode
     }
 
+    private func read(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        do {
+            return try await session.data(for: request)
+        } catch let error as URLError where error.code == .networkConnectionLost {
+            return try await session.data(for: request)
+        }
+    }
+
+    func verifyConnection() async throws {
+        guard try await exists(base) else { throw WebDAVSyncError.unexpectedResponse(404) }
+    }
+
+    private func exists(_ url: URL) async throws -> Bool {
+        var probe = request(url, method: "PROPFIND")
+        probe.setValue("0", forHTTPHeaderField: "Depth")
+        let result = try await read(probe)
+        let code = try status(result.1)
+        if code == 404 { return false }
+        guard code == 207 || code == 200 else { throw WebDAVSyncError.unexpectedResponse(code) }
+        return true
+    }
+
     func prepareFolders() async throws {
         let parent = root.deletingLastPathComponent()
         for folder in [parent, root, root.appendingPathComponent("blobs", isDirectory: true)] {
-            let (_, response) = try await session.data(for: request(folder, method: "MKCOL"))
-            let code = try status(response)
+            if try await exists(folder) { continue }
+            var create = request(folder, method: "MKCOL")
+            create.httpBody = Data()
+            create.setValue("0", forHTTPHeaderField: "Content-Length")
+            let result: (Data, URLResponse)
+            do {
+                result = try await session.data(for: create)
+            } catch let error as URLError where error.code == .networkConnectionLost {
+                // 创建请求可能已经在服务器执行；先查远端，避免盲目重复写入。
+                if try await exists(folder) { continue }
+                throw error
+            }
+            let code = try status(result.1)
             guard [201, 405].contains(code) else { throw WebDAVSyncError.unexpectedResponse(code) }
         }
     }
 
     func fetchManifest() async throws -> (WebDAVManifest, String?, Bool) {
-        let (data, response) = try await session.data(for: request(root.appendingPathComponent("index.json"), method: "GET"))
+        let (data, response) = try await read(request(root.appendingPathComponent("index.json"), method: "GET"))
         let code = try status(response)
         if code == 404 { return (WebDAVManifest(), nil, false) }
         guard code == 200 else { throw WebDAVSyncError.unexpectedResponse(code) }
@@ -196,10 +238,7 @@ private struct WebDAVClient {
 
     func uploadBlob(_ file: URL, hash: String) async throws {
         let url = try blobURL(hash)
-        let (_, headResponse) = try await session.data(for: request(url, method: "HEAD"))
-        let headCode = try status(headResponse)
-        if headCode == 200 { return }
-        guard headCode == 404 else { throw WebDAVSyncError.unexpectedResponse(headCode) }
+        if try await exists(url) { return }
         var put = request(url, method: "PUT")
         put.setValue("*", forHTTPHeaderField: "If-None-Match")
         let (_, response) = try await session.upload(for: put, fromFile: file)
@@ -208,7 +247,14 @@ private struct WebDAVClient {
     }
 
     func downloadBlob(_ hash: String) async throws -> URL {
-        let (temporary, response) = try await session.download(for: request(try blobURL(hash), method: "GET"))
+        let get = request(try blobURL(hash), method: "GET")
+        let result: (URL, URLResponse)
+        do {
+            result = try await session.download(for: get)
+        } catch let error as URLError where error.code == .networkConnectionLost {
+            result = try await session.download(for: get)
+        }
+        let (temporary, response) = result
         let code = try status(response)
         guard code == 200 else { throw WebDAVSyncError.unexpectedResponse(code) }
         let actualHash = try await Task.detached(priority: .utility) {
@@ -227,6 +273,9 @@ final class WebDAVSyncStore: ObservableObject {
     @Published var username: String { didSet { UserDefaults.standard.set(username, forKey: "webdav.username") } }
     @Published var password: String = ""
     @Published private(set) var isSyncing = false
+    @Published private(set) var progressDetail = ""
+    @Published private(set) var completedUnits = 0
+    @Published private(set) var totalUnits = 1
     @Published var message: String?
 
     private let keychainService = "cc.novelia.ios.port.webdav"
@@ -241,70 +290,107 @@ final class WebDAVSyncStore: ObservableObject {
         guard !isSyncing else { return }
         isSyncing = true
         message = nil
+        completedUnits = 0
+        totalUnits = 1
+        progressDetail = "正在连接服务器…"
         defer { isSyncing = false }
+        var stage = "连接服务器"
         do {
-            guard !username.isEmpty, !username.contains(":"), !password.isEmpty else {
+            let account = username.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !account.isEmpty, !account.contains(":"), !password.isEmpty else {
                 throw WebDAVSyncError.missingCredentials
             }
             try savePassword()
             let client = try WebDAVClient(address: address.trimmingCharacters(in: .whitespacesAndNewlines),
-                                          username: username, password: password)
+                                          username: account, password: password)
+            try await client.verifyConnection()
+            stage = "创建同步目录"
+            progressDetail = "正在检查同步目录…"
             try await client.prepareFolders()
+            stage = "读取远端书目"
+            progressDetail = "正在读取远端书目…"
             let (fetchedManifest, etag, existed) = try await client.fetchManifest()
             var manifest = fetchedManifest
             let remoteWeb = manifest.webBooks
             let remoteWenku = manifest.wenkuBooks
+            let missingRemoteWeb = remoteWeb.filter { item in
+                !web.books.contains(where: { $0.id == item.record.id })
+            }
+            let missingRemoteWenku = remoteWenku.filter { item in
+                !wenku.books.contains(where: { $0.id == item.record.id })
+            }
+            let localWeb = web.books.filter { book in
+                !remoteWeb.contains(where: { $0.record.id == book.id })
+            }
+            let localWenku = wenku.books.filter { book in
+                !remoteWenku.contains(where: { $0.record.id == book.id })
+            }
+            totalUnits = missingRemoteWeb.reduce(0) { $0 + $1.assets.count }
+                + missingRemoteWenku.reduce(0) { $0 + $1.assets.count }
+                + localWeb.reduce(0) { $0 + web.syncFiles(for: $1).count }
+                + localWenku.reduce(0) { $0 + wenku.syncFiles(for: $1).count }
+                + 1 // 写入远端书目
             var imported = 0
-            for item in remoteWeb where !web.books.contains(where: { $0.id == item.record.id }) {
-                let files = try await download(item.assets, with: client)
+            stage = "恢复远端下载"
+            for item in missingRemoteWeb {
+                let files = try await download(item.assets, title: item.record.novel.title, with: client)
                 defer { files.values.forEach { try? FileManager.default.removeItem(at: $0) } }
                 try web.restoreFromSync(item.record, files: files)
                 imported += 1
             }
-            for item in remoteWenku where !wenku.books.contains(where: { $0.id == item.record.id }) {
-                let files = try await download(item.assets, with: client)
+            for item in missingRemoteWenku {
+                let files = try await download(item.assets, title: item.record.title, with: client)
                 defer { files.values.forEach { try? FileManager.default.removeItem(at: $0) } }
                 try wenku.restoreFromSync(item.record, files: files)
                 imported += 1
             }
             ReadingPositionSync.merge(manifest.positions, webBooks: web.books)
-            for book in web.books where !manifest.webBooks.contains(where: { $0.record.id == book.id }) {
+            stage = "上传本地下载"
+            for book in localWeb {
                 let files = web.syncFiles(for: book)
                 guard files.count == [book.chapterDataFilename, book.fileFilename].compactMap({ $0 }).count else {
                     throw WebDAVSyncError.invalidAsset
                 }
-                manifest.webBooks.append(try await remoteBook(book, files: files, client: client))
+                manifest.webBooks.append(try await remoteBook(book, title: book.novel.title, files: files, client: client))
             }
-            for book in wenku.books where !manifest.wenkuBooks.contains(where: { $0.record.id == book.id }) {
+            for book in localWenku {
                 let files = wenku.syncFiles(for: book)
                 guard files[book.filename] != nil else { throw WebDAVSyncError.invalidAsset }
-                manifest.wenkuBooks.append(try await remoteBook(book, files: files, client: client))
+                manifest.wenkuBooks.append(try await remoteBook(book, title: book.title, files: files, client: client))
             }
             let webKeys = Set(manifest.webBooks.map { "web:\($0.record.id)" })
             let epubKeys = Set((manifest.webBooks.flatMap(\.assets) + manifest.wenkuBooks.flatMap(\.assets))
                 .map { "epub:\($0.hash)" })
             manifest.positions = ReadingPositionSync.all().filter { webKeys.contains($0.key) || epubKeys.contains($0.key) }
+            stage = "保存远端书目"
+            progressDetail = "正在保存书目和阅读进度…"
             try await client.putManifest(manifest, etag: etag, existed: existed)
+            completedUnits += 1
+            progressDetail = "同步完成"
             message = "同步完成：恢复 \(imported) 本书，网络小说 \(web.books.count) 本，文库 \(wenku.books.count) 本。"
         } catch {
-            message = "同步失败：\(error.localizedDescription)"
+            let code = (error as? URLError).map { "（网络错误 \($0.code.rawValue)）" } ?? ""
+            message = "同步失败（\(stage)）\(code)：\(error.localizedDescription)"
         }
     }
 
-    private func remoteBook<Record: Codable>(_ record: Record, files: [String: URL],
+    private func remoteBook<Record: Codable>(_ record: Record, title: String, files: [String: URL],
                                               client: WebDAVClient) async throws -> WebDAVBook<Record> {
         var assets: [WebDAVAsset] = []
         for (filename, url) in files.sorted(by: { $0.key < $1.key }) {
+            progressDetail = "正在上传：\(title) · \(filename)"
             let hash = try await Task.detached(priority: .utility) {
                 try WebDAVFileHash.sha256(url)
             }.value
             try await client.uploadBlob(url, hash: hash)
             assets.append(WebDAVAsset(filename: filename, hash: hash))
+            completedUnits += 1
         }
         return WebDAVBook(record: record, assets: assets)
     }
 
-    private func download(_ assets: [WebDAVAsset], with client: WebDAVClient) async throws -> [String: URL] {
+    private func download(_ assets: [WebDAVAsset], title: String,
+                          with client: WebDAVClient) async throws -> [String: URL] {
         var files: [String: URL] = [:]
         do {
             for asset in assets {
@@ -312,7 +398,9 @@ final class WebDAVSyncStore: ObservableObject {
                       asset.filename != ".", asset.filename != "..", files[asset.filename] == nil else {
                     throw WebDAVSyncError.invalidAsset
                 }
+                progressDetail = "正在恢复：\(title) · \(asset.filename)"
                 files[asset.filename] = try await client.downloadBlob(asset.hash)
+                completedUnits += 1
             }
             return files
         } catch {
@@ -377,6 +465,20 @@ struct WebDAVSyncView: View {
                     else { Label("立即同步", systemImage: "arrow.triangle.2.circlepath") }
                 }
                 .disabled(syncStore.isSyncing)
+                if syncStore.isSyncing {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ProgressView(value: Double(syncStore.completedUnits),
+                                     total: Double(syncStore.totalUnits))
+                            .tint(.accentColor)
+                        Text(syncStore.progressDetail)
+                            .font(.footnote)
+                            .lineLimit(2)
+                        Text("\(syncStore.completedUnits) / \(syncStore.totalUnits) · \(Int(Double(syncStore.completedUnits) / Double(syncStore.totalUnits) * 100))%")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
                 if let message = syncStore.message { Text(message).font(.footnote) }
             } footer: {
                 Text("使用 HTTPS WebDAV。下载文件与阅读位置保存在服务器的 NoveliaSync/v1 文件夹；不会删除任一端的书籍。请使用可信服务器：同步内容未端到端加密。用户名保存在本机设置，密码保存在钥匙串。")
