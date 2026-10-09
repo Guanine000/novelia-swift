@@ -583,7 +583,7 @@ final class PrototypeEPUBContainer {
                 let mapped = mapToSpine(entries, baseDirectory: Self.directory(of: navItem.href))
                 Self.tocLog.fault("TOC nav entries=\(entries.count) mapped=\(mapped.filter { $0.spineIndex != nil }.count) navHref=\(navItem.href, privacy: .public)")
                 if !mapped.isEmpty {
-                    toc = mapped
+                    toc = await preferGeneratedTOCIfSparse(mapped)
                     return
                 }
                 tocDiagnostic = "nav 文档解析出 \(entries.count) 个条目，但没有一个能映射到 spine 章节"
@@ -605,7 +605,7 @@ final class PrototypeEPUBContainer {
             if !parsed.isEmpty {
                 let mapped = mapToSpine(parsed, baseDirectory: Self.directory(of: ncxItem.href))
                 if !mapped.isEmpty {
-                    toc = mapped
+                    toc = await preferGeneratedTOCIfSparse(mapped)
                     return
                 }
                 tocDiagnostic = "NCX 解析出 \(parsed.count) 个条目，但没有一个能映射到 spine 章节"
@@ -619,6 +619,56 @@ final class PrototypeEPUBContainer {
             } else if tocDiagnostic == nil {
                 tocDiagnostic = "目录文档存在但未能解析出条目"
             }
+        }
+    }
+
+    /// Some EPUBs ship a technically valid nav/NCX containing only a colophon or cover.
+    /// When that directory is clearly incomplete, recover chapter headings from the spine.
+    private func preferGeneratedTOCIfSparse(_ embedded: [PrototypeTOCEntry]) async -> [PrototypeTOCEntry] {
+        guard embedded.count <= 1 else { return embedded }
+        let generated = await generateTOCFromSpineHeadings()
+        guard generated.count > embedded.count else { return embedded }
+        Self.tocLog.info("TOC fallback generated entries=\(generated.count), embedded entries=\(embedded.count)")
+        return generated
+    }
+
+    private func generateTOCFromSpineHeadings() async -> [PrototypeTOCEntry] {
+        guard let headingPattern = try? NSRegularExpression(
+            pattern: "^(?:序章|序幕|プロローグ|Prologue|第\\s*[0-9０-９一二三四五六七八九十百]+\\s*(?:章|话|話|节|節|回|幕)|终章|終章|尾声|後日譚|后日谈|终幕|終幕|エピローグ|Epilogue)",
+            options: [.caseInsensitive]) else { return [] }
+
+        var entries: [PrototypeTOCEntry] = []
+        var seenTitles = Set<String>()
+        for (spineIndex, item) in spine.enumerated() {
+            guard item.mediaType.contains("xhtml") || item.mediaType.contains("html"),
+                  let html = try? await chapterHTML(path: item.href) else { continue }
+            for paragraph in Self.paragraphTexts(in: html) {
+                let range = NSRange(paragraph.startIndex..., in: paragraph)
+                guard headingPattern.firstMatch(in: paragraph, range: range) != nil else { continue }
+                let title = paragraph
+                    .replacingOccurrences(of: "[\\s　]+", with: " ", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !title.isEmpty, seenTitles.insert(title).inserted else { continue }
+                entries.append(PrototypeTOCEntry(title: title, spineIndex: spineIndex))
+                // A chapter XHTML may contain examples or links that resemble later headings.
+                // The first matching title in each spine item is its navigation target.
+                break
+            }
+        }
+        return entries
+    }
+
+    private static func paragraphTexts(in html: String) -> [String] {
+        guard let regex = try? NSRegularExpression(
+            pattern: "<p\\b[^>]*>([\\s\\S]*?)</p>", options: [.caseInsensitive]) else { return [] }
+        let ns = html as NSString
+        return regex.matches(in: html, range: NSRange(location: 0, length: ns.length)).compactMap { match in
+            var text = ns.substring(with: match.range(at: 1))
+                .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+            text = XMLValueParser.decodeEntities(text)
+                .replacingOccurrences(of: "[\\s　]+", with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? nil : text
         }
     }
 

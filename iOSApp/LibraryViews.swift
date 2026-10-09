@@ -1654,6 +1654,7 @@ private enum MyDownloadsImportError: LocalizedError {
 struct MyDownloadsView: View {
     @EnvironmentObject private var webNovelDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
+    @EnvironmentObject private var webDAVSync: WebDAVSyncStore
     @StateObject private var txtChapterRuleStore = TXTChapterRuleStore.shared
     @State private var selectedTab: MyDownloadsTab
     @State private var prototypeTarget: PrototypeDownloadTarget?
@@ -1665,6 +1666,9 @@ struct MyDownloadsView: View {
     @State private var importCompletedCount = 0
     @State private var importTotalCount = 0
     @State private var importError: String?
+    @State private var syncTask: Task<Void, Never>?
+    @State private var hasTriggeredSync = false
+    @State private var isShowingSyncProgress = false
 
     init(initialTab: MyDownloadsTab = .network) {
         _selectedTab = State(initialValue: initialTab)
@@ -1694,14 +1698,44 @@ struct MyDownloadsView: View {
         .task { await wenkuDownloads.refreshMissingMetadata() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                // 点击直接打开文件选择器（本地书点列表行即可打开，无需二级菜单）。
-                Button {
-                    isShowingFileImporter = true
-                } label: {
-                    Label("导入 TXT / EPUB", systemImage: "square.and.arrow.down")
+                HStack(spacing: 14) {
+                    Button {
+                        if hasTriggeredSync || webDAVSync.isSyncing {
+                            isShowingSyncProgress = true
+                        } else {
+                            hasTriggeredSync = true
+                            syncTask = Task {
+                                await webDAVSync.sync(web: webNovelDownloads, wenku: wenkuDownloads)
+                            }
+                        }
+                    } label: {
+                        if webDAVSync.isSyncing {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        }
+                    }
+                    .accessibilityLabel(webDAVSync.isSyncing ? "查看同步进度" : "WebDAV 同步")
+                    .disabled(!webDAVSync.isEnabled)
+
+                    Button {
+                        isShowingFileImporter = true
+                    } label: {
+                        Label("导入 TXT / EPUB", systemImage: "square.and.arrow.down")
+                    }
+                    .accessibilityLabel("导入 TXT 或 EPUB")
                 }
-                .accessibilityLabel("导入 TXT 或 EPUB")
             }
+        }
+        .sheet(isPresented: $isShowingSyncProgress) {
+            WebDAVSyncProgressPanel(onCancel: { syncTask?.cancel() }) {
+                syncTask = Task { await webDAVSync.sync(web: webNovelDownloads, wenku: wenkuDownloads) }
+            }
+            .presentationDetents([.height(280)])
+            .presentationDragIndicator(.visible)
+        }
+        .onChange(of: webDAVSync.isEnabled) { _, isEnabled in
+            if !isEnabled { syncTask?.cancel() }
         }
         .navigationDestination(item: $prototypeTarget) { target in
             PrototypeReaderHost(initialURL: target.url)

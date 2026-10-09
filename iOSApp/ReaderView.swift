@@ -436,13 +436,41 @@ private struct ReaderTextBlock: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(chunks.indices, id: \.self) { index in
-                Text(chunks[index])
+                LinkedReaderText(text: chunks[index], color: color)
                     .font(.system(size: CGFloat(fontSize), weight: .regular, design: .serif))
                     .lineSpacing(fontSize * 0.48)
                     .fixedSize(horizontal: false, vertical: true)
-                    .foregroundStyle(color)
             }
         }
+    }
+}
+
+/// Makes URLs embedded in chapter prose visibly interactive while retaining the reader font.
+private struct LinkedReaderText: View {
+    let text: String
+    let color: Color
+
+    private var attributedText: AttributedString {
+        var value = AttributedString(text)
+        value.foregroundColor = color
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return value
+        }
+        let matches = detector.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        for match in matches {
+            guard let url = match.url,
+                  ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+                  let range = Range(match.range, in: value) else { continue }
+            value[range].link = url
+            value[range].foregroundColor = UIColor.link
+            value[range].underlineStyle = .single
+        }
+        return value
+    }
+
+    var body: some View {
+        Text(attributedText)
+            .tint(.accentColor)
     }
 }
 

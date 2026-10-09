@@ -210,6 +210,38 @@ final class WenkuLocalLibraryStore: ObservableObject {
         }
     }
 
+    func replaceFromSync(_ book: LocalWenkuEPUB, files: [String: URL]) throws {
+        let previousBooks = books
+        guard let old = previousBooks.first(where: { $0.id == book.id }),
+              let source = files[book.filename] else { throw CocoaError(.fileReadNoSuchFile) }
+        let destination = uniqueDestination(for: Self.safeFilename(book.filename))
+        try fileManager.copyItem(at: source, to: destination)
+        var replacement = LocalWenkuEPUB(id: book.id, title: book.title,
+            filename: destination.lastPathComponent, addedAt: book.addedAt,
+            lastLocatorJSON: book.lastLocatorJSON, bookDescription: book.bookDescription,
+            author: book.author, coverFilename: nil, metadataLoaded: book.metadataLoaded,
+            fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel)
+        do {
+            if let coverName = book.coverFilename, let coverSource = files[coverName] {
+                let coverDestination = directory.appendingPathComponent("cover-\(UUID().uuidString).jpg")
+                try fileManager.copyItem(at: coverSource, to: coverDestination)
+                replacement.coverFilename = coverDestination.lastPathComponent
+            }
+            guard let index = books.firstIndex(where: { $0.id == book.id }) else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            books[index] = replacement
+            try persistIndex()
+            try? fileManager.removeItem(at: fileURL(for: old))
+            if let oldCover = coverURL(for: old) { try? fileManager.removeItem(at: oldCover) }
+        } catch {
+            books = previousBooks
+            try? fileManager.removeItem(at: destination)
+            if let cover = replacement.coverFilename { try? fileManager.removeItem(at: directory.appendingPathComponent(cover)) }
+            throw error
+        }
+    }
+
     func coverURL(for book: LocalWenkuEPUB) -> URL? {
         guard let coverFilename = book.coverFilename else { return nil }
         let url = directory.appendingPathComponent(coverFilename)
@@ -646,6 +678,40 @@ final class WebNovelDownloadStore: ObservableObject {
                 throw error
             }
         } catch {
+            for url in copied { try? fileManager.removeItem(at: url) }
+            throw error
+        }
+    }
+
+    func replaceFromSync(_ book: DownloadedWebNovel, files: [String: URL]) throws {
+        let previousBooks = books
+        guard let old = previousBooks.first(where: { $0.id == book.id }),
+              book.chapterDataFilename != nil || book.fileFilename != nil else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        var copied: [URL] = []
+        do {
+            var names: [String: String] = [:]
+            for filename in [book.chapterDataFilename, book.fileFilename].compactMap({ $0 }) {
+                guard let source = files[filename] else { throw CocoaError(.fileReadNoSuchFile) }
+                let destination = uniqueDestination(for: filename)
+                try fileManager.copyItem(at: source, to: destination)
+                copied.append(destination)
+                names[filename] = destination.lastPathComponent
+            }
+            let replacement = DownloadedWebNovel(novel: book.novel,
+                chapterDataFilename: book.chapterDataFilename.flatMap { names[$0] },
+                fileFilename: book.fileFilename.flatMap { names[$0] }, downloadedAt: book.downloadedAt,
+                translationSource: book.translationSource, downloadMode: book.downloadMode,
+                fileFormat: book.fileFormat)
+            guard let index = books.firstIndex(where: { $0.id == book.id }) else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            books[index] = replacement
+            try persistIndex()
+            removeStoredFile(for: old)
+        } catch {
+            books = previousBooks
             for url in copied { try? fileManager.removeItem(at: url) }
             throw error
         }
