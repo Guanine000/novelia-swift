@@ -1,0 +1,20 @@
+# macOS and Xcode user-specific files
+.DS_Store
+**/xcuserdata/
+
+# Xcode and Swift build products
+DerivedData/
+build/
+.build/
+.swiftpm/
+*.xcarchive
+*.ipa
+*.dSYM
+
+# Local credentials and diagnostics
+.env
+.env.*
+*.p12
+*.p8
+*.mobileprovision
+*.log

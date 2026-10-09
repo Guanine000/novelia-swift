@@ -1,0 +1,478 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* NoveliaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* NoveliaApp.swift */; };
+		A10000000000000000000002 /* LibraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000002 /* LibraryViews.swift */; };
+		A10000000000000000000003 /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000003 /* ReaderView.swift */; };
+		A10000000000000000000004 /* Novel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000004 /* Novel.swift */; };
+		A10000000000000000000005 /* DemoLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000005 /* DemoLibrary.swift */; };
+		A10000000000000000000006 /* DiscoverStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000007 /* DiscoverStore.swift */; };
+		A10000000000000000000007 /* NoveliaAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000008 /* NoveliaAPIClient.swift */; };
+		A10000000000000000000008 /* AccountAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* AccountAuth.swift */; };
+		A10000000000000000000009 /* FavoritesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000010 /* FavoritesStore.swift */; };
+		A10000000000000000000010 /* ReadingHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000011 /* ReadingHistoryStore.swift */; };
+		A10000000000000000000011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* Assets.xcassets */; };
+		A10000000000000000000012 /* WenkuViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* WenkuViews.swift */; };
+		A10000000000000000000013 /* WenkuStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* WenkuStore.swift */; };
+		A10000000000000000000014 /* WenkuNovel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000015 /* WenkuNovel.swift */; };
+		A10000000000000000000015 /* ReadiumShared in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000001 /* ReadiumShared */; };
+		A10000000000000000000016 /* ReadiumStreamer in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000002 /* ReadiumStreamer */; };
+		A10000000000000000000017 /* YueduCoreText in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000003 /* YueduCoreText */; };
+		A10000000000000000000018 /* ReadiumZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000004 /* ReadiumZIPFoundation */; };
+		A10000000000000000000019 /* PrototypeEPUBContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* PrototypeEPUBContainer.swift */; };
+		A10000000000000000000020 /* PrototypePageBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* PrototypePageBook.swift */; };
+		A10000000000000000000021 /* PrototypePagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000018 /* PrototypePagerView.swift */; };
+		A10000000000000000000022 /* PrototypeReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* PrototypeReaderModel.swift */; };
+		A10000000000000000000023 /* PrototypeReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* PrototypeReaderView.swift */; };
+		A10000000000000000000024 /* PrototypeSampleBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000021 /* PrototypeSampleBook.swift */; };
+		A10000000000000000000025 /* ThirdPartyLicenses in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000022 /* ThirdPartyLicenses */; };
+		A10000000000000000000026 /* WebDAVSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000023 /* WebDAVSync.swift */; };
+		A10000000000000000000027 /* ForumViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000024 /* ForumViews.swift */; };
+		A10000000000000000000028 /* ForumAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000025 /* ForumAPIClient.swift */; };
+		A10000000000000000000029 /* TXTChapterParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000026 /* TXTChapterParser.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		B10000000000000000000001 /* NoveliaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoveliaApp.swift; sourceTree = "<group>"; };
+		B10000000000000000000002 /* LibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViews.swift; sourceTree = "<group>"; };
+		B10000000000000000000003 /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
+		B10000000000000000000004 /* Novel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Novel.swift; sourceTree = "<group>"; };
+		B10000000000000000000005 /* DemoLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoLibrary.swift; sourceTree = "<group>"; };
+		B10000000000000000000006 /* Novelia.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Novelia.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B10000000000000000000007 /* DiscoverStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverStore.swift; sourceTree = "<group>"; };
+		B10000000000000000000008 /* NoveliaAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoveliaAPIClient.swift; sourceTree = "<group>"; };
+		B10000000000000000000009 /* AccountAuth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountAuth.swift; sourceTree = "<group>"; };
+		B10000000000000000000010 /* FavoritesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesStore.swift; sourceTree = "<group>"; };
+		B10000000000000000000011 /* ReadingHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingHistoryStore.swift; sourceTree = "<group>"; };
+		B10000000000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B10000000000000000000013 /* WenkuViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WenkuViews.swift; sourceTree = "<group>"; };
+		B10000000000000000000014 /* WenkuStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WenkuStore.swift; sourceTree = "<group>"; };
+		B10000000000000000000015 /* WenkuNovel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WenkuNovel.swift; sourceTree = "<group>"; };
+		B10000000000000000000016 /* PrototypeEPUBContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeEPUBContainer.swift; sourceTree = "<group>"; };
+		B10000000000000000000017 /* PrototypePageBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypePageBook.swift; sourceTree = "<group>"; };
+		B10000000000000000000018 /* PrototypePagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypePagerView.swift; sourceTree = "<group>"; };
+		B10000000000000000000019 /* PrototypeReaderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeReaderModel.swift; sourceTree = "<group>"; };
+		B10000000000000000000020 /* PrototypeReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeReaderView.swift; sourceTree = "<group>"; };
+		B10000000000000000000021 /* PrototypeSampleBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeSampleBook.swift; sourceTree = "<group>"; };
+		B10000000000000000000022 /* ThirdPartyLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; path = iOSApp/Resources/ThirdPartyLicenses; sourceTree = "<group>"; };
+		B10000000000000000000023 /* WebDAVSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVSync.swift; sourceTree = "<group>"; };
+		B10000000000000000000024 /* ForumViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumViews.swift; sourceTree = "<group>"; };
+		B10000000000000000000025 /* ForumAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForumAPIClient.swift; sourceTree = "<group>"; };
+		B10000000000000000000026 /* TXTChapterParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTChapterParser.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C10000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000015 /* ReadiumShared in Frameworks */,
+				A10000000000000000000016 /* ReadiumStreamer in Frameworks */,
+				A10000000000000000000017 /* YueduCoreText in Frameworks */,
+				A10000000000000000000018 /* ReadiumZIPFoundation in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		D10000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				D10000000000000000000002 /* iOSApp */,
+				D10000000000000000000003 /* Sources/NoveliaIOSCore */,
+				D10000000000000000000005 /* EPUBPrototype */,
+				B10000000000000000000012 /* Assets.xcassets */,
+				B10000000000000000000022 /* ThirdPartyLicenses */,
+				D10000000000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D10000000000000000000005 /* EPUBPrototype */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000016 /* PrototypeEPUBContainer.swift */,
+				B10000000000000000000017 /* PrototypePageBook.swift */,
+				B10000000000000000000018 /* PrototypePagerView.swift */,
+				B10000000000000000000019 /* PrototypeReaderModel.swift */,
+				B10000000000000000000020 /* PrototypeReaderView.swift */,
+				B10000000000000000000021 /* PrototypeSampleBook.swift */,
+			);
+			path = iOSApp/EPUBPrototype;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000002 /* iOSApp */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000001 /* NoveliaApp.swift */,
+				B10000000000000000000002 /* LibraryViews.swift */,
+				B10000000000000000000003 /* ReaderView.swift */,
+				B10000000000000000000007 /* DiscoverStore.swift */,
+				B10000000000000000000009 /* AccountAuth.swift */,
+				B10000000000000000000010 /* FavoritesStore.swift */,
+				B10000000000000000000011 /* ReadingHistoryStore.swift */,
+				B10000000000000000000013 /* WenkuViews.swift */,
+				B10000000000000000000014 /* WenkuStore.swift */,
+				B10000000000000000000023 /* WebDAVSync.swift */,
+				B10000000000000000000024 /* ForumViews.swift */,
+				B10000000000000000000026 /* TXTChapterParser.swift */,
+			);
+			path = iOSApp;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000003 /* Sources/NoveliaIOSCore */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000004 /* Novel.swift */,
+				B10000000000000000000005 /* DemoLibrary.swift */,
+				B10000000000000000000008 /* NoveliaAPIClient.swift */,
+				B10000000000000000000015 /* WenkuNovel.swift */,
+				B10000000000000000000025 /* ForumAPIClient.swift */,
+			);
+			path = Sources/NoveliaIOSCore;
+			sourceTree = "<group>";
+		};
+		D10000000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000006 /* Novelia.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		E10000000000000000000001 /* Novelia */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F10000000000000000000002 /* Build configuration list for PBXNativeTarget "Novelia" */;
+			buildPhases = (
+				A20000000000000000000001 /* Sources */,
+				C10000000000000000000001 /* Frameworks */,
+				A20000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			packageProductDependencies = (
+				F31000000000000000000001 /* ReadiumShared */,
+				F31000000000000000000002 /* ReadiumStreamer */,
+				F31000000000000000000003 /* YueduCoreText */,
+				F31000000000000000000004 /* ReadiumZIPFoundation */,
+			);
+			name = Novelia;
+			productName = Novelia;
+			productReference = B10000000000000000000006 /* Novelia.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		E10000000000000000000002 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					E10000000000000000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = F10000000000000000000001 /* Build configuration list for PBXProject "NoveliaIOS" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = zh_CN;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				zh_CN,
+				en,
+				Base,
+			);
+			mainGroup = D10000000000000000000001;
+			productRefGroup = D10000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				E10000000000000000000001 /* Novelia */,
+			);
+			packageReferences = (
+				F30000000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit" */,
+				F30000000000000000000002 /* XCRemoteSwiftPackageReference "YueduCoreText" */,
+				F30000000000000000000003 /* XCRemoteSwiftPackageReference "ReadiumZIPFoundation" */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		F30000000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/readium/swift-toolkit.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.9.0;
+			};
+		};
+		F30000000000000000000002 /* XCRemoteSwiftPackageReference "YueduCoreText" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/CHANG-JUI-LIN/YueduCoreText.git";
+			requirement = {
+				kind = exactVersion;
+				version = 0.8.0;
+			};
+		};
+		F30000000000000000000003 /* XCRemoteSwiftPackageReference "ReadiumZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/readium/ZIPFoundation.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.0.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F31000000000000000000001 /* ReadiumShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F30000000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit" */;
+			productName = ReadiumShared;
+		};
+		F31000000000000000000002 /* ReadiumStreamer */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F30000000000000000000001 /* XCRemoteSwiftPackageReference "swift-toolkit" */;
+			productName = ReadiumStreamer;
+		};
+		F31000000000000000000003 /* YueduCoreText */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F30000000000000000000002 /* XCRemoteSwiftPackageReference "YueduCoreText" */;
+			productName = YueduCoreText;
+		};
+		F31000000000000000000004 /* ReadiumZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F30000000000000000000003 /* XCRemoteSwiftPackageReference "ReadiumZIPFoundation" */;
+			productName = ReadiumZIPFoundation;
+		};
+
+/* End XCSwiftPackageProductDependency section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A20000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000011 /* Assets.xcassets in Resources */,
+				A10000000000000000000025 /* ThirdPartyLicenses in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A20000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* NoveliaApp.swift in Sources */,
+				A10000000000000000000002 /* LibraryViews.swift in Sources */,
+				A10000000000000000000003 /* ReaderView.swift in Sources */,
+				A10000000000000000000004 /* Novel.swift in Sources */,
+				A10000000000000000000005 /* DemoLibrary.swift in Sources */,
+				A10000000000000000000006 /* DiscoverStore.swift in Sources */,
+				A10000000000000000000007 /* NoveliaAPIClient.swift in Sources */,
+				A10000000000000000000008 /* AccountAuth.swift in Sources */,
+				A10000000000000000000009 /* FavoritesStore.swift in Sources */,
+				A10000000000000000000010 /* ReadingHistoryStore.swift in Sources */,
+				A10000000000000000000012 /* WenkuViews.swift in Sources */,
+				A10000000000000000000013 /* WenkuStore.swift in Sources */,
+				A10000000000000000000026 /* WebDAVSync.swift in Sources */,
+				A10000000000000000000027 /* ForumViews.swift in Sources */,
+				A10000000000000000000028 /* ForumAPIClient.swift in Sources */,
+				A10000000000000000000029 /* TXTChapterParser.swift in Sources */,
+				A10000000000000000000014 /* WenkuNovel.swift in Sources */,
+				A10000000000000000000019 /* PrototypeEPUBContainer.swift in Sources */,
+				A10000000000000000000020 /* PrototypePageBook.swift in Sources */,
+				A10000000000000000000021 /* PrototypePagerView.swift in Sources */,
+				A10000000000000000000022 /* PrototypeReaderModel.swift in Sources */,
+				A10000000000000000000023 /* PrototypeReaderView.swift in Sources */,
+				A10000000000000000000024 /* PrototypeSampleBook.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		F20000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		F20000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		F20000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = iOSApp/Info.plist;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.7.1;
+				CURRENT_PROJECT_VERSION = 23;
+				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F20000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = iOSApp/Info.plist;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.7.1;
+				CURRENT_PROJECT_VERSION = 23;
+				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		F10000000000000000000001 /* Build configuration list for PBXProject "NoveliaIOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F20000000000000000000001 /* Debug */,
+				F20000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F10000000000000000000002 /* Build configuration list for PBXNativeTarget "Novelia" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F20000000000000000000003 /* Debug */,
+				F20000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = E10000000000000000000002 /* Project object */;
+}
