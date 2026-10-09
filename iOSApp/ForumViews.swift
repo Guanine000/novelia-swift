@@ -112,7 +112,7 @@ struct ForumView: View {
                         Text(error)
                     } actions: {
                         Button("重试") { Task { await store.refresh() } }
-                            .buttonStyle(.borderedProminent).tint(NoveliaStyle.coral)
+                            .buttonStyle(.borderedProminent).tint(NoveliaStyle.brandGreen)
                     }
                     .listRowBackground(Color.clear)
                 } else if visiblePosts.isEmpty, !store.isLoadingPosts, store.errorMessage == nil {
@@ -215,7 +215,7 @@ struct ForumView: View {
                                         .font(.system(size: 13, weight: .semibold))
                                         .foregroundStyle(store.selectedCategory == category.slug ? .white : NoveliaStyle.ink)
                                         .padding(.horizontal, 14).padding(.vertical, 8)
-                                        .background(store.selectedCategory == category.slug ? NoveliaStyle.coral : NoveliaStyle.card, in: Capsule())
+                                        .background(store.selectedCategory == category.slug ? NoveliaStyle.brandGreen : NoveliaStyle.card, in: Capsule())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -267,9 +267,9 @@ private struct ForumPostRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 7) {
-                if post.pinOrder != nil { Image(systemName: "pin.fill").foregroundStyle(NoveliaStyle.coral) }
+                if post.pinOrder != nil { Image(systemName: "pin.fill").foregroundStyle(NoveliaStyle.brandGreen) }
                 Text(category?.title ?? "论坛")
-                    .foregroundStyle(NoveliaStyle.coral)
+                    .foregroundStyle(NoveliaStyle.brandGreen)
                 if post.commentsLocked { Image(systemName: "lock.fill").foregroundStyle(NoveliaStyle.muted) }
                 Spacer()
                 Text(post.createdAt.forumDisplayDate).foregroundStyle(NoveliaStyle.muted)
@@ -285,7 +285,7 @@ private struct ForumPostRow: View {
                         ForEach(post.tags) { tag in
                             Text(tag.name).font(.caption2.weight(.medium))
                                 .padding(.horizontal, 8).padding(.vertical, 4)
-                                .background(NoveliaStyle.coral.opacity(0.10), in: Capsule())
+                                .background(NoveliaStyle.brandGreen.opacity(0.10), in: Capsule())
                         }
                     }
                 }
@@ -295,7 +295,7 @@ private struct ForumPostRow: View {
                 Label("\(post.commentsCount)", systemImage: "bubble.right")
                 Label("\(post.viewsCount)", systemImage: "eye")
                 Spacer()
-                if post.favorited { Image(systemName: "bookmark.fill").foregroundStyle(NoveliaStyle.coral) }
+                if post.favorited { Image(systemName: "bookmark.fill").foregroundStyle(NoveliaStyle.brandGreen) }
             }
             .font(.caption2).foregroundStyle(NoveliaStyle.muted)
         }
@@ -359,14 +359,14 @@ private struct ForumPostDetailView: View {
                                 .disabled(favoriteInProgress)
                             }
                             .font(.caption)
-                            .tint(NoveliaStyle.coral)
+                            .tint(NoveliaStyle.brandGreen)
                         }
                         .padding(16).background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 16))
                     } else if isLoading {
                         HStack { Spacer(); ProgressView("正在加载帖子…"); Spacer() }
                     } else if let errorMessage {
                         ContentUnavailableView("帖子加载失败", systemImage: "wifi.exclamationmark", description: Text(errorMessage))
-                        Button("重试") { Task { await load() } }.buttonStyle(.borderedProminent).tint(NoveliaStyle.coral)
+                        Button("重试") { Task { await load() } }.buttonStyle(.borderedProminent).tint(NoveliaStyle.brandGreen)
                     }
 
                     if let post, !post.commentsLocked {
@@ -379,7 +379,7 @@ private struct ForumPostDetailView: View {
                                 .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
                         }
                         .buttonStyle(.plain)
-                        .tint(NoveliaStyle.coral)
+                        .tint(NoveliaStyle.brandGreen)
                     } else if post?.commentsLocked == true {
                         Label("该帖子已关闭评论。", systemImage: "lock.fill").font(.footnote).foregroundStyle(NoveliaStyle.muted)
                     }
@@ -591,7 +591,7 @@ private struct ForumMarkdownBody: View {
             }
         }
         .foregroundStyle(NoveliaStyle.ink)
-        .tint(NoveliaStyle.coral)
+        .tint(NoveliaStyle.brandGreen)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
         .font(mode == .comment ? .system(size: 14) : .system(size: 15))
@@ -735,7 +735,7 @@ private struct ForumDetailsBlock: View {
         } label: {
             Text(title.isEmpty ? "点击展开" : title).font(.system(size: 14, weight: .semibold))
         }
-        .tint(NoveliaStyle.coral)
+        .tint(NoveliaStyle.brandGreen)
         .padding(11)
         .background(NoveliaStyle.paper.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(NoveliaStyle.muted.opacity(0.2), lineWidth: 1))
@@ -848,7 +848,7 @@ private struct ForumCommentEditorSheet: View {
                         else { Label("发送", systemImage: "paperplane.fill") }
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(NoveliaStyle.coral)
+                    .tint(NoveliaStyle.brandGreen)
                     .disabled(isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 .padding(.horizontal, 16)
@@ -909,7 +909,7 @@ private struct ForumCommentEditorSheet: View {
             }
             .padding(.vertical, 2)
         }
-        .tint(NoveliaStyle.coral)
+        .tint(NoveliaStyle.brandGreen)
     }
 
     private var selectedText: String {
@@ -1213,10 +1213,10 @@ private struct ForumCommentCard: View {
                 Text(comment.createdAt.forumDisplayDate).font(.caption2).foregroundStyle(NoveliaStyle.muted)
             }
             ForumMarkdownBody(markdown: comment.content, mode: .comment)
-            Button("回复") { onReply() }.font(.caption.weight(.semibold)).tint(NoveliaStyle.coral)
+            Button("回复") { onReply() }.font(.caption.weight(.semibold)).tint(NoveliaStyle.brandGreen)
             ForEach(allReplies) { reply in
                 HStack(alignment: .top, spacing: 8) {
-                    RoundedRectangle(cornerRadius: 2).fill(NoveliaStyle.coral.opacity(0.4)).frame(width: 3)
+                    RoundedRectangle(cornerRadius: 2).fill(NoveliaStyle.brandGreen.opacity(0.4)).frame(width: 3)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(reply.authorUsername).font(.caption2.weight(.bold))
@@ -1234,7 +1234,7 @@ private struct ForumCommentCard: View {
                     if isLoadingReplies { ProgressView().controlSize(.small) }
                     else { Text("加载更多回复（剩余 \(count - Int64(allReplies.count)) 条）") }
                 }
-                .font(.caption.weight(.semibold)).tint(NoveliaStyle.coral).disabled(isLoadingReplies)
+                .font(.caption.weight(.semibold)).tint(NoveliaStyle.brandGreen).disabled(isLoadingReplies)
             }
         }
         .padding(14).frame(maxWidth: .infinity, alignment: .leading)
@@ -1295,7 +1295,7 @@ private struct ForumErrorOverlay: View {
                     if let onRetry {
                         Button("重试", action: onRetry)
                             .buttonStyle(.borderedProminent)
-                            .tint(NoveliaStyle.coral)
+                            .tint(NoveliaStyle.brandGreen)
                     }
                     Button("关闭", action: onDismiss)
                         .buttonStyle(.borderedProminent)

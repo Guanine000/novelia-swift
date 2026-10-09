@@ -70,7 +70,7 @@ struct PrototypeReaderView: View {
             .overlay(alignment: .bottom) {
                 // 常驻细进度条：工具栏隐藏时仍可见当前阅读进度。
                 Rectangle()
-                    .fill(Color(red: 0.91, green: 0.31, blue: 0.34).opacity(0.8))
+                    .fill(NoveliaStyle.brandGreen.opacity(0.8))
                     .frame(width: max(4, geometry.size.width * model.overallProgress), height: 2.5)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .frame(maxHeight: .infinity, alignment: .bottom)
@@ -229,7 +229,7 @@ struct PrototypeReaderView: View {
                             model.seek(to: scrubProgress)
                         }
                     })
-                    .tint(Color(red: 0.91, green: 0.31, blue: 0.34))
+                    .tint(NoveliaStyle.brandGreen)
                     .disabled(model.status != .ready || model.isAnimating || model.isLayingOut)
                     .accessibilityLabel("阅读进度")
                     Text("\(Int((isScrubbing ? scrubProgress : model.overallProgress) * 100))%")
@@ -298,7 +298,7 @@ struct PrototypeReaderView: View {
                                         VStack(alignment: .leading, spacing: 3) {
                                             Text(entry.title)
                                                 .foregroundStyle(isCurrent
-                                                    ? Color(red: 0.91, green: 0.31, blue: 0.34) : .primary)
+                                                    ? NoveliaStyle.brandGreen : .primary)
                                                 .fontWeight(isCurrent ? .semibold : .regular)
                                             if let spineIndex = entry.spineIndex {
                                                 Text("spine \(spineIndex + 1)")
@@ -309,7 +309,7 @@ struct PrototypeReaderView: View {
                                         if isCurrent {
                                             Image(systemName: "book.fill")
                                                 .font(.caption)
-                                                .foregroundStyle(Color(red: 0.91, green: 0.31, blue: 0.34))
+                                                .foregroundStyle(NoveliaStyle.brandGreen)
                                         }
                                     }
                                 }

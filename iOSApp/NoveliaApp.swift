@@ -14,14 +14,14 @@ struct NoveliaApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
-                .tint(NoveliaStyle.coral)
+                .tint(NoveliaStyle.brandGreen)
                 .textSelection(.enabled)
         }
     }
 }
 
 enum NoveliaStyle {
-    static let coral = Color(red: 0.91, green: 0.31, blue: 0.34)
+    static let brandGreen = Color(red: 85 / 255, green: 151 / 255, blue: 117 / 255)
 
     /// 主文字色（深色下近白）。
     static var ink: Color {
