@@ -682,6 +682,7 @@ private struct APIWebOutline: Decodable {
     let type: String?
     let keywords: [String]?
     let total: Int?
+    let totalCharacters: Int?
     let youdao: Int?
     let gpt: Int?
     let sakura: Int?
@@ -701,7 +702,8 @@ private struct APIWebOutline: Decodable {
             providerId: providerId,
             novelId: novelId,
             cloudFavoriteFolderID: favored,
-            translationChapterCounts: translationCounts(youdao: youdao, gpt: gpt, sakura: sakura)
+            translationChapterCounts: translationCounts(youdao: youdao, gpt: gpt, sakura: sakura),
+            totalCharacters: totalCharacters
         )
     }
 

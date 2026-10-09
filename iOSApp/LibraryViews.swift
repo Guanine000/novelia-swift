@@ -1588,7 +1588,7 @@ private struct NovelRow: View {
                 Text(novel.author)
                     .font(.system(size: 12))
                     .foregroundStyle(NoveliaStyle.muted)
-                Text("\(novel.chapters.count) 章  ·  \(novel.genres.first ?? "小说")")
+                Text(metadata(for: novel))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(NoveliaStyle.muted.opacity(0.85))
             }
@@ -1599,6 +1599,21 @@ private struct NovelRow: View {
         }
         .padding(11)
         .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 17))
+    }
+
+    private func metadata(for novel: Novel) -> String {
+        let detail: String
+        if let totalCharacters = novel.totalCharacters, totalCharacters > 0 {
+            detail = "\(totalCharacters.formatted()) 字"
+        } else if !novel.chapters.isEmpty {
+            detail = "\(novel.chapters.count) 章"
+        } else {
+            detail = novel.genres.first ?? "小说"
+        }
+        if let genre = novel.genres.first, detail != genre {
+            return "\(detail)  ·  \(genre)"
+        }
+        return detail
     }
 }
 
