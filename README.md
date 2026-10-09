@@ -33,6 +33,12 @@ Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名�
 
 仓库保持私密。v0.5.0 的旧 IPA 已停止分发；请使用包含 GPL-3.0-only 许可告知及对应源码的新 Release。旧版本标签保留供历史追溯。已经转交出去的旧文件不会因 Release 附件下架而消失。
 
+## 0.6.2 相较上一正式版的变化
+
+与上一正式版 [v0.6.0](https://github.com/Guanine000/novelia-ios-port/releases/tag/v0.6.0) 相比，v0.6.2 新增本地 TXT 多选导入与阅读，并支持启停内置分章规则、管理自定义分章规则，以及跳转章节目录。TXT 解码新增对带 BOM 的 UTF-16/32、GB18030/GBK、Big5 和 Shift_JIS 的支持，同时补充导入、解码和分章错误诊断。在线小说与 TXT 阅读时会隐藏底部标签栏；网络小说整本下载提供 EPUB，TXT 通过本地文件导入。已有下载列表中的 TXT 文件仍可阅读。
+
+完整更新说明及未签名 IPA、对应源码和 YueduCoreText 锁定源码见[最新 Release](https://github.com/Guanine000/novelia-ios-port/releases/latest)。
+
 项目主要目录：`iOSApp/` 为 SwiftUI 应用与 EPUB 阅读器，`Sources/NoveliaIOSCore/` 为 API、模型和存储代码，`NoveliaIOS.xcodeproj/` 为 Xcode 工程。
 
 ## 已知限制
