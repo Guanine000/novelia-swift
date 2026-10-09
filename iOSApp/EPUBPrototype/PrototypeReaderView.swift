@@ -270,6 +270,7 @@ struct PrototypeReaderView: View {
                                     Text("本书包含 \(count) 处脚本内容，已忽略（脚本不参与显示）。")
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
                                 }
                             }
                             if let count = model.container?.opacityRewriteCount, count > 0 {
@@ -277,6 +278,7 @@ struct PrototypeReaderView: View {
                                     Text("本书包含 \(count) 处 opacity 透明度，已转换为等价文字颜色（当前排版引擎不支持 opacity 属性）。")
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
                                 }
                             }
                             if let count = model.container?.mediaQueryRewriteCount, count > 0 {
@@ -284,6 +286,7 @@ struct PrototypeReaderView: View {
                                     Text("本书包含 \(count) 个 @media 规则块，已按设备条件求值（当前排版引擎不支持媒体查询；不匹配的规则被忽略）。")
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
                                 }
                             }
                             if let count = model.container?.tableDisplayStripCount, count > 0 {
@@ -291,6 +294,7 @@ struct PrototypeReaderView: View {
                                     Text("本书包含 \(count) 处表格化垂直居中声明（display:table/vertical-align:middle），已剥离以正常显示图片，插图不再垂直居中。")
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
                                 }
                             }
                             if let count = model.container?.flexGridRewriteCount, count > 0 {
@@ -298,6 +302,7 @@ struct PrototypeReaderView: View {
                                     Text("本书包含 \(count) 处 Flex/Grid 布局声明，已回退为普通块布局以显示内容；相关内容的专属对齐和间距效果可能不同。")
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
                                 }
                             }
                             if let count = model.container?.textShadowRewriteCount, count > 0 {
@@ -305,6 +310,7 @@ struct PrototypeReaderView: View {
                                     Text("本书包含 \(count) 处文字阴影（text-shadow），当前排版引擎不支持阴影，已改用阴影颜色作为文字颜色以保证可读。")
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
                                 }
                             }
                             let tocEntries = model.container?.toc ?? []
