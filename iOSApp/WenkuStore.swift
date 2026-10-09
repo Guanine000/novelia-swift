@@ -234,9 +234,11 @@ final class WenkuLocalLibraryStore: ObservableObject {
         }
 
         if format == .txt {
-            // Validate imported text before it enters the local library. The reader currently
-            // uses UTF-8 too, so accepting another encoding here would create an unreadable item.
-            guard let text = try? String(contentsOf: fileURL, encoding: .utf8), !text.isEmpty else {
+            let isReadableTXT = await Task.detached(priority: .utility) {
+                guard let text = try? TXTTextDecoder.decode(contentsOf: fileURL) else { return false }
+                return !text.isEmpty
+            }.value
+            guard isReadableTXT else {
                 try? fileManager.removeItem(at: fileURL)
                 throw WenkuLocalLibraryError.invalidTXT
             }
@@ -430,7 +432,7 @@ private enum WenkuLocalLibraryError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidEPUB: "该文件不是有效的 EPUB 压缩包。"
-        case .invalidTXT: "TXT 文件为空或不是 UTF-8 编码，暂时无法导入。"
+        case .invalidTXT: "TXT 文件为空或编码无法识别，暂时无法导入。"
         case .unsupportedFile: "目前只支持导入 .epub 或 .txt 文件。"
         }
     }

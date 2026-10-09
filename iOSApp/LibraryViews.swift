@@ -1802,6 +1802,9 @@ struct MyDownloadsView: View {
 
     private func importFile(_ pickedURL: URL) async throws {
         let extensionName = pickedURL.pathExtension.lowercased()
+        if extensionName == "txt" {
+            TXTDiagnosticLog.logger.info("TXT import started")
+        }
         guard extensionName == "txt" || extensionName == "epub" else {
             throw MyDownloadsImportError.unsupportedFile
         }
@@ -1819,10 +1822,26 @@ struct MyDownloadsView: View {
                 try FileManager.default.copyItem(at: sourceURL, to: destination)
             } catch { copyError = error }
         }
-        if let coordinatedError { throw coordinatedError }
-        if let copyError { throw copyError }
+        if let error = coordinatedError ?? copyError {
+            if extensionName == "txt" {
+                let nsError = error as NSError
+                TXTDiagnosticLog.logger.error("TXT import copy failed; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public)")
+            }
+            throw error
+        }
         let title = pickedURL.deletingPathExtension().lastPathComponent
-        try await wenkuDownloads.registerDownloadedFile(at: destination, title: title)
+        do {
+            try await wenkuDownloads.registerDownloadedFile(at: destination, title: title)
+        } catch {
+            if extensionName == "txt" {
+                let nsError = error as NSError
+                TXTDiagnosticLog.logger.error("TXT import registration failed; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public)")
+            }
+            throw error
+        }
+        if extensionName == "txt" {
+            TXTDiagnosticLog.logger.info("TXT import completed")
+        }
     }
 
     private var networkDownloads: some View {
@@ -2143,10 +2162,12 @@ private struct DownloadedWebNovelTXTReader: View {
         .task(id: url) {
             do {
                 chapters = try await Task.detached(priority: .userInitiated) {
-                    let text = try String(contentsOf: url, encoding: .utf8)
+                    let text = try TXTTextDecoder.decode(contentsOf: url)
                     return TXTChapterParser.parse(text, rules: rules)
                 }.value
             } catch {
+                let nsError = error as NSError
+                TXTDiagnosticLog.logger.error("TXT reader load failed; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public)")
                 errorMessage = error.localizedDescription
             }
         }
@@ -2524,11 +2545,14 @@ private enum ApplicationLogExporter {
         let startDate = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? .distantPast
         let entries = try store.getEntries(at: store.position(date: startDate))
         let formatter = ISO8601DateFormatter()
-        let messages = entries.compactMap { entry -> String? in
-            guard let entry = entry as? OSLogEntryLog else { return nil }
-            return "\(formatter.string(from: entry.date)) [\(entry.level)] [\(entry.subsystem):\(entry.category)] \(entry.composedMessage)"
+        let logEntries = entries.compactMap { $0 as? OSLogEntryLog }
+        let recentEntries = Array(logEntries.suffix(5_000))
+        let messages = recentEntries.map {
+            "\(formatter.string(from: $0.date)) [\($0.level)] [\($0.subsystem):\($0.category)] \($0.composedMessage)"
         }
-        let recentMessages = Array(messages.suffix(5_000))
+        let txtDiagnosticCount = recentEntries.filter {
+            $0.subsystem == "cc.novelia.ios.port" && ["txt", "txt-download"].contains($0.category)
+        }.count
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "未知"
         var lines = [
@@ -2536,9 +2560,11 @@ private enum ApplicationLogExporter {
             "版本：\(version) (\(build))",
             "导出时间：\(formatter.string(from: Date()))",
             "范围：最近 7 天，最多 5000 条当前进程日志",
+            "本次导出条数：\(recentEntries.count)",
+            "TXT 下载 / 导入 / 解码 / 分章诊断条数：\(txtDiagnosticCount)",
             ""
         ]
-        lines.append(contentsOf: recentMessages.isEmpty ? ["系统日志存储中没有可导出的应用日志。"] : recentMessages)
+        lines.append(contentsOf: messages.isEmpty ? ["系统日志存储中没有可导出的应用日志。"] : messages)
 
         let filename = "Novelia-logs-\(Int(Date().timeIntervalSince1970)).txt"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)

@@ -1,5 +1,62 @@
 import Foundation
 import Combine
+import CoreFoundation
+import OSLog
+
+enum TXTDiagnosticLog {
+    static let logger = Logger(subsystem: "cc.novelia.ios.port", category: "txt")
+}
+
+/// Reads common plain-text encodings used by downloaded and user-supplied novels.
+enum TXTTextDecoder {
+    static func decode(contentsOf url: URL) throws -> String {
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        guard let text = decode(data: data), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000)
+            TXTDiagnosticLog.logger.error("TXT decode failed; bytes=\(data.count, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public), attempted=UTF-8/BOM-Unicode/GB18030/GBK/Big5/Shift_JIS")
+            throw TXTTextDecodingError.unrecognizedEncoding
+        }
+        let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000)
+        TXTDiagnosticLog.logger.info("TXT decode succeeded; bytes=\(data.count, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
+        return text
+    }
+
+    static func decode(data: Data) -> String? {
+        if data.starts(with: [0x00, 0x00, 0xFE, 0xFF]) {
+            return String(data: data.dropFirst(4), encoding: .utf32BigEndian)
+        }
+        if data.starts(with: [0xFF, 0xFE, 0x00, 0x00]) {
+            return String(data: data.dropFirst(4), encoding: .utf32LittleEndian)
+        }
+        if data.starts(with: [0xEF, 0xBB, 0xBF]) {
+            return String(data: data.dropFirst(3), encoding: .utf8)
+        }
+        if data.starts(with: [0xFE, 0xFF]) {
+            return String(data: data.dropFirst(2), encoding: .utf16BigEndian)
+        }
+        if data.starts(with: [0xFF, 0xFE]) {
+            return String(data: data.dropFirst(2), encoding: .utf16LittleEndian)
+        }
+
+        if let utf8 = String(data: data, encoding: .utf8) { return utf8 }
+        for charset in ["GB18030", "GBK", "Big5", "Shift_JIS"] {
+            let cfEncoding = CFStringConvertIANACharSetNameToEncoding(charset as CFString)
+            guard cfEncoding != kCFStringEncodingInvalidId else { continue }
+            let encoding = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(cfEncoding))
+            if let text = String(data: data, encoding: encoding) { return text }
+        }
+        return nil
+    }
+}
+
+enum TXTTextDecodingError: LocalizedError {
+    case unrecognizedEncoding
+
+    var errorDescription: String? {
+        "无法识别 TXT 编码或文件内容为空。支持 UTF-8、UTF-16、UTF-32、GB18030/GBK、Big5 和 Shift_JIS。"
+    }
+}
 
 /// Detects common TXT chapter headings with an independent, conservative Swift implementation.
 /// The multi-pass design was informed by the public documentation of Qingdu Reader
@@ -137,6 +194,7 @@ enum TXTChapterParser {
     )
 
     static func parse(_ text: String, rules: TXTChapterRuleConfiguration = .defaults) -> [TXTChapter] {
+        let startedAt = ProcessInfo.processInfo.systemUptime
         let lines = text.components(separatedBy: .newlines)
         guard !lines.isEmpty else { return [TXTChapter(index: 0, title: "全文", body: text, volumeTitle: nil)] }
         let customMatchers = rules.enabledCustomRules.compactMap { rule -> CustomMatcher? in
@@ -159,11 +217,19 @@ enum TXTChapterParser {
             return false
         }
         guard chapterHeadings.count >= 3 else {
+            let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000)
+            TXTDiagnosticLog.logger.info("TXT chapter detection fell back to full text; lines=\(lines.count, privacy: .public), headings=\(chapterHeadings.count, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
             let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
             return [TXTChapter(index: 0, title: "全文", body: body, volumeTitle: nil)]
         }
 
         var result: [TXTChapter] = []
+        var nextHeadingLineByLine: [Int: Int] = [:]
+        for index in headings.indices {
+            nextHeadingLineByLine[headings[index].line] = index + 1 < headings.count
+                ? headings[index + 1].line
+                : lines.count
+        }
         var currentVolume: String?
         var cursor = 0
         for heading in headings {
@@ -178,7 +244,7 @@ enum TXTChapterParser {
                     appendChapter(title: "前言", lines: lines, range: cursor..<heading.line, volume: currentVolume, to: &result)
                 }
                 cursor = heading.line + 1
-                let nextLine = headings.first(where: { $0.line > heading.line })?.line ?? lines.count
+                let nextLine = nextHeadingLineByLine[heading.line] ?? lines.count
                 appendChapter(title: heading.title, lines: lines, range: cursor..<nextLine, volume: currentVolume, to: &result)
                 cursor = nextLine
                 continue
@@ -192,16 +258,19 @@ enum TXTChapterParser {
                 }
             }
             cursor = heading.line + 1
-            let nextBoundary = headings.first(where: { $0.line > heading.line })?.line ?? lines.count
+            let nextBoundary = nextHeadingLineByLine[heading.line] ?? lines.count
             appendChapter(title: heading.title, lines: lines, range: cursor..<nextBoundary, volume: currentVolume, to: &result)
             cursor = nextBoundary
         }
 
-        return result.isEmpty
+        let chapters = result.isEmpty
             ? [TXTChapter(index: 0, title: "全文", body: text.trimmingCharacters(in: .whitespacesAndNewlines), volumeTitle: nil)]
             : result.enumerated().map { index, chapter in
                 TXTChapter(index: index, title: chapter.title, body: chapter.body, volumeTitle: chapter.volumeTitle)
             }
+        let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000)
+        TXTDiagnosticLog.logger.info("TXT chapters parsed; lines=\(lines.count, privacy: .public), chapters=\(chapters.count, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
+        return chapters
     }
 
     private static func parseHeading(

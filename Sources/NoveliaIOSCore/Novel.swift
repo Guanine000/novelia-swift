@@ -128,7 +128,8 @@ public enum WebNovelDownloadMode: String, CaseIterable, Identifiable, Hashable, 
         switch self {
         case .original: "jp"
         case .translated: "zh"
-        case .bilingual: "bi"
+        // The generated-file API spells the bilingual direction explicitly.
+        case .bilingual: "jp-zh"
         }
     }
 }

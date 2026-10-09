@@ -1,9 +1,11 @@
 import Foundation
 import Security
+import OSLog
 
 public struct NoveliaAPIClient: Sendable {
     public static let defaultBaseURL = URL(string: "https://n.novelia.cc/api/")!
     public static let forumBaseURL = URL(string: "https://forum.novelia.cc/")!
+    private static let downloadLogger = Logger(subsystem: "cc.novelia.ios.port", category: "txt-download")
 
     private let baseURL: URL
     private let session: URLSession
@@ -129,13 +131,15 @@ public struct NoveliaAPIClient: Sendable {
         components.percentEncodedPath = basePath + encodedPath
 
         let apiMode = mode.apiValue
+        let translationsMode = mode == .bilingual ? "parallel" : "priority"
         let effectiveTranslationSource = mode == .original ? nil : translationSource
         let translatorCode = effectiveTranslationSource.map { String($0.rawValue.prefix(1)) } ?? ""
         let safeTitle = title.replacingOccurrences(of: "[\\/|\\\\:*?\"<>]", with: "", options: .regularExpression)
-        let filenameParts = [apiMode, translatorCode.isEmpty ? nil : "Y\(translatorCode)", safeTitle, fileType].compactMap { $0 }
+        let translationFilenamePrefix = mode == .bilingual ? "B" : "Y"
+        let filenameParts = [apiMode, translatorCode.isEmpty ? nil : "\(translationFilenamePrefix)\(translatorCode)", safeTitle, fileType].compactMap { $0 }
         var queryItems = [
             URLQueryItem(name: "mode", value: apiMode),
-            URLQueryItem(name: "translationsMode", value: "priority"),
+            URLQueryItem(name: "translationsMode", value: translationsMode),
             URLQueryItem(name: "type", value: fileType),
             URLQueryItem(name: "filename", value: filenameParts.joined(separator: "."))
         ]
@@ -151,11 +155,33 @@ public struct NoveliaAPIClient: Sendable {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         request.timeoutInterval = 180
-        let (temporaryURL, response) = try await session.download(for: request)
+        let downloadStartedAt = ProcessInfo.processInfo.systemUptime
+        Self.downloadLogger.info("Starting novel file download; format=\(fileType, privacy: .public), mode=\(apiMode, privacy: .public), translationsMode=\(translationsMode, privacy: .public)")
+        let temporaryURL: URL
+        let response: URLResponse
+        do {
+            (temporaryURL, response) = try await session.download(for: request)
+        } catch {
+            let nsError = error as NSError
+            let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - downloadStartedAt) * 1_000)
+            Self.downloadLogger.error("Novel file request failed before receiving an HTTP response; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
+            throw error
+        }
         guard let http = response as? HTTPURLResponse else { throw NoveliaAPIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
+            let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - downloadStartedAt) * 1_000)
+            Self.downloadLogger.error("Novel file request returned HTTP \(http.statusCode, privacy: .public); elapsedMs=\(elapsedMS, privacy: .public)")
             throw NoveliaAPIError.httpStatus(http.statusCode, serverMessage(in: Self.responseData(from: temporaryURL)))
         }
+        let attributes = try? FileManager.default.attributesOfItem(atPath: temporaryURL.path)
+        let size = (attributes?[.size] as? NSNumber)?.intValue ?? 0
+        guard size > 0 else {
+            Self.downloadLogger.error("Novel file response was empty")
+            try? FileManager.default.removeItem(at: temporaryURL)
+            throw NoveliaAPIError.invalidResponse
+        }
+        let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - downloadStartedAt) * 1_000)
+        Self.downloadLogger.info("Novel file download completed; bytes=\(size, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
         try FileManager.default.moveItem(at: temporaryURL, to: destinationURL)
     }
 
