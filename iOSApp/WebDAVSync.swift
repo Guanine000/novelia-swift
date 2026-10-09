@@ -549,7 +549,7 @@ struct WebDAVSyncProgressPanel: View {
             }
             if syncStore.isSyncing {
                 ProgressView(value: Double(syncStore.completedUnits), total: Double(max(syncStore.totalUnits, 1)))
-                    .tint(NoveliaStyle.coral)
+                    .tint(NoveliaStyle.brandGreen)
                 Text(syncStore.progressDetail)
                     .font(.subheadline)
                     .lineLimit(2)
@@ -569,7 +569,7 @@ struct WebDAVSyncProgressPanel: View {
                     Label("再次同步", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(NoveliaStyle.coral)
+                .tint(NoveliaStyle.brandGreen)
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }

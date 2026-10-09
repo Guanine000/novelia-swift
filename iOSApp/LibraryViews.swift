@@ -15,7 +15,7 @@ struct ShelfView: View {
                     Text("YOUR PERSONAL LIBRARY")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .tracking(1.4)
-                        .foregroundStyle(NoveliaStyle.coral)
+                        .foregroundStyle(NoveliaStyle.brandGreen)
                     Text("我的书架")
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundStyle(NoveliaStyle.ink)
@@ -40,7 +40,7 @@ struct ShelfView: View {
                                     Image(systemName: "chevron.right")
                                 }
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(NoveliaStyle.coral)
+                                .foregroundStyle(NoveliaStyle.brandGreen)
                             }
                         }
                     }
@@ -52,7 +52,7 @@ struct ShelfView: View {
                         } actions: {
                             Button("登录 Novelia 账号") { auth.isLoginPresented = true }
                                 .buttonStyle(.borderedProminent)
-                                .tint(NoveliaStyle.coral)
+                                .tint(NoveliaStyle.brandGreen)
                         }
                         .padding(.vertical, 22)
                     } else if favorites.isLoading && favorites.novels.isEmpty {
@@ -84,11 +84,11 @@ struct ShelfView: View {
                             .font(.system(size: 13))
                             .foregroundStyle(.red)
                         Button("重新同步") { Task { await favorites.refresh(account: auth.username) } }
-                            .tint(NoveliaStyle.coral)
+                            .tint(NoveliaStyle.brandGreen)
                     } else if auth.username != nil {
                         Button("刷新网页收藏") { Task { await favorites.refresh(account: auth.username) } }
                             .font(.system(size: 13, weight: .medium))
-                            .tint(NoveliaStyle.coral)
+                            .tint(NoveliaStyle.brandGreen)
                     }
                 }
             }
@@ -120,7 +120,7 @@ struct ShelfView: View {
                             Image(systemName: "chevron.right")
                         }
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(NoveliaStyle.coral)
+                        .foregroundStyle(NoveliaStyle.brandGreen)
                     }
                 }
             }
@@ -133,7 +133,7 @@ struct ShelfView: View {
                 } actions: {
                     Button("登录 Novelia 账号") { auth.isLoginPresented = true }
                         .buttonStyle(.borderedProminent)
-                        .tint(NoveliaStyle.coral)
+                        .tint(NoveliaStyle.brandGreen)
                 }
                 .padding(.vertical, 12)
             } else if readingHistory.items.isEmpty && readingHistory.isLoading {
@@ -147,7 +147,7 @@ struct ShelfView: View {
                 } actions: {
                     Button("刷新阅读历史") { Task { await readingHistory.refresh(account: auth.username) } }
                         .buttonStyle(.bordered)
-                        .tint(NoveliaStyle.coral)
+                        .tint(NoveliaStyle.brandGreen)
                 }
                 .padding(.vertical, 12)
             } else {
@@ -172,7 +172,7 @@ struct ShelfView: View {
                         .foregroundStyle(.orange)
                     Button("重新同步") { Task { await readingHistory.refresh(account: auth.username) } }
                         .font(.system(size: 13, weight: .medium))
-                        .tint(NoveliaStyle.coral)
+                        .tint(NoveliaStyle.brandGreen)
                 }
             }
         }
@@ -228,7 +228,7 @@ private struct CloudReadingHistoryListView: View {
                     } actions: {
                         Button("重新加载") { Task { await readingHistory.refresh(account: auth.username) } }
                             .buttonStyle(.borderedProminent)
-                            .tint(NoveliaStyle.coral)
+                            .tint(NoveliaStyle.brandGreen)
                     }
                 }
 
@@ -262,7 +262,7 @@ private struct CloudReadingHistoryListView: View {
                             }
                         }
                     }
-                    .tint(NoveliaStyle.coral)
+                    .tint(NoveliaStyle.brandGreen)
                 } else if readingHistory.canLoadMore {
                     if readingHistory.isLoadingMore {
                         HStack { Spacer(); ProgressView("正在加载更多历史…"); Spacer() }
@@ -285,7 +285,7 @@ private struct CloudReadingHistoryListView: View {
 
                 Button("刷新阅读历史") { Task { await readingHistory.refresh(account: auth.username) } }
                     .font(.system(size: 13, weight: .medium))
-                    .tint(NoveliaStyle.coral)
+                    .tint(NoveliaStyle.brandGreen)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
             }
@@ -316,7 +316,7 @@ private struct CloudFavoritesListView: View {
                     } actions: {
                         Button("重新加载") { Task { await favorites.refresh(account: auth.username) } }
                             .buttonStyle(.borderedProminent)
-                            .tint(NoveliaStyle.coral)
+                            .tint(NoveliaStyle.brandGreen)
                     }
                 }
 
@@ -347,7 +347,7 @@ private struct CloudFavoritesListView: View {
                 }
                 Button("刷新网页收藏") { Task { await favorites.refresh(account: auth.username) } }
                     .font(.system(size: 13, weight: .medium))
-                    .tint(NoveliaStyle.coral)
+                    .tint(NoveliaStyle.brandGreen)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
             }
@@ -371,7 +371,7 @@ struct DiscoverView: View {
                     Text("FIND YOUR NEXT STORY")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .tracking(1.4)
-                        .foregroundStyle(NoveliaStyle.coral)
+                        .foregroundStyle(NoveliaStyle.brandGreen)
                     Text("发现好故事")
                         .font(.system(size: 31, weight: .bold, design: .rounded))
                         .foregroundStyle(NoveliaStyle.ink)
@@ -385,7 +385,7 @@ struct DiscoverView: View {
                             .font(.system(size: 18, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(width: 42, height: 42)
-                            .background(NoveliaStyle.coral, in: RoundedRectangle(cornerRadius: 13))
+                            .background(NoveliaStyle.brandGreen, in: RoundedRectangle(cornerRadius: 13))
                         VStack(alignment: .leading, spacing: 3) {
                             Text("小说排行榜")
                                 .font(.system(size: 15, weight: .bold, design: .rounded))
@@ -435,7 +435,7 @@ struct DiscoverView: View {
                     } actions: {
                         Button("重试") { Task { await store.search(query: query) } }
                             .buttonStyle(.borderedProminent)
-                            .tint(NoveliaStyle.coral)
+                            .tint(NoveliaStyle.brandGreen)
                     }
                 }
 
@@ -460,7 +460,7 @@ struct DiscoverView: View {
                             Task { await store.loadMore() }
                         }
                         .buttonStyle(.bordered)
-                        .tint(NoveliaStyle.coral)
+                        .tint(NoveliaStyle.brandGreen)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
@@ -507,7 +507,7 @@ private struct RankingView: View {
                     Text("RANKING")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
                         .tracking(1.4)
-                        .foregroundStyle(NoveliaStyle.coral)
+                        .foregroundStyle(NoveliaStyle.brandGreen)
                     Text("小说排行榜")
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundStyle(NoveliaStyle.ink)
@@ -515,7 +515,7 @@ private struct RankingView: View {
 
                 HStack(spacing: 8) {
                     Image(systemName: "flame.fill")
-                        .foregroundStyle(NoveliaStyle.coral)
+                        .foregroundStyle(NoveliaStyle.brandGreen)
                     Text("Novelia 站内点击热度 · 一般向作品")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(NoveliaStyle.muted)
@@ -538,7 +538,7 @@ private struct RankingView: View {
                     } actions: {
                         Button("重试") { Task { await loadCurrentPage() } }
                             .buttonStyle(.borderedProminent)
-                            .tint(NoveliaStyle.coral)
+                            .tint(NoveliaStyle.brandGreen)
                     }
                 }
 
@@ -549,7 +549,7 @@ private struct RankingView: View {
                         HStack(spacing: 8) {
                             Text(String(format: "%02d", (page - 1) * 20 + index + 1))
                                 .font(.system(size: 14, weight: .heavy, design: .rounded))
-                                .foregroundStyle(index < 3 && page == 1 ? NoveliaStyle.coral : NoveliaStyle.muted)
+                                .foregroundStyle(index < 3 && page == 1 ? NoveliaStyle.brandGreen : NoveliaStyle.muted)
                                 .frame(width: 34)
                             FeaturedNovelCard(novel: novel)
                         }
@@ -570,7 +570,7 @@ private struct RankingView: View {
                             .disabled(page >= store.pageCount || store.isLoading)
                     }
                     .buttonStyle(.bordered)
-                    .tint(NoveliaStyle.coral)
+                    .tint(NoveliaStyle.brandGreen)
                     .padding(.vertical, 8)
                 } else if !store.novels.isEmpty {
                     Text("共 \(store.novels.count) 部上榜作品")
@@ -605,7 +605,7 @@ private struct TagSearchResultsView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("按标签筛选")
                         .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundStyle(NoveliaStyle.coral)
+                        .foregroundStyle(NoveliaStyle.brandGreen)
                     Text(tag)
                         .font(.system(size: 25, weight: .bold, design: .rounded))
                         .foregroundStyle(NoveliaStyle.ink)
@@ -631,7 +631,7 @@ private struct TagSearchResultsView: View {
                             Task { await store.search(query: tag, exactTag: true) }
                         }
                         .buttonStyle(.borderedProminent)
-                        .tint(NoveliaStyle.coral)
+                        .tint(NoveliaStyle.brandGreen)
                     }
                 }
 
@@ -655,7 +655,7 @@ private struct TagSearchResultsView: View {
                             .foregroundStyle(NoveliaStyle.muted)
                         Button("重试加载") { Task { await store.loadMore() } }
                             .buttonStyle(.bordered)
-                            .tint(NoveliaStyle.coral)
+                            .tint(NoveliaStyle.brandGreen)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
@@ -842,7 +842,7 @@ struct NovelDetailView: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 17)
                         .padding(.vertical, 14)
-                        .background(NoveliaStyle.coral, in: RoundedRectangle(cornerRadius: 15))
+                        .background(NoveliaStyle.brandGreen, in: RoundedRectangle(cornerRadius: 15))
                     }
                     .buttonStyle(.plain)
                 }
@@ -935,7 +935,7 @@ struct NovelDetailView: View {
                     } actions: {
                         Button("重试") { Task { await loadDetail() } }
                             .buttonStyle(.borderedProminent)
-                            .tint(NoveliaStyle.coral)
+                            .tint(NoveliaStyle.brandGreen)
                     }
                 } else if displayNovel.chapters.isEmpty {
                     Text("没有可阅读的章节。")
@@ -951,9 +951,9 @@ struct NovelDetailView: View {
                         HStack(spacing: 13) {
                             Text(String(format: "%02d", index + 1))
                                 .font(.system(size: 13, weight: .bold, design: .rounded))
-                                .foregroundStyle(NoveliaStyle.coral)
+                                .foregroundStyle(NoveliaStyle.brandGreen)
                                 .frame(width: 35, height: 35)
-                                .background(NoveliaStyle.coral.opacity(0.09), in: Circle())
+                                .background(NoveliaStyle.brandGreen.opacity(0.09), in: Circle())
                             Text(chapter.title)
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(NoveliaStyle.ink)
@@ -983,7 +983,7 @@ struct NovelDetailView: View {
                     favoriteTapped()
                 } label: {
                     Image(systemName: isCloudFavorite ? "heart.fill" : "heart")
-                        .foregroundStyle(NoveliaStyle.coral)
+                        .foregroundStyle(NoveliaStyle.brandGreen)
                 }
                 .accessibilityLabel(isCloudFavorite ? "取消网页收藏" : "收藏到网页端")
                 .disabled(isLoadingDetail || isLoadingFavoriteFolders)
@@ -1223,7 +1223,7 @@ struct NovelCommentsView: View {
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 13)
-                            .background(NoveliaStyle.coral, in: RoundedRectangle(cornerRadius: 13))
+                            .background(NoveliaStyle.brandGreen, in: RoundedRectangle(cornerRadius: 13))
                     }
                     .buttonStyle(.plain)
                 }
@@ -1250,7 +1250,7 @@ struct NovelCommentsView: View {
                     } actions: {
                         Button("重试") { Task { await loadComments() } }
                             .buttonStyle(.borderedProminent)
-                            .tint(NoveliaStyle.coral)
+                            .tint(NoveliaStyle.brandGreen)
                     }
                 } else if let commentPage, commentPage.items.isEmpty {
                     ContentUnavailableView("还没有评论", systemImage: "text.bubble", description: Text("来发表第一条评论吧。"))
@@ -1272,7 +1272,7 @@ struct NovelCommentsView: View {
                                 .disabled(page >= Int(ceil(Double(commentPage.total) / Double(pageSize))) || isLoading)
                         }
                         .font(.system(size: 13, weight: .semibold))
-                        .tint(NoveliaStyle.coral)
+                        .tint(NoveliaStyle.brandGreen)
                         .padding(.top, 5)
                     }
                 }
@@ -1297,7 +1297,7 @@ struct NovelCommentsView: View {
                 HStack {
                     Text("回复 @\(replyRoot.authorUsername)")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(NoveliaStyle.coral)
+                        .foregroundStyle(NoveliaStyle.brandGreen)
                     Spacer()
                     Button("取消回复") { self.replyRoot = nil }
                         .font(.system(size: 12, weight: .medium))
@@ -1336,7 +1336,7 @@ struct NovelCommentsView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(NoveliaStyle.coral, in: Capsule())
+                .background(NoveliaStyle.brandGreen, in: Capsule())
                 .disabled(isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
@@ -1358,7 +1358,7 @@ struct NovelCommentsView: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(NoveliaStyle.muted)
             }
-            Text(comment.content)
+            ForumMarkdownBody(markdown: comment.content, mode: .comment)
                 .font(.system(size: 14))
                 .foregroundStyle(NoveliaStyle.ink)
                 .lineSpacing(4)
@@ -1372,7 +1372,7 @@ struct NovelCommentsView: View {
                         .font(.system(size: 11, weight: .semibold))
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(NoveliaStyle.coral)
+                .foregroundStyle(NoveliaStyle.brandGreen)
             }
 
             if !visibleReplies.isEmpty {
@@ -1380,7 +1380,7 @@ struct NovelCommentsView: View {
                     ForEach(visibleReplies) { reply in
                         HStack(alignment: .top, spacing: 8) {
                             RoundedRectangle(cornerRadius: 2)
-                                .fill(NoveliaStyle.coral.opacity(0.35))
+                                .fill(NoveliaStyle.brandGreen.opacity(0.35))
                                 .frame(width: 3)
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
@@ -1391,7 +1391,7 @@ struct NovelCommentsView: View {
                                         .font(.system(size: 9, weight: .medium))
                                         .foregroundStyle(NoveliaStyle.muted)
                                 }
-                                Text(reply.content)
+                                ForumMarkdownBody(markdown: reply.content, mode: .comment)
                                     .font(.system(size: 12))
                                     .lineSpacing(3)
                             }
@@ -1413,7 +1413,7 @@ struct NovelCommentsView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(NoveliaStyle.coral)
+                .foregroundStyle(NoveliaStyle.brandGreen)
                 .disabled(loadingReplyIDs.contains(comment.id))
             }
         }
@@ -1516,7 +1516,7 @@ private struct ContinueReadingCard: View {
                 Text("接着上次")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .tracking(0.8)
-                    .foregroundStyle(NoveliaStyle.coral)
+                    .foregroundStyle(NoveliaStyle.brandGreen)
                 Text(novel.title)
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundStyle(NoveliaStyle.ink)
@@ -1529,7 +1529,7 @@ private struct ContinueReadingCard: View {
                     Image(systemName: "arrow.right")
                 }
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(NoveliaStyle.coral)
+                .foregroundStyle(NoveliaStyle.brandGreen)
                 .padding(.top, 2)
             }
             Spacer(minLength: 0)
@@ -1539,7 +1539,7 @@ private struct ContinueReadingCard: View {
         .overlay(alignment: .trailing) {
             Image(systemName: "sparkle")
                 .font(.system(size: 19, weight: .light))
-                .foregroundStyle(NoveliaStyle.coral.opacity(0.7))
+                .foregroundStyle(NoveliaStyle.brandGreen.opacity(0.7))
                 .padding(15)
                 .frame(maxHeight: .infinity, alignment: .top)
         }
@@ -1795,7 +1795,7 @@ struct MyDownloadsView: View {
                         Label("正在导入书籍", systemImage: "books.vertical")
                             .font(.system(size: 16, weight: .semibold))
                         ProgressView(value: Double(importCompletedCount), total: Double(max(importTotalCount, 1)))
-                            .tint(NoveliaStyle.coral)
+                            .tint(NoveliaStyle.brandGreen)
                         Text("已处理 \(importCompletedCount) / \(importTotalCount) 个文件")
                             .font(.system(size: 13))
                             .foregroundStyle(NoveliaStyle.muted)
@@ -2006,15 +2006,15 @@ struct MyDownloadsView: View {
                                             .clipShape(RoundedRectangle(cornerRadius: 7))
                                     } else {
                                         Image(systemName: "book.closed.fill")
-                                            .font(.title2).foregroundStyle(NoveliaStyle.coral)
+                                            .font(.title2).foregroundStyle(NoveliaStyle.brandGreen)
                                             .frame(width: 52, height: 72)
-                                            .background(NoveliaStyle.coral.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
+                                            .background(NoveliaStyle.brandGreen.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
                                     }
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(book.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
                                         Text(book.resolvedFileFormat.title)
                                             .font(.system(size: 10, weight: .medium))
-                                            .foregroundStyle(NoveliaStyle.coral)
+                                            .foregroundStyle(NoveliaStyle.brandGreen)
                                         if let author = book.author, !author.isEmpty {
                                             Text(author).font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
                                         }
@@ -2029,7 +2029,7 @@ struct MyDownloadsView: View {
                             .buttonStyle(.plain)
                             ShareLink(item: wenkuDownloads.fileURL(for: book)) {
                                 Image(systemName: "square.and.arrow.up")
-                                    .foregroundStyle(NoveliaStyle.coral)
+                                    .foregroundStyle(NoveliaStyle.brandGreen)
                             }
                         }
                         .padding(.vertical, 4)
@@ -2106,7 +2106,7 @@ private struct DownloadedWebNovelTXTReader: View {
                             if let volumeTitle = chapter.volumeTitle {
                                 Text(volumeTitle)
                                     .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(NoveliaStyle.coral)
+                                    .foregroundStyle(NoveliaStyle.brandGreen)
                             }
                             Text(chapter.title)
                                 .font(.system(size: 25, weight: .bold, design: .rounded))
@@ -2193,7 +2193,7 @@ private struct DownloadedWebNovelTXTReader: View {
                                         Text(volume).font(.caption).foregroundStyle(.secondary)
                                     }
                                     Text(chapters[index].title)
-                                        .foregroundStyle(index == chapterIndex ? NoveliaStyle.coral : .primary)
+                                        .foregroundStyle(index == chapterIndex ? NoveliaStyle.brandGreen : .primary)
                                 }
                             }
                         }
@@ -2292,6 +2292,8 @@ private struct DownloadedWebNovelReader: View {
 
 struct SettingsView: View {
     @EnvironmentObject private var auth: AccountAuthStore
+    @AppStorage("appThemeColor") private var themeColorRaw = AppThemeColor.novelia.rawValue
+    @AppStorage("appThemeCustomHex") private var themeCustomHex = "559775"
     @AppStorage("readerFontSize") private var fontSize = 20.0
     @AppStorage("readerMode") private var modeRaw = ReaderMode.bilingual.rawValue
     @State private var isExportingLogs = false
@@ -2323,10 +2325,33 @@ struct SettingsView: View {
                     } label: {
                         Label("登录 / 注册", systemImage: "person.crop.circle.badge.checkmark")
                     }
-                    .tint(NoveliaStyle.coral)
+                    .tint(NoveliaStyle.brandGreen)
                 }
             }
             Section("阅读体验") {
+                Picker(selection: $themeColorRaw) {
+                    ForEach(AppThemeColor.allCases) { option in
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(option == .custom ? AppThemeColor.color(fromHex: themeCustomHex) : option.color)
+                                .frame(width: 12, height: 12)
+                            Text(option.title)
+                        }
+                        .tag(option.rawValue)
+                    }
+                } label: {
+                    Label("主题色", systemImage: "paintpalette")
+                }
+                if AppThemeColor(rawValue: themeColorRaw) == .custom {
+                    ColorPicker(
+                        "自定义颜色",
+                        selection: Binding(
+                            get: { AppThemeColor.color(fromHex: themeCustomHex) },
+                            set: { themeCustomHex = AppThemeColor.hex(from: $0) }
+                        ),
+                        supportsOpacity: false
+                    )
+                }
                 Picker("显示语言", selection: $modeRaw) {
                     ForEach(ReaderMode.allCases) { mode in
                         Text(mode.title).tag(mode.rawValue)
@@ -2340,7 +2365,7 @@ struct SettingsView: View {
                             .foregroundStyle(NoveliaStyle.muted)
                     }
                     Slider(value: $fontSize, in: 16...30, step: 1)
-                        .tint(NoveliaStyle.coral)
+                        .tint(NoveliaStyle.brandGreen)
                 }
                 NavigationLink {
                     TXTChapterRulesView()

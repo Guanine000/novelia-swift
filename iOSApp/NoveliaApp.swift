@@ -1,5 +1,6 @@
 import SwiftUI
 import OSLog
+import UIKit
 
 @main
 struct NoveliaApp: App {
@@ -14,14 +15,82 @@ struct NoveliaApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
-                .tint(NoveliaStyle.coral)
                 .textSelection(.enabled)
         }
     }
 }
 
+enum AppThemeColor: String, CaseIterable, Identifiable {
+    case novelia
+    case ocean
+    case plum
+    case rose
+    case amber
+    case custom
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .novelia: "Novelia 绿"
+        case .ocean: "海洋蓝"
+        case .plum: "柔和紫"
+        case .rose: "莓果红"
+        case .amber: "琥珀棕"
+        case .custom: "自定义"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .novelia: Color(red: 85 / 255, green: 151 / 255, blue: 117 / 255)
+        case .ocean: Color(red: 48 / 255, green: 112 / 255, blue: 153 / 255)
+        case .plum: Color(red: 112 / 255, green: 77 / 255, blue: 151 / 255)
+        case .rose: Color(red: 176 / 255, green: 70 / 255, blue: 92 / 255)
+        case .amber: Color(red: 145 / 255, green: 96 / 255, blue: 31 / 255)
+        case .custom: AppThemeColor.novelia.color
+        }
+    }
+
+    static func color(for rawValue: String, customHex: String) -> Color {
+        guard let theme = AppThemeColor(rawValue: rawValue) else { return AppThemeColor.novelia.color }
+        return theme == .custom ? color(fromHex: customHex) : theme.color
+    }
+
+    static func color(fromHex hex: String) -> Color {
+        let normalized = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard normalized.count == 6, let value = UInt64(normalized, radix: 16) else {
+            return AppThemeColor.novelia.color
+        }
+        return Color(
+            .sRGB,
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255,
+            opacity: 1
+        )
+    }
+
+    static func hex(from color: Color) -> String {
+        let uiColor = UIColor(color)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return "559775"
+        }
+        return String(
+            format: "%02X%02X%02X",
+            Int((red * 255).rounded()),
+            Int((green * 255).rounded()),
+            Int((blue * 255).rounded())
+        )
+    }
+}
+
 enum NoveliaStyle {
-    static let coral = Color(red: 0.91, green: 0.31, blue: 0.34)
+    static var brandGreen: Color { .accentColor }
 
     /// 主文字色（深色下近白）。
     static var ink: Color {
@@ -69,6 +138,8 @@ enum NoveliaStyle {
 }
 
 struct RootView: View {
+    @AppStorage("appThemeColor") private var appThemeColorRaw = AppThemeColor.novelia.rawValue
+    @AppStorage("appThemeCustomHex") private var appThemeCustomHex = "559775"
     @StateObject private var auth = AccountAuthStore()
     @StateObject private var forumAuth = ForumAuthStore()
     @StateObject private var favorites = FavoritesStore()
@@ -109,6 +180,7 @@ struct RootView: View {
             }
             .tabItem { Label("我的", systemImage: "person.crop.circle") }
         }
+        .tint(AppThemeColor.color(for: appThemeColorRaw, customHex: appThemeCustomHex))
         .background(NoveliaStyle.paper)
         .environmentObject(auth)
         .environmentObject(forumAuth)

@@ -103,6 +103,9 @@ final class PrototypePagerUIView: UIView, UIGestureRecognizerDelegate {
     private let currentImageView = UIImageView()
     private let nextImageView = UIImageView()
     private let selectionLayer = CAShapeLayer()
+    private let handlesLayer = CAShapeLayer()
+    private var adjustingStart = false
+    private var selectionBounds: [CGRect] = []
     private var longPressGesture: UILongPressGestureRecognizer!
     private var editMenuInteraction: UIEditMenuInteraction!
 
@@ -111,8 +114,8 @@ final class PrototypePagerUIView: UIView, UIGestureRecognizerDelegate {
     private var isAnimating = false
     private var isDragActive = false
     private var panBaseX: CGFloat = 0
-    private var selectionAnchor: Int?
-    private var selectionFocus: Int?
+    private var selectionInitialRange: NSRange?
+    private var selectionMovingRange: NSRange?
     private var selectedText: String?
 
     override init(frame: CGRect) {
@@ -130,6 +133,8 @@ final class PrototypePagerUIView: UIView, UIGestureRecognizerDelegate {
         }
         selectionLayer.fillColor = UIColor.systemBlue.withAlphaComponent(0.28).cgColor
         currentImageView.layer.addSublayer(selectionLayer)
+        handlesLayer.fillColor = UIColor.systemBlue.cgColor
+        currentImageView.layer.addSublayer(handlesLayer)
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1
@@ -206,6 +211,7 @@ final class PrototypePagerUIView: UIView, UIGestureRecognizerDelegate {
             }
         }
         selectionLayer.frame = currentImageView.bounds
+        handlesLayer.frame = currentImageView.bounds
         // 当前页始终位于中间槽位。
         strip.frame = CGRect(x: -width, y: 0, width: width * 3, height: height)
     }
@@ -226,10 +232,25 @@ final class PrototypePagerUIView: UIView, UIGestureRecognizerDelegate {
         let width = max(bounds.width, pageSize.width)
         guard width > 0 else { return }
 
+        if selectionInitialRange != nil, gesture.state != .began {
+            if gesture.state == .changed, let range = selectionRangeProvider?(gesture.location(in: self)) {
+                if adjustingStart { selectionInitialRange = range }
+                else { selectionMovingRange = range }
+                updateSelectionHighlight()
+            } else if gesture.state == .ended || gesture.state == .cancelled {
+                presentCopyMenu(at: gesture.location(in: self))
+            }
+            return
+        }
         switch gesture.state {
         case .began:
-            if selectionAnchor != nil {
-                gesture.state = .cancelled
+            if selectionInitialRange != nil {
+                guard let first = selectionBounds.first, let last = selectionBounds.last else { return }
+                let point = gesture.location(in: self)
+                let start = CGPoint(x: first.minX, y: first.minY)
+                let end = CGPoint(x: last.maxX, y: last.maxY)
+                adjustingStart = hypot(point.x - start.x, point.y - start.y) < hypot(point.x - end.x, point.y - end.y)
+                editMenuInteraction.dismissMenu()
                 return
             }
             if isAnimating {
@@ -281,7 +302,7 @@ final class PrototypePagerUIView: UIView, UIGestureRecognizerDelegate {
         let location = gesture.location(in: self)
         let width = max(bounds.width, pageSize.width)
 
-        if selectionAnchor != nil {
+        if selectionInitialRange != nil {
             clearSelection()
             return
         }
@@ -316,13 +337,13 @@ final class PrototypePagerUIView: UIView, UIGestureRecognizerDelegate {
         switch gesture.state {
         case .began:
             guard let range = selectionRangeProvider?(point), range.length > 0 else { return }
-            selectionAnchor = range.location
-            selectionFocus = NSMaxRange(range) - 1
+            selectionInitialRange = range
+            selectionMovingRange = range
             updateSelectionHighlight()
         case .changed:
-            guard selectionAnchor != nil,
+            guard selectionInitialRange != nil,
                   let range = selectionRangeProvider?(point), range.length > 0 else { return }
-            selectionFocus = NSMaxRange(range) - 1
+            selectionMovingRange = range
             updateSelectionHighlight()
         case .ended:
             presentCopyMenu(at: point)
@@ -334,34 +355,47 @@ final class PrototypePagerUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     private func updateSelectionHighlight() {
-        guard let anchor = selectionAnchor, let focus = selectionFocus else {
+        guard let initial = selectionInitialRange, let moving = selectionMovingRange else {
             selectionLayer.path = nil
             selectedText = nil
             return
         }
-        let start = min(anchor, focus)
-        let range = NSRange(location: start, length: abs(focus - anchor) + 1)
+        let start = min(initial.location, moving.location)
+        let range = NSRange(location: start, length: max(NSMaxRange(initial), NSMaxRange(moving)) - start)
         selectedText = selectedTextProvider?(range)
         let rects = selectionRectsProvider?(range) ?? []
+        selectionBounds = rects
         let path = UIBezierPath()
         for rect in rects {
             path.append(UIBezierPath(roundedRect: rect, cornerRadius: 2))
         }
         selectionLayer.path = path.cgPath
+        let handles = UIBezierPath()
+        if let first = rects.first, let last = rects.last {
+            handles.append(UIBezierPath(ovalIn: CGRect(x: first.minX - 6, y: first.minY - 10, width: 12, height: 12)))
+            handles.append(UIBezierPath(ovalIn: CGRect(x: last.maxX - 6, y: last.maxY - 2, width: 12, height: 12)))
+        }
+        handlesLayer.path = handles.cgPath
     }
 
     private func presentCopyMenu(at point: CGPoint) {
         guard selectedText?.isEmpty == false else { return }
+        if let initial = selectionInitialRange, let moving = selectionMovingRange, initial.location > moving.location {
+            selectionInitialRange = moving
+            selectionMovingRange = initial
+        }
         let configuration = UIEditMenuConfiguration(identifier: nil, sourcePoint: point)
         editMenuInteraction.presentEditMenu(with: configuration)
     }
 
     private func clearSelection() {
         editMenuInteraction.dismissMenu()
-        selectionAnchor = nil
-        selectionFocus = nil
+        selectionInitialRange = nil
+        selectionMovingRange = nil
         selectedText = nil
         selectionLayer.path = nil
+        handlesLayer.path = nil
+        selectionBounds = []
     }
 
     private func snapBack() {
@@ -406,6 +440,18 @@ final class PrototypePagerUIView: UIView, UIGestureRecognizerDelegate {
 }
 
 extension PrototypePagerUIView: UIEditMenuInteractionDelegate {
+    private func presentSelectionController(_ controller: UIViewController) {
+        editMenuInteraction.dismissMenu()
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let presenter = current as? UIViewController {
+                presenter.present(controller, animated: true)
+                return
+            }
+            responder = current.next
+        }
+    }
+
     func editMenuInteraction(
         _ interaction: UIEditMenuInteraction,
         menuFor configuration: UIEditMenuConfiguration,
@@ -416,6 +462,22 @@ extension PrototypePagerUIView: UIEditMenuInteractionDelegate {
             guard let selectedText = self?.selectedText else { return }
             UIPasteboard.general.string = selectedText
         }
-        return UIMenu(children: [copy])
+        let search = UIAction(title: "搜索网页", image: UIImage(systemName: "magnifyingglass")) { _ in
+            var components = URLComponents(string: "https://www.google.com/search")!
+            components.queryItems = [URLQueryItem(name: "q", value: selectedText)]
+            if let url = components.url { UIApplication.shared.open(url) }
+        }
+        let lookup = UIAction(title: "查询", image: UIImage(systemName: "book")) { [weak self] _ in
+            guard let self else { return }
+            self.presentSelectionController(UIReferenceLibraryViewController(term: selectedText))
+        }
+        let share = UIAction(title: "分享", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
+            guard let self else { return }
+            let controller = UIActivityViewController(activityItems: [selectedText], applicationActivities: nil)
+            controller.popoverPresentationController?.sourceView = self
+            controller.popoverPresentationController?.sourceRect = CGRect(origin: configuration.sourcePoint, size: CGSize(width: 1, height: 1))
+            self.presentSelectionController(controller)
+        }
+        return UIMenu(children: [copy, lookup, search, share])
     }
 }

@@ -6,6 +6,7 @@ import YueduCoreText
 
 /// 阅读器自己的排版偏好；字体名称来自设备当前可用的 UIFont 字体族。
 struct PrototypeReaderStyle: Codable, Equatable {
+    var doublePage: Bool? = false
     var fontSize: CGFloat = 21
     var fontFamily: String? = nil
     var lineSpacing: CGFloat = 0
@@ -172,8 +173,18 @@ final class PrototypeReaderModel: ObservableObject {
     var displayScale: CGFloat = UIScreen.main.scale
 
     /// 视口宽高比（宽/高），用于 @media 的 device-aspect-ratio 条件求值。
+    var usesDoublePage: Bool { style.doublePage == true }
+    private var leafWidth: CGFloat { viewportSize.width / (usesDoublePage ? 2 : 1) }
+    private var pageStride: Int { usesDoublePage ? 2 : 1 }
+    private var selectionLeaf = 0
+    private struct SpreadCacheEntry {
+        let secondLeafAvailable: Bool
+        let image: CGImage
+    }
+    private var spreadCache: [PrototypePageID: SpreadCacheEntry] = [:]
+
     private var viewportAspectRatio: CGFloat {
-        viewportSize.width / max(viewportSize.height, 1)
+        leafWidth / max(viewportSize.height, 1)
     }
 
     private var relayoutTask: Task<Void, Never>?
@@ -238,8 +249,10 @@ final class PrototypeReaderModel: ObservableObject {
     /// 视图点击点 → 链接语义。注脚返回其文本；普通链接返回 href（本轮不导航）。
     func linkHit(at point: CGPoint) -> PrototypeLinkHit? {
         guard let pageBook else { return nil }
-        let id = pageID(location.spineIndex, location.pageIndex)
-        guard let region = pageBook.linkRegion(at: point, for: id) else { return nil }
+        let leaf = usesDoublePage && point.x >= leafWidth ? 1 : 0
+        let id = pageID(location.spineIndex, location.pageIndex + leaf)
+        let localPoint = CGPoint(x: point.x - CGFloat(leaf) * leafWidth, y: point.y)
+        guard let region = pageBook.linkRegion(at: localPoint, for: id) else { return nil }
         switch region.semantic {
         case .noteref:
             if let text = pageBook.footnoteText(forHref: region.href, id: id), !text.isEmpty {
@@ -325,7 +338,7 @@ final class PrototypeReaderModel: ObservableObject {
 
     private func makeConfig() -> BrowserLayoutConfig {
         let contentInsets = style.contentInsets
-        let contentWidth = max(1, viewportSize.width - contentInsets.left - contentInsets.right)
+        let contentWidth = max(1, leafWidth - contentInsets.left - contentInsets.right)
         let contentHeight = max(1, viewportSize.height - contentInsets.top - contentInsets.bottom)
         var config = BrowserLayoutConfig()
         config.renderWidth = contentWidth
@@ -357,6 +370,7 @@ final class PrototypeReaderModel: ObservableObject {
         let previousFraction = keepingCurrentSpine
             ? CGFloat(location.pageIndex) / CGFloat(previousCount)
             : 0
+        spreadCache.removeAll()
         generation += 1
         let book = PrototypePageBook(generation: generation)
         book.onPagesChanged = { [weak self] in
@@ -376,6 +390,7 @@ final class PrototypeReaderModel: ObservableObject {
                 location.spineIndex = spineIndex
                 location.pageIndex = min(Int(previousFraction * CGFloat(max(pageCount(spineIndex: spineIndex), 1))),
                                          max(pageCount(spineIndex: spineIndex) - 1, 0))
+                if usesDoublePage { location.pageIndex = (location.pageIndex / 2) * 2 }
                 prefetchNeighbors(of: spineIndex)
                 applyDebugJumpIfNeeded()
             }
@@ -529,6 +544,11 @@ final class PrototypeReaderModel: ObservableObject {
     /// 渲染完成后再刷新——拖动开始瞬间不再有解码大图造成的卡顿。
     func pagerImages() -> PrototypePagerView.PageImages {
         guard let pageBook else { return .init(previous: nil, current: nil, next: nil) }
+        if usesDoublePage {
+            return .init(previous: spreadImage(at: turnLocation(forward: false)),
+                         current: spreadImage(at: location),
+                         next: spreadImage(at: turnLocation(forward: true)), size: viewportSize)
+        }
         let size = viewportSize
         guard size.width > 0 else { return .init(previous: nil, current: nil, next: nil) }
         let background = pageBackground
@@ -554,52 +574,84 @@ final class PrototypeReaderModel: ObservableObject {
         return result
     }
 
+    private func spreadImage(at target: PrototypeReadingLocation?) -> CGImage? {
+        guard let target, let pageBook,
+              pageBook.isPageAvailable(pageID(target.spineIndex, target.pageIndex)) else { return nil }
+        let ids = (0..<2).map { pageID(target.spineIndex, target.pageIndex + $0) }
+        let secondAvailable = pageBook.isPageAvailable(ids[1])
+        if let cached = spreadCache[ids[0]], cached.secondLeafAvailable == secondAvailable { return cached.image }
+        let leaves = ids.map { pageBook.renderedImage(for: $0, scale: displayScale, background: pageBackground) }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = displayScale
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(size: viewportSize, format: format).image { context in
+            pageBackground.setFill()
+            context.fill(CGRect(origin: .zero, size: viewportSize))
+            for (index, image) in leaves.enumerated() {
+                if let image {
+                    UIImage(cgImage: image, scale: displayScale, orientation: .up)
+                        .draw(in: CGRect(x: CGFloat(index) * leafWidth, y: 0, width: leafWidth, height: viewportSize.height))
+                }
+            }
+        }.cgImage
+        if let image {
+            spreadCache[ids[0]] = SpreadCacheEntry(secondLeafAvailable: secondAvailable, image: image)
+            let nearby = [location, turnLocation(forward: true), turnLocation(forward: false)].compactMap { $0 }
+            let keep = Set(nearby.map { pageID($0.spineIndex, $0.pageIndex) })
+            spreadCache = spreadCache.filter { keep.contains($0.key) }
+        }
+        return image
+    }
+
     func selectionRange(at point: CGPoint) -> NSRange? {
-        pageBook?.selectionRange(at: point, for: pageID(location.spineIndex, location.pageIndex))
+        // Both leaves share chapter UTF-16 offsets, so selection can cross the gutter.
+        let leaf = usesDoublePage && point.x >= leafWidth ? 1 : 0
+        selectionLeaf = leaf
+        return pageBook?.selectionRange(at: CGPoint(x: point.x - CGFloat(leaf) * leafWidth, y: point.y),
+                                       for: pageID(location.spineIndex, location.pageIndex + leaf))
     }
 
     func selectionRects(for range: NSRange) -> [CGRect] {
-        pageBook?.selectionRects(for: range, on: pageID(location.spineIndex, location.pageIndex)) ?? []
+        (0..<(usesDoublePage ? 2 : 1)).flatMap { leaf in
+            (pageBook?.selectionRects(for: range, on: pageID(location.spineIndex, location.pageIndex + leaf)) ?? [])
+                .map { $0.offsetBy(dx: CGFloat(leaf) * leafWidth, dy: 0) }
+        }
     }
 
     func selectedText(for range: NSRange) -> String? {
-        pageBook?.selectedText(for: range, on: pageID(location.spineIndex, location.pageIndex))
+        pageBook?.selectedText(for: range, on: pageID(location.spineIndex, location.pageIndex + selectionLeaf))
+    }
+
+    private func turnLocation(forward: Bool) -> PrototypeReadingLocation? {
+        let count = pageCount(spineIndex: location.spineIndex)
+        if forward {
+            if location.pageIndex + pageStride < count {
+                return .init(spineIndex: location.spineIndex, pageIndex: location.pageIndex + pageStride)
+            }
+            // Do not leave a chapter until its last leaf has finished pagination.
+            guard pageBook?.isChapterComplete(location.spineIndex) == true,
+                  pageCount(spineIndex: location.spineIndex + 1) > 0 else { return nil }
+            return .init(spineIndex: location.spineIndex + 1, pageIndex: 0)
+        }
+        if location.pageIndex > 0 {
+            return .init(spineIndex: location.spineIndex, pageIndex: max(0, location.pageIndex - pageStride))
+        }
+        let previousCount = pageCount(spineIndex: location.spineIndex - 1)
+        guard previousCount > 0, pageBook?.isChapterComplete(location.spineIndex - 1) == true else { return nil }
+        return .init(spineIndex: location.spineIndex - 1, pageIndex: ((previousCount - 1) / pageStride) * pageStride)
     }
 
     // MARK: 翻页
 
     /// 目标页是否已经排版好（拖动开始的门槛：保证动画只移动已渲染结果）。
     func canTurn(forward: Bool) -> Bool {
-        guard !isAnimating, !isLayingOut, status == .ready, let pageBook else { return false }
-        if forward {
-            let count = pageCount(spineIndex: location.spineIndex)
-            if location.pageIndex + 1 < count { return true }
-            return pageBook.hasChapter(location.spineIndex + 1) && pageCount(spineIndex: location.spineIndex + 1) > 0
-        } else {
-            if location.pageIndex > 0 { return true }
-            return pageBook.hasChapter(location.spineIndex - 1) && pageCount(spineIndex: location.spineIndex - 1) > 0
-        }
+        guard !isAnimating, !isLayingOut, status == .ready, pageBook != nil else { return false }
+        return turnLocation(forward: forward) != nil
     }
 
-    /// 动画结束后的落页提交：只切换索引，不触发任何排版。
     func commitTurn(forward: Bool) {
-        guard canTurn(forward: forward) else { return }
-        let count = pageCount(spineIndex: location.spineIndex)
-        if forward {
-            if location.pageIndex + 1 < count {
-                location.pageIndex += 1
-            } else {
-                location.spineIndex += 1
-                location.pageIndex = 0
-            }
-        } else {
-            if location.pageIndex > 0 {
-                location.pageIndex -= 1
-            } else {
-                location.spineIndex -= 1
-                location.pageIndex = max(pageCount(spineIndex: location.spineIndex) - 1, 0)
-            }
-        }
+        guard canTurn(forward: forward), let target = turnLocation(forward: forward) else { return }
+        location = target
         prefetchNeighbors(of: location.spineIndex)
     }
 

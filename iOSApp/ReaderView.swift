@@ -139,7 +139,7 @@ struct ReaderView: View {
                         Text("\(novel.title.uppercased())  ·  \(chapterIndex + 1) / \(novel.chapters.count)")
                             .font(.system(size: 10, weight: .bold, design: .rounded))
                             .tracking(1.2)
-                            .foregroundStyle(NoveliaStyle.coral)
+                            .foregroundStyle(NoveliaStyle.brandGreen)
                         Text(chapter.title)
                             .font(.system(size: 27, weight: .bold, design: .rounded))
                             .lineSpacing(4)
@@ -151,7 +151,7 @@ struct ReaderView: View {
                     .padding(.top, 14)
 
                     Rectangle()
-                        .fill(NoveliaStyle.coral.opacity(0.28))
+                        .fill(NoveliaStyle.brandGreen.opacity(0.28))
                         .frame(width: 44, height: 3)
                         .clipShape(Capsule())
 
@@ -166,7 +166,7 @@ struct ReaderView: View {
                         } actions: {
                             Button("重试") { loadAttempt += 1 }
                                 .buttonStyle(.borderedProminent)
-                                .tint(NoveliaStyle.coral)
+                                .tint(NoveliaStyle.brandGreen)
                         }
                     } else {
                         readerText.id(chapter.id)
@@ -195,7 +195,7 @@ struct ReaderView: View {
                         .disabled(chapterIndex >= novel.chapters.count - 1)
                     }
                     .font(.system(size: 13, weight: .semibold))
-                    .tint(NoveliaStyle.coral)
+                    .tint(NoveliaStyle.brandGreen)
                     .padding(.top, 10)
                     .padding(.bottom, 35)
                 }
@@ -225,7 +225,7 @@ struct ReaderView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: toggleBookmark) {
                         Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
-                            .foregroundStyle(NoveliaStyle.coral)
+                            .foregroundStyle(NoveliaStyle.brandGreen)
                     }
                     .accessibilityLabel(isBookmarked ? "移除书签" : "添加书签")
                 }
@@ -386,7 +386,7 @@ private struct ChapterDirectoryView: View {
                     if index == selectedIndex {
                         Image(systemName: "checkmark")
                             .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(NoveliaStyle.coral)
+                            .foregroundStyle(NoveliaStyle.brandGreen)
                     }
                 }
                 .contentShape(Rectangle())

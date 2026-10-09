@@ -35,24 +35,8 @@ struct PrototypeReaderView: View {
                 case .failed(let message):
                     ContentUnavailableView("无法排版", systemImage: "exclamationmark.triangle", description: Text(message))
                 case .ready:
-                    PrototypePagerView(
-                        canTurn: { forward in model.canTurn(forward: forward) },
-                        onCommit: { forward in
-                            model.commitTurn(forward: forward)
-                        },
-                        onAnimatingChange: { animating in model.setAnimating(animating) },
-                        linkHitTest: { point in model.linkHit(at: point) },
-                        onNoteTap: { text in model.activeNote = PrototypeNote(text: text) },
-                        onPlainLinkTap: { href in
-                            model.openLink(href)
-                        },
-                        onCenterTap: { withAnimation(.easeInOut(duration: 0.15)) { showChrome.toggle() } },
-                        selectionRangeAt: { point in model.selectionRange(at: point) },
-                        selectionRects: { range in model.selectionRects(for: range) },
-                        selectedText: { range in model.selectedText(for: range) },
-                        images: model.pagerImages()
-                    )
-                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    PrototypeReaderPageSurface(model: model, showChrome: $showChrome, size: geometry.size)
+                        .equatable()
                 }
                 if model.isLayingOut {
                     ProgressView().scaleEffect(1.4)
@@ -70,7 +54,7 @@ struct PrototypeReaderView: View {
             .overlay(alignment: .bottom) {
                 // 常驻细进度条：工具栏隐藏时仍可见当前阅读进度。
                 Rectangle()
-                    .fill(Color(red: 0.91, green: 0.31, blue: 0.34).opacity(0.8))
+                    .fill(NoveliaStyle.brandGreen.opacity(0.8))
                     .frame(width: max(4, geometry.size.width * model.overallProgress), height: 2.5)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .frame(maxHeight: .infinity, alignment: .bottom)
@@ -106,7 +90,9 @@ struct PrototypeReaderView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
-        .statusBarHidden(!showChrome)
+        // The reader already displays time and battery in its own overlay.
+        // Toggling the system bar changes safe-area height and repaginates the book.
+        .statusBarHidden(true)
         .sheet(isPresented: $isShowingTOC) { tocSheet }
         .sheet(isPresented: $isShowingStyle) { styleSheet }
         .sheet(item: $model.activeNote) { note in noteSheet(note) }
@@ -229,7 +215,7 @@ struct PrototypeReaderView: View {
                             model.seek(to: scrubProgress)
                         }
                     })
-                    .tint(Color(red: 0.91, green: 0.31, blue: 0.34))
+                    .tint(NoveliaStyle.brandGreen)
                     .disabled(model.status != .ready || model.isAnimating || model.isLayingOut)
                     .accessibilityLabel("阅读进度")
                     Text("\(Int((isScrubbing ? scrubProgress : model.overallProgress) * 100))%")
@@ -298,7 +284,7 @@ struct PrototypeReaderView: View {
                                         VStack(alignment: .leading, spacing: 3) {
                                             Text(entry.title)
                                                 .foregroundStyle(isCurrent
-                                                    ? Color(red: 0.91, green: 0.31, blue: 0.34) : .primary)
+                                                    ? NoveliaStyle.brandGreen : .primary)
                                                 .fontWeight(isCurrent ? .semibold : .regular)
                                             if let spineIndex = entry.spineIndex {
                                                 Text("spine \(spineIndex + 1)")
@@ -309,7 +295,7 @@ struct PrototypeReaderView: View {
                                         if isCurrent {
                                             Image(systemName: "book.fill")
                                                 .font(.caption)
-                                                .foregroundStyle(Color(red: 0.91, green: 0.31, blue: 0.34))
+                                                .foregroundStyle(NoveliaStyle.brandGreen)
                                         }
                                     }
                                 }
@@ -377,6 +363,11 @@ struct PrototypeReaderView: View {
     private var styleSheet: some View {
         NavigationStack {
             Form {
+                Section("分页") {
+                    Toggle("双页模式", isOn: Binding(get: { draftStyle.doublePage == true }, set: { draftStyle.doublePage = $0 }))
+                    Text("每次显示两页；横屏或 iPad 上阅读更舒适。章节末尾不足两页时保留空白页。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("字体") {
                     NavigationLink {
                         PrototypeFontPicker(selection: $draftStyle.fontFamily) { deletedFamily in
@@ -708,5 +699,38 @@ struct PrototypeReaderHost: View {
                 }
             }
         }
+    }
+}
+
+/// Chrome-only changes reuse the page surface. Model changes still invalidate
+/// this observed view when pagination, reading position, or cached pages change.
+private struct PrototypeReaderPageSurface: View, Equatable {
+    @ObservedObject var model: PrototypeReaderModel
+    @Binding var showChrome: Bool
+    let size: CGSize
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.model === rhs.model && lhs.size == rhs.size
+    }
+
+    var body: some View {
+        PrototypePagerView(
+            canTurn: { forward in model.canTurn(forward: forward) },
+            onCommit: { forward in
+                model.commitTurn(forward: forward)
+            },
+            onAnimatingChange: { animating in model.setAnimating(animating) },
+            linkHitTest: { point in model.linkHit(at: point) },
+            onNoteTap: { text in model.activeNote = PrototypeNote(text: text) },
+            onPlainLinkTap: { href in
+                model.openLink(href)
+            },
+            onCenterTap: { withAnimation(.easeInOut(duration: 0.15)) { showChrome.toggle() } },
+            selectionRangeAt: { point in model.selectionRange(at: point) },
+            selectionRects: { range in model.selectionRects(for: range) },
+            selectedText: { range in model.selectedText(for: range) },
+            images: model.pagerImages()
+        )
+        .frame(width: size.width, height: size.height)
     }
 }

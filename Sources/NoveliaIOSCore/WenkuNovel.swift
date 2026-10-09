@@ -8,6 +8,14 @@ public struct WenkuNovelOutline: Identifiable, Hashable, Sendable, Decodable {
     public let cover: String?
     public let favored: String?
 
+    public init(id: String, title: String, titleZh: String = "", cover: String? = nil, favored: String? = nil) {
+        self.id = id
+        self.title = title
+        self.titleZh = titleZh
+        self.cover = cover
+        self.favored = favored
+    }
+
     public var displayTitle: String {
         titleZh.isEmpty ? title : titleZh
     }

@@ -112,7 +112,7 @@ struct ForumView: View {
                         Text(error)
                     } actions: {
                         Button("重试") { Task { await store.refresh() } }
-                            .buttonStyle(.borderedProminent).tint(NoveliaStyle.coral)
+                            .buttonStyle(.borderedProminent).tint(NoveliaStyle.brandGreen)
                     }
                     .listRowBackground(Color.clear)
                 } else if visiblePosts.isEmpty, !store.isLoadingPosts, store.errorMessage == nil {
@@ -215,7 +215,7 @@ struct ForumView: View {
                                         .font(.system(size: 13, weight: .semibold))
                                         .foregroundStyle(store.selectedCategory == category.slug ? .white : NoveliaStyle.ink)
                                         .padding(.horizontal, 14).padding(.vertical, 8)
-                                        .background(store.selectedCategory == category.slug ? NoveliaStyle.coral : NoveliaStyle.card, in: Capsule())
+                                        .background(store.selectedCategory == category.slug ? NoveliaStyle.brandGreen : NoveliaStyle.card, in: Capsule())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -226,7 +226,7 @@ struct ForumView: View {
                 }
             }
             .refreshable { await store.refresh() }
-            .task { await store.refresh() }
+            .task { if store.categories.isEmpty { await store.refresh() } }
             .sheet(isPresented: $auth.isLoginPresented) {
                 ForumLoginSheet(auth: auth)
             }
@@ -267,9 +267,9 @@ private struct ForumPostRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 7) {
-                if post.pinOrder != nil { Image(systemName: "pin.fill").foregroundStyle(NoveliaStyle.coral) }
+                if post.pinOrder != nil { Image(systemName: "pin.fill").foregroundStyle(NoveliaStyle.brandGreen) }
                 Text(category?.title ?? "论坛")
-                    .foregroundStyle(NoveliaStyle.coral)
+                    .foregroundStyle(NoveliaStyle.brandGreen)
                 if post.commentsLocked { Image(systemName: "lock.fill").foregroundStyle(NoveliaStyle.muted) }
                 Spacer()
                 Text(post.createdAt.forumDisplayDate).foregroundStyle(NoveliaStyle.muted)
@@ -285,7 +285,7 @@ private struct ForumPostRow: View {
                         ForEach(post.tags) { tag in
                             Text(tag.name).font(.caption2.weight(.medium))
                                 .padding(.horizontal, 8).padding(.vertical, 4)
-                                .background(NoveliaStyle.coral.opacity(0.10), in: Capsule())
+                                .background(NoveliaStyle.brandGreen.opacity(0.10), in: Capsule())
                         }
                     }
                 }
@@ -295,7 +295,7 @@ private struct ForumPostRow: View {
                 Label("\(post.commentsCount)", systemImage: "bubble.right")
                 Label("\(post.viewsCount)", systemImage: "eye")
                 Spacer()
-                if post.favorited { Image(systemName: "bookmark.fill").foregroundStyle(NoveliaStyle.coral) }
+                if post.favorited { Image(systemName: "bookmark.fill").foregroundStyle(NoveliaStyle.brandGreen) }
             }
             .font(.caption2).foregroundStyle(NoveliaStyle.muted)
         }
@@ -359,14 +359,14 @@ private struct ForumPostDetailView: View {
                                 .disabled(favoriteInProgress)
                             }
                             .font(.caption)
-                            .tint(NoveliaStyle.coral)
+                            .tint(NoveliaStyle.brandGreen)
                         }
                         .padding(16).background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 16))
                     } else if isLoading {
                         HStack { Spacer(); ProgressView("正在加载帖子…"); Spacer() }
                     } else if let errorMessage {
                         ContentUnavailableView("帖子加载失败", systemImage: "wifi.exclamationmark", description: Text(errorMessage))
-                        Button("重试") { Task { await load() } }.buttonStyle(.borderedProminent).tint(NoveliaStyle.coral)
+                        Button("重试") { Task { await load() } }.buttonStyle(.borderedProminent).tint(NoveliaStyle.brandGreen)
                     }
 
                     if let post, !post.commentsLocked {
@@ -379,7 +379,7 @@ private struct ForumPostDetailView: View {
                                 .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
                         }
                         .buttonStyle(.plain)
-                        .tint(NoveliaStyle.coral)
+                        .tint(NoveliaStyle.brandGreen)
                     } else if post?.commentsLocked == true {
                         Label("该帖子已关闭评论。", systemImage: "lock.fill").font(.footnote).foregroundStyle(NoveliaStyle.muted)
                     }
@@ -579,9 +579,11 @@ private func isLocalForumURL(_ url: URL, postID: Int64) -> Bool {
 /// `Text(AttributedString(markdown:))` preserves inline emphasis and links, but
 /// SwiftUI's `Text` flattens Markdown block structure. Render blocks separately
 /// so paragraphs, headings, lists, and quotes retain the hierarchy shown on web.
-private struct ForumMarkdownBody: View {
+struct ForumMarkdownBody: View {
     let markdown: String
     var mode: ForumMarkdownMode = .article
+    @Environment(\.openURL) private var parentOpenURL
+    @State private var novelRoute: ForumNovelRoute?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -591,10 +593,34 @@ private struct ForumMarkdownBody: View {
             }
         }
         .foregroundStyle(NoveliaStyle.ink)
-        .tint(NoveliaStyle.coral)
+        .tint(NoveliaStyle.brandGreen)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
         .font(mode == .comment ? .system(size: 14) : .system(size: 15))
+        .environment(\.openURL, OpenURLAction { url in
+            if let route = ForumNovelRoute(url: url) { novelRoute = route; return .handled }
+            parentOpenURL(url)
+            return .handled
+        })
+        .background {
+            // The body is used inside lazy comment stacks. A local hidden link
+            // pushes directly without registering a destination in a lazy child.
+            NavigationLink(isActive: Binding(
+                get: { novelRoute != nil },
+                set: { if !$0 { novelRoute = nil } }
+            )) {
+                if let route = novelRoute {
+                    if route.isCatalogue {
+                        DiscoverView()
+                    } else if let provider = route.provider {
+                        NovelDetailView(novel: Novel(id: "\(provider)/\(route.novelID)", title: "正在加载…", author: "", summary: "", genres: [], chapters: [], accent: .ocean, providerId: provider, novelId: route.novelID))
+                    } else {
+                        WenkuDetailView(outline: route.outline)
+                    }
+                }
+            } label: { EmptyView() }
+            .hidden()
+        }
     }
 
     @ViewBuilder
@@ -624,6 +650,23 @@ private struct ForumMarkdownBody: View {
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(NoveliaStyle.paper, in: RoundedRectangle(cornerRadius: 8))
+        case let .table(rows):
+            ScrollView(.horizontal) {
+                Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+                    ForEach(rows.indices, id: \.self) { row in
+                        GridRow {
+                            ForEach(rows[row].indices, id: \.self) { column in
+                                ForumInlineMarkdownText(markdown: rows[row][column])
+                                    .fontWeight(row == 0 ? .semibold : .regular)
+                                    .padding(10)
+                                    .frame(minWidth: 100, maxWidth: 240, alignment: .leading)
+                                    .background(row == 0 ? NoveliaStyle.paper : NoveliaStyle.card)
+                                    .overlay(Rectangle().stroke(NoveliaStyle.muted.opacity(0.25)))
+                            }
+                        }
+                    }
+                }
+            }
         case .divider:
             Rectangle().fill(NoveliaStyle.muted.opacity(0.25)).frame(height: 1).padding(.vertical, 5)
         case let .starRating(value):
@@ -666,10 +709,12 @@ private struct ForumInlineMarkdownText: View {
     }
 
     var body: some View {
-        Text(renderInlineMarkdown(markdown, spoilersRevealed: spoilersRevealed, pattern: spoilerPattern))
-            .simultaneousGesture(TapGesture().onEnded {
-                if hasSpoilers && !spoilersRevealed { spoilersRevealed = true }
-            })
+        if hasSpoilers && !spoilersRevealed {
+            Text(renderInlineMarkdown(markdown, spoilersRevealed: false, pattern: spoilerPattern))
+                .onTapGesture { spoilersRevealed = true }
+        } else {
+            Text(renderInlineMarkdown(markdown, spoilersRevealed: true, pattern: spoilerPattern))
+        }
     }
 }
 
@@ -685,10 +730,10 @@ private func renderInlineMarkdown(_ markdown: String, spoilersRevealed: Bool, pa
         let spoilerRange = capturedRange
         let markerRange = NSRange(location: match.range.location, length: spoilerRange.location - match.range.location)
         if markerRange.location > cursor {
-            result += (try? AttributedString(markdown: ns.substring(with: NSRange(location: cursor, length: markerRange.location - cursor))))
+            result += (try? forumInlineAttributes(ns.substring(with: NSRange(location: cursor, length: markerRange.location - cursor))))
                 ?? AttributedString(ns.substring(with: NSRange(location: cursor, length: markerRange.location - cursor)))
         }
-        var spoiler = (try? AttributedString(markdown: ns.substring(with: spoilerRange))) ?? AttributedString(ns.substring(with: spoilerRange))
+        var spoiler = (try? forumInlineAttributes(ns.substring(with: spoilerRange))) ?? AttributedString(ns.substring(with: spoilerRange))
         if !spoilersRevealed {
             spoiler.foregroundColor = .clear
             spoiler.backgroundColor = NoveliaStyle.ink.opacity(0.78)
@@ -698,7 +743,7 @@ private func renderInlineMarkdown(_ markdown: String, spoilersRevealed: Bool, pa
     }
     if cursor < ns.length {
         let tail = ns.substring(from: cursor)
-        result += (try? AttributedString(markdown: tail)) ?? AttributedString(tail)
+        result += (try? forumInlineAttributes(tail)) ?? AttributedString(tail)
     }
     return result
 }
@@ -735,14 +780,14 @@ private struct ForumDetailsBlock: View {
         } label: {
             Text(title.isEmpty ? "点击展开" : title).font(.system(size: 14, weight: .semibold))
         }
-        .tint(NoveliaStyle.coral)
+        .tint(NoveliaStyle.brandGreen)
         .padding(11)
         .background(NoveliaStyle.paper.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(NoveliaStyle.muted.opacity(0.2), lineWidth: 1))
     }
 }
 
-private enum ForumMarkdownMode {
+enum ForumMarkdownMode {
     case article
     case comment
 }
@@ -848,7 +893,7 @@ private struct ForumCommentEditorSheet: View {
                         else { Label("发送", systemImage: "paperplane.fill") }
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(NoveliaStyle.coral)
+                    .tint(NoveliaStyle.brandGreen)
                     .disabled(isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 .padding(.horizontal, 16)
@@ -909,7 +954,7 @@ private struct ForumCommentEditorSheet: View {
             }
             .padding(.vertical, 2)
         }
-        .tint(NoveliaStyle.coral)
+        .tint(NoveliaStyle.brandGreen)
     }
 
     private var selectedText: String {
@@ -1076,6 +1121,7 @@ private struct ForumMarkdownBlock: Identifiable {
         case quote
         case code
         case divider
+        case table([[String]])
         case starRating(Double)
         case details(String)
     }
@@ -1107,28 +1153,7 @@ private func parseForumMarkdown(_ markdown: String, mode: ForumMarkdownMode = .a
     while index < lines.count {
         let rawLine = lines[index]
         let line = rawLine.trimmingCharacters(in: .whitespaces)
-        if let details = line.firstMatch(of: /^:::\s*details(?:\s+(.*))?$/) {
-            flushParagraph()
-            let title = String(details.1 ?? "")
-            index += 1
-            var content: [String] = []
-            while index < lines.count, lines[index].trimmingCharacters(in: .whitespaces) != ":::" {
-                content.append(lines[index])
-                index += 1
-            }
-            if index < lines.count { index += 1 }
-            append(.details(title), content.joined(separator: "\n"))
-            continue
-        }
-        if mode == .comment,
-           let star = line.firstMatch(of: /^:::\s*star\s+([0-9]+(?:\.[0-9]+)?)\s*$/),
-           let value = Double(star.1) {
-            flushParagraph()
-            append(.starRating(min(5, max(0, value))), "")
-            index += 1
-            continue
-        }
-        if mode == .article && (line.hasPrefix("```") || line.hasPrefix("~~~")) {
+        if (line.hasPrefix("```") || line.hasPrefix("~~~")) {
             flushParagraph()
             if inCodeFence {
                 append(.code, codeLines.joined(separator: "\n"))
@@ -1143,6 +1168,42 @@ private func parseForumMarkdown(_ markdown: String, mode: ForumMarkdownMode = .a
         if inCodeFence {
             codeLines.append(rawLine)
             index += 1
+            continue
+        }
+        if let details = line.firstMatch(of: /^:::\s*details(?:\s+(.*))?$/) {
+            flushParagraph()
+            let title = String(details.1 ?? "")
+            index += 1
+            var content: [String] = []
+            while index < lines.count, lines[index].trimmingCharacters(in: .whitespaces) != ":::" {
+                content.append(lines[index])
+                index += 1
+            }
+            if index < lines.count { index += 1 }
+            append(.details(title), content.joined(separator: "\n"))
+            continue
+        }
+        if let star = line.firstMatch(of: /^:::\s*star\s+([0-9]+(?:\.[0-9]+)?)\s*$/),
+           let value = Double(star.1) {
+            flushParagraph()
+            append(.starRating(min(5, max(0, value))), "")
+            index += 1
+            if index < lines.count, lines[index].trimmingCharacters(in: .whitespaces) == ":::" { index += 1 }
+            continue
+        }
+        if index + 1 < lines.count, line.contains("|"),
+           forumTableCells(lines[index + 1]).allSatisfy({ $0.range(of: "^:?-{3,}:?$", options: .regularExpression) != nil }),
+           !forumTableCells(lines[index + 1]).isEmpty {
+            flushParagraph()
+            let header = forumTableCells(rawLine)
+            var rows = [header]
+            index += 2
+            while index < lines.count, lines[index].contains("|"), !lines[index].trimmingCharacters(in: .whitespaces).isEmpty {
+                let cells = forumTableCells(lines[index])
+                rows.append(Array((cells + Array(repeating: "", count: header.count)).prefix(header.count)))
+                index += 1
+            }
+            append(.table(rows), "")
             continue
         }
         if line.isEmpty {
@@ -1213,10 +1274,10 @@ private struct ForumCommentCard: View {
                 Text(comment.createdAt.forumDisplayDate).font(.caption2).foregroundStyle(NoveliaStyle.muted)
             }
             ForumMarkdownBody(markdown: comment.content, mode: .comment)
-            Button("回复") { onReply() }.font(.caption.weight(.semibold)).tint(NoveliaStyle.coral)
+            Button("回复") { onReply() }.font(.caption.weight(.semibold)).tint(NoveliaStyle.brandGreen)
             ForEach(allReplies) { reply in
                 HStack(alignment: .top, spacing: 8) {
-                    RoundedRectangle(cornerRadius: 2).fill(NoveliaStyle.coral.opacity(0.4)).frame(width: 3)
+                    RoundedRectangle(cornerRadius: 2).fill(NoveliaStyle.brandGreen.opacity(0.4)).frame(width: 3)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(reply.authorUsername).font(.caption2.weight(.bold))
@@ -1234,7 +1295,7 @@ private struct ForumCommentCard: View {
                     if isLoadingReplies { ProgressView().controlSize(.small) }
                     else { Text("加载更多回复（剩余 \(count - Int64(allReplies.count)) 条）") }
                 }
-                .font(.caption.weight(.semibold)).tint(NoveliaStyle.coral).disabled(isLoadingReplies)
+                .font(.caption.weight(.semibold)).tint(NoveliaStyle.brandGreen).disabled(isLoadingReplies)
             }
         }
         .padding(14).frame(maxWidth: .infinity, alignment: .leading)
@@ -1295,7 +1356,7 @@ private struct ForumErrorOverlay: View {
                     if let onRetry {
                         Button("重试", action: onRetry)
                             .buttonStyle(.borderedProminent)
-                            .tint(NoveliaStyle.coral)
+                            .tint(NoveliaStyle.brandGreen)
                     }
                     Button("关闭", action: onDismiss)
                         .buttonStyle(.borderedProminent)
@@ -1434,5 +1495,64 @@ private extension String {
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let date = formatter.date(from: self) ?? ISO8601DateFormatter().date(from: self)
         return date?.formatted(date: .abbreviated, time: .shortened) ?? self
+    }
+}
+
+private func forumTableCells(_ line: String) -> [String] {
+    var cells: [String] = []
+    var cell = ""
+    var escaped = false
+    var inCode = false
+    for character in line.trimmingCharacters(in: .whitespaces) {
+        if escaped { cell.append(character); escaped = false; continue }
+        if character == "\\" { escaped = true; cell.append(character); continue }
+        if character == "`" { inCode.toggle() }
+        if character == "|", !inCode { cells.append(cell.trimmingCharacters(in: .whitespaces)); cell = "" }
+        else { cell.append(character) }
+    }
+    cells.append(cell.trimmingCharacters(in: .whitespaces))
+    if cells.first == "" { cells.removeFirst() }
+    if cells.last == "" { cells.removeLast() }
+    return cells
+}
+
+private func forumInlineAttributes(_ input: String) throws -> AttributedString {
+    // Normalize a struck link label before splitting strike spans, preserving
+    // the complete Markdown link for Foundation's parser.
+    let text = input.replacingOccurrences(of: "\\[~~([^\\]]+?)~~\\]\\(([^)]+)\\)", with: "~~[$1]($2)~~", options: .regularExpression)
+        .replacingOccurrences(of: "</?(?:del|s|strike)>", with: "~~", options: [.regularExpression, .caseInsensitive])
+    guard let expression = try? NSRegularExpression(pattern: "~~([\\s\\S]+?)~~") else {
+        return try AttributedString(markdown: text)
+    }
+    let source = text as NSString
+    var result = AttributedString()
+    var cursor = 0
+    for match in expression.matches(in: text, range: NSRange(location: 0, length: source.length)) {
+        result += try AttributedString(markdown: source.substring(with: NSRange(location: cursor, length: match.range.location - cursor)))
+        var struck = try AttributedString(markdown: source.substring(with: match.range(at: 1)))
+        struck.strikethroughStyle = .single
+        result += struck
+        cursor = NSMaxRange(match.range)
+    }
+    result += try AttributedString(markdown: source.substring(from: cursor))
+    return result
+}
+
+private struct ForumNovelRoute: Hashable {
+    let isCatalogue: Bool
+    let provider: String?
+    let novelID: String
+    var outline: WenkuNovelOutline {
+        WenkuNovelOutline(id: novelID, title: "正在加载…")
+    }
+    init?(url: URL) {
+        let host = url.host?.lowercased()
+        guard host == "n.novelia.cc" || host == "novelia.cc" || host == "www.novelia.cc" || host == "books.fishhawk.top" || (host == nil && url.scheme == nil) else { return nil }
+        let parts = url.path.split(separator: "/").map(String.init)
+        isCatalogue = parts == ["novel"]
+        if isCatalogue { provider = nil; novelID = "" }
+        else if parts.count == 3, parts[0] == "novel" { provider = parts[1]; novelID = parts[2] }
+        else if parts.count == 2, parts[0] == "wenku" { provider = nil; novelID = parts[1] }
+        else { return nil }
     }
 }
