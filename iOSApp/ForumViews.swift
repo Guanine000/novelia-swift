@@ -705,7 +705,7 @@ private struct ForumInlineMarkdownText: View {
     }
 
     private var hasSpoilers: Bool {
-        spoilerPattern.firstMatch(in: markdown, range: NSRange(markdown.startIndex..., in: markdown)) != nil
+        !forumSpoilerMatches(forumSpoilerMarkdown(markdown), pattern: spoilerPattern).isEmpty
     }
 
     var body: some View {
@@ -718,10 +718,38 @@ private struct ForumInlineMarkdownText: View {
     }
 }
 
+private func forumSpoilerMarkdown(_ markdown: String) -> String {
+    // Keep the entire link inside the reveal span when its label is spoiled.
+    guard let links = try? NSRegularExpression(pattern: "\\[((?:!!!!|!!))([^\\]]+?)\\1\\]\\(([^)]+)\\)") else { return markdown }
+    let source = markdown as NSString
+    let codeRanges = forumInlineCodeRanges(markdown)
+    let result = NSMutableString(string: markdown)
+    for match in links.matches(in: markdown, range: NSRange(location: 0, length: source.length)).reversed() {
+        guard !codeRanges.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) else { continue }
+        let marker = source.substring(with: match.range(at: 1))
+        let label = source.substring(with: match.range(at: 2))
+        let target = source.substring(with: match.range(at: 3))
+        result.replaceCharacters(in: match.range, with: "\(marker)[\(label)](\(target))\(marker)")
+    }
+    return result as String
+}
+
+private func forumInlineCodeRanges(_ markdown: String) -> [NSRange] {
+    let code = try? NSRegularExpression(pattern: "(?<!`)(`+)(?!`)[\\s\\S]*?(?<!`)\\1(?!`)")
+    return code?.matches(in: markdown, range: NSRange(markdown.startIndex..., in: markdown)).map(\.range) ?? []
+}
+
+private func forumSpoilerMatches(_ markdown: String, pattern: NSRegularExpression) -> [NSTextCheckingResult] {
+    let codeRanges = forumInlineCodeRanges(markdown)
+    return pattern.matches(in: markdown, range: NSRange(markdown.startIndex..., in: markdown)).filter { match in
+        !codeRanges.contains { NSIntersectionRange($0, match.range).length > 0 }
+    }
+}
+
 private func renderInlineMarkdown(_ markdown: String, spoilersRevealed: Bool, pattern: NSRegularExpression) -> AttributedString {
-    let ns = markdown as NSString
-    let fullRange = NSRange(location: 0, length: ns.length)
-    let matches = pattern.matches(in: markdown, range: fullRange)
+    let normalized = forumSpoilerMarkdown(markdown)
+    let ns = normalized as NSString
+    let matches = forumSpoilerMatches(normalized, pattern: pattern)
     var result = AttributedString()
     var cursor = 0
     for match in matches {
@@ -735,6 +763,9 @@ private func renderInlineMarkdown(_ markdown: String, spoilersRevealed: Bool, pa
         }
         var spoiler = (try? forumInlineAttributes(ns.substring(with: spoilerRange))) ?? AttributedString(ns.substring(with: spoilerRange))
         if !spoilersRevealed {
+            // Concealed content cannot open invisible links; revealing restores
+            // the original Markdown link attributes on the next render.
+            spoiler.link = nil
             spoiler.foregroundColor = .clear
             spoiler.backgroundColor = NoveliaStyle.ink.opacity(0.78)
         }

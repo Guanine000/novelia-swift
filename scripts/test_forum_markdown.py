@@ -14,6 +14,8 @@ code += section('private struct ForumMarkdownBlock', 'private func isForumMarkdo
 code += section('private func isForumMarkdownDivider', 'private struct Forum')
 code += section('private func forumTableCells', 'private func forumInlineAttributes')
 code += section('private func forumInlineAttributes', 'private struct ForumNovelRoute')
+code += 'private enum NoveliaStyle { static let ink = Color.black }\n'
+code += section('private func forumSpoilerMarkdown', 'private struct ForumStarRating')
 wenku = (root / 'Sources/NoveliaIOSCore/WenkuNovel.swift').read_text()
 code += wenku[:wenku.index('public struct WenkuNovelDetail')]
 code += source[source.index('private struct ForumNovelRoute'):]
@@ -59,6 +61,19 @@ for value in ["~~[小说](https://n.novelia.cc/novel/x/y)~~", "[~~小说~~](http
     check(rendered.runs.contains { $0.link?.absoluteString == "https://n.novelia.cc/novel/x/y" }, "strike removed link")
     check(rendered.runs.contains { $0.strikethroughStyle != nil }, "strike missing")
 }
+
+private let spoilerPattern = try NSRegularExpression(pattern: "!!!!([\\s\\S]+?)!!!!|!!([\\s\\S]+?)!!")
+for sample in ["!!文字中的[链接](https://forum.novelia.cc/p/342)!!", "!!!![小说](https://n.novelia.cc/novel/x/y)!!!!", "[!!小说!!](https://n.novelia.cc/novel/x/y)", "[!!!!小说!!!!](https://n.novelia.cc/novel/x/y)", "`!!示例!!` 正文 !![链接](https://forum.novelia.cc/p/342)!!"] {
+    let revealed = renderInlineMarkdown(sample, spoilersRevealed: true, pattern: spoilerPattern)
+    check(revealed.runs.contains { $0.link != nil }, "revealed spoiler link missing")
+    let hidden = renderInlineMarkdown(sample, spoilersRevealed: false, pattern: spoilerPattern)
+    check(!hidden.runs.contains { $0.link != nil }, "hidden spoiler link remains actionable")
+}
+check(forumSpoilerMatches("`!!示例!!`", pattern: spoilerPattern).isEmpty, "inline code treated as spoiler")
+check(forumSpoilerMatches("``!!示例!!``", pattern: spoilerPattern).isEmpty, "double-backtick code treated as spoiler")
+check(forumSpoilerMarkdown("`[!!示例!!](https://example.com)`") == "`[!!示例!!](https://example.com)`", "link syntax inside code changed")
+private let adjacent = renderInlineMarkdown("[前半](https://n.novelia.cc/novel/x/y)!!遮挡!![后半](https://n.novelia.cc/novel/x/y)", spoilersRevealed: true, pattern: spoilerPattern)
+check(adjacent.runs.filter { $0.link != nil }.count == 2, "links beside spoiler lost")
 check(ForumNovelRoute(url: URL(string: "https://n.novelia.cc/novel/syosetu/n123#chapter")!)?.provider == "syosetu", "web novel route")
 check(ForumNovelRoute(url: URL(string: "https://n.novelia.cc/wenku/book123")!)?.outline.id == "book123", "wenku route")
 check(ForumNovelRoute(url: URL(string: "/novel/syosetu/n123")!)?.novelID == "n123", "relative route")
