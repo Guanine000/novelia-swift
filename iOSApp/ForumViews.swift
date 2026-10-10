@@ -166,12 +166,12 @@ struct ForumView: View {
                             Task { await store.selectSource(.favorites) }
                         }
                         if auth.username != nil {
-                            Button("退出论坛登录", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                            Button("退出登录", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
                                 auth.logout()
                                 Task { await store.selectSource(.all) }
                             }
                         } else {
-                            Button("登录论坛", systemImage: "person.crop.circle.badge.plus") { auth.isLoginPresented = true }
+                            Button("登录 Novelia", systemImage: "person.crop.circle.badge.plus") { auth.isLoginPresented = true }
                         }
                     } label: {
                         Label(auth.username ?? "我的", systemImage: "person.crop.circle")
@@ -373,7 +373,7 @@ private struct ForumPostDetailView: View {
                         Button {
                             beginComment()
                         } label: {
-                            Label(auth.username == nil ? "登录论坛后发表评论" : "发表评论", systemImage: "square.and.pencil")
+                            Label(auth.username == nil ? "登录 Novelia后发表评论" : "发表评论", systemImage: "square.and.pencil")
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(14)
                                 .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
@@ -1401,7 +1401,7 @@ private struct ForumComposeView: View {
         Form {
             if auth.username == nil {
                 Section {
-                    Button("登录论坛后发布") { auth.isLoginPresented = true }
+                    Button("登录 Novelia后发布") { auth.isLoginPresented = true }
                 } footer: {
                     Text("登录后会保留当前正在编写的内容。")
                 }

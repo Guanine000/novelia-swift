@@ -191,6 +191,8 @@ struct RootView: View {
         .environmentObject(webNovelDownloads)
         .environmentObject(webDAVSync)
         .task {
+            auth.forumAuth = forumAuth
+            forumAuth.accountAuth = auth
             await NoveliaSessionRenewal.shared.register(app: "n") { [weak auth] in
                 guard let auth, await auth.refreshSession() else { return nil }
                 return NoveliaSessionTokenVault.read()
@@ -215,6 +217,12 @@ struct RootView: View {
     }
 
     private func restoreSessions() async {
+        if auth.username != nil || forumAuth.username != nil {
+            if auth.username == nil || forumAuth.username != auth.username {
+                _ = await auth.establishUnifiedSession()
+                return
+            }
+        }
         _ = await NoveliaSessionRenewal.shared.token(app: "n", current: NoveliaSessionTokenVault.read())
         _ = await NoveliaSessionRenewal.shared.token(app: "f", current: NoveliaForumSessionTokenVault.read())
     }

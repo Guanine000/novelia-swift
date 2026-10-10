@@ -12,6 +12,7 @@ final class AccountAuthStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var isLoginPresented = false
 
+    weak var forumAuth: ForumAuthStore?
     private var sessionGeneration = 0
     private let cookieStore = WKWebsiteDataStore.default().httpCookieStore
     private let siteOrigin = URL(string: "https://n.novelia.cc")!
@@ -85,10 +86,31 @@ final class AccountAuthStore: ObservableObject {
     /// Mirrors the upstream client's local logout: clear this app token but retain the
     /// shared authentication website cookies, so another Novelia client session is unaffected.
     func logout() {
+        clearSession()
+        forumAuth?.clearSession()
+    }
+
+    func clearSession() {
         sessionGeneration += 1
         NoveliaSessionTokenVault.clear()
         username = nil
         errorMessage = nil
+    }
+
+    /// One website login establishes both API sessions for the same account.
+    func establishUnifiedSession() async -> Bool {
+        while isRefreshing || forumAuth?.isRefreshing == true {
+            do { try await Task.sleep(nanoseconds: 100_000_000) }
+            catch { return false }
+        }
+        guard !Task.isCancelled, await refreshSession(), let account = username else { return false }
+        guard let forumAuth else { return false }
+        if forumAuth.username != account { forumAuth.clearSession() }
+        guard await forumAuth.refreshSession(), forumAuth.username == account else {
+            errorMessage = "账号已登录，论坛会话暂未建立，请重试完成登录。"
+            return false
+        }
+        return true
     }
 
     private func cookiesForSite() async -> [HTTPCookie] {
@@ -132,6 +154,7 @@ final class ForumAuthStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var isLoginPresented = false
 
+    weak var accountAuth: AccountAuthStore?
     private var sessionGeneration = 0
     private let cookieStore = WKWebsiteDataStore.default().httpCookieStore
     private let siteOrigin = URL(string: "https://forum.novelia.cc")!
@@ -178,6 +201,9 @@ final class ForumAuthStore: ObservableObject {
             let token = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             guard let parsedUsername = AccountAuthStore.username(from: token) else { throw AccountAuthError.invalidToken }
             guard generation == sessionGeneration else { return false }
+            if let expected = accountAuth?.username, parsedUsername != expected {
+                throw AccountAuthError.invalidToken
+            }
             try NoveliaForumSessionTokenVault.save(token)
             username = parsedUsername
             return true
@@ -193,10 +219,22 @@ final class ForumAuthStore: ObservableObject {
     }
 
     func logout() {
+        clearSession()
+        accountAuth?.clearSession()
+    }
+
+    func clearSession() {
         sessionGeneration += 1
         NoveliaForumSessionTokenVault.clear()
         username = nil
         errorMessage = nil
+    }
+
+    func establishUnifiedSession() async -> Bool {
+        guard let accountAuth else { return false }
+        let success = await accountAuth.establishUnifiedSession()
+        if !success { errorMessage = accountAuth.errorMessage }
+        return success
     }
 
     private func cookiesForSite() async -> [HTTPCookie] {
@@ -327,7 +365,7 @@ struct NoveliaLoginSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(auth.isRefreshing ? "验证中…" : "完成登录") {
                         Task {
-                            if await auth.refreshSession() { dismiss() }
+                            if await auth.establishUnifiedSession() { dismiss() }
                         }
                     }
                     .disabled(auth.isRefreshing)
@@ -360,7 +398,7 @@ struct NoveliaLoginSheet: View {
                     try await Task.sleep(nanoseconds: 100_000_000)
                 }
                 try Task.checkCancellation()
-                if await auth.refreshSession(), !Task.isCancelled { dismiss() }
+                if await auth.establishUnifiedSession(), !Task.isCancelled { dismiss() }
             } catch { /* Closing the sheet cancels automatic completion. */ }
         }
     }
@@ -503,7 +541,7 @@ struct ForumLoginSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Text("使用论坛账号登录。账号密码由 Novelia 认证网站直接处理，并与小说账号的 API 会话分开保存。")
+                Text("使用同一个 Novelia 账号登录小说与论坛。账号密码由官方认证网站直接处理。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -512,13 +550,13 @@ struct ForumLoginSheet: View {
                     completeLogin()
                 }, onLoadFailure: { auth.errorMessage = $0 })
             }
-            .navigationTitle("登录 Novelia 论坛")
+            .navigationTitle("登录 Novelia")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(auth.isRefreshing ? "验证中…" : "完成登录") {
-                        Task { if await auth.refreshSession() { dismiss() } }
+                        Task { if await auth.establishUnifiedSession() { dismiss() } }
                     }
                     .disabled(auth.isRefreshing)
                 }
@@ -546,7 +584,7 @@ struct ForumLoginSheet: View {
                     try await Task.sleep(nanoseconds: 100_000_000)
                 }
                 try Task.checkCancellation()
-                if await auth.refreshSession(), !Task.isCancelled { dismiss() }
+                if await auth.establishUnifiedSession(), !Task.isCancelled { dismiss() }
             } catch { /* Closing the sheet cancels automatic completion. */ }
         }
     }
