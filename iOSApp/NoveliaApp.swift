@@ -141,6 +141,9 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("appThemeColor") private var appThemeColorRaw = AppThemeColor.novelia.rawValue
     @AppStorage("appThemeCustomHex") private var appThemeCustomHex = "559775"
+    @Environment(\.openURL) private var openURL
+    @AppStorage(NoveliaUpdateStore.enabledKey) private var checksUpdates = true
+    @StateObject private var updates = NoveliaUpdateStore()
     @StateObject private var auth = AccountAuthStore()
     @StateObject private var forumAuth = ForumAuthStore()
     @StateObject private var favorites = FavoritesStore()
@@ -190,6 +193,21 @@ struct RootView: View {
         .environmentObject(wenkuDownloads)
         .environmentObject(webNovelDownloads)
         .environmentObject(webDAVSync)
+        .task { await updates.check() }
+        .onChange(of: checksUpdates) { _, enabled in
+            if enabled { Task { await updates.check(force: true) } }
+            else { updates.release = nil }
+        }
+        .alert("发现新版本", isPresented: Binding(
+            get: { updates.release != nil },
+            set: { if !$0 { updates.release = nil } }
+        ), presenting: updates.release) { release in
+            Button("跳转下载") { if let url = release.downloadPage { openURL(url) } }
+            Button("取消", role: .cancel) { updates.release = nil }
+            Button("忽略此版本") { updates.ignore(release) }
+        } message: { release in
+            Text("Novelia \(release.version?.display ?? release.tag_name) 已发布，是否前往下载页面？")
+        }
         .task {
             auth.forumAuth = forumAuth
             forumAuth.accountAuth = auth
@@ -227,4 +245,169 @@ struct RootView: View {
         _ = await NoveliaSessionRenewal.shared.token(app: "f", current: NoveliaForumSessionTokenVault.read())
     }
 
+}
+
+/// Stable release numbers only; prereleases are intentionally excluded.
+struct NoveliaReleaseVersion: Comparable, Equatable {
+    let parts: [Int]
+    init?(_ text: String) {
+        let value = text.hasPrefix("v") ? String(text.dropFirst()) : text
+        let fields = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard fields.count == 3, fields.allSatisfy({ !$0.isEmpty && $0.allSatisfy({ $0.isASCII && $0.isNumber }) }),
+              fields.allSatisfy({ Int($0) != nil }) else { return nil }
+        parts = fields.map { Int($0)! }
+    }
+    static func < (lhs: Self, rhs: Self) -> Bool { lhs.parts.lexicographicallyPrecedes(rhs.parts) }
+    var display: String { parts.map(String.init).joined(separator: ".") }
+}
+
+struct NoveliaGitHubRelease: Decodable {
+    let tag_name: String
+    let html_url: String
+    let draft: Bool
+    let prerelease: Bool
+    var version: NoveliaReleaseVersion? { NoveliaReleaseVersion(tag_name) }
+    var downloadPage: URL? {
+        guard let url = URL(string: html_url), let c = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              c.scheme == "https", c.host == "github.com", c.user == nil, c.password == nil,
+              c.port == nil, c.path.hasPrefix("/Guanine000/novelia-swift/releases/tag/") else { return nil }
+        return url
+    }
+    func shouldOffer(current: String, ignored: String) -> Bool {
+        guard !draft, !prerelease, downloadPage != nil, let version,
+              let installed = NoveliaReleaseVersion(current), version > installed else { return false }
+        return NoveliaReleaseVersion(ignored) != version
+    }
+}
+
+@MainActor
+final class NoveliaUpdateStore: ObservableObject {
+    static let enabledKey = "automaticallyCheckGitHubUpdates"
+    static let ignoredKey = "ignoredGitHubReleaseVersion"
+    @Published var release: NoveliaGitHubRelease?
+    private var checkedThisLaunch = false
+    private var isChecking = false
+    private let defaults: UserDefaults
+    private let session: URLSession
+    private let currentVersion: String
+
+    init(defaults: UserDefaults = .standard, session: URLSession = .shared,
+         currentVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") {
+        self.defaults = defaults
+        self.session = session
+        self.currentVersion = currentVersion
+        defaults.register(defaults: [Self.enabledKey: true])
+    }
+
+    func check(force: Bool = false) async {
+        guard defaults.bool(forKey: Self.enabledKey), !isChecking, force || !checkedThisLaunch else { return }
+        checkedThisLaunch = true
+        isChecking = true
+        defer { isChecking = false }
+        var request = URLRequest(url: URL(string: "https://api.github.com/repos/Guanine000/novelia-swift/releases/latest")!)
+        request.timeoutInterval = 15
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("Novelia-iOS", forHTTPHeaderField: "User-Agent")
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard defaults.bool(forKey: Self.enabledKey), let response = response as? HTTPURLResponse,
+                  response.statusCode == 200 else { return }
+            let candidate = try JSONDecoder().decode(NoveliaGitHubRelease.self, from: data)
+            if candidate.shouldOffer(current: currentVersion, ignored: defaults.string(forKey: Self.ignoredKey) ?? "") {
+                release = candidate
+            }
+        } catch {
+            // An unavailable update service must not interrupt reading or login.
+        }
+    }
+
+    func ignore(_ candidate: NoveliaGitHubRelease) {
+        defaults.set(candidate.version?.display, forKey: Self.ignoredKey)
+        release = nil
+    }
+}
+
+struct SyncedBlockedTag: Codable, Equatable {
+    var blocked: Bool
+    var updatedAt: Date
+}
+
+@MainActor
+final class BlockedTagsStore: ObservableObject {
+    static let shared = BlockedTagsStore()
+    @Published private(set) var tags: [String]
+    @Published private(set) var wenkuTags: [String: [String]]
+    private let defaults: UserDefaults
+    private(set) var syncStates: [String: SyncedBlockedTag]
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        syncStates = defaults.data(forKey: "blockedNovelTags.sync.v1")
+            .flatMap { try? JSONDecoder().decode([String: SyncedBlockedTag].self, from: $0) } ?? [:]
+        for tag in defaults.stringArray(forKey: "blockedNovelTags") ?? [] where syncStates[tag] == nil {
+            syncStates[tag] = SyncedBlockedTag(blocked: true, updatedAt: .distantPast)
+        }
+        tags = syncStates.filter { $0.value.blocked }.map(\.key).sorted()
+        wenkuTags = defaults.dictionary(forKey: "knownWenkuTags") as? [String: [String]] ?? [:]
+    }
+    func contains(_ tag: String) -> Bool { tags.contains(tag.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    func add(_ tag: String) {
+        let value = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, !tags.contains(value) else { return }
+        syncStates[value] = SyncedBlockedTag(blocked: true, updatedAt: Date()); persist()
+    }
+    func remove(_ tag: String) {
+        syncStates[tag] = SyncedBlockedTag(blocked: false, updatedAt: Date()); persist()
+    }
+    static func merged(_ local: [String: SyncedBlockedTag], _ remote: [String: SyncedBlockedTag]) -> [String: SyncedBlockedTag] {
+        var result = local
+        for (tag, value) in remote where !tag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let existing = result[tag] {
+                if value.updatedAt > existing.updatedAt || (value.updatedAt == existing.updatedAt && !value.blocked) {
+                    result[tag] = value
+                }
+            } else { result[tag] = value }
+        }
+        return result
+    }
+    func applySynced(_ remote: [String: SyncedBlockedTag]) {
+        syncStates = Self.merged(syncStates, remote); persist()
+    }
+    private func persist() {
+        tags = syncStates.filter { $0.value.blocked }.map(\.key).sorted()
+        defaults.set(tags, forKey: "blockedNovelTags")
+        if let data = try? JSONEncoder().encode(syncStates) { defaults.set(data, forKey: "blockedNovelTags.sync.v1") }
+    }
+    func hides(_ genres: [String]) -> Bool { genres.contains(where: contains) }
+    func rememberWenku(id: String, tags: [String]) {
+        guard wenkuTags[id] != tags else { return }
+        wenkuTags[id] = tags; defaults.set(wenkuTags, forKey: "knownWenkuTags")
+    }
+}
+
+struct BlockedTagsView: View {
+    @ObservedObject private var blocked = BlockedTagsStore.shared
+    @State private var newTag = ""
+    var body: some View {
+        Form {
+            Section("添加屏蔽标签") {
+                TextField("标签名称（精确匹配）", text: $newTag)
+                Button("添加") { blocked.add(newTag); newTag = "" }
+                    .disabled(newTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            Section("已屏蔽标签") {
+                if blocked.tags.isEmpty { Text("暂无屏蔽标签").foregroundStyle(.secondary) }
+                ForEach(blocked.tags, id: \.self) { tag in
+                    HStack {
+                        Text(tag); Spacer()
+                        Button("解除屏蔽") { blocked.remove(tag) }.buttonStyle(.borderless)
+                    }
+                }
+            }
+            Section {
+                Text("含任一屏蔽标签的作品会从发现、搜索和排行榜中隐藏；书架、收藏及下载不受影响。标签按完整名称匹配，设置保存在本机，也可通过手动 WebDAV 同步屏蔽和解除记录。文库列表不返回标签，只能过滤本机已查看过详情的作品。")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("标签屏蔽")
+    }
 }

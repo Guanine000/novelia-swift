@@ -11,10 +11,11 @@ r = Path(tempfile.mkdtemp(prefix='NoveliaEditorRegression-'))
 s = (Path(__file__).resolve().parents[1] / 'iOSApp/ForumViews.swift').read_text()
 component = s[s.index('private struct ForumComposeView'):s.index('private extension String', s.index('private struct ForumComposeView'))]
 fixture = 'import SwiftUI\nimport Combine\nprivate enum NoveliaStyle { static let paper = Color.white; static let brandGreen = Color.green; static let muted = Color.gray }\nprivate final class ForumAuthStore: ObservableObject { @Published var username: String? = "test-author"; @Published var isLoginPresented = false }\nprivate enum NoveliaForumSessionTokenVault { static func read() -> String? { nil } }\nprivate struct ForumTag: Identifiable { let id: Int64; let name: String; let sortOrder = 0 }\nprivate struct ForumCategory: Identifiable { let id: Int64; let title: String; let tags: [ForumTag] }\nprivate struct ForumPost { let id: Int64; let categoryId: Int64; let title: String; let content: String; let authorUsername: String; let tags: [ForumTag] }\nprivate struct ForumAPIClient {\n static var fail = false\n init(tokenProvider: @escaping () -> String?) {}\n func updatePost(id: Int64, categoryID: Int64, title: String, content: String, tagIDs: [Int64]) async throws -> ForumPost {\n  if Self.fail { throw NSError(domain: "Mock", code: 403, userInfo: [NSLocalizedDescriptionKey: "保存失败测试"]) }\n  return ForumPost(id: id, categoryId: categoryID, title: title, content: content, authorUsername: "test-author", tags: tagIDs.map { ForumTag(id: $0, name: "测试标签") })\n }\n func createPost(categoryID: Int64, title: String, content: String, tagIDs: [Int64]) async throws -> ForumPost { try await updatePost(id: 42, categoryID: categoryID, title: title, content: content, tagIDs: tagIDs) }\n}\nprivate struct ForumErrorOverlay: View {\n let message: String; let onDismiss: () -> Void\n var body: some View { VStack { Text(message); Button("关闭", action: onDismiss) }.padding().background(.white) }\n}\n@main struct TapRegressionApp: App { var body: some Scene { WindowGroup { TestScreen() } } }\nprivate struct TestScreen: View {\n @StateObject private var auth = ForumAuthStore()\n @State private var editing = false\n @State private var post = ForumPost(id: 42, categoryId: 7, title: "Original", content: "first\\nlast\\n", authorUsername: "test-author", tags: [ForumTag(id: 3, name: "测试标签")])\n var body: some View {\n  VStack {\n   Text("Saved: \\(post.title)")\n   Button("编辑") { ForumAPIClient.fail = false; editing = true }\n   Button("错误测试") { ForumAPIClient.fail = true; editing = true }\n  }\n  .sheet(isPresented: $editing) {\n   NavigationStack { ForumComposeView(categories: [ForumCategory(id: 7, title: "测试分类", tags: [ForumTag(id: 3, name: "测试标签")])], editingPost: post) { post = $0 } }\n  }\n  .environmentObject(auth)\n }\n}\n'
-fixture = fixture.replace('import Combine', 'import Combine\nimport UIKit').replace('static let paper', 'static let ink = Color.black; static let card = Color.white; static let paper')
+fixture = fixture.replace('import Combine', 'import Combine\nimport UIKit\nimport WebKit').replace('static let paper', 'static let ink = Color.black; static let card = Color.white; static let paper')
 fixture = fixture.replace('let title: String; let tags: [ForumTag] }', 'let title: String; let slug = "novel"; let tags: [ForumTag] }')
 fixture = fixture.replace(' static var fail = false', ' func categories() async throws -> [ForumCategory] { [ForumCategory(id: 7, title: "测试分类", tags: [ForumTag(id: 3, name: "测试标签")])] }\n static var fail = false')
 fixture = fixture.replace('.sheet(isPresented: $editing)', '.fullScreenCover(isPresented: $editing)')
+fixture += 'private struct ForumView: View { var initialCategory: String = ""; var initialQuery: String = ""; var body: some View { Text("分类: \(initialCategory) 搜索: \(initialQuery)").navigationTitle("分类页面") } }\n'
 fixture += 'private enum ForumMarkdownMode { case article, comment }\nprivate struct ForumMarkdownBody: View { let markdown: String; var mode: ForumMarkdownMode = .article; var body: some View { Text((try? AttributedString(markdown: markdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(markdown)) } }\n'
 support = s[s.index('private struct ForumComposeNotice'):s.index('private struct ForumCommentEditorSheet')]
 editor = s[s.index('private struct ForumMarkdownEditor'):s.index('private struct ForumMarkdownBlock')]
@@ -43,6 +44,22 @@ tests = tests.replace('app.buttons["保存修改"].tap()', 'dismissKeyboard(app)
 tests = tests.replace('app.buttons["关闭"].tap(); XCTAssertEqual(title.value as? String, draft)', 'app.buttons["关闭"].tap(); reveal(title, app); XCTAssertEqual(title.value as? String, draft)')
 tests = tests.replace('XCTAssertTrue(app.buttons["保存修改"].isEnabled)', 'reveal(app.buttons["保存修改"], app); XCTAssertTrue(app.buttons["保存修改"].isEnabled)')
 extra = extra.replace('app.swipeUp(); XCTAssertTrue(editor.waitForExistence(timeout: 5))', 'reveal(editor, app); XCTAssertTrue(editor.exists)').replace('app.buttons["剧透"].tap()', 'reveal(app.buttons["粗体"], app); app.buttons["粗体"].swipeLeft(); app.buttons["剧透"].tap()').replace('app.buttons["预览"].tap()', 'dismissKeyboard(app); app.buttons["预览"].tap()').replace('app.buttons["Markdown 语法帮助"].tap()', 'reveal(app.buttons["Markdown 语法帮助"], app); app.buttons["Markdown 语法帮助"].tap()')
+extra += r"""
+ func testNoticeCategoriesAndDraftReturn() {
+  let app = XCUIApplication(); app.launch(); app.buttons["编辑"].tap()
+  let link = app.links["站务公告"]
+  XCTAssertTrue(link.waitForExistence(timeout: 5)); link.tap()
+  XCTAssertTrue(app.staticTexts["分类: announcements 搜索: "].waitForExistence(timeout: 5))
+  app.navigationBars["分类页面"].buttons.firstMatch.tap()
+  let title = app.textFields["forum-post-title"]
+  XCTAssertTrue(title.waitForExistence(timeout: 5)); XCTAssertEqual(title.value as? String, "Original")
+  let feedback = app.links["意见反馈"]; XCTAssertTrue(feedback.exists); feedback.tap()
+  XCTAssertTrue(app.staticTexts["分类: feedback 搜索: "].waitForExistence(timeout: 5))
+  app.navigationBars["分类页面"].buttons.firstMatch.tap()
+  app.links["求书集中帖"].tap()
+  XCTAssertTrue(app.staticTexts["分类: novel 搜索: 求书集中贴"].waitForExistence(timeout: 5))
+ }
+"""
 tests = tests.rsplit('}', 1)[0] + extra + '}\n'
 tests = tests.replace('app.textFields.firstMatch', 'app.textFields["forum-post-title"]').replace('app.buttons["预览"]', 'app.segmentedControls.buttons["预览"]').replace('app.buttons["编辑"].tap(); XCTAssertEqual(editor', 'app.segmentedControls.buttons["编辑"].tap(); XCTAssertEqual(editor')
 
