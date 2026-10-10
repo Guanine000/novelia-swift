@@ -130,7 +130,7 @@ public struct NoveliaAPIClient: Sendable {
 
         var request = URLRequest(url: url)
         request.setValue("application/epub+zip, application/octet-stream", forHTTPHeaderField: "Accept")
-        if let token = tokenProvider(), !token.isEmpty {
+        if let token = await NoveliaSessionRenewal.shared.token(app: "n", current: tokenProvider()), !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         request.timeoutInterval = 180
@@ -232,7 +232,7 @@ public struct NoveliaAPIClient: Sendable {
         guard let url = components.url else { throw NoveliaAPIError.invalidURL }
         var request = URLRequest(url: url)
         request.setValue("application/epub+zip, application/octet-stream", forHTTPHeaderField: "Accept")
-        if let token = tokenProvider(), !token.isEmpty {
+        if let token = await NoveliaSessionRenewal.shared.token(app: "n", current: tokenProvider()), !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         request.timeoutInterval = 120
@@ -372,12 +372,12 @@ public struct NoveliaAPIClient: Sendable {
         } else if method != "GET" && method != "HEAD" {
             request.httpBody = Data()
         }
-        if let token = tokenProvider(), !token.isEmpty {
+        if let token = await NoveliaSessionRenewal.shared.token(app: "n", current: tokenProvider()), !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         request.timeoutInterval = 30
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await NoveliaSessionRenewal.data(session: session, request: request, app: "n", tokenProvider: tokenProvider)
         guard let http = response as? HTTPURLResponse else { throw NoveliaAPIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
             throw NoveliaAPIError.httpStatus(http.statusCode, serverMessage(in: data))
@@ -833,5 +833,60 @@ private extension String {
     var nonEmpty: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+
+/// Coordinates each app's access-token renewal without sharing novel/forum sessions.
+public actor NoveliaSessionRenewal {
+    public static let shared = NoveliaSessionRenewal()
+    private var handlers: [String: @Sendable () async -> String?] = [:]
+    private var pending: [String: (id: UUID, task: Task<String?, Never>)] = [:]
+
+    public func register(app: String, handler: @escaping @Sendable () async -> String?) {
+        handlers[app] = handler
+    }
+
+    public static func claims(_ token: String) -> (subject: String, expiration: Double)? {
+        let parts = token.split(separator: ".")
+        guard parts.count == 3 else { return nil }
+        var payload = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
+        guard let data = Data(base64Encoded: payload),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let subject = json["sub"] as? String,
+              let expiration = json["exp"] as? NSNumber else { return nil }
+        return (subject, expiration.doubleValue)
+    }
+
+    public func token(app: String, current: String?, force: Bool = false) async -> String? {
+        guard let current, let claims = Self.claims(current) else { return current }
+        guard force || claims.expiration <= Date().timeIntervalSince1970 + 60 else { return current }
+        guard let handler = handlers[app] else { return current }
+        let entry: (id: UUID, task: Task<String?, Never>)
+        if let existing = pending[app] { entry = existing }
+        else {
+            entry = (UUID(), Task { await handler() })
+            pending[app] = entry
+        }
+        let refreshed = await entry.task.value
+        if pending[app]?.id == entry.id { pending[app] = nil }
+        guard let refreshed, Self.claims(refreshed)?.subject == claims.subject else { return current }
+        return refreshed
+    }
+
+    public static func data(session: URLSession, request: URLRequest, app: String,
+                            tokenProvider: @Sendable () -> String?) async throws -> (Data, URLResponse) {
+        let initial = tokenProvider()
+        let token = await shared.token(app: app, current: initial)
+        var authenticated = request
+        authenticated.setValue(token.map { "Bearer \($0)" }, forHTTPHeaderField: "Authorization")
+        let result = try await session.data(for: authenticated)
+        guard (result.1 as? HTTPURLResponse)?.statusCode == 401, let token else { return result }
+        let replacement = await shared.token(app: app, current: token, force: true)
+        guard let replacement, replacement != token,
+              Self.claims(tokenProvider() ?? "")?.subject == Self.claims(token)?.subject else { return result }
+        authenticated.setValue("Bearer \(replacement)", forHTTPHeaderField: "Authorization")
+        return try await session.data(for: authenticated)
     }
 }

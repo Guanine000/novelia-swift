@@ -129,7 +129,7 @@ public struct ForumAPIClient: Sendable {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         request.timeoutInterval = 30
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await NoveliaSessionRenewal.data(session: session, request: request, app: "f", tokenProvider: tokenProvider)
         guard let http = response as? HTTPURLResponse else { throw ForumAPIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
             let jsonMessage = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])

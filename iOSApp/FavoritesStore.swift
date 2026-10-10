@@ -115,10 +115,10 @@ final class FavoritesStore: ObservableObject {
     }
 
     private func apiClient(for account: String) throws -> NoveliaAPIClient {
-        guard let token = NoveliaSessionTokenVault.read(), Self.username(from: token) == account else {
+        guard let token = NoveliaSessionTokenVault.read(), NoveliaSessionRenewal.claims(token)?.subject == account else {
             throw NoveliaFavoritesError.loginRequired
         }
-        return NoveliaAPIClient(tokenProvider: { token })
+        return NoveliaAPIClient()
     }
 
     private func cacheKey(for account: String) -> String {
