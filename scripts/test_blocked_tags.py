@@ -7,6 +7,8 @@ source = (Path(__file__).resolve().parents[1]/'iOSApp/NoveliaApp.swift').read_te
 code = 'import Foundation\nimport Combine\n' + source[source.index('struct SyncedBlockedTag:'):source.index('struct BlockedTagsView: View')]
 webdav = (Path(__file__).resolve().parents[1]/'iOSApp/WebDAVSync.swift').read_text()
 code += '\nstruct DownloadedWebNovel: Codable {}\nstruct LocalWenkuEPUB: Codable {}\nstruct SyncedReadingPosition: Codable {}\n'
+code += source[source.index('struct SyncedReaderBackground:'):source.index('@MainActor\nextension ReaderBackgroundStore')]
+code += source[source.index('struct SyncedImportedFont:'):]
 code += webdav[webdav.index('private struct WebDAVAsset:'):webdav.index('private enum WebDAVSyncError:')]
 code += r'''
 @main struct Tests {
@@ -29,6 +31,12 @@ code += r'''
   let roundtrip = try! JSONDecoder().decode(WebDAVManifest.self, from: JSONEncoder().encode(manifest))
   precondition(roundtrip.blockedTags == restored.syncStates)
   let old = Date(timeIntervalSince1970: 100), newer = Date(timeIntervalSince1970: 200)
+  let font = ["hash": SyncedImportedFont(hash: "hash", format: "ttf", deleted: false, updatedAt: old)]
+  let deletedFont = ["hash": SyncedImportedFont(hash: "hash", format: "ttf", deleted: true, updatedAt: newer)]
+  precondition(SyncedImportedFont.merged(font, deletedFont)["hash"]!.deleted)
+  precondition(SyncedImportedFont.merged(deletedFont, font)["hash"]!.deleted)
+  let tied = ["hash": SyncedImportedFont(hash: "hash", format: "ttf", deleted: true, updatedAt: old)]
+  precondition(SyncedImportedFont.merged(font, tied)["hash"]!.deleted && SyncedImportedFont.merged(tied, font)["hash"]!.deleted)
   let remote = ["标签B": SyncedBlockedTag(blocked: true, updatedAt: old)]
   restored.applySynced(remote); precondition(restored.contains("标签B"))
   let unblocked = ["标签B": SyncedBlockedTag(blocked: false, updatedAt: newer)]

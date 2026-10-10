@@ -185,7 +185,7 @@ final class PrototypePageBook {
 
     /// 渲染并缓存页面位图。预览与落页取同一缓存键，天然是同一份结果。
     func renderedImage(for id: PrototypePageID, scale: CGFloat,
-                       background: UIColor) -> CGImage? {
+                       background: UIColor, backgroundImage: UIImage? = nil) -> CGImage? {
         if let cached = renderedImages[id] { return cached }
         guard let chapter = chapters[id.spineIndex],
               chapter.pages.indices.contains(id.pageIndex) else { return nil }
@@ -204,6 +204,11 @@ final class PrototypePageBook {
             let canvasRect = CGRect(origin: .zero, size: canvas.size)
             background.setFill()
             context.fill(canvasRect)
+            if let backgroundImage {
+                let ratio = max(canvasRect.width / backgroundImage.size.width, canvasRect.height / backgroundImage.size.height)
+                let size = CGSize(width: backgroundImage.size.width * ratio, height: backgroundImage.size.height * ratio)
+                backgroundImage.draw(in: CGRect(x: (canvasRect.width - size.width) / 2, y: (canvasRect.height - size.height) / 2, width: size.width, height: size.height))
+            }
             // UIKit 渲染上下文已是左上原点、y 向下，DisplayList.draw 直接可用。
             list.draw(in: context.cgContext)
         }

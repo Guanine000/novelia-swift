@@ -12,6 +12,7 @@ import UniformTypeIdentifiers
 // 分页不变量见 PrototypePageBook：预览页与落页共用同一份排版结果。
 
 struct PrototypeReaderView: View {
+    @ObservedObject private var backgrounds = ReaderBackgroundStore.shared
     @StateObject private var model = PrototypeReaderModel()
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
@@ -28,7 +29,7 @@ struct PrototypeReaderView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                model.pageBackgroundColor.ignoresSafeArea()
+                ReaderBackgroundView(dark: model.isDarkMode, fallback: model.pageBackgroundColor).ignoresSafeArea()
                 switch model.status {
                 case .idle, .opening:
                     ProgressView("正在解析 EPUB…")
@@ -94,6 +95,8 @@ struct PrototypeReaderView: View {
         // Toggling the system bar changes safe-area height and repaginates the book.
         .statusBarHidden(true)
         .sheet(isPresented: $isShowingTOC) { tocSheet }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NoveliaImportedFontsChanged"))) { _ in model.refreshBackground() }
+        .onChange(of: backgrounds.revision) { _, _ in model.refreshBackground() }
         .sheet(isPresented: $isShowingStyle) { styleSheet }
         .sheet(item: $model.activeNote) { note in noteSheet(note) }
         .alert("链接", isPresented: .init(
@@ -363,6 +366,7 @@ struct PrototypeReaderView: View {
     private var styleSheet: some View {
         NavigationStack {
             Form {
+                Section("背景") { NavigationLink("阅读背景") { ReaderBackgroundSettingsView() } }
                 Section("分页") {
                     Toggle("双页模式", isOn: Binding(get: { draftStyle.doublePage == true }, set: { draftStyle.doublePage = $0 }))
                     Text("每次显示两页；横屏或 iPad 上阅读更舒适。章节末尾不足两页时保留空白页。")

@@ -203,7 +203,7 @@ struct ReaderView: View {
                 .frame(maxWidth: 660)
                 .frame(maxWidth: .infinity)
             }
-            .background(readerBackground.ignoresSafeArea())
+            .background(ReaderBackgroundView(dark: appearance.isDark(system: systemColorScheme), fallback: readerBackground).ignoresSafeArea())
             .onChange(of: chapterIndex) { _, newIndex in
                 guard novel.chapters.indices.contains(newIndex) else { return }
                 savedChapterIndex = newIndex
@@ -245,6 +245,7 @@ struct ReaderView: View {
                             }
                         }
                         Divider()
+                        NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
                         Picker("阅读外观", selection: $appearanceRaw) {
                             ForEach(ReaderAppearance.allCases) { option in
                                 Text(option.title).tag(option.rawValue)

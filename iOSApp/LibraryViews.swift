@@ -2153,7 +2153,7 @@ private struct DownloadedWebNovelTXTReader: View {
                 ProgressView("正在打开 TXT…")
             }
         }
-        .background(appearance.background(system: systemColorScheme).ignoresSafeArea())
+        .background(ReaderBackgroundView(dark: appearance.isDark(system: systemColorScheme), fallback: appearance.background(system: systemColorScheme)).ignoresSafeArea())
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
@@ -2339,6 +2339,7 @@ struct SettingsView: View {
                 NavigationLink("标签屏蔽") { BlockedTagsView() }
             }
             Section("阅读体验") {
+                NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
                 Picker(selection: $themeColorRaw) {
                     ForEach(AppThemeColor.allCases) { option in
                         HStack(spacing: 8) {
