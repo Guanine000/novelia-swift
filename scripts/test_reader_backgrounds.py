@@ -50,6 +50,16 @@ struct CheckView: View {
    precondition(other.image(dark: false) == nil)
    try store.removeImage(dark: false)
    precondition(store.mode(dark: false) == "image" && store.image(dark: false) == nil && store.image(dark: false, landscape: true) != nil && store.mode(dark: true) == "color")
+   store.restoreDefaultColor(dark: false)
+   precondition(store.mode(dark: false) == "image" && store.hex(dark: false) == "FAF7F0" && store.image(dark: false, landscape: true) != nil)
+   store.restoreDefaultColor(dark: true)
+   precondition(store.mode(dark: true) == "default" && store.hex(dark: true) == "19191C")
+   store.setColor(Color(.sRGB, red: 0, green: 0, blue: 1, opacity: 1), dark: true)
+   try store.restoreDefaults(dark: false)
+   precondition(store.mode(dark: false) == "default" && store.hex(dark: false) == "FAF7F0")
+   let reset = try store.syncSnapshot(dark: false)
+   precondition(reset.portraitHash == nil && reset.landscapeHash == nil && reset.updatedAt > saved.updatedAt)
+   precondition(store.mode(dark: true) == "color" && store.hex(dark: true) == "0000FF")
    result = "Background checks passed"
   } catch { result = error.localizedDescription }
  }

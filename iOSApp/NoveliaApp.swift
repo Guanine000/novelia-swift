@@ -459,6 +459,19 @@ final class ReaderBackgroundStore: ObservableObject {
         images["\(dark)-\(landscape)"] = UIImage(cgImage: cg)
         setMode("image", dark: dark)
     }
+    func restoreDefaultColor(dark: Bool) {
+        defaults.removeObject(forKey: key(dark, "color"))
+        setMode(mode(dark: dark) == "color" ? "default" : mode(dark: dark), dark: dark)
+    }
+    func restoreDefaults(dark: Bool) throws {
+        for landscape in [false, true] {
+            let url = imageURL(dark: dark, landscape: landscape)
+            if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+        }
+        defaults.removeObject(forKey: key(dark, "color"))
+        images.removeAll()
+        setMode("default", dark: dark)
+    }
     func removeImage(dark: Bool, landscape: Bool = false) throws {
         let url = imageURL(dark: dark, landscape: landscape)
         if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
@@ -507,15 +520,20 @@ struct ReaderBackgroundSettingsView: View {
                 ColorPicker("自定义背景颜色", selection: Binding(
                     get: { AppThemeColor.color(fromHex: store.hex(dark: dark)) },
                     set: { store.setColor($0, dark: dark) }), supportsOpacity: false)
+                Button("恢复默认颜色") { store.restoreDefaultColor(dark: dark); error = nil }.disabled(busy)
                 PhotosPicker("从照片选择图片", selection: $selectedPhoto, matching: .images).disabled(busy)
                 Button("从文件导入图片") { importing = true }.disabled(busy)
                 Button("移除当前方向图片", role: .destructive) {
                     do { try store.removeImage(dark: dark, landscape: landscape) } catch { self.error = error.localizedDescription }
                 }
+                Button("恢复当前模式默认背景", role: .destructive) {
+                    do { try store.restoreDefaults(dark: dark); error = nil }
+                    catch { self.error = error.localizedDescription }
+                }.disabled(busy)
                 if busy { ProgressView("正在导入…") }
                 if let error { Text(error).foregroundStyle(.red) }
             } footer: {
-                Text("浅色和深色分别保存，随阅读器外观切换。竖屏与横屏图片分别保存；未设置当前方向图片时使用背景颜色。图片居中裁剪填满阅读区域；请选择与文字有足够对比的背景。设置应用于在线小说、TXT和EPUB，保存在本机。")
+                Text("默认：使用阅读器内置底色，不显示自定义颜色或图片，已导入图片仍保留。恢复默认颜色只重置颜色；恢复当前模式默认背景会清除该模式的颜色和两张图片。浅色和深色分别保存，随阅读器外观切换。竖屏与横屏图片分别保存；未设置当前方向图片时使用背景颜色。图片居中裁剪填满阅读区域；请选择与文字有足够对比的背景。设置应用于在线小说、TXT和EPUB，保存在本机。")
             }
             Section("预览") {
                 ReaderBackgroundView(dark: dark, fallback: dark ? .black : NoveliaStyle.paper)
