@@ -92,151 +92,135 @@ struct ForumView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            List {
-                Color.clear
-                    .frame(height: 1)
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .id("forum-post-list-top")
-
-                if store.isLoadingCategories && store.categories.isEmpty {
-                    HStack { Spacer(); ProgressView("正在连接论坛…"); Spacer() }
+            VStack(spacing: 0) {
+                ForumCategoryBar(categories: store.categories, selectedCategory: store.selectedCategory,
+                                 isVisible: store.source == .all) { category in
+                    store.selectedCategory = category.slug
+                    Task { await store.loadPosts(page: 0) }
+                }
+                List {
+                    Color.clear
+                        .frame(height: 1)
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
-                }
+                        .id("forum-post-list-top")
 
-                if store.categories.isEmpty, !store.isLoadingCategories, let error = store.errorMessage {
-                    ContentUnavailableView {
-                        Label("论坛暂时无法访问", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(error)
-                    } actions: {
-                        Button("重试") { Task { await store.refresh() } }
-                            .buttonStyle(.borderedProminent).tint(NoveliaStyle.brandGreen)
+                    if store.isLoadingCategories && store.categories.isEmpty {
+                        HStack { Spacer(); ProgressView("正在连接论坛…"); Spacer() }
+                            .listRowBackground(Color.clear)
                     }
-                    .listRowBackground(Color.clear)
-                } else if visiblePosts.isEmpty, !store.isLoadingPosts, store.errorMessage == nil {
-                    ContentUnavailableView(store.posts.isEmpty ? "这里还没有帖子" : "没有匹配的帖子", systemImage: "bubble.left.and.bubble.right", description: Text("切换分类或调整搜索词。"))
+
+                    if store.categories.isEmpty, !store.isLoadingCategories, let error = store.errorMessage {
+                        ContentUnavailableView {
+                            Label("论坛暂时无法访问", systemImage: "wifi.exclamationmark")
+                        } description: {
+                            Text(error)
+                        } actions: {
+                            Button("重试") { Task { await store.refresh() } }
+                                .buttonStyle(.borderedProminent).tint(NoveliaStyle.brandGreen)
+                        }
                         .listRowBackground(Color.clear)
-                }
+                    } else if visiblePosts.isEmpty, !store.isLoadingPosts, store.errorMessage == nil {
+                        ContentUnavailableView(store.posts.isEmpty ? "这里还没有帖子" : "没有匹配的帖子", systemImage: "bubble.left.and.bubble.right", description: Text("切换分类或调整搜索词。"))
+                            .listRowBackground(Color.clear)
+                    }
 
-                ForEach(visiblePosts) { post in
-                    NavigationLink {
-                        ForumPostDetailView(postID: post.id)
-                    } label: {
-                        ForumPostRow(post: post, category: store.categories.first { $0.id == post.categoryId })
+                    ForEach(visiblePosts) { post in
+                        NavigationLink {
+                            ForumPostDetailView(postID: post.id)
+                        } label: {
+                            ForumPostRow(post: post, category: store.categories.first { $0.id == post.categoryId })
+                        }
+                        .listRowBackground(NoveliaStyle.card)
                     }
-                    .listRowBackground(NoveliaStyle.card)
-                }
 
-                if store.total > 20 {
-                    HStack {
-                        Button("上一页") { loadPage(max(0, store.page - 1), using: proxy) }
-                            .disabled(store.page == 0 || store.isLoadingPosts)
-                        Spacer()
-                        Text("第 \(store.page + 1) 页 · 共 \(store.total) 帖")
-                            .font(.caption).foregroundStyle(NoveliaStyle.muted)
-                        Spacer()
-                        Button("下一页") { loadPage(store.page + 1, using: proxy) }
-                            .disabled(Int64((store.page + 1) * 20) >= store.total || store.isLoadingPosts)
+                    if store.total > 20 {
+                        HStack {
+                            Button("上一页") { loadPage(max(0, store.page - 1), using: proxy) }
+                                .disabled(store.page == 0 || store.isLoadingPosts)
+                            Spacer()
+                            Text("第 \(store.page + 1) 页 · 共 \(store.total) 帖")
+                                .font(.caption).foregroundStyle(NoveliaStyle.muted)
+                            Spacer()
+                            Button("下一页") { loadPage(store.page + 1, using: proxy) }
+                                .disabled(Int64((store.page + 1) * 20) >= store.total || store.isLoadingPosts)
+                        }
+                        .listRowBackground(Color.clear)
                     }
-                    .listRowBackground(Color.clear)
+                    if store.isLoadingPosts {
+                        HStack { Spacer(); ProgressView(); Spacer() }.listRowBackground(Color.clear)
+                    }
+                    if let error = store.errorMessage, !store.categories.isEmpty {
+                        Text(error).font(.footnote).foregroundStyle(.red).listRowBackground(Color.clear)
+                    }
                 }
-                if store.isLoadingPosts {
-                    HStack { Spacer(); ProgressView(); Spacer() }.listRowBackground(Color.clear)
-                }
-                if let error = store.errorMessage, !store.categories.isEmpty {
-                    Text(error).font(.footnote).foregroundStyle(.red).listRowBackground(Color.clear)
-                }
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .background(NoveliaStyle.paper)
-            .navigationTitle("论坛")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Menu {
-                        Button("全部帖子", systemImage: "text.bubble") { Task { await store.selectSource(.all) } }
-                        Button("我的帖子", systemImage: "person.text.rectangle") {
-                            guard auth.username != nil else { auth.isLoginPresented = true; return }
-                            Task { await store.selectSource(.myPosts) }
-                        }
-                        Button("云端收藏", systemImage: "bookmark") {
-                            guard auth.username != nil else { auth.isLoginPresented = true; return }
-                            Task { await store.selectSource(.favorites) }
-                        }
-                        if auth.username != nil {
-                            Button("退出登录", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                                auth.logout()
-                                Task { await store.selectSource(.all) }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(NoveliaStyle.paper)
+                .navigationTitle("论坛")
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu {
+                            Button("全部帖子", systemImage: "text.bubble") { Task { await store.selectSource(.all) } }
+                            Button("我的帖子", systemImage: "person.text.rectangle") {
+                                guard auth.username != nil else { auth.isLoginPresented = true; return }
+                                Task { await store.selectSource(.myPosts) }
                             }
-                        } else {
-                            Button("登录 Novelia", systemImage: "person.crop.circle.badge.plus") { auth.isLoginPresented = true }
-                        }
-                    } label: {
-                        Label(auth.username ?? "我的", systemImage: "person.crop.circle")
-                            .labelStyle(.iconOnly)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink {
-                        ForumComposeView(categories: store.categories)
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                    }
-                    .accessibilityLabel("发布新帖")
-                }
-                ToolbarItem(placement: .principal) {
-                    Menu {
-                        ForEach(ForumSort.allCases) { option in
-                            Button {
-                                store.sort = option
-                                Task { await store.loadPosts(page: 0) }
-                            } label: {
-                                if store.sort == option { Label(option.title, systemImage: "checkmark") }
-                                else { Text(option.title) }
+                            Button("云端收藏", systemImage: "bookmark") {
+                                guard auth.username != nil else { auth.isLoginPresented = true; return }
+                                Task { await store.selectSource(.favorites) }
                             }
+                            if auth.username != nil {
+                                Button("退出登录", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                                    auth.logout()
+                                    Task { await store.selectSource(.all) }
+                                }
+                            } else {
+                                Button("登录 Novelia", systemImage: "person.crop.circle.badge.plus") { auth.isLoginPresented = true }
+                            }
+                        } label: {
+                            Label(auth.username ?? "我的", systemImage: "person.crop.circle")
+                                .labelStyle(.iconOnly)
                         }
-                    } label: { Text(store.sort.title).font(.subheadline.weight(.semibold)) }
-                }
-            }
-            .searchable(text: $store.query, prompt: "搜索论坛帖子")
-            .onSubmit(of: .search) { Task { await store.loadPosts(page: 0) } }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if store.source == .all, !store.categories.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 9) {
-                            ForEach(store.categories) { category in
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        NavigationLink {
+                            ForumComposeView(categories: store.categories)
+                        } label: {
+                            Image(systemName: "square.and.pencil")
+                        }
+                        .accessibilityLabel("发布新帖")
+                    }
+                    ToolbarItem(placement: .principal) {
+                        Menu {
+                            ForEach(ForumSort.allCases) { option in
                                 Button {
-                                    store.selectedCategory = category.slug
+                                    store.sort = option
                                     Task { await store.loadPosts(page: 0) }
                                 } label: {
-                                    Text(category.title)
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(store.selectedCategory == category.slug ? .white : NoveliaStyle.ink)
-                                        .padding(.horizontal, 14).padding(.vertical, 8)
-                                        .background(store.selectedCategory == category.slug ? NoveliaStyle.brandGreen : NoveliaStyle.card, in: Capsule())
+                                    if store.sort == option { Label(option.title, systemImage: "checkmark") }
+                                    else { Text(option.title) }
                                 }
-                                .buttonStyle(.plain)
                             }
-                        }
-                        .padding(.horizontal, 16).padding(.vertical, 10)
+                        } label: { Text(store.sort.title).font(.subheadline.weight(.semibold)) }
                     }
-                    .background(NoveliaStyle.paper)
                 }
-            }
-            .refreshable { await store.refresh() }
-            .task { if store.categories.isEmpty { await store.refresh() } }
-            .sheet(isPresented: $auth.isLoginPresented) {
-                ForumLoginSheet(auth: auth)
-            }
-            .overlay {
-                if let error = store.errorMessage {
-                    ForumErrorOverlay(
-                        message: error,
-                        onDismiss: { store.clearError() },
-                        onRetry: { Task { await store.refresh() } }
-                    )
+                .searchable(text: $store.query, prompt: "搜索论坛帖子")
+                .onSubmit(of: .search) { Task { await store.loadPosts(page: 0) } }
+                .refreshable { await store.refresh() }
+                .task { if store.categories.isEmpty { await store.refresh() } }
+                .sheet(isPresented: $auth.isLoginPresented) {
+                    ForumLoginSheet(auth: auth)
+                }
+                .overlay {
+                    if let error = store.errorMessage {
+                        ForumErrorOverlay(
+                            message: error,
+                            onDismiss: { store.clearError() },
+                            onRetry: { Task { await store.refresh() } }
+                        )
+                    }
                 }
             }
         }
@@ -680,6 +664,40 @@ struct ForumMarkdownBody: View {
     }
 }
 
+/// Keep category controls in the normal stack above List instead of a dynamic
+/// safe-area inset, so changing feeds cannot leave a stale collapsed inset.
+private struct ForumCategoryBar: View {
+    let categories: [ForumCategory]
+    let selectedCategory: String
+    let isVisible: Bool
+    let onSelect: (ForumCategory) -> Void
+
+    private var isShown: Bool { isVisible && !categories.isEmpty }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 9) {
+                ForEach(categories) { category in
+                    Button { onSelect(category) } label: {
+                        Text(category.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(selectedCategory == category.slug ? .white : NoveliaStyle.ink)
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .background(selectedCategory == category.slug ? NoveliaStyle.brandGreen : NoveliaStyle.card, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+        }
+        .frame(height: isShown ? 56 : 0)
+        .clipped()
+        .background(NoveliaStyle.paper)
+        .allowsHitTesting(isShown)
+        .accessibilityHidden(!isShown)
+    }
+}
+
 /// A bounded text width lets each row grow vertically instead of truncating
 /// cells under the horizontal scroll view's unconstrained width proposal.
 private struct ForumMarkdownTable: View {
@@ -699,9 +717,12 @@ private struct ForumMarkdownTable: View {
                                 .frame(width: 220, alignment: .leading)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .padding(10)
+                                .frame(maxHeight: .infinity, alignment: .topLeading)
                                 .background(row == 0 ? NoveliaStyle.paper : NoveliaStyle.card)
                                 .overlay(Rectangle().stroke(NoveliaStyle.muted.opacity(0.25)))
                                 .gridCellAnchor(.topLeading)
+                                .accessibilityElement(children: .contain)
+                                .accessibilityIdentifier("forum-table-cell-\(row)-\(column)")
                         }
                     }
                 }
@@ -709,6 +730,7 @@ private struct ForumMarkdownTable: View {
             .fixedSize(horizontal: true, vertical: false)
         }
         .defaultScrollAnchor(.leading)
+        .accessibilityIdentifier("forum-markdown-table")
     }
 }
 
