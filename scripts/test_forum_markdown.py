@@ -23,6 +23,16 @@ code += r'''
 func check(_ condition: @autoclosure () -> Bool, _ message: String) {
     if !condition() { fatalError(message) }
 }
+for mode in [ForumMarkdownMode.article, .comment] {
+    let source = "第一行\n[下载](https://example.com/download)\n说明文字\n[源码](https://example.com/source)"
+    let blocks = parseForumMarkdown(source, mode: mode)
+    check(blocks.count == 1 && blocks[0].text == source, "soft line breaks collapsed")
+    let rendered = try! forumInlineAttributes(blocks[0].text)
+    check(String(rendered.characters).components(separatedBy: "\n").count == 4, "inline renderer lost line breaks")
+    check(rendered.runs.filter { $0.link != nil }.count == 2, "line-break parsing damaged links")
+}
+let rawLink = try! forumInlineAttributes("第一行\nhttps://example.com/download\n尾行")
+check(rawLink.runs.contains { $0.link?.absoluteString == "https://example.com/download" }, "bare URL link missing")
 private let table = parseForumMarkdown("| 名称 | 链接 |\n| :--- | ---: |\n| A | [B](https://n.novelia.cc/novel/x/y) |\n\n尾段")
 check(table.count == 2, "table/paragraph boundaries")
 if case let .table(rows) = table[0].kind {

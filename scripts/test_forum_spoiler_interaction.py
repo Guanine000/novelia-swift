@@ -5,7 +5,7 @@ import subprocess
 import argparse
 import tempfile
 
-parser = argparse.ArgumentParser(description="Run the production spoiler renderer in a simulator and tap its revealed link.")
+parser = argparse.ArgumentParser(description="Run production forum table layout and spoiler link interaction checks in a simulator.")
 parser.add_argument("--device", required=True, help="Booted iOS simulator UDID")
 args = parser.parse_args()
 r = Path(tempfile.mkdtemp(prefix="NoveliaSpoilerTapRegression-"))
@@ -16,21 +16,58 @@ tail = r"""@main struct TapRegressionApp: App {
 }
 struct TestScreen: View {
  @State private var opened = 0
+ @State private var allPosts = true
+ @State private var category = "announcements"
  var body: some View {
   VStack(spacing: 30) {
+    ForumCategoryBar(categories: [ForumCategory(id: 1, title: "站务公告", slug: "announcements"), ForumCategory(id: 2, title: "小说讨论", slug: "novel"), ForumCategory(id: 3, title: "意见反馈", slug: "feedback")], selectedCategory: category, isVisible: allPosts) { category = $0.slug }
+   ForumMarkdownTable(rows: [["第一列", "第二列", "第三列"], [String(repeating: "长文本应当完整换行显示，不允许省略。", count: 8), "中间内容", "末列内容"]], mode: .article)
+    .font(.system(size: 15)).frame(height: 300)
+   Button(allPosts ? "云端收藏" : "全部帖子") { allPosts.toggle() }
+   Text("当前分类: \(category)")
    Text("Spoiler tap regression").font(.title)
    ForumInlineMarkdownText(markdown: "`!!示例!!` 正文 !![测试链接](https://n.novelia.cc/novel/hameln/test)!!")
     .textSelection(.enabled)
     .environment(\.openURL, OpenURLAction { _ in opened += 1; return .handled })
    Text("Opened: \(opened)").accessibilityIdentifier("opened-count")
-  }.padding(30)
+  }.padding(.horizontal, 12).padding(.vertical, 20)
+
  }
 }
 """
-code='import SwiftUI\nimport UIKit\nimport Foundation\nprivate enum NoveliaStyle { static let ink = Color.primary; static let brandGreen = Color.green }\n'+s[s.index('private struct ForumInlineMarkdownText'):s.index('private struct ForumStarRating')]+s[s.index('private func forumInlineAttributes'):s.index('private struct ForumNovelRoute')]+tail
+code='import SwiftUI\nimport UIKit\nimport Foundation\nprivate enum NoveliaStyle { static let ink = Color.primary; static let brandGreen = Color.green; static let paper = Color.white; static let card = Color.white; static let muted = Color.gray }\nprivate enum ForumMarkdownMode { case article, comment }\nprivate struct ForumCategory: Identifiable { let id: Int; let title: String; let slug: String }\n'+s[s.index('private struct ForumCategoryBar'):s.index('private struct ForumStarRating')]+s[s.index('private func forumInlineAttributes'):s.index('private struct ForumNovelRoute')]+tail
 (r/'TapRegression.swift').write_text(code)
 (r/'TapTests.swift').write_text('''import XCTest
 final class TapTests: XCTestCase {
+ func testCategoriesReturnAfterFavorites() {
+  let app = XCUIApplication(); app.launch()
+  for _ in 0..<3 {
+   XCTAssertTrue(app.buttons["站务公告"].waitForExistence(timeout: 5))
+   app.buttons["云端收藏"].tap()
+   XCTAssertFalse(app.buttons["站务公告"].exists)
+   app.buttons["全部帖子"].tap()
+   XCTAssertTrue(app.buttons["小说讨论"].waitForExistence(timeout: 5))
+   XCTAssertTrue(app.buttons["意见反馈"].isHittable)
+  }
+  app.buttons["小说讨论"].tap()
+  XCTAssertTrue(app.staticTexts["当前分类: novel"].exists)
+ }
+ func testTableWrapsAndScrolls() {
+  let app = XCUIApplication()
+  app.launch()
+  let cell = app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "长文本应当完整换行显示")).firstMatch
+  XCTAssertTrue(cell.waitForExistence(timeout: 10))
+  XCTAssertGreaterThan(cell.frame.height, 100)
+  XCTAssertLessThanOrEqual(cell.frame.width, 221)
+  let first = app.otherElements["forum-table-cell-1-0"].firstMatch
+  let second = app.otherElements["forum-table-cell-1-1"].firstMatch
+  XCTAssertEqual(first.frame.minY, second.frame.minY, accuracy: 1)
+  XCTAssertEqual(first.frame.maxY, second.frame.maxY, accuracy: 1)
+  XCTAssertGreaterThan(first.frame.height, 100)
+  XCTAssertTrue(app.staticTexts["第一列"].isHittable)
+  app.scrollViews["forum-markdown-table"].swipeLeft()
+  XCTAssertTrue(app.staticTexts["末列内容"].isHittable)
+ }
  func testRevealThenTapLink() {
   let app = XCUIApplication()
   app.launch()
@@ -70,4 +107,4 @@ def ref(n,name):return f'<BuildableReference BuildableIdentifier="primary" Bluep
 print(f'UI test artifacts: {r}', flush=True)
 with (r / 'test.log').open('w') as log:
  subprocess.run(['xcodebuild','-project',str(p),'-scheme','TapTests','-destination',f'platform=iOS Simulator,id={args.device}','-derivedDataPath',str(r/'DerivedData'),'-parallel-testing-enabled','NO','test'],stdout=log,stderr=subprocess.STDOUT,check=True)
-print('Actual reveal-then-tap simulator UI regression passed')
+print('Forum categories, table alignment/scrolling and spoiler link UI regressions passed')

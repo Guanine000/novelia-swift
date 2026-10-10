@@ -368,36 +368,48 @@ private struct ChapterDirectoryView: View {
     let appearance: ReaderAppearance
 
     var body: some View {
-        List(Array(novel.chapters.enumerated()), id: \.element.id) { index, chapter in
-            Button {
-                selectedIndex = index
-                dismiss()
-            } label: {
-                HStack(spacing: 12) {
-                    Text("\(index + 1)")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundStyle(appearance.secondaryText(system: systemColorScheme))
-                        .frame(minWidth: 32, alignment: .trailing)
-                    Text(chapter.title)
-                        .font(.system(size: 14, weight: index == selectedIndex ? .semibold : .regular))
-                        .foregroundStyle(appearance.primaryText(system: systemColorScheme))
-                        .lineLimit(2)
-                    Spacer(minLength: 8)
-                    if index == selectedIndex {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(NoveliaStyle.brandGreen)
+        ScrollViewReader { proxy in
+            List(Array(novel.chapters.enumerated()), id: \.element.id) { index, chapter in
+                Button {
+                    selectedIndex = index
+                    dismiss()
+                } label: {
+                    HStack(spacing: 12) {
+                        Text("\(index + 1)")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(appearance.secondaryText(system: systemColorScheme))
+                            .frame(minWidth: 32, alignment: .trailing)
+                        Text(chapter.title)
+                            .font(.system(size: 14, weight: index == selectedIndex ? .semibold : .regular))
+                            .foregroundStyle(appearance.primaryText(system: systemColorScheme))
+                            .lineLimit(2)
+                        Spacer(minLength: 8)
+                        if index == selectedIndex {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(NoveliaStyle.brandGreen)
+                        }
                     }
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .id(chapter.id)
+                .buttonStyle(.plain)
+                .listRowBackground(appearance.card(system: systemColorScheme))
             }
-            .buttonStyle(.plain)
-            .listRowBackground(appearance.card(system: systemColorScheme))
+            .scrollContentBackground(.hidden)
+            .background(appearance.background(system: systemColorScheme).ignoresSafeArea())
+            .task(id: selectedIndex) {
+                guard novel.chapters.indices.contains(selectedIndex) else { return }
+                let chapterID = novel.chapters[selectedIndex].id
+                // Wait for the pushed List's first layout before positioning a lazy row.
+                do { try await Task.sleep(nanoseconds: 100_000_000) }
+                catch { return }
+                guard !Task.isCancelled else { return }
+                proxy.scrollTo(chapterID, anchor: .center)
+            }
+            .navigationTitle("章节目录")
+            .navigationBarTitleDisplayMode(.inline)
         }
-        .scrollContentBackground(.hidden)
-        .background(appearance.background(system: systemColorScheme).ignoresSafeArea())
-        .navigationTitle("章节目录")
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
