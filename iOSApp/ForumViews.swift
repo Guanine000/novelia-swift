@@ -186,7 +186,7 @@ struct ForumView: View {
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         NavigationLink {
-                            ForumComposeView(categories: store.categories)
+                            ForumComposeView(categories: store.categories, initialCategorySlug: store.selectedCategory)
                         } label: {
                             Image(systemName: "square.and.pencil")
                         }
@@ -303,6 +303,9 @@ private struct ForumPostDetailView: View {
     @State private var isComposerPresented = false
     @State private var isSending = false
     @State private var favoriteInProgress = false
+    @State private var isPostEditorPresented = false
+    @State private var isPreparingEdit = false
+    @State private var editCategories: [ForumCategory] = []
     @State private var operationError: String?
     @State private var linkedPostRoute: ForumPostRoute?
     @State private var requestedAnchor: String?
@@ -334,6 +337,12 @@ private struct ForumPostDetailView: View {
                                 Label("\(post.viewsCount) 次浏览", systemImage: "eye")
                                 Label("\(post.commentsCount) 条评论", systemImage: "bubble.right")
                                 Spacer()
+                                if auth.username == post.authorUsername {
+                                    Button { Task { await preparePostEditor() } } label: {
+                                        Label("编辑", systemImage: "square.and.pencil")
+                                    }
+                                    .disabled(isPreparingEdit)
+                                }
                                 Button {
                                     guard auth.username != nil else { auth.isLoginPresented = true; return }
                                     Task { await toggleFavorite() }
@@ -432,6 +441,16 @@ private struct ForumPostDetailView: View {
                 ForumPostDetailView(postID: linkedPostRoute.postID, initialFragment: linkedPostRoute.fragment)
             }
         }
+        .sheet(isPresented: $isPostEditorPresented) {
+            NavigationStack {
+                if let post {
+                    ForumComposeView(categories: editCategories, editingPost: post) { updated in
+                        self.post = updated
+                        isPostEditorPresented = false
+                    }
+                }
+            }
+        }
         .sheet(isPresented: $isComposerPresented) {
             ForumCommentEditorSheet(
                 draft: $draft,
@@ -452,6 +471,18 @@ private struct ForumPostDetailView: View {
                 )
             }
         }
+    }
+
+    @MainActor
+    private func preparePostEditor() async {
+        guard let post, auth.username == post.authorUsername, !isPreparingEdit else { return }
+        isPreparingEdit = true
+        defer { isPreparingEdit = false }
+        do {
+            editCategories = try await api.categories()
+            guard auth.username == post.authorUsername else { return }
+            isPostEditorPresented = true
+        } catch { operationError = error.localizedDescription }
     }
 
     private func openPostInBrowser() {
@@ -946,6 +977,66 @@ private func forumCommentMarkdownForSubmission(_ markdown: String) -> String {
     return regex.stringByReplacingMatches(in: markdown, range: range, withTemplate: "!!$1!!")
 }
 
+private struct ForumComposeNotice: View {
+    let isPost: Bool
+
+    private var markdown: String {
+        if !isPost { return "发言请遵守 [社区守则](https://forum.novelia.cc/rules)。" }
+        return """
+        - 提问前先阅读 [站务公告](https://forum.novelia.cc/c/announcements) 的新人教程，再搜索 [意见反馈](https://forum.novelia.cc/c/feedback) 中的相同案例，避免重复发帖。
+        - 报错请详述问题，并附小说链接或截图。
+        - 求书请前往 [求书集中帖](https://forum.novelia.cc/c/novel?q=%E6%B1%82%E4%B9%A6%E9%9B%86%E4%B8%AD%E8%B4%B4)，请勿单独发帖。
+        - 碰到此类建政小说时，不要在论坛发帖或群里讨论，请通过 QQ 或 Telegram 私信管理员处理。
+        - 发言请遵守 [社区守则](https://forum.novelia.cc/rules)。
+        """
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "info.circle").foregroundStyle(NoveliaStyle.brandGreen)
+            ForumMarkdownBody(markdown: markdown, mode: .article)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .background(NoveliaStyle.brandGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+private struct ForumMarkdownHelpView: View {
+    @Environment(\.dismiss) private var dismiss
+    private let examples: [(String, String)] = [
+        ("加粗、斜体与删除线", "**加粗文字**\n*斜体文字*\n~~删除线文字~~"),
+        ("链接", "[链接文字](https://n.novelia.cc/)"),
+        ("剧透", "!!剧透内容!!"),
+        ("标题与引用", "## 二级标题\n> 引用内容"),
+        ("列表", "- 第一项\n- 第二项\n\n1. 第一项\n2. 第二项"),
+        ("表格", "| 名称 | 说明 |\n| --- | --- |\n| 示例 | 内容 |"),
+        ("星级评分", "::: star 4.5"),
+        ("折叠内容", "::: details 点击展开\n折叠内容\n:::"),
+        ("代码", "`行内代码`\n\n```\n代码块\n```")
+    ]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("选中文字后点击格式按钮，可为选中内容添加标记；没有选中文字时会插入示例。切换到预览查看效果，返回编辑可继续修改。")
+                }
+                ForEach(examples.indices, id: \.self) { index in
+                    Section(examples[index].0) {
+                        Text(examples[index].1)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .navigationTitle("Markdown 语法帮助")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成") { dismiss() } } }
+        }
+    }
+}
+
 private struct ForumCommentEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var draft: String
@@ -954,17 +1045,12 @@ private struct ForumCommentEditorSheet: View {
     let onCancel: () -> Void
     let onSend: () async -> String?
 
-    @State private var selection = NSRange(location: 0, length: 0)
-    @State private var isPreviewing = false
     @State private var isSending = false
     @State private var sendError: String?
-    @State private var isLinkDialogPresented = false
-    @State private var linkLabel = ""
-    @State private var linkURL = "https://"
-    @FocusState private var isEditorFocused: Bool
 
     var body: some View {
         NavigationStack {
+            ScrollView {
             VStack(spacing: 12) {
                 HStack {
                     if let replyTo {
@@ -980,49 +1066,14 @@ private struct ForumCommentEditorSheet: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(NoveliaStyle.ink)
 
-                Picker("编辑模式", selection: $isPreviewing) {
-                    Text("编辑").tag(false)
-                    Text("预览").tag(true)
-                }
-                .pickerStyle(.segmented)
-
-                Group {
-                    if isPreviewing {
-                        ScrollView {
-                            if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Text("预览内容会显示在这里。")
-                                    .foregroundStyle(NoveliaStyle.muted)
-                                    .frame(maxWidth: .infinity, minHeight: 170, alignment: .topLeading)
-                            } else {
-                                ForumMarkdownBody(markdown: draft, mode: .comment)
-                                    .frame(maxWidth: .infinity, minHeight: 170, alignment: .topLeading)
-                            }
-                        }
-                        .padding(12)
-                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 12))
-                    } else {
-                        ZStack(alignment: .topLeading) {
-                            ForumMarkdownTextEditor(text: $draft, selection: $selection)
-                                .focused($isEditorFocused)
-                                .frame(minHeight: 190)
-                            if draft.isEmpty {
-                                Text("写下评论。支持 Markdown，也可以使用下方工具栏插入格式。")
-                                    .font(.system(size: 15))
-                                    .foregroundStyle(NoveliaStyle.muted.opacity(0.75))
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 9)
-                                    .allowsHitTesting(false)
-                            }
-                        }
-                        .padding(8)
-                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 12))
-                    }
-                }
-
-                if !isPreviewing { formattingToolbar }
+                ForumComposeNotice(isPost: false)
+                ForumMarkdownEditor(draft: $draft, autoFocus: true)
+                    .disabled(isSending)
                 Spacer(minLength: 0)
             }
             .padding(16)
+            }
+            .scrollDismissesKeyboard(.interactively)
             .background(NoveliaStyle.paper.ignoresSafeArea())
             .overlay {
                 if let sendError {
@@ -1031,7 +1082,7 @@ private struct ForumCommentEditorSheet: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 HStack {
-                    Button("取消") { onCancel(); dismiss() }
+                    Button("取消") { onCancel(); dismiss() }.disabled(isSending)
                         .buttonStyle(.bordered)
                     Spacer()
                     Button {
@@ -1050,13 +1101,93 @@ private struct ForumCommentEditorSheet: View {
             }
             .navigationTitle(replyTo == nil ? "发表评论" : "回复评论")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { isEditorFocused = false }
-                        .disabled(isPreviewing)
+
+        }
+    }
+
+    @MainActor
+    private func submit() async {
+        guard !isSending else { return }
+        isSending = true
+        sendError = nil
+        defer { isSending = false }
+        if let error = await onSend() {
+            sendError = error
+        } else {
+            dismiss()
+        }
+    }
+}
+
+private struct ForumMarkdownEditor: View {
+    @Binding var draft: String
+    var mode: ForumMarkdownMode = .comment
+    var minimumHeight: CGFloat = 190
+    var autoFocus = false
+    @State private var selection = NSRange(location: 0, length: 0)
+    @State private var isPreviewing = false
+    @State private var sendError: String?
+    @State private var isHelpPresented = false
+    @State private var isLinkDialogPresented = false
+    @State private var linkLabel = ""
+    @State private var linkURL = "https://"
+    @FocusState private var isEditorFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+                Picker("编辑模式", selection: $isPreviewing) {
+                    Text("编辑").tag(false)
+                    Text("预览").tag(true)
                 }
+                .pickerStyle(.segmented)
+
+                Group {
+                    if isPreviewing {
+                        ScrollView {
+                            if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Text("预览内容会显示在这里。")
+                                    .foregroundStyle(NoveliaStyle.muted)
+                                    .frame(maxWidth: .infinity, minHeight: 170, alignment: .topLeading)
+                            } else {
+                                ForumMarkdownBody(markdown: draft, mode: mode)
+                                    .frame(maxWidth: .infinity, minHeight: 170, alignment: .topLeading)
+                            }
+                        }
+                        .frame(height: minimumHeight)
+                        .padding(12)
+                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 12))
+                    } else {
+                        ZStack(alignment: .topLeading) {
+                            ForumMarkdownTextEditor(text: $draft, selection: $selection)
+                                .focused($isEditorFocused)
+                                .frame(height: minimumHeight)
+                            if draft.isEmpty {
+                                Text("支持 Markdown，可使用下方工具栏插入格式。")
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(NoveliaStyle.muted.opacity(0.75))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 9)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                        .padding(8)
+                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+
+                if !isPreviewing { formattingToolbar }
+            Button { isHelpPresented = true } label: {
+                Label("Markdown 语法帮助", systemImage: "questionmark.circle")
             }
-            .onAppear { isEditorFocused = true }
+            .buttonStyle(.borderless)
+            .font(.footnote)
+        }
+        .sheet(isPresented: $isHelpPresented) { ForumMarkdownHelpView() }
+        .onChange(of: isPreviewing) { _, preview in if preview { isEditorFocused = false } }
+        .overlay {
+            if let sendError { ForumErrorOverlay(message: sendError, onDismiss: { self.sendError = nil }) }
+        }
+            .onAppear { isEditorFocused = autoFocus }
             .alert("插入链接", isPresented: $isLinkDialogPresented) {
                 TextField("链接文字", text: $linkLabel)
                 TextField("https://example.com", text: $linkURL)
@@ -1066,6 +1197,14 @@ private struct ForumCommentEditorSheet: View {
                 Button("插入") { insertLink() }
             } message: {
                 Text("链接将以 [链接文字](https://example.com) 的格式插入。")
+            }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("完成") {
+                    isEditorFocused = false
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
             }
         }
     }
@@ -1083,7 +1222,7 @@ private struct ForumCommentEditorSheet: View {
                     isEditorFocused = false
                     isLinkDialogPresented = true
                 }
-                formatButton("剧透", icon: "eye.slash") { wrapSelection(prefix: "!!!!", suffix: "!!!!", placeholder: "剧透内容") }
+                formatButton("剧透", icon: "eye.slash") { wrapSelection(prefix: "!!", suffix: "!!", placeholder: "剧透内容") }
                 Menu {
                     ForEach(1...10, id: \.self) { step in
                         let rating = Double(step) / 2
@@ -1201,18 +1340,6 @@ private struct ForumCommentEditorSheet: View {
         isEditorFocused = true
     }
 
-    @MainActor
-    private func submit() async {
-        guard !isSending else { return }
-        isSending = true
-        sendError = nil
-        defer { isSending = false }
-        if let error = await onSend() {
-            sendError = error
-        } else {
-            dismiss()
-        }
-    }
 }
 
 private struct ForumMarkdownTextEditor: UIViewRepresentable {
@@ -1229,7 +1356,7 @@ private struct ForumMarkdownTextEditor: UIViewRepresentable {
         view.textContainerInset = UIEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
         view.textContainer.lineFragmentPadding = 0
         view.delegate = context.coordinator
-        view.accessibilityLabel = "评论内容"
+        view.accessibilityLabel = "Markdown 正文"
         return view
     }
 
@@ -1291,7 +1418,7 @@ private func parseForumMarkdown(_ markdown: String, mode: ForumMarkdownMode = .a
         blocks.append(ForumMarkdownBlock(id: blocks.count, kind: kind, text: text, anchor: anchor))
     }
     func flushParagraph() {
-        let text = paragraph.joined(separator: mode == .comment ? "\n" : " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = paragraph.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty { append(.paragraph, text) }
         paragraph.removeAll(keepingCapacity: true)
     }
@@ -1529,7 +1656,11 @@ private struct ForumErrorOverlay: View {
 private struct ForumComposeView: View {
     @EnvironmentObject private var auth: ForumAuthStore
     @Environment(\.dismiss) private var dismiss
-    let categories: [ForumCategory]
+    @State private var categories: [ForumCategory]
+    @State private var isLoadingCategories = false
+    let initialCategorySlug: String
+    let editingPost: ForumPost?
+    var onSaved: ((ForumPost) -> Void)?
 
     @State private var selectedCategoryID: Int64?
     @State private var title = ""
@@ -1541,13 +1672,25 @@ private struct ForumComposeView: View {
     private var selectedCategory: ForumCategory? { categories.first { $0.id == selectedCategoryID } }
     private var api: ForumAPIClient { ForumAPIClient(tokenProvider: { NoveliaForumSessionTokenVault.read() }) }
 
-    init(categories: [ForumCategory]) {
-        self.categories = categories
-        _selectedCategoryID = State(initialValue: categories.first?.id)
+    init(categories: [ForumCategory], initialCategorySlug: String = "novel", editingPost: ForumPost? = nil, onSaved: ((ForumPost) -> Void)? = nil) {
+        _categories = State(initialValue: categories)
+        self.initialCategorySlug = initialCategorySlug
+        self.editingPost = editingPost
+        self.onSaved = onSaved
+        _selectedCategoryID = State(initialValue: editingPost?.categoryId ?? categories.first(where: { $0.slug == initialCategorySlug })?.id ?? categories.first?.id)
+        _title = State(initialValue: editingPost?.title ?? "")
+        _content = State(initialValue: editingPost?.content ?? "")
+        _selectedTagIDs = State(initialValue: Set(editingPost?.tags.map(\.id) ?? []))
+    }
+
+    private var canSubmit: Bool {
+        guard let username = auth.username else { return false }
+        return editingPost.map { $0.authorUsername == username } ?? true
     }
 
     var body: some View {
         Form {
+            Section { ForumComposeNotice(isPost: true) }
             if auth.username == nil {
                 Section {
                     Button("登录 Novelia后发布") { auth.isLoginPresented = true }
@@ -1557,7 +1700,8 @@ private struct ForumComposeView: View {
             }
             Section("分类") {
                 if categories.isEmpty {
-                    Text("正在读取分类…").foregroundStyle(NoveliaStyle.muted)
+                    if isLoadingCategories { ProgressView("正在读取分类…") }
+                    else { Button("重新加载分类与标签") { Task { await loadEditorCategories() } } }
                 } else {
                     Picker("发布到", selection: $selectedCategoryID) {
                         ForEach(categories) { category in
@@ -1582,34 +1726,57 @@ private struct ForumComposeView: View {
             Section("标题") {
                 TextField("帖子标题（2–100 字）", text: $title, axis: .vertical)
                     .lineLimit(1...3)
+                    .accessibilityIdentifier("forum-post-title")
             }
             Section("正文") {
-                TextEditor(text: $content).frame(minHeight: 240)
+                ForumMarkdownEditor(draft: $content, mode: .article, minimumHeight: 240)
             }
             Section {
                 Button {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                     Task { await publish() }
                 } label: {
                     HStack {
                         Spacer()
-                        if isSending { ProgressView() } else { Text("发布帖子") }
+                        if isSending { ProgressView() } else { Text(editingPost == nil ? "发布帖子" : "保存修改") }
                         Spacer()
                     }
                 }
-                .disabled(auth.username == nil || selectedCategoryID == nil || !validInput || isSending)
+                .disabled(!canSubmit || selectedCategoryID == nil || !validInput || isSending)
             }
         }
+        .scrollDismissesKeyboard(.interactively)
+        .task { await loadEditorCategories() }
+        .disabled(isSending)
         .scrollContentBackground(.hidden)
         .background(NoveliaStyle.paper)
-        .navigationTitle("新建帖子")
+        .navigationTitle(editingPost == nil ? "新建帖子" : "编辑帖子")
+        .interactiveDismissDisabled(isSending)
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: selectedCategoryID) { _, _ in selectedTagIDs.removeAll() }
-        .toolbar { ToolbarItem(placement: .topBarTrailing) { if isSending { ProgressView() } } }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                if editingPost != nil { Button("取消") { dismiss() }.disabled(isSending) }
+            }
+            ToolbarItem(placement: .topBarTrailing) { if isSending { ProgressView() } }
+        }
         .overlay {
             if let errorMessage {
                 ForumErrorOverlay(message: errorMessage, onDismiss: { self.errorMessage = nil })
             }
         }
+    }
+
+    @MainActor
+    private func loadEditorCategories() async {
+        guard !isLoadingCategories else { return }
+        isLoadingCategories = true
+        defer { isLoadingCategories = false }
+        do {
+            let fetched = try await api.categories()
+            categories = fetched
+            if selectedCategoryID == nil { selectedCategoryID = fetched.first(where: { $0.slug == initialCategorySlug })?.id ?? fetched.first?.id }
+        } catch { errorMessage = error.localizedDescription }
     }
 
     private var validInput: Bool {
@@ -1620,20 +1787,22 @@ private struct ForumComposeView: View {
 
     @MainActor
     private func publish() async {
-        guard let selectedCategoryID, auth.username != nil, validInput else { return }
+        guard let selectedCategoryID, canSubmit, validInput, !isSending else { return }
         isSending = true
         errorMessage = nil
         defer { isSending = false }
         do {
-            let post = try await api.createPost(
-                categoryID: selectedCategoryID,
-                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                content: content.trimmingCharacters(in: .whitespacesAndNewlines),
-                tagIDs: Array(selectedTagIDs)
-            )
+            let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let saved: ForumPost
+            if let editingPost {
+                saved = try await api.updatePost(id: editingPost.id, categoryID: selectedCategoryID,
+                    title: cleanTitle, content: content, tagIDs: Array(selectedTagIDs))
+            } else {
+                saved = try await api.createPost(categoryID: selectedCategoryID,
+                    title: cleanTitle, content: content.trimmingCharacters(in: .whitespacesAndNewlines), tagIDs: Array(selectedTagIDs))
+            }
+            onSaved?(saved)
             dismiss()
-            // The caller can discover the newly published topic from the active feed.
-            _ = post
         } catch { errorMessage = error.localizedDescription }
     }
 }
@@ -1672,19 +1841,19 @@ private func forumInlineAttributes(_ input: String) throws -> AttributedString {
     let text = input.replacingOccurrences(of: "\\[~~([^\\]]+?)~~\\]\\(([^)]+)\\)", with: "~~[$1]($2)~~", options: .regularExpression)
         .replacingOccurrences(of: "</?(?:del|s|strike)>", with: "~~", options: [.regularExpression, .caseInsensitive])
     guard let expression = try? NSRegularExpression(pattern: "~~([\\s\\S]+?)~~") else {
-        return try AttributedString(markdown: text)
+        return try AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
     }
     let source = text as NSString
     var result = AttributedString()
     var cursor = 0
     for match in expression.matches(in: text, range: NSRange(location: 0, length: source.length)) {
-        result += try AttributedString(markdown: source.substring(with: NSRange(location: cursor, length: match.range.location - cursor)))
-        var struck = try AttributedString(markdown: source.substring(with: match.range(at: 1)))
+        result += try AttributedString(markdown: source.substring(with: NSRange(location: cursor, length: match.range.location - cursor)), options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
+        var struck = try AttributedString(markdown: source.substring(with: match.range(at: 1)), options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
         struck.strikethroughStyle = .single
         result += struck
         cursor = NSMaxRange(match.range)
     }
-    result += try AttributedString(markdown: source.substring(from: cursor))
+    result += try AttributedString(markdown: source.substring(from: cursor), options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
     return result
 }
 

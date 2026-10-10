@@ -12,30 +12,33 @@ Novelia iOS 是使用 SwiftUI 编写的 iPhone 客户端，连接 Novelia 网站
 | --- | --- |
 | 发现与作品 | 搜索网络小说和文库、筛选标签、查看站内热度榜与作品详情。 |
 | 账号与书架 | 使用 Novelia 统一认证；读取网络小说和文库收藏、最近阅读与阅读历史。 |
-| 论坛 | 浏览论坛分类与帖子，按活跃度、发布时间、浏览量或评论数排序；搜索帖子、查看详情与回复；论坛账号可单独登录、发帖、评论、回复和收藏。论坛登录会话与 Novelia 小说账号分开保存。 |
+| 论坛 | 浏览论坛分类与帖子，按活跃度、发布时间、浏览量或评论数排序；搜索帖子、查看详情与回复；使用同一 Novelia 账号登录小说与论坛，支持发帖、评论、回复和收藏。 |
 | 在线章节 | 原文、译文或逐段双语阅读；章节目录、阅读进度、书签、字号和深浅色设置；正文中的 HTTP/HTTPS 链接以带下划线的链接样式呈现，可点按打开。 |
 | 评论 | 查看网络小说与文库的网页评论和回复；登录后发表与回复。 |
 | EPUB 下载 | 使用 Novelia 官网整本接口下载网络小说 EPUB；下载文库译文或双语 EPUB；在“我的下载”中导出或删除。 |
 | 本地书籍导入 | 在“我的下载”中从“文件”多选导入 EPUB 和 TXT；浮窗显示批量处理进度，完成后加入本地书籍列表，可阅读、导出或删除。 |
-| EPUB 阅读 | 从“我的下载”打开 EPUB；解析 EPUB 2 NCX / EPUB 3 nav、图片与部分 ruby；左右相接的跟手平移翻页、目录跳转、注脚弹层、书内链接、可拖动进度条；目录提供可折叠、可复制的解析与排版诊断。 |
+| EPUB 阅读 | 从“我的下载”打开 EPUB；解析 EPUB 2 NCX / EPUB 3 nav、图片与部分 ruby；左右相接的跟手平移翻页、单页/双页模式、多字拖选与复制/查询/网页搜索/分享、目录跳转、注脚弹层、书内链接、可拖动进度条；目录提供可折叠、可复制的解析与排版诊断。 |
 | TXT 导入与阅读 | 从“文件”多选导入 TXT；本地阅读支持常见中英文标题分章、卷标题、章节目录、字号与主题设置。“我的 → 阅读体验 → TXT 分章规则”可启停内置规则，并添加、编辑或删除自定义整行正则。分章规则设计参考 [Qingdu Reader](https://github.com/zengchen666/qingdu-reader)（Apache-2.0），本项目为独立 Swift 实现。 |
 | 阅读样式 | 设置字号、字体、行间距、段落间距、首行缩进和四边边距；恢复默认；从“文件”导入 TTF/OTF/TTC，并在管理页选用或删除。 |
 | WebDAV 同步 | 在“我的 → WebDAV 同步”启用并配置 HTTPS WebDAV；在“我的下载”点同步开始，同步中再次点按可查看进度或取消；按书籍的下载/导入时间选择较新版本，阅读位置独立按更新时间合并；密码保存在 iOS 钥匙串。 |
 | 诊断 | 从“我的”页面导出最近 7 天的应用日志；包含 EPUB 下载状态、TXT 导入阶段、解码字节数、分章数量与耗时、失败的系统错误域/代码。导出摘要会统计 TXT 导入、解码与分章诊断记录数。 |
 
-EPUB 阅读器的容器解析、页面缓存、翻页界面和字体管理代码位于 [`iOSApp/EPUBPrototype/`](iOSApp/EPUBPrototype/)。排版依赖 [YueduCoreText 0.8.0](https://github.com/CHANG-JUI-LIN/YueduCoreText)。[阅读器报告](EPUB_READER_REPORT.md) 记录了实现过程、真实书样本和已知限制。
+EPUB 阅读器的容器解析、页面缓存、翻页界面和字体管理代码位于 [`iOSApp/EPUBPrototype/`](iOSApp/EPUBPrototype/)。排版依赖 [YueduCoreText 0.8.0](https://github.com/CHANG-JUI-LIN/YueduCoreText)。依赖说明见[阅读器依赖](iOSApp/EPUBPrototype/DEPENDENCIES.md)，当前限制见下文。
 
 WebDAV 使用方法：在“我的 → WebDAV 同步”打开同步开关，并填入可写的 HTTPS WebDAV 文件夹地址、用户名和密码（或应用密码）。之后在“我的下载”点同步按钮开始；同步过程中再次点按钮可打开进度浮窗并取消任务。另一台设备配置相同地址并同步后，会恢复云端较新的书籍记录。网络小说按下载时间、文库书按导入时间逐本比较；阅读位置分别按更新时间合并，网络小说记录章节序号，EPUB 记录文件哈希对应的阅读比例。同步采用追加与恢复：本地删除不会删除云端副本，后续同步可能再次恢复该书。取消不会回滚已经传输或恢复的文件，远端目录清单在同步最后阶段写入。服务器会生成 `NoveliaSync/v1/`，其中的下载文件与书目未做端到端加密。
 
 ## 下载与运行
 
-[下载最新 Release](https://github.com/Guanine000/novelia-ios-port/releases/latest) · [查看发行记录](https://github.com/Guanine000/novelia-ios-port/releases)
+[下载最新 Release](https://github.com/Guanine000/novelia-swift/releases/latest) · [查看发行记录](https://github.com/Guanine000/novelia-swift/releases)
 
 Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名。要从源码运行，使用 Xcode 打开 `NoveliaIOS.xcodeproj`，选择 `Novelia` scheme 和 iPhone 模拟器或已配置签名的设备。依赖由 Swift Package Manager 解析，锁定版本见 `NoveliaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`。
 
-仓库保持私密。v0.5.0 的旧 IPA 已停止分发；请使用包含 GPL-3.0-only 许可告知及对应源码的新 Release。旧版本标签保留供历史追溯。已经转交出去的旧文件不会因 Release 附件下架而消失。
 
 项目主要目录：`iOSApp/` 为 SwiftUI 应用与 EPUB 阅读器，`Sources/NoveliaIOSCore/` 为 API、模型和存储代码，`NoveliaIOS.xcodeproj/` 为 Xcode 工程。
+
+## 待更新
+
+- 论坛列表筛选与排序将与网页端保持一致：小说讨论支持按书单、工具、教程、资源标签查看；站务公告和意见反馈不提供标签筛选。三个分类均支持最近活跃、最新发布、最新更新、浏览最多和评论最多五种排序。此项尚未实现。
 
 ## 已知限制
 
@@ -52,8 +55,12 @@ App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完�
 
 **TXT 分章参考：** [Qingdu Reader](https://github.com/zengchen666/qingdu-reader) 使用 Apache License 2.0。本项目仅参考其公开说明中的设计思路，分章识别器为独立 Swift 实现；没有复制、修改或随包分发 Qingdu Reader 的源代码、二进制或资源。Apache-2.0 原文见 [Qingdu Reader LICENSE](https://github.com/zengchen666/qingdu-reader/blob/main/LICENSE)。
 
-最新 Release 附有本项目对应版本源码归档，以及 YueduCoreText 锁定提交的源码和许可材料。由于仓库为私密仓库，分发 IPA 时应确保每位接收者能取得同一版本的完整对应源码。构建流程使用 [`scripts/verify_third_party_notices.py`](scripts/verify_third_party_notices.py) 核对锁定依赖、许可清单和原始文件，并检查许可资源是否进入 IPA。
+最新 Release 附有本项目对应版本源码归档，以及 YueduCoreText 锁定提交的源码和许可材料。分发 IPA 时应同时提供同一版本的完整对应源码与第三方许可材料。构建流程使用 [`scripts/verify_third_party_notices.py`](scripts/verify_third_party_notices.py) 核对锁定依赖、许可清单和原始文件，并检查许可资源是否进入 IPA。发布前还需运行 `python3 scripts/verify_release_privacy.py <IPA路径>`，检查包内是否包含开发者主目录路径或常见凭据特征。
 
 本仓库中由项目维护者拥有授权权利的 App 源代码和项目文档采用 **GNU GPL-3.0-only**（SPDX：`GPL-3.0-only`），完整条款见根目录 [LICENSE](LICENSE)。本 iOS 项目是参考 [GPL-3.0-only 安卓客户端](https://github.com/nobYoQ/novelia) 制作的 Swift 移植版本，包含平台适配和后续修改；上游版权声明 `Copyright (C) 2026 Novelia Android contributors.` 予以保留。本 iOS 移植及新增部分版权声明为 `Copyright (C) 2026 Novelia iOS contributors.`，修改版本日期为 2026-10-09。
 
-第三方组件、YueduCoreText、用户导入字体、Novelia 网站内容、小说与用户内容仍分别适用其自身许可证或权利声明，不被本仓库的 GPL 声明替代或重新授权。完整第三方清单、许可文本和 YueduCoreText 对应源码见上方清单及最新 Release 附件。App 图标由项目维护者制作或 AI 生成，未直接取自安卓对照项目或 Yuedu-reader；图标和其他非代码资源仍以其各自权利状态为准。
+第三方组件、YueduCoreText、用户导入字体、Novelia 网站内容、小说与用户内容仍分别适用其自身许可证或权利声明，不被本仓库的 GPL 声明替代或重新授权。完整第三方清单、许可文本和 YueduCoreText 对应源码见上方清单及最新 Release 附件。默认书本图标由维护者使用 GPT 生成并提供，随本项目源码和 IPA 分发；其他非代码资源仍以其各自权利状态为准。
+
+## 反馈
+
+普通问题请通过 [Issues](https://github.com/Guanine000/novelia-swift/issues) 提交。公开反馈前请移除账号、令牌、WebDAV 凭据、私人书籍和个人信息。安全漏洞请通过[私密安全报告](https://github.com/Guanine000/novelia-swift/security/advisories/new)提交。

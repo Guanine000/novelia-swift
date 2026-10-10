@@ -88,6 +88,17 @@ public struct ForumAPIClient: Sendable {
         )
     }
 
+    /// Matches the official forum editor's PATCH contract.
+    public func updatePost(id: Int64, categoryID: Int64, title: String, content: String, tagIDs: [Int64] = []) async throws -> ForumPost {
+        guard id > 0, categoryID > 0 else { throw ForumAPIError.invalidInput("帖子或分类无效。") }
+        guard (2...100).contains(title.unicodeScalars.count) else { throw ForumAPIError.invalidInput("标题长度需为 2–100 个字符。") }
+        guard (1...20_000).contains(content.unicodeScalars.count) else { throw ForumAPIError.invalidInput("正文长度需为 1–20,000 个字符。") }
+        guard tagIDs.count <= 3 else { throw ForumAPIError.invalidInput("每篇帖子最多选择 3 个标签。") }
+        return try await request(path: ["post", String(id), ""], method: "PATCH",
+            body: JSONEncoder().encode(ForumPostInput(categoryId: categoryID, title: title, content: content, tagIds: tagIDs)),
+            as: ForumPost.self)
+    }
+
     public func setFavorite(postID: Int64, isFavorite: Bool) async throws {
         _ = try await request(path: ["post", String(postID), "favorite"], method: isFavorite ? "PUT" : "DELETE", as: EmptyResponse.self)
     }
