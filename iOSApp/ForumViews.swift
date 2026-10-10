@@ -347,6 +347,8 @@ private struct ForumPostDetailView: View {
     @State private var errorMessage: String?
     @State private var draft = ""
     @State private var replyRoot: ForumComment?
+    @State private var editingComment: ForumComment?
+    @State private var editedCommentContents: [Int64: String] = [:]
     @State private var isComposerPresented = false
     @State private var isSending = false
     @State private var favoriteInProgress = false
@@ -433,12 +435,17 @@ private struct ForumPostDetailView: View {
                         ForumCommentCard(
                             postID: postID,
                             comment: comment,
+                            username: auth.username,
+                            editedContents: editedCommentContents,
+                            content: editedCommentContents[comment.id] ?? comment.content,
                             onReply: {
                                 guard auth.username != nil else { auth.isLoginPresented = true; return }
+                                editingComment = nil
                                 replyRoot = comment
                                 draft = ""
                                 isComposerPresented = true
                             },
+                            onEdit: { beginCommentEdit($0) },
                             onError: { operationError = $0 }
                         )
                     }
@@ -502,9 +509,13 @@ private struct ForumPostDetailView: View {
             ForumCommentEditorSheet(
                 draft: $draft,
                 replyTo: replyRoot?.authorUsername,
+                isEditing: editingComment != nil,
                 username: auth.username ?? "",
-                onCancel: { isComposerPresented = false },
-                onSend: { await sendComment() }
+                onCancel: { cancelCommentEditor() },
+                onSend: {
+                    if editingComment == nil { return await sendComment() }
+                    return await saveCommentEdit()
+                }
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
@@ -556,8 +567,24 @@ private struct ForumPostDetailView: View {
     private func beginComment() {
         guard auth.username != nil else { auth.isLoginPresented = true; return }
         replyRoot = nil
+        editingComment = nil
         draft = ""
         isComposerPresented = true
+    }
+
+    private func beginCommentEdit(_ comment: ForumComment) {
+        guard auth.username == comment.authorUsername else { return }
+        replyRoot = nil
+        editingComment = comment
+        draft = editedCommentContents[comment.id] ?? comment.content
+        isComposerPresented = true
+    }
+
+    private func cancelCommentEditor() {
+        isComposerPresented = false
+        editingComment = nil
+        replyRoot = nil
+        draft = ""
     }
 
     @MainActor
@@ -600,6 +627,23 @@ private struct ForumPostDetailView: View {
             replyRoot = nil
             await loadComments(page: 0)
             post = try await api.post(id: postID)
+            return nil
+        } catch { return error.localizedDescription }
+    }
+
+    @MainActor
+    private func saveCommentEdit() async -> String? {
+        guard let editingComment, auth.username == editingComment.authorUsername else { return "只能编辑自己发表的评论。" }
+        let content = forumCommentMarkdownForSubmission(draft).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else { return "请先输入评论内容。" }
+        isSending = true
+        defer { isSending = false }
+        do {
+            let updated = try await api.updateComment(postID: postID, commentID: editingComment.id, content: content)
+            editedCommentContents[updated.id] = updated.content
+            self.editingComment = nil
+            draft = ""
+            await loadComments(page: commentPage)
             return nil
         } catch { return error.localizedDescription }
     }
@@ -1196,6 +1240,7 @@ private struct ForumCommentEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var draft: String
     let replyTo: String?
+    let isEditing: Bool
     let username: String
     let onCancel: () -> Void
     let onSend: () async -> String?
@@ -1210,6 +1255,8 @@ private struct ForumCommentEditorSheet: View {
                 HStack {
                     if let replyTo {
                         Label("回复 @\(replyTo)", systemImage: "arrowshape.turn.up.left")
+                    } else if isEditing {
+                        Label("编辑评论", systemImage: "square.and.pencil")
                     } else {
                         Label("发表评论", systemImage: "bubble.left")
                     }
@@ -1244,7 +1291,7 @@ private struct ForumCommentEditorSheet: View {
                         Task { await submit() }
                     } label: {
                         if isSending { ProgressView().tint(.white) }
-                        else { Label("发送", systemImage: "paperplane.fill") }
+                        else { Label(isEditing ? "保存" : "发送", systemImage: isEditing ? "checkmark" : "paperplane.fill") }
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(NoveliaStyle.brandGreen)
@@ -1254,7 +1301,7 @@ private struct ForumCommentEditorSheet: View {
                 .padding(.vertical, 10)
                 .background(.ultraThinMaterial)
             }
-            .navigationTitle(replyTo == nil ? "发表评论" : "回复评论")
+            .navigationTitle(isEditing ? "编辑评论" : (replyTo == nil ? "发表评论" : "回复评论"))
             .navigationBarTitleDisplayMode(.inline)
 
         }
@@ -1688,7 +1735,11 @@ private func forumHeadingSlug(_ title: String) -> String {
 private struct ForumCommentCard: View {
     let postID: Int64
     let comment: ForumComment
+    let username: String?
+    let editedContents: [Int64: String]
+    let content: String
     let onReply: () -> Void
+    let onEdit: (ForumComment) -> Void
     let onError: (String) -> Void
     @State private var extraReplies: [ForumComment] = []
     @State private var isLoadingReplies = false
@@ -1704,8 +1755,14 @@ private struct ForumCommentCard: View {
                 Spacer()
                 Text(comment.createdAt.forumDisplayDate).font(.caption2).foregroundStyle(NoveliaStyle.muted)
             }
-            ForumMarkdownBody(markdown: comment.content, mode: .comment)
-            Button("回复") { onReply() }.font(.caption.weight(.semibold)).tint(NoveliaStyle.brandGreen)
+            ForumMarkdownBody(markdown: content, mode: .comment)
+            HStack(spacing: 16) {
+                Button("回复") { onReply() }
+                if username == comment.authorUsername {
+                    Button("编辑") { onEdit(comment) }
+                }
+            }
+            .font(.caption.weight(.semibold)).tint(NoveliaStyle.brandGreen)
             ForEach(allReplies) { reply in
                 HStack(alignment: .top, spacing: 8) {
                     RoundedRectangle(cornerRadius: 2).fill(NoveliaStyle.brandGreen.opacity(0.4)).frame(width: 3)
@@ -1715,7 +1772,11 @@ private struct ForumCommentCard: View {
                             Spacer()
                             Text(reply.createdAt.forumDisplayDate).font(.caption2).foregroundStyle(NoveliaStyle.muted)
                         }
-                        ForumMarkdownBody(markdown: reply.content, mode: .comment)
+                        ForumMarkdownBody(markdown: editedContents[reply.id] ?? reply.content, mode: .comment)
+                        if username == reply.authorUsername {
+                            Button("编辑") { onEdit(reply) }
+                                .font(.caption.weight(.semibold)).tint(NoveliaStyle.brandGreen)
+                        }
                     }
                 }
             }

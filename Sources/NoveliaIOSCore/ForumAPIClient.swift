@@ -78,6 +78,21 @@ public struct ForumAPIClient: Sendable {
         )
     }
 
+    /// Updates one of the authenticated user's comments (including a reply).
+    public func updateComment(postID: Int64, commentID: Int64, content: String) async throws -> ForumComment {
+        guard postID > 0, commentID > 0 else { throw ForumAPIError.invalidInput("评论无效。") }
+        let normalized = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...1_000).contains(normalized.unicodeScalars.count) else {
+            throw ForumAPIError.invalidInput("评论长度需为 1–1,000 个字符。")
+        }
+        return try await request(
+            path: ["post", String(postID), "comment", String(commentID)],
+            method: "PATCH",
+            body: JSONSerialization.data(withJSONObject: ["content": content]),
+            as: ForumComment.self
+        )
+    }
+
     public func createPost(categoryID: Int64, title: String, content: String, tagIDs: [Int64] = []) async throws -> ForumPost {
         let titleLength = title.unicodeScalars.count
         let contentLength = content.unicodeScalars.count
