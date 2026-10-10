@@ -64,7 +64,14 @@ final class TapTests: XCTestCase {
   XCTAssertEqual(first.frame.minY, second.frame.minY, accuracy: 1)
   XCTAssertEqual(first.frame.maxY, second.frame.maxY, accuracy: 1)
   XCTAssertGreaterThan(first.frame.height, 100)
-  XCTAssertTrue(app.staticTexts["第一列"].isHittable)
+  let header = app.staticTexts["第一列"]
+  XCTAssertTrue(header.isHittable)
+  let viewport = app.scrollViews["forum-markdown-table"].frame
+  XCTAssertGreaterThanOrEqual(header.frame.minY, viewport.minY)
+  XCTAssertLessThanOrEqual(header.frame.maxY, viewport.maxY)
+  let headerCell = app.otherElements["forum-table-cell-0-0"].firstMatch
+  XCTAssertGreaterThanOrEqual(header.frame.minY, headerCell.frame.minY)
+  XCTAssertLessThanOrEqual(header.frame.maxY, headerCell.frame.maxY)
   app.scrollViews["forum-markdown-table"].swipeLeft()
   XCTAssertTrue(app.staticTexts["末列内容"].isHittable)
  }

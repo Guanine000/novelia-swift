@@ -361,6 +361,7 @@ private struct CloudFavoritesListView: View {
 }
 
 struct DiscoverView: View {
+    @ObservedObject private var blocked = BlockedTagsStore.shared
     @State private var query = ""
     @StateObject private var store = DiscoverStore()
 
@@ -439,7 +440,7 @@ struct DiscoverView: View {
                     }
                 }
 
-                ForEach(store.novels) { novel in
+                ForEach(store.novels.filter { !blocked.hides($0.genres) }) { novel in
                     NavigationLink {
                         NovelDetailView(novel: novel)
                     } label: {
@@ -495,6 +496,7 @@ struct DiscoverView: View {
 }
 
 private struct RankingView: View {
+    @ObservedObject private var blocked = BlockedTagsStore.shared
     @State private var page = 1
     @StateObject private var store = RankingStore()
 
@@ -542,7 +544,7 @@ private struct RankingView: View {
                     }
                 }
 
-                ForEach(Array(store.novels.enumerated()), id: \.element.id) { index, novel in
+                ForEach(Array(store.novels.enumerated()).filter { !blocked.hides($0.element.genres) }, id: \.element.id) { index, novel in
                     NavigationLink {
                         NovelDetailView(novel: novel)
                     } label: {
@@ -596,6 +598,7 @@ private struct RankingView: View {
 }
 
 private struct TagSearchResultsView: View {
+    @ObservedObject private var blocked = BlockedTagsStore.shared
     let tag: String
     @StateObject private var store = DiscoverStore()
 
@@ -635,7 +638,7 @@ private struct TagSearchResultsView: View {
                     }
                 }
 
-                ForEach(store.novels) { novel in
+                ForEach(store.novels.filter { !blocked.hides($0.genres) }) { novel in
                     NavigationLink {
                         NovelDetailView(novel: novel)
                     } label: {
@@ -686,6 +689,7 @@ private struct TagSearchResultsView: View {
 }
 
 struct NovelDetailView: View {
+    @ObservedObject private var blocked = BlockedTagsStore.shared
     @EnvironmentObject private var auth: AccountAuthStore
     @EnvironmentObject private var favorites: FavoritesStore
     @EnvironmentObject private var webNovelDownloads: WebNovelDownloadStore
@@ -795,7 +799,7 @@ struct NovelDetailView: View {
 
                 if !displayNovel.genres.isEmpty {
                     VStack(alignment: .leading, spacing: 11) {
-                        Text("标签 · 点击搜索")
+                        Text("标签 · 点击搜索，长按屏蔽")
                             .font(.system(size: 19, weight: .bold, design: .rounded))
                         LazyVGrid(
                             columns: [GridItem(.adaptive(minimum: 92), alignment: .leading)],
@@ -815,8 +819,14 @@ struct NovelDetailView: View {
                                         .background(NoveliaStyle.card, in: Capsule())
                                 }
                                 .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button(blocked.contains(tag) ? "解除屏蔽此标签" : "屏蔽此标签", systemImage: "eye.slash") {
+                                        if blocked.contains(tag) { blocked.remove(tag) } else { blocked.add(tag) }
+                                    }
+                                }
                             }
                         }
+                        NavigationLink("管理屏蔽标签") { BlockedTagsView() }
                     }
                 }
 
@@ -2143,7 +2153,7 @@ private struct DownloadedWebNovelTXTReader: View {
                 ProgressView("正在打开 TXT…")
             }
         }
-        .background(appearance.background(system: systemColorScheme).ignoresSafeArea())
+        .background(ReaderBackgroundView(dark: appearance.isDark(system: systemColorScheme), fallback: appearance.background(system: systemColorScheme)).ignoresSafeArea())
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .tabBar)
@@ -2287,6 +2297,7 @@ private struct DownloadedWebNovelReader: View {
 }
 
 struct SettingsView: View {
+    @AppStorage(NoveliaUpdateStore.enabledKey) private var checksUpdates = true
     @EnvironmentObject private var auth: AccountAuthStore
     @AppStorage("appThemeColor") private var themeColorRaw = AppThemeColor.novelia.rawValue
     @AppStorage("appThemeCustomHex") private var themeCustomHex = "559775"
@@ -2324,7 +2335,11 @@ struct SettingsView: View {
                     .tint(NoveliaStyle.brandGreen)
                 }
             }
+            Section("内容筛选") {
+                NavigationLink("标签屏蔽") { BlockedTagsView() }
+            }
             Section("阅读体验") {
+                NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
                 Picker(selection: $themeColorRaw) {
                     ForEach(AppThemeColor.allCases) { option in
                         HStack(spacing: 8) {
@@ -2382,6 +2397,7 @@ struct SettingsView: View {
                 }
             }
             Section("版本") {
+                Toggle("启动时检查更新", isOn: $checksUpdates)
                 LabeledContent("当前版本", value: appVersion)
                 LabeledContent("平台", value: "iOS 17+")
                 NavigationLink("开源许可") {

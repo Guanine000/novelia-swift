@@ -78,6 +78,8 @@ enum PrototypeLocalFonts {
             try? FileManager.default.removeItem(at: destination)
             throw FontImportError.registrationFailed
         }
+        let hash = try WebDAVFileHash.sha256(destination)
+        recordSync(SyncedImportedFont(hash: hash, format: destination.pathExtension, deleted: false, updatedAt: Date()))
         return family
     }
 
@@ -98,8 +100,48 @@ enum PrototypeLocalFonts {
         guard font.url.deletingLastPathComponent().standardizedFileURL == directory.standardizedFileURL else {
             throw FontImportError.invalidLocation
         }
+        let hash = try WebDAVFileHash.sha256(font.url)
         CTFontManagerUnregisterFontsForURL(font.url as CFURL, .process, nil)
         try FileManager.default.removeItem(at: font.url)
+        recordSync(SyncedImportedFont(hash: hash, format: font.url.pathExtension, deleted: true, updatedAt: Date()))
+    }
+
+    static func syncSnapshot() throws -> [String: SyncedImportedFont] {
+        var records = syncRecords()
+        for font in importedFonts() {
+            let hash = try WebDAVFileHash.sha256(font.url)
+            if records[hash] == nil { records[hash] = SyncedImportedFont(hash: hash, format: font.url.pathExtension, deleted: false, updatedAt: .distantPast) }
+        }
+        return records
+    }
+    static func syncFiles() throws -> [String: URL] {
+        var files: [String: URL] = [:]
+        for font in importedFonts() { files[try WebDAVFileHash.sha256(font.url)] = font.url }
+        return files
+    }
+    private static func syncRecords() -> [String: SyncedImportedFont] {
+        UserDefaults.standard.data(forKey: "readerFonts.sync.v1").flatMap { try? JSONDecoder().decode([String: SyncedImportedFont].self, from: $0) } ?? [:]
+    }
+    private static func recordSync(_ record: SyncedImportedFont) {
+        var records = syncRecords(); records[record.hash] = record
+        if let data = try? JSONEncoder().encode(records) { UserDefaults.standard.set(data, forKey: "readerFonts.sync.v1") }
+    }
+    static func applySync(_ records: [String: SyncedImportedFont], files: [String: URL]) throws {
+        for (hash, record) in records {
+            if let local = syncRecords()[hash], local.updatedAt > record.updatedAt { continue }
+            let matches = try importedFonts().filter { try WebDAVFileHash.sha256($0.url) == hash }
+            if record.deleted {
+                for font in matches { try deleteFont(font) }
+            } else if matches.isEmpty {
+                guard ["ttf", "otf", "ttc"].contains(record.format), let file = files[hash] else { throw CocoaError(.fileReadCorruptFile) }
+                let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(record.format)
+                try FileManager.default.copyItem(at: file, to: temporary)
+                defer { try? FileManager.default.removeItem(at: temporary) }
+                _ = try importFont(from: temporary)
+            }
+            recordSync(record)
+        }
+        NotificationCenter.default.post(name: Notification.Name("NoveliaImportedFontsChanged"), object: nil)
     }
 
     private enum FontImportError: LocalizedError {
@@ -314,9 +356,9 @@ final class PrototypeReaderModel: ObservableObject {
 
     /// 页面底色（浅色=米色纸面，深色=近黑）。
     var pageBackground: UIColor {
-        isDarkMode
+        UIColor(ReaderBackgroundStore.shared.color(dark: isDarkMode, fallback: Color(isDarkMode
             ? UIColor(red: 0.10, green: 0.10, blue: 0.11, alpha: 1)
-            : UIColor(red: 0.97, green: 0.95, blue: 0.91, alpha: 1)
+            : UIColor(red: 0.97, green: 0.95, blue: 0.91, alpha: 1))))
     }
 
     /// 正文颜色（浅色=黑，深色=近白）。
@@ -327,6 +369,16 @@ final class PrototypeReaderModel: ObservableObject {
     /// 页面底色（SwiftUI 视图背景用）。
     var pageBackgroundColor: Color {
         Color(pageBackground)
+    }
+
+    private var backgroundRefreshTask: Task<Void, Never>?
+    func refreshBackground() {
+        backgroundRefreshTask?.cancel()
+        backgroundRefreshTask = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
+            guard let self else { return }
+            await self.relayout(keepingCurrentSpine: true)
+        }
     }
 
     func setDarkMode(_ dark: Bool) {
@@ -349,7 +401,7 @@ final class PrototypeReaderModel: ObservableObject {
         config.paragraphSpacing = style.paragraphSpacing
         config.contentInsets = contentInsets
         config.textColor = pageTextColor
-        config.backgroundColor = pageBackground
+        config.backgroundColor = ReaderBackgroundStore.shared.image(dark: isDarkMode, landscape: viewportSize.width > viewportSize.height) == nil ? pageBackground : .clear
         config.defaultTextAlignment = .natural
         config.onDiagnostic = { diagnostic in
             engineDiagLog.fault("ENGINE_DIAG \(String(describing: diagnostic), privacy: .public)")
@@ -468,7 +520,7 @@ final class PrototypeReaderModel: ObservableObject {
             scheduledRenders.insert(id)
             Task { [weak self] in
                 guard let self else { return }
-                _ = self.pageBook?.renderedImage(for: id, scale: self.displayScale, background: background)
+                _ = self.pageBook?.renderedImage(for: id, scale: self.displayScale, background: background, backgroundImage: ReaderBackgroundStore.shared.image(dark: self.isDarkMode, landscape: self.viewportSize.width > self.viewportSize.height))
                 self.scheduledRenders.remove(id)
                 self.objectWillChange.send()
             }
@@ -556,7 +608,7 @@ final class PrototypeReaderModel: ObservableObject {
         var result = PrototypePagerView.PageImages(
             previous: cachedImage(location.spineIndex, location.pageIndex - 1, background: background),
             current: pageBook.renderedImage(for: pageID(location.spineIndex, location.pageIndex),
-                                            scale: displayScale, background: background),
+                                            scale: displayScale, background: background, backgroundImage: ReaderBackgroundStore.shared.image(dark: isDarkMode, landscape: viewportSize.width > viewportSize.height)),
             next: cachedImage(location.spineIndex, location.pageIndex + 1, background: background)
         )
         result.size = size
@@ -580,7 +632,7 @@ final class PrototypeReaderModel: ObservableObject {
         let ids = (0..<2).map { pageID(target.spineIndex, target.pageIndex + $0) }
         let secondAvailable = pageBook.isPageAvailable(ids[1])
         if let cached = spreadCache[ids[0]], cached.secondLeafAvailable == secondAvailable { return cached.image }
-        let leaves = ids.map { pageBook.renderedImage(for: $0, scale: displayScale, background: pageBackground) }
+        let leaves = ids.map { pageBook.renderedImage(for: $0, scale: displayScale, background: pageBackground, backgroundImage: ReaderBackgroundStore.shared.image(dark: isDarkMode, landscape: viewportSize.width > viewportSize.height)) }
         let format = UIGraphicsImageRendererFormat()
         format.scale = displayScale
         format.opaque = true

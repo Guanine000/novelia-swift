@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct WenkuView: View {
+    @ObservedObject private var blocked = BlockedTagsStore.shared
     @EnvironmentObject private var auth: AccountAuthStore
     @EnvironmentObject private var localLibrary: WenkuLocalLibraryStore
     @StateObject private var store = WenkuStore()
@@ -102,7 +103,7 @@ struct WenkuView: View {
                 } else if novels.isEmpty {
                     ContentUnavailableView("没有找到作品", systemImage: "books.vertical", description: Text("换个关键词试试。"))
                 }
-                ForEach(Array(novels.enumerated()), id: \.element.id) { index, novel in
+                ForEach(Array(novels.enumerated()).filter { section != .search || !blocked.hides(blocked.wenkuTags[$0.element.id] ?? []) }, id: \.element.id) { index, novel in
                     NavigationLink {
                         WenkuDetailView(outline: novel)
                             .environmentObject(localLibrary)
@@ -113,6 +114,10 @@ struct WenkuView: View {
                     .task {
                         if index >= novels.count - 4 { await loadMore() }
                     }
+                }
+                if section == .search, !blocked.tags.isEmpty, !novels.isEmpty {
+                    Button("加载更多作品") { Task { await loadMore() } }
+                        .disabled(loading).padding()
                 }
                 if loading && !novels.isEmpty { ProgressView().padding() }
                 if let error, !novels.isEmpty {
@@ -173,6 +178,7 @@ private struct WenkuNovelRow: View {
 }
 
 struct WenkuDetailView: View {
+    @ObservedObject private var blocked = BlockedTagsStore.shared
     @EnvironmentObject private var auth: AccountAuthStore
     @EnvironmentObject private var store: WenkuStore
     @EnvironmentObject private var localLibrary: WenkuLocalLibraryStore
@@ -191,6 +197,7 @@ struct WenkuDetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         header(detail)
+                            .onAppear { blocked.rememberWenku(id: detail.id, tags: detail.keywords) }
                         if !detail.introduction.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("简介").font(.headline)
@@ -200,7 +207,12 @@ struct WenkuDetailView: View {
                         if !detail.keywords.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("标签").font(.headline)
-                                Text(detail.keywords.joined(separator: " · ")).font(.subheadline).foregroundStyle(NoveliaStyle.muted)
+                                ForEach(detail.keywords, id: \.self) { tag in
+                                    Button(blocked.contains(tag) ? "解除屏蔽：\(tag)" : "屏蔽：\(tag)") {
+                                        if blocked.contains(tag) { blocked.remove(tag) } else { blocked.add(tag) }
+                                    }
+                                }
+                                NavigationLink("管理屏蔽标签") { BlockedTagsView() }
                             }
                         }
                         NavigationLink {

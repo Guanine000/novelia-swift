@@ -2,6 +2,7 @@ import Combine
 import Foundation
 import SwiftUI
 import UIKit
+import WebKit
 
 @MainActor
 final class ForumStore: ObservableObject {
@@ -14,12 +15,30 @@ final class ForumStore: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published var selectedCategory = ""
     @Published var query = ""
+    @Published var selectedTagID: Int64?
+
+    var filterTags: [ForumTag] {
+        guard source == .all, selectedCategory == "novel" else { return [] }
+        return categories.first(where: { $0.slug == "novel" })?.tags
+            .filter { ["书单", "工具", "教程", "资源"].contains($0.name) }
+            .sorted { $0.sortOrder < $1.sortOrder } ?? []
+    }
     @Published var sort: ForumSort = .active
     @Published var source: ForumFeedSource = .all
 
     private let pageSize = 20
     private var requestGeneration = 0
-    private let api = ForumAPIClient(tokenProvider: { NoveliaForumSessionTokenVault.read() })
+    private let api: ForumAPIClient
+
+    init(api: ForumAPIClient = ForumAPIClient(tokenProvider: { NoveliaForumSessionTokenVault.read() })) {
+        self.api = api
+    }
+
+    func selectCategory(_ slug: String) async {
+        selectedTagID = nil
+        selectedCategory = slug
+        await loadPosts(page: 0)
+    }
 
     func loadCategories() async {
         guard !isLoadingCategories else { return }
@@ -50,6 +69,7 @@ final class ForumStore: ObservableObject {
                 category: selectedCategory,
                 query: query.trimmingCharacters(in: .whitespacesAndNewlines),
                 sort: sort,
+                tagID: filterTags.contains(where: { $0.id == selectedTagID }) ? selectedTagID : nil,
                 source: source
             )
             guard generation == requestGeneration else { return }
@@ -73,6 +93,7 @@ final class ForumStore: ObservableObject {
 
     func selectSource(_ value: ForumFeedSource) async {
         source = value
+        selectedTagID = nil
         await loadPosts(page: 0)
     }
 
@@ -90,13 +111,39 @@ struct ForumView: View {
     @EnvironmentObject private var auth: ForumAuthStore
     @StateObject private var store = ForumStore()
 
+    init(initialCategory: String = "", initialQuery: String = "") {
+        let store = ForumStore()
+        store.selectedCategory = initialCategory
+        store.query = initialQuery
+        _store = StateObject(wrappedValue: store)
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             VStack(spacing: 0) {
                 ForumCategoryBar(categories: store.categories, selectedCategory: store.selectedCategory,
                                  isVisible: store.source == .all) { category in
-                    store.selectedCategory = category.slug
-                    Task { await store.loadPosts(page: 0) }
+                    Task { await store.selectCategory(category.slug) }
+                }
+                if !store.filterTags.isEmpty {
+                    HStack {
+                        Text("标签").foregroundStyle(NoveliaStyle.muted)
+                        Picker("标签筛选", selection: $store.selectedTagID) {
+                            Text("全部标签").tag(nil as Int64?)
+                            ForEach(store.filterTags) { tag in
+                                Text(tag.name).tag(Optional(tag.id))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .accessibilityIdentifier("forum-tag-filter")
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(NoveliaStyle.paper)
+                    .onChange(of: store.selectedTagID) { _, _ in
+                        Task { await store.loadPosts(page: 0) }
+                    }
                 }
                 List {
                     Color.clear
@@ -737,9 +784,9 @@ private struct ForumMarkdownTable: View {
 
     var body: some View {
         ScrollView(.horizontal) {
-            Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(rows.indices, id: \.self) { row in
-                    GridRow {
+                    ForumTableRowLayout {
                         ForEach(rows[row].indices, id: \.self) { column in
                             ForumInlineMarkdownText(markdown: rows[row][column], baseSize: mode == .comment ? 14 : 15, bold: row == 0)
                                 .fontWeight(row == 0 ? .semibold : .regular)
@@ -751,7 +798,6 @@ private struct ForumMarkdownTable: View {
                                 .frame(maxHeight: .infinity, alignment: .topLeading)
                                 .background(row == 0 ? NoveliaStyle.paper : NoveliaStyle.card)
                                 .overlay(Rectangle().stroke(NoveliaStyle.muted.opacity(0.25)))
-                                .gridCellAnchor(.topLeading)
                                 .accessibilityElement(children: .contain)
                                 .accessibilityIdentifier("forum-table-cell-\(row)-\(column)")
                         }
@@ -760,8 +806,24 @@ private struct ForumMarkdownTable: View {
             }
             .fixedSize(horizontal: true, vertical: false)
         }
-        .defaultScrollAnchor(.leading)
+        // Keep the vertical origin at the top when a tall table exceeds its viewport.
+        .defaultScrollAnchor(.topLeading)
         .accessibilityIdentifier("forum-markdown-table")
+    }
+}
+
+/// Measure each row independently so expanded cell backgrounds cannot alter
+/// the text origin or borrow height from another row.
+private struct ForumTableRowLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(ProposedViewSize(width: 240, height: nil)) }
+        return CGSize(width: CGFloat(subviews.count) * 240, height: sizes.map(\.height).max() ?? 0)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for (index, view) in subviews.enumerated() {
+            view.place(at: CGPoint(x: bounds.minX + CGFloat(index) * 240, y: bounds.minY),
+                       anchor: .topLeading, proposal: ProposedViewSize(width: 240, height: bounds.height))
+        }
     }
 }
 
@@ -979,6 +1041,8 @@ private func forumCommentMarkdownForSubmission(_ markdown: String) -> String {
 
 private struct ForumComposeNotice: View {
     let isPost: Bool
+    @Environment(\.openURL) private var parentOpenURL
+    @State private var destination: ForumNoticeDestination?
 
     private var markdown: String {
         if !isPost { return "发言请遵守 [社区守则](https://forum.novelia.cc/rules)。" }
@@ -999,6 +1063,97 @@ private struct ForumComposeNotice: View {
         }
         .padding(12)
         .background(NoveliaStyle.brandGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .environment(\.openURL, OpenURLAction { url in
+            guard let route = ForumNoticeDestination(url: url) else {
+                parentOpenURL(url)
+                return .handled
+            }
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            destination = route
+            return .handled
+        })
+        .background {
+            NavigationLink(isActive: Binding(
+                get: { destination != nil },
+                set: { if !$0 { destination = nil } }
+            )) {
+                if let destination {
+                    switch destination {
+                    case let .category(slug, query): ForumView(initialCategory: slug, initialQuery: query)
+                    case .rules: ForumRulesView()
+                    }
+                }
+            } label: { EmptyView() }
+            .hidden()
+        }
+    }
+}
+
+private enum ForumNoticeDestination: Equatable {
+    case category(String, String)
+    case rules
+
+    init?(url: URL) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https",
+              components.host?.lowercased() == "forum.novelia.cc",
+              components.user == nil, components.password == nil,
+              components.port == nil || components.port == 443 else { return nil }
+        let segments = components.path.split(separator: "/")
+        if segments == ["rules"] { self = .rules; return }
+        guard segments.count == 2, segments[0] == "c",
+              ["announcements", "feedback", "novel"].contains(String(segments[1])) else { return nil }
+        self = .category(String(segments[1]), components.queryItems?.first(where: { $0.name == "q" })?.value ?? "")
+    }
+}
+
+private struct ForumRulesView: View {
+    @State private var errorMessage: String?
+    @State private var isLoading = true
+    @State private var reloadID = UUID()
+
+    var body: some View {
+        ZStack {
+            ForumRulesWebView(onFinish: { isLoading = false }, onError: {
+                isLoading = false
+                errorMessage = $0
+            })
+            .id(reloadID)
+            if isLoading { ProgressView("正在加载社区守则…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) }
+            if let errorMessage {
+                ContentUnavailableView {
+                    Label("社区守则加载失败", systemImage: "wifi.exclamationmark")
+                } description: { Text(errorMessage) } actions: {
+                    Button("重试") { self.errorMessage = nil; isLoading = true; reloadID = UUID() }
+                }
+                .background(NoveliaStyle.paper)
+            }
+        }
+        .navigationTitle("社区守则")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct ForumRulesWebView: UIViewRepresentable {
+    var onFinish: () -> Void
+    var onError: (String) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+    func makeUIView(context: Context) -> WKWebView {
+        let view = WKWebView()
+        view.navigationDelegate = context.coordinator
+        view.load(URLRequest(url: URL(string: "https://forum.novelia.cc/rules")!))
+        return view
+    }
+    func updateUIView(_ view: WKWebView, context: Context) { context.coordinator.parent = self }
+    static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) { view.stopLoading(); view.navigationDelegate = nil }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var parent: ForumRulesWebView
+        init(parent: ForumRulesWebView) { self.parent = parent }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { parent.onFinish() }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { parent.onError(error.localizedDescription) }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { parent.onError(error.localizedDescription) }
     }
 }
 

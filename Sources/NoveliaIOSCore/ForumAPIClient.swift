@@ -29,6 +29,7 @@ public struct ForumAPIClient: Sendable {
         category: String = "",
         query: String = "",
         sort: ForumSort = .active,
+        tagID: Int64? = nil,
         source: ForumFeedSource = .all
     ) async throws -> ForumPage<ForumPost> {
         guard page >= 0, pageSize > 0, pageSize <= 100 else { throw ForumAPIError.invalidInput("论坛分页参数无效。") }
@@ -39,6 +40,9 @@ public struct ForumAPIClient: Sendable {
         if source == .all, !category.isEmpty { items.append(URLQueryItem(name: "category", value: category)) }
         if source == .all, !query.isEmpty { items.append(URLQueryItem(name: "q", value: query)) }
         if source == .all { items.append(URLQueryItem(name: "sort", value: sort.rawValue)) }
+        if source == .all, category == "novel", let tagID, tagID > 0 {
+            items.append(URLQueryItem(name: "tag", value: String(tagID)))
+        }
         let path = source == .favorites ? ["me", "favorite"] : source == .myPosts ? ["me", "post"] : ["post", ""]
         return try await get(path: path, query: items)
     }
@@ -325,12 +329,13 @@ public struct ForumPostInput: Codable, Hashable, Sendable {
 }
 
 public enum ForumSort: String, CaseIterable, Identifiable, Sendable {
-    case active, newest, views, comments
+    case active, newest, updated, views, comments
     public var id: String { rawValue }
     public var title: String {
         switch self {
         case .active: "最近活跃"
         case .newest: "最新发布"
+        case .updated: "最新更新"
         case .views: "浏览最多"
         case .comments: "评论最多"
         }
