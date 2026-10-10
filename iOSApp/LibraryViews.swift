@@ -850,8 +850,16 @@ struct NovelDetailView: View {
 
                 if !displayNovel.genres.isEmpty {
                     VStack(alignment: .leading, spacing: 11) {
-                        Text("标签 · 点击搜索，长按屏蔽")
-                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                        HStack(spacing: 8) {
+                            Text("标签").font(.system(size: 19, weight: .bold, design: .rounded))
+                            Text("点击搜索，长按屏蔽")
+                                .font(.system(size: 12))
+                                .foregroundStyle(NoveliaStyle.muted)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                            Spacer(minLength: 6)
+                            TagBlockingMenu(tags: displayNovel.genres)
+                        }
                         LazyVGrid(
                             columns: [GridItem(.adaptive(minimum: 92), alignment: .leading)],
                             alignment: .leading,
@@ -863,7 +871,7 @@ struct NovelDetailView: View {
                                 } label: {
                                     Text(tag)
                                         .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(NoveliaStyle.accent(for: displayNovel.accent))
+                                        .foregroundStyle(blocked.contains(tag) ? NoveliaStyle.muted : NoveliaStyle.accent(for: displayNovel.accent))
                                         .lineLimit(1)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 8)
@@ -877,7 +885,6 @@ struct NovelDetailView: View {
                                 }
                             }
                         }
-                        NavigationLink("管理屏蔽标签") { BlockedTagsView() }
                     }
                 }
 
