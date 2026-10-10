@@ -26,6 +26,23 @@ check(table.count == 2, "table/paragraph boundaries")
 if case let .table(rows) = table[0].kind {
     check(rows.count == 2 && rows[1][0] == "A", "table rows")
 } else { fatalError("table missing") }
+
+// Forum post 263 uses two hyphens per separator cell; shortened synthetic
+// content reproduces its structure without redistributing the author's prose.
+for mode in [ForumMarkdownMode.article, .comment] {
+    for delimiter in ["-", "--", "---", ":-", "-:", ":--:"] {
+        let blocks = parseForumMarkdown("| 评分 | 链接 | 评语 | 日期 |\n| \(delimiter) | \(delimiter) | \(delimiter) | \(delimiter) |\n| ☆☆☆☆☆ | [小说](https://books.fishhawk.top/novel/hameln/357228) | **更新** | 20250226 |\n|  | *分隔* | | |\n\n后文", mode: mode)
+        check(blocks.count == 2, "short delimiter block boundaries")
+        if case let .table(rows) = blocks[0].kind {
+            check(rows.count == 3 && rows.allSatisfy { $0.count == 4 }, "four-column table")
+            check(rows[2] == ["", "*分隔*", "", ""], "blank cells preserved")
+        } else { fatalError("short delimiter not recognized") }
+    }
+}
+private let mismatched = parseForumMarkdown("| a | b |\n| -- |\n| c | d |")
+check(!mismatched.contains { if case .table = $0.kind { return true }; return false }, "mismatched header/delimiter must not become table")
+check(forumTableCells("a | | b") == ["a", "", "b"], "unframed interior empty cell")
+check(forumTableCells(" | b") == ["b"], "leading pipe boundary")
 check(forumTableCells("| a\\|b | `x|y` |") == ["a\\|b", "`x|y`"], "escaped and code pipes")
 for mode in [ForumMarkdownMode.article, .comment] {
     let stars = parseForumMarkdown("::: star 4.5\n:::\n\n正文", mode: mode)

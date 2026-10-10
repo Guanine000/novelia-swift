@@ -1192,8 +1192,9 @@ private func parseForumMarkdown(_ markdown: String, mode: ForumMarkdownMode = .a
             continue
         }
         if index + 1 < lines.count, line.contains("|"),
-           forumTableCells(lines[index + 1]).allSatisfy({ $0.range(of: "^:?-{3,}:?$", options: .regularExpression) != nil }),
-           !forumTableCells(lines[index + 1]).isEmpty {
+           forumTableCells(lines[index + 1]).allSatisfy({ $0.range(of: "^:?-+:?$", options: .regularExpression) != nil }),
+           !forumTableCells(lines[index + 1]).isEmpty,
+           forumTableCells(rawLine).count == forumTableCells(lines[index + 1]).count {
             flushParagraph()
             let header = forumTableCells(rawLine)
             var rows = [header]
@@ -1511,8 +1512,9 @@ private func forumTableCells(_ line: String) -> [String] {
         else { cell.append(character) }
     }
     cells.append(cell.trimmingCharacters(in: .whitespaces))
-    if cells.first == "" { cells.removeFirst() }
-    if cells.last == "" { cells.removeLast() }
+    let trimmed = line.trimmingCharacters(in: .whitespaces)
+    if trimmed.hasPrefix("|"), cells.first == "" { cells.removeFirst() }
+    if trimmed.hasSuffix("|"), cells.last == "" { cells.removeLast() }
     return cells
 }
 
