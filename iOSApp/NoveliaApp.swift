@@ -138,6 +138,7 @@ enum NoveliaStyle {
 }
 
 struct RootView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("appThemeColor") private var appThemeColorRaw = AppThemeColor.novelia.rawValue
     @AppStorage("appThemeCustomHex") private var appThemeCustomHex = "559775"
     @StateObject private var auth = AccountAuthStore()
@@ -189,6 +190,22 @@ struct RootView: View {
         .environmentObject(wenkuDownloads)
         .environmentObject(webNovelDownloads)
         .environmentObject(webDAVSync)
+        .task {
+            auth.forumAuth = forumAuth
+            forumAuth.accountAuth = auth
+            await NoveliaSessionRenewal.shared.register(app: "n") { [weak auth] in
+                guard let auth, await auth.refreshSession() else { return nil }
+                return NoveliaSessionTokenVault.read()
+            }
+            await NoveliaSessionRenewal.shared.register(app: "f") { [weak forumAuth] in
+                guard let forumAuth, await forumAuth.refreshSession() else { return nil }
+                return await MainActor.run { NoveliaForumSessionTokenVault.read() }
+            }
+            await restoreSessions()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await restoreSessions() } }
+        }
         .sheet(isPresented: $auth.isLoginPresented) {
             NoveliaLoginSheet(auth: auth)
         }
@@ -198,4 +215,16 @@ struct RootView: View {
             }
         }
     }
+
+    private func restoreSessions() async {
+        if auth.username != nil || forumAuth.username != nil {
+            if auth.username == nil || forumAuth.username != auth.username {
+                _ = await auth.establishUnifiedSession()
+                return
+            }
+        }
+        _ = await NoveliaSessionRenewal.shared.token(app: "n", current: NoveliaSessionTokenVault.read())
+        _ = await NoveliaSessionRenewal.shared.token(app: "f", current: NoveliaForumSessionTokenVault.read())
+    }
+
 }

@@ -14,6 +14,8 @@ code += section('private struct ForumMarkdownBlock', 'private func isForumMarkdo
 code += section('private func isForumMarkdownDivider', 'private struct Forum')
 code += section('private func forumTableCells', 'private func forumInlineAttributes')
 code += section('private func forumInlineAttributes', 'private struct ForumNovelRoute')
+code += 'private enum NoveliaStyle { static let ink = Color.black }\n'
+code += section('private func forumSpoilerMarkdown', 'private struct ForumStarRating')
 wenku = (root / 'Sources/NoveliaIOSCore/WenkuNovel.swift').read_text()
 code += wenku[:wenku.index('public struct WenkuNovelDetail')]
 code += source[source.index('private struct ForumNovelRoute'):]
@@ -26,6 +28,23 @@ check(table.count == 2, "table/paragraph boundaries")
 if case let .table(rows) = table[0].kind {
     check(rows.count == 2 && rows[1][0] == "A", "table rows")
 } else { fatalError("table missing") }
+
+// Forum post 263 uses two hyphens per separator cell; shortened synthetic
+// content reproduces its structure without redistributing the author's prose.
+for mode in [ForumMarkdownMode.article, .comment] {
+    for delimiter in ["-", "--", "---", ":-", "-:", ":--:"] {
+        let blocks = parseForumMarkdown("| 评分 | 链接 | 评语 | 日期 |\n| \(delimiter) | \(delimiter) | \(delimiter) | \(delimiter) |\n| ☆☆☆☆☆ | [小说](https://books.fishhawk.top/novel/hameln/example) | **更新** | 20250226 |\n|  | *分隔* | | |\n\n后文", mode: mode)
+        check(blocks.count == 2, "short delimiter block boundaries")
+        if case let .table(rows) = blocks[0].kind {
+            check(rows.count == 3 && rows.allSatisfy { $0.count == 4 }, "four-column table")
+            check(rows[2] == ["", "*分隔*", "", ""], "blank cells preserved")
+        } else { fatalError("short delimiter not recognized") }
+    }
+}
+private let mismatched = parseForumMarkdown("| a | b |\n| -- |\n| c | d |")
+check(!mismatched.contains { if case .table = $0.kind { return true }; return false }, "mismatched header/delimiter must not become table")
+check(forumTableCells("a | | b") == ["a", "", "b"], "unframed interior empty cell")
+check(forumTableCells(" | b") == ["b"], "leading pipe boundary")
 check(forumTableCells("| a\\|b | `x|y` |") == ["a\\|b", "`x|y`"], "escaped and code pipes")
 for mode in [ForumMarkdownMode.article, .comment] {
     let stars = parseForumMarkdown("::: star 4.5\n:::\n\n正文", mode: mode)
@@ -42,6 +61,19 @@ for value in ["~~[小说](https://n.novelia.cc/novel/x/y)~~", "[~~小说~~](http
     check(rendered.runs.contains { $0.link?.absoluteString == "https://n.novelia.cc/novel/x/y" }, "strike removed link")
     check(rendered.runs.contains { $0.strikethroughStyle != nil }, "strike missing")
 }
+
+private let spoilerPattern = try NSRegularExpression(pattern: "!!!!([\\s\\S]+?)!!!!|!!([\\s\\S]+?)!!")
+for sample in ["!!文字中的[链接](https://example.com/spoiler-link)!!", "!!!![小说](https://n.novelia.cc/novel/x/y)!!!!", "[!!小说!!](https://n.novelia.cc/novel/x/y)", "[!!!!小说!!!!](https://n.novelia.cc/novel/x/y)", "`!!示例!!` 正文 !![链接](https://example.com/spoiler-link)!!"] {
+    let revealed = renderInlineMarkdown(sample, spoilersRevealed: true, pattern: spoilerPattern)
+    check(revealed.runs.contains { $0.link != nil }, "revealed spoiler link missing")
+    let hidden = renderInlineMarkdown(sample, spoilersRevealed: false, pattern: spoilerPattern)
+    check(!hidden.runs.contains { $0.link != nil }, "hidden spoiler link remains actionable")
+}
+check(forumSpoilerMatches("`!!示例!!`", pattern: spoilerPattern).isEmpty, "inline code treated as spoiler")
+check(forumSpoilerMatches("``!!示例!!``", pattern: spoilerPattern).isEmpty, "double-backtick code treated as spoiler")
+check(forumSpoilerMarkdown("`[!!示例!!](https://example.com)`") == "`[!!示例!!](https://example.com)`", "link syntax inside code changed")
+private let adjacent = renderInlineMarkdown("[前半](https://n.novelia.cc/novel/x/y)!!遮挡!![后半](https://n.novelia.cc/novel/x/y)", spoilersRevealed: true, pattern: spoilerPattern)
+check(adjacent.runs.filter { $0.link != nil }.count == 2, "links beside spoiler lost")
 check(ForumNovelRoute(url: URL(string: "https://n.novelia.cc/novel/syosetu/n123#chapter")!)?.provider == "syosetu", "web novel route")
 check(ForumNovelRoute(url: URL(string: "https://n.novelia.cc/wenku/book123")!)?.outline.id == "book123", "wenku route")
 check(ForumNovelRoute(url: URL(string: "/novel/syosetu/n123")!)?.novelID == "n123", "relative route")

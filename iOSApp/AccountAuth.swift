@@ -12,6 +12,8 @@ final class AccountAuthStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var isLoginPresented = false
 
+    weak var forumAuth: ForumAuthStore?
+    private var sessionGeneration = 0
     private let cookieStore = WKWebsiteDataStore.default().httpCookieStore
     private let siteOrigin = URL(string: "https://n.novelia.cc")!
     // The upstream client refreshes at auth.novelia.cc and reads that host's cookie.
@@ -20,12 +22,13 @@ final class AccountAuthStore: ObservableObject {
 
     init() {
         let savedToken = NoveliaSessionTokenVault.read()
-        username = Self.username(from: savedToken)
+        username = savedToken.flatMap { NoveliaSessionRenewal.claims($0)?.subject }
         if savedToken != nil && username == nil { NoveliaSessionTokenVault.clear() }
     }
 
     func refreshSession() async -> Bool {
         guard !isRefreshing else { return false }
+        let generation = sessionGeneration
         isRefreshing = true
         errorMessage = nil
         defer { isRefreshing = false }
@@ -53,12 +56,28 @@ final class AccountAuthStore: ObservableObject {
                 throw AccountAuthError.refreshRejected(http.statusCode)
             }
 
+            // URLSession and WKWebView have separate cookie stores. Persist rotated
+            // refresh cookies back to the authentication web view for the next renewal.
+            let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, pair in
+                if let key = pair.key as? String { result[key] = String(describing: pair.value) }
+            }
+            for cookie in HTTPCookie.cookies(withResponseHeaderFields: headers, for: refreshURL) {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    cookieStore.setCookie(cookie) { continuation.resume() }
+                }
+            }
             let token = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             guard Self.username(from: token) != nil else { throw AccountAuthError.invalidToken }
+            guard generation == sessionGeneration else { return false }
             try NoveliaSessionTokenVault.save(token)
             username = Self.username(from: token)
             return true
         } catch {
+            guard generation == sessionGeneration else { return false }
+            if case AccountAuthError.refreshRejected(401) = error {
+                NoveliaSessionTokenVault.clear()
+                username = nil
+            }
             errorMessage = error.localizedDescription
             return false
         }
@@ -67,9 +86,31 @@ final class AccountAuthStore: ObservableObject {
     /// Mirrors the upstream client's local logout: clear this app token but retain the
     /// shared authentication website cookies, so another Novelia client session is unaffected.
     func logout() {
+        clearSession()
+        forumAuth?.clearSession()
+    }
+
+    func clearSession() {
+        sessionGeneration += 1
         NoveliaSessionTokenVault.clear()
         username = nil
         errorMessage = nil
+    }
+
+    /// One website login establishes both API sessions for the same account.
+    func establishUnifiedSession() async -> Bool {
+        while isRefreshing || forumAuth?.isRefreshing == true {
+            do { try await Task.sleep(nanoseconds: 100_000_000) }
+            catch { return false }
+        }
+        guard !Task.isCancelled, await refreshSession(), let account = username else { return false }
+        guard let forumAuth else { return false }
+        if forumAuth.username != account { forumAuth.clearSession() }
+        guard await forumAuth.refreshSession(), forumAuth.username == account else {
+            errorMessage = "账号已登录，论坛会话暂未建立，请重试完成登录。"
+            return false
+        }
+        return true
     }
 
     private func cookiesForSite() async -> [HTTPCookie] {
@@ -113,18 +154,21 @@ final class ForumAuthStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var isLoginPresented = false
 
+    weak var accountAuth: AccountAuthStore?
+    private var sessionGeneration = 0
     private let cookieStore = WKWebsiteDataStore.default().httpCookieStore
     private let siteOrigin = URL(string: "https://forum.novelia.cc")!
     private let refreshURL = URL(string: "https://auth.novelia.cc/api/v1/auth/refresh?app=f")!
 
     init() {
         let savedToken = NoveliaForumSessionTokenVault.read()
-        username = AccountAuthStore.username(from: savedToken)
+        username = savedToken.flatMap { NoveliaSessionRenewal.claims($0)?.subject }
         if savedToken != nil && username == nil { NoveliaForumSessionTokenVault.clear() }
     }
 
     func refreshSession() async -> Bool {
         guard !isRefreshing else { return false }
+        let generation = sessionGeneration
         isRefreshing = true
         errorMessage = nil
         defer { isRefreshing = false }
@@ -144,21 +188,53 @@ final class ForumAuthStore: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else { throw AccountAuthError.invalidResponse }
             guard (200..<300).contains(http.statusCode) else { throw AccountAuthError.refreshRejected(http.statusCode) }
+            // URLSession and WKWebView have separate cookie stores. Persist rotated
+            // refresh cookies back to the authentication web view for the next renewal.
+            let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, pair in
+                if let key = pair.key as? String { result[key] = String(describing: pair.value) }
+            }
+            for cookie in HTTPCookie.cookies(withResponseHeaderFields: headers, for: refreshURL) {
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    cookieStore.setCookie(cookie) { continuation.resume() }
+                }
+            }
             let token = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             guard let parsedUsername = AccountAuthStore.username(from: token) else { throw AccountAuthError.invalidToken }
+            guard generation == sessionGeneration else { return false }
+            if let expected = accountAuth?.username, parsedUsername != expected {
+                throw AccountAuthError.invalidToken
+            }
             try NoveliaForumSessionTokenVault.save(token)
             username = parsedUsername
             return true
         } catch {
+            guard generation == sessionGeneration else { return false }
+            if case AccountAuthError.refreshRejected(401) = error {
+                NoveliaForumSessionTokenVault.clear()
+                username = nil
+            }
             errorMessage = error.localizedDescription
             return false
         }
     }
 
     func logout() {
+        clearSession()
+        accountAuth?.clearSession()
+    }
+
+    func clearSession() {
+        sessionGeneration += 1
         NoveliaForumSessionTokenVault.clear()
         username = nil
         errorMessage = nil
+    }
+
+    func establishUnifiedSession() async -> Bool {
+        guard let accountAuth else { return false }
+        let success = await accountAuth.establishUnifiedSession()
+        if !success { errorMessage = accountAuth.errorMessage }
+        return success
     }
 
     private func cookiesForSite() async -> [HTTPCookie] {
@@ -260,6 +336,7 @@ struct NoveliaLoginSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var auth: AccountAuthStore
     @State private var webView: WKWebView?
+    @State private var loginCompletionTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -273,11 +350,7 @@ struct NoveliaLoginSheet: View {
                 NoveliaAuthWebView(
                     webView: $webView,
                     appID: "n",
-                    onLoginSuccess: {
-                        Task {
-                            if await auth.refreshSession() { dismiss() }
-                        }
-                    },
+                    onLoginSuccess: { completeLogin() },
                     onLoadFailure: { message in
                         auth.errorMessage = message
                     }
@@ -292,7 +365,7 @@ struct NoveliaLoginSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(auth.isRefreshing ? "验证中…" : "完成登录") {
                         Task {
-                            if await auth.refreshSession() { dismiss() }
+                            if await auth.establishUnifiedSession() { dismiss() }
                         }
                     }
                     .disabled(auth.isRefreshing)
@@ -310,7 +383,26 @@ struct NoveliaLoginSheet: View {
                 }
             }
         }
+        .onDisappear { loginCompletionTask?.cancel() }
     }
+
+    private func completeLogin() {
+        guard loginCompletionTask == nil else { return }
+        loginCompletionTask = Task { @MainActor in
+            defer { loginCompletionTask = nil }
+            do {
+                // Allow WebKit to publish response cookies, then wait for any
+                // in-flight renewal instead of losing this login-success signal.
+                try await Task.sleep(nanoseconds: 150_000_000)
+                while auth.isRefreshing {
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                }
+                try Task.checkCancellation()
+                if await auth.establishUnifiedSession(), !Task.isCancelled { dismiss() }
+            } catch { /* Closing the sheet cancels automatic completion. */ }
+        }
+    }
+
 }
 
 struct NoveliaAuthWebView: UIViewRepresentable {
@@ -330,11 +422,29 @@ struct NoveliaAuthWebView: UIViewRepresentable {
         // WKWebView has no equivalent switch, so load auth.novelia.cc as the top-level
         // page instead. Its postMessage to window.parent is then delivered to itself.
         let script = """
-        window.addEventListener('message', function(event) {
-          if (event.origin === 'https://auth.novelia.cc' && event.data && event.data.type === 'login_success') {
-            window.webkit.messageHandlers.noveliaAuth.postMessage('login_success');
-          }
-        });
+        (() => {
+          const notify = () => window.webkit.messageHandlers.noveliaAuth.postMessage('login_success');
+          window.addEventListener('message', function(event) {
+            if (event.origin === 'https://auth.novelia.cc' && event.data && event.data.type === 'login_success') {
+              notify();
+            }
+          });
+          // The official top-level page displays a toast instead of postMessage.
+          // Observe only successful identity-provider login/register POST responses;
+          // never read the request body, response body, credentials or cookie values.
+          const originalFetch = window.fetch;
+          window.fetch = async function(input, options) {
+            const response = await originalFetch.apply(this, arguments);
+            const url = new URL(input instanceof Request ? input.url : input, window.location.href);
+            const method = String(options?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+            if (window.location.origin === 'https://auth.novelia.cc' &&
+                url.origin === window.location.origin && method === 'POST' && response.ok &&
+                (url.pathname === '/api/v1/auth/login' || url.pathname === '/api/v1/auth/register')) {
+              notify();
+            }
+            return response;
+          };
+        })();
         """
         controller.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
 
@@ -426,26 +536,27 @@ struct ForumLoginSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var auth: ForumAuthStore
     @State private var webView: WKWebView?
+    @State private var loginCompletionTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Text("使用论坛账号登录。账号密码由 Novelia 认证网站直接处理，并与小说账号的 API 会话分开保存。")
+                Text("使用同一个 Novelia 账号登录小说与论坛。账号密码由官方认证网站直接处理。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
                 NoveliaAuthWebView(webView: $webView, appID: "f", onLoginSuccess: {
-                    Task { if await auth.refreshSession() { dismiss() } }
+                    completeLogin()
                 }, onLoadFailure: { auth.errorMessage = $0 })
             }
-            .navigationTitle("登录 Novelia 论坛")
+            .navigationTitle("登录 Novelia")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(auth.isRefreshing ? "验证中…" : "完成登录") {
-                        Task { if await auth.refreshSession() { dismiss() } }
+                        Task { if await auth.establishUnifiedSession() { dismiss() } }
                     }
                     .disabled(auth.isRefreshing)
                 }
@@ -458,5 +569,24 @@ struct ForumLoginSheet: View {
                 }
             }
         }
+        .onDisappear { loginCompletionTask?.cancel() }
     }
+
+    private func completeLogin() {
+        guard loginCompletionTask == nil else { return }
+        loginCompletionTask = Task { @MainActor in
+            defer { loginCompletionTask = nil }
+            do {
+                // Allow WebKit to publish response cookies, then wait for any
+                // in-flight renewal instead of losing this login-success signal.
+                try await Task.sleep(nanoseconds: 150_000_000)
+                while auth.isRefreshing {
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                }
+                try Task.checkCancellation()
+                if await auth.establishUnifiedSession(), !Task.isCancelled { dismiss() }
+            } catch { /* Closing the sheet cancels automatic completion. */ }
+        }
+    }
+
 }

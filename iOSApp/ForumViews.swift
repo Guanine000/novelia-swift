@@ -166,12 +166,12 @@ struct ForumView: View {
                             Task { await store.selectSource(.favorites) }
                         }
                         if auth.username != nil {
-                            Button("退出论坛登录", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                            Button("退出登录", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
                                 auth.logout()
                                 Task { await store.selectSource(.all) }
                             }
                         } else {
-                            Button("登录论坛", systemImage: "person.crop.circle.badge.plus") { auth.isLoginPresented = true }
+                            Button("登录 Novelia", systemImage: "person.crop.circle.badge.plus") { auth.isLoginPresented = true }
                         }
                     } label: {
                         Label(auth.username ?? "我的", systemImage: "person.crop.circle")
@@ -373,7 +373,7 @@ private struct ForumPostDetailView: View {
                         Button {
                             beginComment()
                         } label: {
-                            Label(auth.username == nil ? "登录论坛后发表评论" : "发表评论", systemImage: "square.and.pencil")
+                            Label(auth.username == nil ? "登录 Novelia后发表评论" : "发表评论", systemImage: "square.and.pencil")
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(14)
                                 .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
@@ -627,9 +627,9 @@ struct ForumMarkdownBody: View {
     private func blockView(_ block: ForumMarkdownBlock) -> some View {
         switch block.kind {
         case .paragraph:
-            ForumInlineMarkdownText(markdown: block.text)
+            ForumInlineMarkdownText(markdown: block.text, baseSize: mode == .comment ? 14 : 15)
         case let .heading(level):
-            ForumInlineMarkdownText(markdown: block.text)
+            ForumInlineMarkdownText(markdown: block.text, baseSize: CGFloat(headingSize(level)), bold: true)
                 .font(.system(size: headingSize(level), weight: .bold, design: .rounded))
                 .padding(.top, level <= 2 ? 5 : 2)
         case .unorderedItem:
@@ -639,7 +639,7 @@ struct ForumMarkdownBody: View {
         case .quote:
             HStack(alignment: .top, spacing: 9) {
                 RoundedRectangle(cornerRadius: 2).fill(NoveliaStyle.muted.opacity(0.45)).frame(width: 3)
-                ForumInlineMarkdownText(markdown: block.text).foregroundStyle(NoveliaStyle.muted)
+                ForumInlineMarkdownText(markdown: block.text, baseSize: mode == .comment ? 14 : 15, textColor: NoveliaStyle.muted).foregroundStyle(NoveliaStyle.muted)
             }
             .fixedSize(horizontal: false, vertical: true)
             .padding(.leading, 4)
@@ -656,7 +656,7 @@ struct ForumMarkdownBody: View {
                     ForEach(rows.indices, id: \.self) { row in
                         GridRow {
                             ForEach(rows[row].indices, id: \.self) { column in
-                                ForumInlineMarkdownText(markdown: rows[row][column])
+                                ForumInlineMarkdownText(markdown: rows[row][column], baseSize: mode == .comment ? 14 : 15, bold: row == 0)
                                     .fontWeight(row == 0 ? .semibold : .regular)
                                     .padding(10)
                                     .frame(minWidth: 100, maxWidth: 240, alignment: .leading)
@@ -679,7 +679,7 @@ struct ForumMarkdownBody: View {
     private func listRow(marker: String, text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(marker).font(.system(size: 15, weight: .semibold)).frame(minWidth: 18, alignment: .trailing)
-            ForumInlineMarkdownText(markdown: text)
+            ForumInlineMarkdownText(markdown: text, baseSize: mode == .comment ? 14 : 15)
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.leading, 5)
@@ -697,6 +697,9 @@ struct ForumMarkdownBody: View {
 
 private struct ForumInlineMarkdownText: View {
     let markdown: String
+    var baseSize: CGFloat = 15
+    var bold = false
+    var textColor = NoveliaStyle.ink
     @State private var spoilersRevealed = false
 
     private var spoilerPattern: NSRegularExpression {
@@ -705,23 +708,126 @@ private struct ForumInlineMarkdownText: View {
     }
 
     private var hasSpoilers: Bool {
-        spoilerPattern.firstMatch(in: markdown, range: NSRange(markdown.startIndex..., in: markdown)) != nil
+        !forumSpoilerMatches(forumSpoilerMarkdown(markdown), pattern: spoilerPattern).isEmpty
     }
 
     var body: some View {
         if hasSpoilers && !spoilersRevealed {
             Text(renderInlineMarkdown(markdown, spoilersRevealed: false, pattern: spoilerPattern))
                 .onTapGesture { spoilersRevealed = true }
+        } else if hasSpoilers {
+            ForumRevealedSpoilerText(
+                text: renderInlineMarkdown(markdown, spoilersRevealed: true, pattern: spoilerPattern),
+                baseSize: baseSize, bold: bold, textColor: textColor
+            )
         } else {
             Text(renderInlineMarkdown(markdown, spoilersRevealed: true, pattern: spoilerPattern))
         }
     }
 }
 
+/// Use TextKit's explicit link interaction after revealing instead of reusing
+/// SwiftUI's selectable Text backing view that previously handled reveal taps.
+private struct ForumRevealedSpoilerText: UIViewRepresentable {
+    let text: AttributedString
+    let baseSize: CGFloat
+    let bold: Bool
+    let textColor: Color
+    @Environment(\.openURL) private var openURL
+
+    func makeCoordinator() -> Coordinator { Coordinator(openURL: openURL) }
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.isEditable = false
+        view.isSelectable = true
+        view.isScrollEnabled = false
+        view.backgroundColor = .clear
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.delegate = context.coordinator
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        context.coordinator.openURL = openURL
+        view.attributedText = forumSpoilerNativeText(text, baseSize: baseSize, bold: bold, textColor: textColor)
+        view.linkTextAttributes = [
+            .foregroundColor: UIColor(NoveliaStyle.brandGreen),
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ]
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        guard let width = proposal.width, width > 0 else { return nil }
+        let size = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: width, height: ceil(size.height))
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var openURL: OpenURLAction
+        init(openURL: OpenURLAction) { self.openURL = openURL }
+
+        func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem,
+                      defaultAction: UIAction) -> UIAction? {
+            guard case let .link(url) = textItem.content else { return defaultAction }
+            return UIAction { [weak self] _ in self?.openURL(url) }
+        }
+    }
+}
+
+private func forumSpoilerNativeText(_ text: AttributedString, baseSize: CGFloat, bold: Bool, textColor: Color) -> NSAttributedString {
+    let result = NSMutableAttributedString(string: "")
+    for run in text.runs {
+        var traits: UIFontDescriptor.SymbolicTraits = bold ? [.traitBold] : []
+        if run.inlinePresentationIntent?.contains(.stronglyEmphasized) == true { traits.insert(.traitBold) }
+        if run.inlinePresentationIntent?.contains(.emphasized) == true { traits.insert(.traitItalic) }
+        let base = run.inlinePresentationIntent?.contains(.code) == true
+            ? UIFont.monospacedSystemFont(ofSize: baseSize, weight: .regular)
+            : UIFont.systemFont(ofSize: baseSize)
+        let descriptor = base.fontDescriptor.withSymbolicTraits(traits) ?? base.fontDescriptor
+        let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: UIFont(descriptor: descriptor, size: baseSize))
+        var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor(textColor)]
+        if let url = run.link { attributes[.link] = url }
+        if run.strikethroughStyle != nil { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
+        result.append(NSAttributedString(string: String(text.characters[run.range]), attributes: attributes))
+    }
+    return result
+}
+
+private func forumSpoilerMarkdown(_ markdown: String) -> String {
+    // Keep the entire link inside the reveal span when its label is spoiled.
+    guard let links = try? NSRegularExpression(pattern: "\\[((?:!!!!|!!))([^\\]]+?)\\1\\]\\(([^)]+)\\)") else { return markdown }
+    let source = markdown as NSString
+    let codeRanges = forumInlineCodeRanges(markdown)
+    let result = NSMutableString(string: markdown)
+    for match in links.matches(in: markdown, range: NSRange(location: 0, length: source.length)).reversed() {
+        guard !codeRanges.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) else { continue }
+        let marker = source.substring(with: match.range(at: 1))
+        let label = source.substring(with: match.range(at: 2))
+        let target = source.substring(with: match.range(at: 3))
+        result.replaceCharacters(in: match.range, with: "\(marker)[\(label)](\(target))\(marker)")
+    }
+    return result as String
+}
+
+private func forumInlineCodeRanges(_ markdown: String) -> [NSRange] {
+    let code = try? NSRegularExpression(pattern: "(?<!`)(`+)(?!`)[\\s\\S]*?(?<!`)\\1(?!`)")
+    return code?.matches(in: markdown, range: NSRange(markdown.startIndex..., in: markdown)).map(\.range) ?? []
+}
+
+private func forumSpoilerMatches(_ markdown: String, pattern: NSRegularExpression) -> [NSTextCheckingResult] {
+    let codeRanges = forumInlineCodeRanges(markdown)
+    return pattern.matches(in: markdown, range: NSRange(markdown.startIndex..., in: markdown)).filter { match in
+        !codeRanges.contains { NSIntersectionRange($0, match.range).length > 0 }
+    }
+}
+
 private func renderInlineMarkdown(_ markdown: String, spoilersRevealed: Bool, pattern: NSRegularExpression) -> AttributedString {
-    let ns = markdown as NSString
-    let fullRange = NSRange(location: 0, length: ns.length)
-    let matches = pattern.matches(in: markdown, range: fullRange)
+    let normalized = forumSpoilerMarkdown(markdown)
+    let ns = normalized as NSString
+    let matches = forumSpoilerMatches(normalized, pattern: pattern)
     var result = AttributedString()
     var cursor = 0
     for match in matches {
@@ -735,6 +841,9 @@ private func renderInlineMarkdown(_ markdown: String, spoilersRevealed: Bool, pa
         }
         var spoiler = (try? forumInlineAttributes(ns.substring(with: spoilerRange))) ?? AttributedString(ns.substring(with: spoilerRange))
         if !spoilersRevealed {
+            // Concealed content cannot open invisible links; revealing restores
+            // the original Markdown link attributes on the next render.
+            spoiler.link = nil
             spoiler.foregroundColor = .clear
             spoiler.backgroundColor = NoveliaStyle.ink.opacity(0.78)
         }
@@ -1192,8 +1301,9 @@ private func parseForumMarkdown(_ markdown: String, mode: ForumMarkdownMode = .a
             continue
         }
         if index + 1 < lines.count, line.contains("|"),
-           forumTableCells(lines[index + 1]).allSatisfy({ $0.range(of: "^:?-{3,}:?$", options: .regularExpression) != nil }),
-           !forumTableCells(lines[index + 1]).isEmpty {
+           forumTableCells(lines[index + 1]).allSatisfy({ $0.range(of: "^:?-+:?$", options: .regularExpression) != nil }),
+           !forumTableCells(lines[index + 1]).isEmpty,
+           forumTableCells(rawLine).count == forumTableCells(lines[index + 1]).count {
             flushParagraph()
             let header = forumTableCells(rawLine)
             var rows = [header]
@@ -1401,7 +1511,7 @@ private struct ForumComposeView: View {
         Form {
             if auth.username == nil {
                 Section {
-                    Button("登录论坛后发布") { auth.isLoginPresented = true }
+                    Button("登录 Novelia后发布") { auth.isLoginPresented = true }
                 } footer: {
                     Text("登录后会保留当前正在编写的内容。")
                 }
@@ -1511,8 +1621,9 @@ private func forumTableCells(_ line: String) -> [String] {
         else { cell.append(character) }
     }
     cells.append(cell.trimmingCharacters(in: .whitespaces))
-    if cells.first == "" { cells.removeFirst() }
-    if cells.last == "" { cells.removeLast() }
+    let trimmed = line.trimmingCharacters(in: .whitespaces)
+    if trimmed.hasPrefix("|"), cells.first == "" { cells.removeFirst() }
+    if trimmed.hasSuffix("|"), cells.last == "" { cells.removeLast() }
     return cells
 }
 

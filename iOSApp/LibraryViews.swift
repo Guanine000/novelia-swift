@@ -1020,8 +1020,7 @@ struct NovelDetailView: View {
     private func loadDetail() async {
         guard novel.isRemote, let providerId = novel.providerId, let novelId = novel.novelId else { return }
         let account = auth.username
-        let token = NoveliaSessionTokenVault.read()
-        let api = NoveliaAPIClient(tokenProvider: { token })
+        let api = NoveliaAPIClient()
         isLoadingDetail = true
         detailError = nil
         defer { isLoadingDetail = false }
@@ -1430,8 +1429,7 @@ struct NovelCommentsView: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            let token = NoveliaSessionTokenVault.read()
-            let api = NoveliaAPIClient(tokenProvider: { token })
+            let api = NoveliaAPIClient()
             let result = try await api.novelComments(subjectKey: subjectKey, page: targetPage, pageSize: pageSize)
             commentPage = result
             page = targetPage
@@ -1451,8 +1449,7 @@ struct NovelCommentsView: View {
         isSending = true
         defer { isSending = false }
         do {
-            let token = NoveliaSessionTokenVault.read()
-            let api = NoveliaAPIClient(tokenProvider: { token })
+            let api = NoveliaAPIClient()
             try await api.postNovelComment(subjectKey: subjectKey, content: content, rootID: replyRoot?.id)
             draft = ""
             replyRoot = nil
@@ -1467,8 +1464,7 @@ struct NovelCommentsView: View {
         guard loadingReplyIDs.insert(comment.id).inserted else { return }
         defer { loadingReplyIDs.remove(comment.id) }
         do {
-            let token = NoveliaSessionTokenVault.read()
-            let api = NoveliaAPIClient(tokenProvider: { token })
+            let api = NoveliaAPIClient()
             let nextPage = loadedCount / 20 + 1
             let result = try await api.novelCommentReplies(
                 subjectKey: subjectKey,
@@ -2698,9 +2694,9 @@ private struct ThirdPartyLicensesView: View {
                 NavigationLink("GNU GPL-3.0-only 完整文本") {
                     licenseText("GPL-3.0-only.txt", title: "GNU GPL-3.0-only")
                 }
-                Text("本项目是参考 GPL-3.0-only 安卓客户端 nobYoQ/novelia 制作的 Swift iOS 移植版本，包含 iOS 平台实现及后续修改。上游版权声明：Copyright (C) 2026 Novelia Android contributors. 本 iOS 移植及新增部分：Copyright (C) 2026 Novelia iOS contributors。修改版本日期：2026-10-09。")
+                Text("本项目是参考 GPL-3.0-only 安卓客户端 nobYoQ/novelia 制作的 Swift iOS 移植版本，包含 iOS 平台实现及后续修改。上游版权声明：Copyright (C) 2026 Novelia Android contributors. 本 iOS 移植及新增部分：Copyright (C) 2026 Novelia iOS contributors。修改版本日期：2026-10-10。")
                 Link("查看对应版本的源码仓库", destination: URL(string: "https://github.com/Guanine000/novelia-swift")!)
-                Text("仓库目前为私密仓库。分发 IPA 时，分发者应确保接收者可取得与该 IPA 对应的完整源代码。")
+                Text("源码仓库公开可访问。Release 同时提供对应版本的完整源码及第三方许可材料。")
             }
             Section {
                 Text("本应用使用的第三方软件及其原始许可文本。YueduCoreText 的 NOTICE 包含 Unicode License v3。")
