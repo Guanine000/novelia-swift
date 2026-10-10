@@ -273,6 +273,19 @@ public struct NoveliaAPIClient: Sendable {
         return response.items.compactMap { $0.asReadingHistoryItem }
     }
 
+    /// Records the chapter most recently opened in the signed-in user's web novel history.
+    public func updateWebReadingHistory(providerId: String, novelId: String, chapterId: String) async throws {
+        guard !providerId.isEmpty, !novelId.isEmpty, !chapterId.isEmpty else {
+            throw NoveliaAPIError.invalidInput("阅读记录参数无效。")
+        }
+        _ = try await request(
+            path: ["user", "read-history", providerId, novelId],
+            method: "PUT",
+            body: Data(chapterId.utf8),
+            contentType: "text/plain; charset=utf-8"
+        )
+    }
+
     public func novelForContinuation(providerId: String, novelId: String) async throws -> NoveliaCloudNovelDetail {
         let detail: APIWebDetail = try await get(path: ["novel", providerId, novelId])
         return NoveliaCloudNovelDetail(
@@ -350,7 +363,7 @@ public struct NoveliaAPIClient: Sendable {
         }
     }
 
-    private func request(path: [String], method: String = "GET", query: [URLQueryItem] = [], body: Data? = nil, baseURL requestBaseURL: URL? = nil) async throws -> Data {
+    private func request(path: [String], method: String = "GET", query: [URLQueryItem] = [], body: Data? = nil, baseURL requestBaseURL: URL? = nil, contentType: String = "application/json") async throws -> Data {
         guard var components = URLComponents(url: requestBaseURL ?? baseURL, resolvingAgainstBaseURL: false) else {
             throw NoveliaAPIError.invalidURL
         }
@@ -368,7 +381,7 @@ public struct NoveliaAPIClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let body {
             request.httpBody = body
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         } else if method != "GET" && method != "HEAD" {
             request.httpBody = Data()
         }
@@ -595,6 +608,7 @@ public enum NoveliaSessionError: LocalizedError {
 public enum NoveliaAPIError: LocalizedError {
     case invalidURL
     case invalidResponse
+    case invalidInput(String)
     case httpStatus(Int, String?)
     case decoding(String)
     case unsupportedWenkuOriginalDownload
@@ -603,6 +617,7 @@ public enum NoveliaAPIError: LocalizedError {
         switch self {
         case .invalidURL: return "API 地址无效。"
         case .invalidResponse: return "服务器返回了无法识别的响应。"
+        case let .invalidInput(message): return message
         case .unsupportedWenkuOriginalDownload: return "Novelia 上游暂不支持单独下载文库原文 EPUB。"
         case let .httpStatus(status, message):
             if let message, !message.isEmpty { return "Novelia API 错误（HTTP \(status)）：\(message)" }

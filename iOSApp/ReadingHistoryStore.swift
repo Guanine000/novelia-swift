@@ -81,6 +81,30 @@ final class ReadingHistoryStore: ObservableObject {
         }
     }
 
+    func recordRead(novel: Novel, chapterId: String, account: String?) async {
+        guard let account, !account.isEmpty,
+              let providerId = novel.providerId, let novelId = novel.novelId,
+              !chapterId.isEmpty else { return }
+
+        do {
+            try await apiClient(for: account).updateWebReadingHistory(
+                providerId: providerId,
+                novelId: novelId,
+                chapterId: chapterId
+            )
+            let item = NoveliaCloudReadingHistoryItem(
+                novel: novel,
+                lastReadAt: Int64(Date().timeIntervalSince1970)
+            )
+            let updatedItems = deduplicated([item] + cachedItems(for: account))
+            saveCache(updatedItems, for: account)
+            if activeAccount == account { items = updatedItems }
+        } catch {
+            guard activeAccount == account else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func continuation(for item: NoveliaCloudReadingHistoryItem, account: String) async throws -> CloudReadingContinuation {
         guard let providerId = item.novel.providerId, let novelId = item.novel.novelId else {
             throw NoveliaReadingHistoryError.unsupportedNovel

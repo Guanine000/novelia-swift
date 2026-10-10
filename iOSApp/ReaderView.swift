@@ -52,6 +52,8 @@ struct ReaderView: View {
     let novel: Novel
     private let isOffline: Bool
     private let offlineTranslationSource: NovelTranslationSource?
+    @EnvironmentObject private var auth: AccountAuthStore
+    @EnvironmentObject private var readingHistory: ReadingHistoryStore
     @Environment(\.colorScheme) private var systemColorScheme
     @State private var chapterIndex: Int
     @AppStorage("readerAppearance") private var appearanceRaw = ReaderAppearance.system.rawValue
@@ -270,7 +272,11 @@ struct ReaderView: View {
                 ReadingPositionSync.recordWeb(id: novel.id, chapterIndex: chapterIndex)
                 if let offlineTranslationSource { translationSourceRaw = offlineTranslationSource.rawValue }
             }
-            .task(id: "\(chapter.id)-\(loadAttempt)") { await loadChapter() }
+            .task(id: "\(chapter.id)-\(loadAttempt)-\(auth.username ?? "")") {
+                let chapterID = chapter.id
+                guard await loadChapter(), !Task.isCancelled else { return }
+                await readingHistory.recordRead(novel: novel, chapterId: chapterID, account: auth.username)
+            }
         }
         .navigationTitle("阅读")
         .navigationBarTitleDisplayMode(.inline)
@@ -338,12 +344,12 @@ struct ReaderView: View {
     }
 
     @MainActor
-    private func loadChapter() async {
-        guard !isOffline,
-              novel.isRemote,
+    private func loadChapter() async -> Bool {
+        guard novel.isRemote,
               let providerId = novel.providerId,
-              let novelId = novel.novelId,
-              chapter.originalText.isEmpty else { return }
+              let novelId = novel.novelId else { return false }
+        if isOffline { return !chapter.originalText.isEmpty || !chapter.translatedText.isEmpty }
+        guard chapter.originalText.isEmpty else { return true }
         isLoadingChapter = true
         chapterError = nil
         defer { isLoadingChapter = false }
@@ -354,9 +360,11 @@ struct ReaderView: View {
                 chapterId: chapter.id
             )
             loadedChapters[chapter.id] = loaded
+            return true
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return false }
             chapterError = error.localizedDescription
+            return false
         }
     }
 }
