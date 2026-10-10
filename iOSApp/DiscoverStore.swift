@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class DiscoverStore: ObservableObject {
     @Published private(set) var novels: [Novel] = []
+    @Published private(set) var wenkuNovels: [WenkuNovelOutline] = []
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingMore = false
     @Published private(set) var hasMore = false
@@ -24,6 +25,7 @@ final class DiscoverStore: ObservableObject {
         activeExactTag = exactTag
         nextPage = 1
         novels = []
+        wenkuNovels = []
         hasMore = false
         isLoadingMore = false
         loadMoreError = nil
@@ -42,6 +44,14 @@ final class DiscoverStore: ObservableObject {
             novels = fetched
             nextPage = 2
             hasMore = fetched.count == pageSize
+            if fetched.isEmpty,
+               !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // 网络小说书源只按片段匹配标题/关键词，整本书名或中文译名常常搜不到；
+                // 此时再查一次文库（中文译本）作为兜底，用户可以从文库详情页跳回网络小说。
+                let wenkuPage = try? await api.searchWenku(query: query, page: 0, pageSize: 12, level: 0)
+                guard generation == requestGeneration else { return }
+                wenkuNovels = wenkuPage?.novels ?? []
+            }
         } catch is CancellationError {
             return
         } catch {

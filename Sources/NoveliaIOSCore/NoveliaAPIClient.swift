@@ -412,7 +412,7 @@ public struct NoveliaAPIClient: Sendable {
     // Mirrors the provider order used by the Android client's public novel-list request.
     private static let providers = ["kakuyomu", "syosetu", "novelup", "hameln", "pixiv", "alphapolis"]
 
-    fileprivate static func providerName(_ id: String) -> String {
+    public static func providerName(_ id: String) -> String {
         switch id {
         case "kakuyomu": "Kakuyomu"
         case "syosetu": "成为小说家吧"
@@ -702,6 +702,7 @@ private struct APIWebOutline: Decodable {
     let gpt: Int?
     let sakura: Int?
     let favored: String?
+    let wenkuId: String?
     let lastReadAt: Int64?
 
     var asNovel: Novel? {
@@ -710,12 +711,14 @@ private struct APIWebOutline: Decodable {
             id: "remote/\(providerId)/\(novelId)",
             title: titleZh?.nonEmpty ?? titleJp?.nonEmpty ?? novelId,
             author: NoveliaAPIClient.providerName(providerId),
+            originalTitle: titleJp?.nonEmpty,
             summary: "\(type?.nonEmpty ?? "网络小说") · \(total ?? 0) 章",
             genres: keywords ?? [],
             chapters: [],
             accent: NovelAccent.forProvider(providerId),
             providerId: providerId,
             novelId: novelId,
+            wenkuId: wenkuId?.nonEmpty,
             cloudFavoriteFolderID: favored,
             translationChapterCounts: translationCounts(youdao: youdao, gpt: gpt, sakura: sakura),
             totalCharacters: totalCharacters
@@ -743,6 +746,7 @@ private struct APIWebDetail: Decodable {
     let youdao: Int?
     let gpt: Int?
     let sakura: Int?
+    let wenkuId: String?
 }
 
 private struct APIAuthor: Decodable {
@@ -812,12 +816,14 @@ private extension APIWebDetail {
             id: "remote/\(providerId)/\(novelId)",
             title: titleZh?.nonEmpty ?? titleJp?.nonEmpty ?? novelId,
             author: author.isEmpty ? providerId : author,
+            originalTitle: titleJp?.nonEmpty,
             summary: introductionZh?.nonEmpty ?? introductionJp?.nonEmpty ?? "暂无简介",
             genres: [type?.nonEmpty].compactMap { $0 } + (keywords ?? []),
             chapters: chapters,
             accent: NovelAccent.forProvider(providerId),
             providerId: providerId,
             novelId: novelId,
+            wenkuId: wenkuId?.nonEmpty,
             cloudFavoriteFolderID: favored,
             translationChapterCounts: translationCounts(youdao: youdao, gpt: gpt, sakura: sakura),
             totalCharacters: totalCharacters

@@ -4,12 +4,16 @@ public struct Novel: Identifiable, Hashable, Codable, Sendable {
     public let id: String
     public let title: String
     public let author: String
+    /// 原书名（网络小说的原文标题）。服务端未提供或与 `title` 相同时为 nil。
+    public let originalTitle: String?
     public let summary: String
     public let genres: [String]
     public let chapters: [NovelChapter]
     public let accent: NovelAccent
     public let providerId: String?
     public let novelId: String?
+    /// 同一作品在文库（中文译本）里的 id；服务端未关联文库时为 nil。
+    public let wenkuId: String?
     public let cloudFavoriteFolderID: String?
     public let translationChapterCounts: [NovelTranslationSource: Int]?
     public let totalCharacters: Int?
@@ -18,12 +22,14 @@ public struct Novel: Identifiable, Hashable, Codable, Sendable {
         id: String,
         title: String,
         author: String,
+        originalTitle: String? = nil,
         summary: String,
         genres: [String],
         chapters: [NovelChapter],
         accent: NovelAccent,
         providerId: String? = nil,
         novelId: String? = nil,
+        wenkuId: String? = nil,
         cloudFavoriteFolderID: String? = nil,
         translationChapterCounts: [NovelTranslationSource: Int]? = nil,
         totalCharacters: Int? = nil
@@ -31,12 +37,14 @@ public struct Novel: Identifiable, Hashable, Codable, Sendable {
         self.id = id
         self.title = title
         self.author = author
+        self.originalTitle = originalTitle
         self.summary = summary
         self.genres = genres
         self.chapters = chapters
         self.accent = accent
         self.providerId = providerId
         self.novelId = novelId
+        self.wenkuId = wenkuId
         self.cloudFavoriteFolderID = cloudFavoriteFolderID
         self.translationChapterCounts = translationChapterCounts
         self.totalCharacters = totalCharacters
@@ -44,17 +52,27 @@ public struct Novel: Identifiable, Hashable, Codable, Sendable {
 
     public var isRemote: Bool { providerId != nil && novelId != nil }
 
+    /// 仅当原书名存在且与展示标题不同时返回，供详情页决定是否显示「原名」一行。
+    public var distinctOriginalTitle: String? {
+        guard let originalTitle = originalTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !originalTitle.isEmpty,
+              originalTitle != title else { return nil }
+        return originalTitle
+    }
+
     public func settingCloudFavoriteFolder(_ folderID: String?) -> Novel {
         Novel(
             id: id,
             title: title,
             author: author,
+            originalTitle: originalTitle,
             summary: summary,
             genres: genres,
             chapters: chapters,
             accent: accent,
             providerId: providerId,
             novelId: novelId,
+            wenkuId: wenkuId,
             cloudFavoriteFolderID: folderID,
             translationChapterCounts: translationChapterCounts,
             totalCharacters: totalCharacters
