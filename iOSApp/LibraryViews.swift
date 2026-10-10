@@ -480,7 +480,32 @@ struct DiscoverView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
                 }
-                if store.novels.isEmpty && store.errorMessage == nil && !store.isLoading {
+                if !store.wenkuNovels.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("文库（中文译本）")
+                                .font(.system(size: 17, weight: .bold, design: .rounded))
+                                .foregroundStyle(NoveliaStyle.ink)
+                            Spacer()
+                            Text("共 \(store.wenkuNovels.count) 部")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(NoveliaStyle.muted)
+                        }
+                        Text("网络小说书源没有匹配结果，以下是在文库中找到的作品。进入文库详情页可以跳转到对应的网络小说。")
+                            .font(.system(size: 12))
+                            .foregroundStyle(NoveliaStyle.muted)
+                        ForEach(store.wenkuNovels) { novel in
+                            NavigationLink {
+                                WenkuDetailView(outline: novel)
+                            } label: {
+                                WenkuNovelRow(novel: novel)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                if store.novels.isEmpty && store.wenkuNovels.isEmpty && store.errorMessage == nil && !store.isLoading {
                     ContentUnavailableView.search(text: query)
                         .padding(.top, 20)
                 }
@@ -747,6 +772,12 @@ struct NovelDetailView: View {
                         Text(displayNovel.title)
                             .font(.system(size: 29, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
+                        if let originalTitle = displayNovel.distinctOriginalTitle {
+                            Text("原名：\(originalTitle)")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.72))
+                                .lineLimit(2)
+                        }
                         HStack(spacing: 8) {
                             Text("著 · \(displayNovel.author)")
                             if let totalCharacters = displayNovel.totalCharacters, totalCharacters > 0 {
@@ -760,6 +791,26 @@ struct NovelDetailView: View {
                 }
                 .frame(height: 210)
                 .clipShape(RoundedRectangle(cornerRadius: 24))
+
+                if let wenkuId = displayNovel.wenkuId {
+                    NavigationLink {
+                        WenkuDetailView(outline: WenkuNovelOutline(id: wenkuId, title: "正在加载…"))
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "books.vertical").font(.title3)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("文库版").font(.headline)
+                                Text("查看对应的 Novelia 文库作品")
+                                    .font(.caption).foregroundStyle(NoveliaStyle.muted)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption)
+                        }
+                        .padding(14)
+                        .background(NoveliaStyle.brandGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 VStack(alignment: .leading, spacing: 9) {
                     Text("作品简介")

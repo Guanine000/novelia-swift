@@ -152,6 +152,7 @@ struct RootView: View {
     @StateObject private var favorites = FavoritesStore()
     @StateObject private var readingHistory = ReadingHistoryStore()
     @StateObject private var wenkuDownloads = WenkuLocalLibraryStore()
+    @StateObject private var wenkuStore = WenkuStore()
     @StateObject private var webNovelDownloads = WebNovelDownloadStore()
     @StateObject private var webDAVSync = WebDAVSyncStore()
 
@@ -194,9 +195,13 @@ struct RootView: View {
         .environmentObject(favorites)
         .environmentObject(readingHistory)
         .environmentObject(wenkuDownloads)
+        .environmentObject(wenkuStore)
         .environmentObject(webNovelDownloads)
         .environmentObject(webDAVSync)
         .task { await updates.check() }
+        .task(id: auth.username) {
+            await wenkuStore.refreshFavorites(account: auth.username)
+        }
         .onChange(of: checksUpdates) { _, enabled in
             if enabled { Task { await updates.check(force: true) } }
             else { updates.release = nil }

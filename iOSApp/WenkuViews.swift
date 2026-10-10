@@ -4,7 +4,7 @@ struct WenkuView: View {
     @ObservedObject private var blocked = BlockedTagsStore.shared
     @EnvironmentObject private var auth: AccountAuthStore
     @EnvironmentObject private var localLibrary: WenkuLocalLibraryStore
-    @StateObject private var store = WenkuStore()
+    @EnvironmentObject private var store: WenkuStore
     @State private var section = WenkuSection.search
     @State private var query = ""
 
@@ -31,9 +31,6 @@ struct WenkuView: View {
         .navigationTitle("文库")
         .navigationBarTitleDisplayMode(.inline)
         .environmentObject(store)
-        .task(id: auth.username) {
-            await store.refreshFavorites(account: auth.username)
-        }
         .task {
             await localLibrary.refreshMissingMetadata()
         }
@@ -144,7 +141,7 @@ private enum WenkuSection: String, CaseIterable, Identifiable {
     }
 }
 
-private struct WenkuNovelRow: View {
+struct WenkuNovelRow: View {
     let novel: WenkuNovelOutline
 
     var body: some View {
@@ -198,6 +195,9 @@ struct WenkuDetailView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         header(detail)
                             .onAppear { blocked.rememberWenku(id: detail.id, tags: detail.keywords) }
+                        if !linkedWebNovels(detail.webIds).isEmpty {
+                            relatedWebNovelsSection(detail)
+                        }
                         if !detail.introduction.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("简介").font(.headline)
@@ -244,7 +244,12 @@ struct WenkuDetailView: View {
         }
         .navigationTitle(detail?.displayTitle ?? outline.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: outline.id) { await loadDetail() }
+        .task(id: outline.id) {
+            await loadDetail()
+            if auth.username != nil, store.folders.isEmpty {
+                await store.refreshFavorites(account: auth.username)
+            }
+        }
         .sheet(item: $downloadRequest) { request in
             WenkuDownloadSheet(detail: request.detail, volume: request.volume)
                 .environmentObject(localLibrary)
@@ -265,7 +270,7 @@ struct WenkuDetailView: View {
             .frame(width: 112, height: 154).clipShape(RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 8) {
                 Text(detail.displayTitle).font(.system(size: 21, weight: .bold)).foregroundStyle(NoveliaStyle.ink)
-                if detail.title != detail.displayTitle { Text(detail.title).font(.system(size: 13)).foregroundStyle(NoveliaStyle.muted) }
+                if detail.title != detail.displayTitle { Text("原名：\(detail.title)").font(.system(size: 13)).foregroundStyle(NoveliaStyle.muted).lineLimit(2) }
                 if !detail.authors.isEmpty { Label(detail.authors.joined(separator: "、"), systemImage: "person").font(.caption).foregroundStyle(NoveliaStyle.muted) }
                 if !detail.publisher.isNilOrEmpty { Text([detail.publisher, detail.imprint].compactMap { $0 }.joined(separator: " · ")).font(.caption).foregroundStyle(NoveliaStyle.muted) }
                 Text(detail.level).font(.caption2.weight(.medium)).padding(.horizontal, 8).padding(.vertical, 4).background(NoveliaStyle.brandGreen.opacity(0.1), in: Capsule())
@@ -295,6 +300,37 @@ struct WenkuDetailView: View {
                 .buttonStyle(.borderedProminent).tint(NoveliaStyle.brandGreen)
             }
         }
+    }
+
+    private func relatedWebNovelsSection(_ detail: WenkuNovelDetail) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("相关网络小说").font(.headline)
+            ForEach(linkedWebNovels(detail.webIds), id: \.self) { linked in
+                NavigationLink {
+                    NovelDetailView(novel: linked.novel)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "globe.asia.australia").font(.title3)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(linked.providerTitle).font(.headline)
+                            Text(linked.novelId)
+                                .font(.caption)
+                                .foregroundStyle(NoveliaStyle.muted)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption)
+                    }
+                    .padding(14)
+                    .background(NoveliaStyle.brandGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func linkedWebNovels(_ webIds: [String]) -> [LinkedWebNovel] {
+        webIds.compactMap(LinkedWebNovel.init)
     }
 
     private func volumesSection(_ detail: WenkuNovelDetail) -> some View {
@@ -347,6 +383,36 @@ struct WenkuDetailView: View {
 
     private func withFavorite(_ old: WenkuNovelDetail, folderID: String?) -> WenkuNovelDetail {
         WenkuNovelDetail(id: old.id, title: old.title, titleZh: old.titleZh, cover: old.cover, authors: old.authors, artists: old.artists, keywords: old.keywords, publisher: old.publisher, imprint: old.imprint, latestPublishAt: old.latestPublishAt, level: old.level, introduction: old.introduction, webIds: old.webIds, volumes: old.volumes, glossary: old.glossary, visited: old.visited, favored: folderID, volumeZh: old.volumeZh, volumeJp: old.volumeJp)
+    }
+}
+
+/// 文库详情页里指向对应「网络小说」详情的跳转目标，服务端返回形如 "syosetu/n8803hp"。
+private struct LinkedWebNovel: Hashable {
+    let providerId: String
+    let novelId: String
+
+    init?(_ raw: String) {
+        let parts = raw.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        providerId = parts[0]
+        novelId = parts[1]
+    }
+
+    var providerTitle: String { NoveliaAPIClient.providerName(providerId) }
+
+    /// 占位 Novel：详情页加载后会补齐标题、简介与章节。
+    var novel: Novel {
+        Novel(
+            id: "remote/\(providerId)/\(novelId)",
+            title: "正在加载…",
+            author: providerTitle,
+            summary: "",
+            genres: [],
+            chapters: [],
+            accent: .ocean,
+            providerId: providerId,
+            novelId: novelId
+        )
     }
 }
 
