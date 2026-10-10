@@ -205,14 +205,23 @@ struct WenkuDetailView: View {
                             }
                         }
                         if !detail.keywords.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("标签").font(.headline)
-                                ForEach(detail.keywords, id: \.self) { tag in
-                                    Button(blocked.contains(tag) ? "解除屏蔽：\(tag)" : "屏蔽：\(tag)") {
-                                        if blocked.contains(tag) { blocked.remove(tag) } else { blocked.add(tag) }
+                            VStack(alignment: .leading, spacing: 11) {
+                                HStack(spacing: 8) {
+                                    Text("标签").font(.system(size: 19, weight: .bold, design: .rounded))
+                                    Spacer(minLength: 6)
+                                    TagBlockingMenu(tags: detail.keywords)
+                                }
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), alignment: .leading)], alignment: .leading, spacing: 9) {
+                                    ForEach(detail.keywords, id: \.self) { tag in
+                                        Text(tag)
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(blocked.contains(tag) ? NoveliaStyle.muted : NoveliaStyle.ink)
+                                            .lineLimit(1)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(NoveliaStyle.card, in: Capsule())
                                     }
                                 }
-                                NavigationLink("管理屏蔽标签") { BlockedTagsView() }
                             }
                         }
                         NavigationLink {

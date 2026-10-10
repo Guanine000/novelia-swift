@@ -420,6 +420,42 @@ struct BlockedTagsView: View {
     }
 }
 
+/// 作品详情页标签区的二级菜单：勾选屏蔽/解除本作品的标签，并保留进入标签屏蔽管理的入口。
+struct TagBlockingMenu: View {
+    let tags: [String]
+    @ObservedObject private var blocked = BlockedTagsStore.shared
+    @State private var showsManager = false
+
+    var body: some View {
+        Menu {
+            ForEach(tags, id: \.self) { tag in
+                Button {
+                    if blocked.contains(tag) { blocked.remove(tag) } else { blocked.add(tag) }
+                } label: {
+                    Label(tag, systemImage: blocked.contains(tag) ? "checkmark.circle.fill" : "circle")
+                }
+            }
+            Divider()
+            Button { showsManager = true } label: {
+                Label("标签屏蔽管理", systemImage: "slider.horizontal.3")
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "eye.slash")
+                Text("选择标签屏蔽")
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
+            }
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(NoveliaStyle.brandGreen)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(NoveliaStyle.brandGreen.opacity(0.10), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .navigationDestination(isPresented: $showsManager) { BlockedTagsView() }
+    }
+}
+
 @MainActor
 final class ReaderBackgroundStore: ObservableObject {
     static let shared = ReaderBackgroundStore()
