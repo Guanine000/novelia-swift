@@ -33,7 +33,7 @@ if case let .table(rows) = table[0].kind {
 // content reproduces its structure without redistributing the author's prose.
 for mode in [ForumMarkdownMode.article, .comment] {
     for delimiter in ["-", "--", "---", ":-", "-:", ":--:"] {
-        let blocks = parseForumMarkdown("| 评分 | 链接 | 评语 | 日期 |\n| \(delimiter) | \(delimiter) | \(delimiter) | \(delimiter) |\n| ☆☆☆☆☆ | [小说](https://books.fishhawk.top/novel/hameln/357228) | **更新** | 20250226 |\n|  | *分隔* | | |\n\n后文", mode: mode)
+        let blocks = parseForumMarkdown("| 评分 | 链接 | 评语 | 日期 |\n| \(delimiter) | \(delimiter) | \(delimiter) | \(delimiter) |\n| ☆☆☆☆☆ | [小说](https://books.fishhawk.top/novel/hameln/example) | **更新** | 20250226 |\n|  | *分隔* | | |\n\n后文", mode: mode)
         check(blocks.count == 2, "short delimiter block boundaries")
         if case let .table(rows) = blocks[0].kind {
             check(rows.count == 3 && rows.allSatisfy { $0.count == 4 }, "four-column table")
@@ -63,7 +63,7 @@ for value in ["~~[小说](https://n.novelia.cc/novel/x/y)~~", "[~~小说~~](http
 }
 
 private let spoilerPattern = try NSRegularExpression(pattern: "!!!!([\\s\\S]+?)!!!!|!!([\\s\\S]+?)!!")
-for sample in ["!!文字中的[链接](https://forum.novelia.cc/p/342)!!", "!!!![小说](https://n.novelia.cc/novel/x/y)!!!!", "[!!小说!!](https://n.novelia.cc/novel/x/y)", "[!!!!小说!!!!](https://n.novelia.cc/novel/x/y)", "`!!示例!!` 正文 !![链接](https://forum.novelia.cc/p/342)!!"] {
+for sample in ["!!文字中的[链接](https://example.com/spoiler-link)!!", "!!!![小说](https://n.novelia.cc/novel/x/y)!!!!", "[!!小说!!](https://n.novelia.cc/novel/x/y)", "[!!!!小说!!!!](https://n.novelia.cc/novel/x/y)", "`!!示例!!` 正文 !![链接](https://example.com/spoiler-link)!!"] {
     let revealed = renderInlineMarkdown(sample, spoilersRevealed: true, pattern: spoilerPattern)
     check(revealed.runs.contains { $0.link != nil }, "revealed spoiler link missing")
     let hidden = renderInlineMarkdown(sample, spoilersRevealed: false, pattern: spoilerPattern)

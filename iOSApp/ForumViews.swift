@@ -651,22 +651,7 @@ struct ForumMarkdownBody: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(NoveliaStyle.paper, in: RoundedRectangle(cornerRadius: 8))
         case let .table(rows):
-            ScrollView(.horizontal) {
-                Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
-                    ForEach(rows.indices, id: \.self) { row in
-                        GridRow {
-                            ForEach(rows[row].indices, id: \.self) { column in
-                                ForumInlineMarkdownText(markdown: rows[row][column], baseSize: mode == .comment ? 14 : 15, bold: row == 0)
-                                    .fontWeight(row == 0 ? .semibold : .regular)
-                                    .padding(10)
-                                    .frame(minWidth: 100, maxWidth: 240, alignment: .leading)
-                                    .background(row == 0 ? NoveliaStyle.paper : NoveliaStyle.card)
-                                    .overlay(Rectangle().stroke(NoveliaStyle.muted.opacity(0.25)))
-                            }
-                        }
-                    }
-                }
-            }
+            ForumMarkdownTable(rows: rows, mode: mode)
         case .divider:
             Rectangle().fill(NoveliaStyle.muted.opacity(0.25)).frame(height: 1).padding(.vertical, 5)
         case let .starRating(value):
@@ -692,6 +677,38 @@ struct ForumMarkdownBody: View {
         case 3: 18
         default: 16
         }
+    }
+}
+
+/// A bounded text width lets each row grow vertically instead of truncating
+/// cells under the horizontal scroll view's unconstrained width proposal.
+private struct ForumMarkdownTable: View {
+    let rows: [[String]]
+    let mode: ForumMarkdownMode
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
+                ForEach(rows.indices, id: \.self) { row in
+                    GridRow {
+                        ForEach(rows[row].indices, id: \.self) { column in
+                            ForumInlineMarkdownText(markdown: rows[row][column], baseSize: mode == .comment ? 14 : 15, bold: row == 0)
+                                .fontWeight(row == 0 ? .semibold : .regular)
+                                .lineLimit(nil)
+                                .multilineTextAlignment(.leading)
+                                .frame(width: 220, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(10)
+                                .background(row == 0 ? NoveliaStyle.paper : NoveliaStyle.card)
+                                .overlay(Rectangle().stroke(NoveliaStyle.muted.opacity(0.25)))
+                                .gridCellAnchor(.topLeading)
+                        }
+                    }
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .defaultScrollAnchor(.leading)
     }
 }
 
