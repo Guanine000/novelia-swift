@@ -23,10 +23,12 @@ public struct NoveliaAPIClient: Sendable {
 
     public func searchNovels(query: String, page: Int = 1, exactTag: Bool = false) async throws -> [Novel] {
         let searchQuery = exactTag ? "\(query)$" : query
+        // The app uses 1-based pages, while the novel search API is 0-based.
+        let apiPage = max(page - 1, 0)
         let response: APIPage<APIWebOutline> = try await get(
             path: ["novel"],
             query: [
-                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "page", value: String(apiPage)),
                 URLQueryItem(name: "pageSize", value: "20"),
                 URLQueryItem(name: "query", value: searchQuery),
                 URLQueryItem(name: "provider", value: Self.providers.joined(separator: ",")),
