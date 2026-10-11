@@ -364,6 +364,12 @@ struct DiscoverView: View {
     @ObservedObject private var blocked = BlockedTagsStore.shared
     @State private var query = ""
     @StateObject private var store = DiscoverStore()
+    private let showsNavigationBar: Bool
+
+    init(initialQuery: String = "", showsNavigationBar: Bool = false) {
+        _query = State(initialValue: initialQuery)
+        self.showsNavigationBar = showsNavigationBar
+    }
 
     var body: some View {
         ScrollView {
@@ -515,7 +521,9 @@ struct DiscoverView: View {
             .padding(.bottom, 24)
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationTitle(showsNavigationBar ? "搜索结果" : "")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(showsNavigationBar ? .visible : .hidden, for: .navigationBar)
         .task(id: query) { await store.search(query: query) }
     }
 }
@@ -779,7 +787,7 @@ struct NovelDetailView: View {
                                 .lineLimit(2)
                         }
                         HStack(spacing: 8) {
-                            Text("著 · \(displayNovel.author)")
+                            Label(displayNovel.author, systemImage: "person")
                             if let totalCharacters = displayNovel.totalCharacters, totalCharacters > 0 {
                                 Text("· \(totalCharacters.formatted()) 字")
                             }

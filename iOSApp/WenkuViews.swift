@@ -8,6 +8,10 @@ struct WenkuView: View {
     @State private var section = WenkuSection.search
     @State private var query = ""
 
+    init(initialQuery: String = "") {
+        _query = State(initialValue: initialQuery)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Picker("文库", selection: $section) {
@@ -198,6 +202,21 @@ struct WenkuDetailView: View {
                         if !linkedWebNovels(detail.webIds).isEmpty {
                             relatedWebNovelsSection(detail)
                         }
+                        if detail.title != detail.displayTitle || latestUpdateText(detail.latestPublishAt) != nil {
+                            VStack(alignment: .leading, spacing: 5) {
+                                if detail.title != detail.displayTitle {
+                                    Text("原名：\(detail.title)")
+                                        .font(.caption)
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                        .lineLimit(2)
+                                }
+                                if let latestUpdate = latestUpdateText(detail.latestPublishAt) {
+                                    Label(latestUpdate, systemImage: "clock")
+                                        .font(.caption)
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                }
+                            }
+                        }
                         if !detail.introduction.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("简介").font(.headline)
@@ -223,6 +242,9 @@ struct WenkuDetailView: View {
                                     }
                                 }
                             }
+                        }
+                        if !detail.volumes.isEmpty {
+                            volumeCoverGallery(detail.volumes)
                         }
                         NavigationLink {
                             NovelCommentsView(title: detail.displayTitle, subjectKey: "wenku-\(detail.id)")
@@ -279,9 +301,14 @@ struct WenkuDetailView: View {
             .frame(width: 112, height: 154).clipShape(RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 8) {
                 Text(detail.displayTitle).font(.system(size: 21, weight: .bold)).foregroundStyle(NoveliaStyle.ink)
-                if detail.title != detail.displayTitle { Text("原名：\(detail.title)").font(.system(size: 13)).foregroundStyle(NoveliaStyle.muted).lineLimit(2) }
-                if !detail.authors.isEmpty { Label(detail.authors.joined(separator: "、"), systemImage: "person").font(.caption).foregroundStyle(NoveliaStyle.muted) }
-                if !detail.publisher.isNilOrEmpty { Text([detail.publisher, detail.imprint].compactMap { $0 }.joined(separator: " · ")).font(.caption).foregroundStyle(NoveliaStyle.muted) }
+                if !detail.authors.isEmpty { metadataSearchLinks(label: "作者", values: detail.authors) }
+                if !detail.artists.isEmpty { metadataSearchLinks(label: "画师", values: detail.artists) }
+                if !detail.publisher.isNilOrEmpty, let publisher = detail.publisher {
+                    metadataSearchLinks(label: "出版社", values: [publisher])
+                }
+                if !detail.imprint.isNilOrEmpty, let imprint = detail.imprint {
+                    metadataSearchValue(label: "文库", value: imprint)
+                }
                 Text(detail.level).font(.caption2.weight(.medium)).padding(.horizontal, 8).padding(.vertical, 4).background(NoveliaStyle.brandGreen.opacity(0.1), in: Capsule())
                 Spacer(minLength: 4)
                 Button {
@@ -309,6 +336,80 @@ struct WenkuDetailView: View {
                 .buttonStyle(.borderedProminent).tint(NoveliaStyle.brandGreen)
             }
         }
+    }
+
+    private func latestUpdateText(_ timestamp: Int64?) -> String? {
+        guard let timestamp, timestamp > 0 else { return nil }
+        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
+        return "最新更新：\(date.formatted(date: .numeric, time: .omitted))"
+    }
+
+    private func metadataSearchValue(label: String, value: String) -> some View {
+        HStack(spacing: 4) {
+            Text("\(label)：")
+                .font(.caption)
+                .foregroundStyle(NoveliaStyle.muted)
+            NavigationLink {
+                WenkuView(initialQuery: "\"\(value)\"")
+            } label: {
+                HStack(spacing: 4) {
+                    Text(value).lineLimit(2)
+                    Image(systemName: "magnifyingglass").font(.system(size: 9, weight: .semibold))
+                }
+                .font(.caption)
+                .foregroundStyle(NoveliaStyle.brandGreen)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func metadataSearchLinks(label: String, values: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(NoveliaStyle.muted)
+            ForEach(values.indices, id: \.self) { index in
+                let value = values[index]
+                NavigationLink {
+                    WenkuView(initialQuery: "\"\(value)\"")
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(value).lineLimit(2)
+                        Image(systemName: "magnifyingglass").font(.system(size: 9, weight: .semibold))
+                    }
+                    .font(.caption)
+                    .foregroundStyle(NoveliaStyle.brandGreen)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func volumeCoverGallery(_ volumes: [WenkuVolumeMetadata]) -> some View {
+        ScrollView(.horizontal) {
+            LazyHStack(spacing: 8) {
+                ForEach(Array(volumes.enumerated()), id: \.offset) { item in
+                    let volume = item.element
+                    AsyncImage(url: URL(string: volume.coverHires ?? volume.cover)) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(NoveliaStyle.brandGreen.opacity(0.1))
+                                .overlay {
+                                    Image(systemName: "book.closed")
+                                        .font(.title2)
+                                        .foregroundStyle(NoveliaStyle.brandGreen)
+                                }
+                        }
+                    }
+                    .frame(width: 112, height: 154)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .accessibilityLabel(volume.titleZh ?? volume.title)
+                }
+            }
+        }
+        .scrollIndicators(.hidden)
     }
 
     private func relatedWebNovelsSection(_ detail: WenkuNovelDetail) -> some View {
