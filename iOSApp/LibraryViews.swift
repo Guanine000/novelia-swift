@@ -787,15 +787,7 @@ struct NovelDetailView: View {
                                 .lineLimit(2)
                         }
                         HStack(spacing: 8) {
-                            NavigationLink {
-                                DiscoverView(initialQuery: "\"\(displayNovel.author)\"", showsNavigationBar: true)
-                            } label: {
-                                Label(displayNovel.author, systemImage: "person")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundStyle(.white)
-                                    .underline()
-                            }
-                            .buttonStyle(.plain)
+                            Label(displayNovel.author, systemImage: "person")
                             if let totalCharacters = displayNovel.totalCharacters, totalCharacters > 0 {
                                 Text("· \(totalCharacters.formatted()) 字")
                             }

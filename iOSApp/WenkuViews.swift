@@ -202,6 +202,21 @@ struct WenkuDetailView: View {
                         if !linkedWebNovels(detail.webIds).isEmpty {
                             relatedWebNovelsSection(detail)
                         }
+                        if detail.title != detail.displayTitle || latestUpdateText(detail.latestPublishAt) != nil {
+                            VStack(alignment: .leading, spacing: 5) {
+                                if detail.title != detail.displayTitle {
+                                    Text("原名：\(detail.title)")
+                                        .font(.caption)
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                        .lineLimit(2)
+                                }
+                                if let latestUpdate = latestUpdateText(detail.latestPublishAt) {
+                                    Label(latestUpdate, systemImage: "clock")
+                                        .font(.caption)
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                }
+                            }
+                        }
                         if !detail.introduction.isEmpty {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("简介").font(.headline)
@@ -286,19 +301,13 @@ struct WenkuDetailView: View {
             .frame(width: 112, height: 154).clipShape(RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 8) {
                 Text(detail.displayTitle).font(.system(size: 21, weight: .bold)).foregroundStyle(NoveliaStyle.ink)
-                if detail.title != detail.displayTitle { Text("原名：\(detail.title)").font(.system(size: 13)).foregroundStyle(NoveliaStyle.muted).lineLimit(2) }
                 if !detail.authors.isEmpty { metadataSearchLinks(label: "作者", values: detail.authors) }
                 if !detail.artists.isEmpty { metadataSearchLinks(label: "画师", values: detail.artists) }
                 if !detail.publisher.isNilOrEmpty, let publisher = detail.publisher {
                     metadataSearchLinks(label: "出版社", values: [publisher])
                 }
                 if !detail.imprint.isNilOrEmpty, let imprint = detail.imprint {
-                    Text("文库：\(imprint)").font(.caption).foregroundStyle(NoveliaStyle.muted)
-                }
-                if let latestUpdate = latestUpdateText(detail.latestPublishAt) {
-                    Label(latestUpdate, systemImage: "clock")
-                        .font(.caption)
-                        .foregroundStyle(NoveliaStyle.muted)
+                    metadataSearchValue(label: "文库", value: imprint)
                 }
                 Text(detail.level).font(.caption2.weight(.medium)).padding(.horizontal, 8).padding(.vertical, 4).background(NoveliaStyle.brandGreen.opacity(0.1), in: Capsule())
                 Spacer(minLength: 4)
@@ -333,6 +342,25 @@ struct WenkuDetailView: View {
         guard let timestamp, timestamp > 0 else { return nil }
         let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
         return "最新更新：\(date.formatted(date: .numeric, time: .omitted))"
+    }
+
+    private func metadataSearchValue(label: String, value: String) -> some View {
+        HStack(spacing: 4) {
+            Text("\(label)：")
+                .font(.caption)
+                .foregroundStyle(NoveliaStyle.muted)
+            NavigationLink {
+                WenkuView(initialQuery: "\"\(value)\"")
+            } label: {
+                HStack(spacing: 4) {
+                    Text(value).lineLimit(2)
+                    Image(systemName: "magnifyingglass").font(.system(size: 9, weight: .semibold))
+                }
+                .font(.caption)
+                .foregroundStyle(NoveliaStyle.brandGreen)
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private func metadataSearchLinks(label: String, values: [String]) -> some View {
