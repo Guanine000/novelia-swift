@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Test the production editor with synthetic posts and a local mock; never writes to a forum."""
 from pathlib import Path
+import re
 import argparse
 import subprocess
 import tempfile
@@ -8,18 +9,24 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--device', required=True)
 args = parser.parse_args()
 r = Path(tempfile.mkdtemp(prefix='NoveliaEditorRegression-'))
-s = (Path(__file__).resolve().parents[1] / 'iOSApp/ForumViews.swift').read_text()
-component = s[s.index('private struct ForumComposeView'):s.index('private extension String', s.index('private struct ForumComposeView'))]
+s = (Path(__file__).resolve().parents[1] / 'iOSApp/ForumEditorViews.swift').read_text()
+component = s[s.index('struct ForumComposeView'):]
 fixture = 'import SwiftUI\nimport Combine\nprivate enum NoveliaStyle { static let paper = Color.white; static let brandGreen = Color.green; static let muted = Color.gray }\nprivate final class ForumAuthStore: ObservableObject { @Published var username: String? = "test-author"; @Published var isLoginPresented = false }\nprivate enum NoveliaForumSessionTokenVault { static func read() -> String? { nil } }\nprivate struct ForumTag: Identifiable { let id: Int64; let name: String; let sortOrder = 0 }\nprivate struct ForumCategory: Identifiable { let id: Int64; let title: String; let tags: [ForumTag] }\nprivate struct ForumPost { let id: Int64; let categoryId: Int64; let title: String; let content: String; let authorUsername: String; let tags: [ForumTag] }\nprivate struct ForumAPIClient {\n static var fail = false\n init(tokenProvider: @escaping () -> String?) {}\n func updatePost(id: Int64, categoryID: Int64, title: String, content: String, tagIDs: [Int64]) async throws -> ForumPost {\n  if Self.fail { throw NSError(domain: "Mock", code: 403, userInfo: [NSLocalizedDescriptionKey: "保存失败测试"]) }\n  return ForumPost(id: id, categoryId: categoryID, title: title, content: content, authorUsername: "test-author", tags: tagIDs.map { ForumTag(id: $0, name: "测试标签") })\n }\n func createPost(categoryID: Int64, title: String, content: String, tagIDs: [Int64]) async throws -> ForumPost { try await updatePost(id: 42, categoryID: categoryID, title: title, content: content, tagIDs: tagIDs) }\n}\nprivate struct ForumErrorOverlay: View {\n let message: String; let onDismiss: () -> Void\n var body: some View { VStack { Text(message); Button("关闭", action: onDismiss) }.padding().background(.white) }\n}\n@main struct TapRegressionApp: App { var body: some Scene { WindowGroup { TestScreen() } } }\nprivate struct TestScreen: View {\n @StateObject private var auth = ForumAuthStore()\n @State private var editing = false\n @State private var post = ForumPost(id: 42, categoryId: 7, title: "Original", content: "first\\nlast\\n", authorUsername: "test-author", tags: [ForumTag(id: 3, name: "测试标签")])\n var body: some View {\n  VStack {\n   Text("Saved: \\(post.title)")\n   Button("编辑") { ForumAPIClient.fail = false; editing = true }\n   Button("错误测试") { ForumAPIClient.fail = true; editing = true }\n  }\n  .sheet(isPresented: $editing) {\n   NavigationStack { ForumComposeView(categories: [ForumCategory(id: 7, title: "测试分类", tags: [ForumTag(id: 3, name: "测试标签")])], editingPost: post) { post = $0 } }\n  }\n  .environmentObject(auth)\n }\n}\n'
 fixture = fixture.replace('import Combine', 'import Combine\nimport UIKit\nimport WebKit').replace('static let paper', 'static let ink = Color.black; static let card = Color.white; static let paper')
 fixture = fixture.replace('let title: String; let tags: [ForumTag] }', 'let title: String; let slug = "novel"; let tags: [ForumTag] }')
 fixture = fixture.replace(' static var fail = false', ' func categories() async throws -> [ForumCategory] { [ForumCategory(id: 7, title: "测试分类", tags: [ForumTag(id: 3, name: "测试标签")])] }\n static var fail = false')
 fixture = fixture.replace('.sheet(isPresented: $editing)', '.fullScreenCover(isPresented: $editing)')
 fixture += 'private struct ForumView: View { var initialCategory: String = ""; var initialQuery: String = ""; var body: some View { Text("分类: \(initialCategory) 搜索: \(initialQuery)").navigationTitle("分类页面") } }\n'
+fixture += 'struct ForumNovelRoute: Hashable {}\nstruct ForumNovelRouteView: View { let route: ForumNovelRoute; var body: some View { EmptyView() } }\n'
 fixture += 'private enum ForumMarkdownMode { case article, comment }\nprivate struct ForumMarkdownBody: View { let markdown: String; var mode: ForumMarkdownMode = .article; var body: some View { Text((try? AttributedString(markdown: markdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(markdown)) } }\n'
-support = s[s.index('private struct ForumComposeNotice'):s.index('private struct ForumCommentEditorSheet')]
-editor = s[s.index('private struct ForumMarkdownEditor'):s.index('private struct ForumMarkdownBlock')]
-(r / "TapRegression.swift").write_text(fixture + support + editor + component)
+support = s[s.index('private struct ForumComposeNotice'):s.index('struct ForumCommentEditorSheet')]
+core = (Path(__file__).resolve().parents[1] / 'Sources/NoveliaIOSCore/ForumMarkdown.swift').read_text()
+support += core[core.index('enum ForumNoticeDestination'):core.index('struct ForumMarkdownBlock')]
+editor = s[s.index('private struct ForumMarkdownEditor'):s.index('struct ForumComposeView')]
+# One-file test app: drop top-level `private` so the stubs above and the shipped
+# views (some internal since the forum files were split) agree on access levels.
+source = re.sub(r'(?m)^private (struct|enum|final class|class|func|extension) ', r'\1 ', fixture + support + editor + component)
+(r / "TapRegression.swift").write_text(source)
 (r / "TapTests.swift").write_text('import XCTest\nfinal class TapTests: XCTestCase {\n func testPrefillCancelAndSave() {\n  let app = XCUIApplication(); app.launch(); app.buttons["编辑"].tap()\n  let title = app.textFields.firstMatch\n  XCTAssertTrue(title.waitForExistence(timeout: 5)); XCTAssertEqual(title.value as? String, "Original")\n  XCTAssertEqual(app.textViews.firstMatch.value as? String, "first\\nlast\\n")\n  XCTAssertEqual(app.switches["测试标签"].value as? String, "1")\n  app.buttons["取消"].tap(); XCTAssertTrue(app.staticTexts["Saved: Original"].waitForExistence(timeout: 5))\n  app.buttons["编辑"].tap(); title.tap(); title.typeText("X")\n  let draft = title.value as! String; XCTAssertNotEqual(draft, "Original")\n  app.buttons["保存修改"].tap()\n  XCTAssertTrue(app.staticTexts["Saved: \(draft)"].waitForExistence(timeout: 5))\n }\n func testErrorKeepsDraft() {\n  let app = XCUIApplication(); app.launch(); app.buttons["错误测试"].tap()\n  let title = app.textFields.firstMatch; XCTAssertTrue(title.waitForExistence(timeout: 5))\n  title.tap(); title.typeText("X"); let draft = title.value as! String; app.buttons["保存修改"].tap()\n  XCTAssertTrue(app.staticTexts["保存失败测试"].waitForExistence(timeout: 5))\n  app.buttons["关闭"].tap(); XCTAssertEqual(title.value as? String, draft)\n  XCTAssertTrue(app.buttons["保存修改"].isEnabled)\n }\n}\n')
 tests = (r / "TapTests.swift").read_text()
 extra = r"""

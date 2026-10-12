@@ -3,12 +3,6 @@ import Foundation
 import Security
 import SwiftUI
 
-struct SyncedReadingPosition: Codable {
-    var chapterIndex: Int?
-    var fraction: Double?
-    var updatedAt: Date
-}
-
 @MainActor
 enum ReadingPositionSync {
     private static let key = "readingPositions.v1"
@@ -24,33 +18,30 @@ enum ReadingPositionSync {
         save(positions)
     }
 
-    static func recordEPUB(hash: String, fraction: Double) {
+    static func recordEPUB(hash: String, fraction: Double, spineIndex: Int, chapterOffset: Int?) {
         var positions = all()
-        positions["epub:\(hash)"] = SyncedReadingPosition(chapterIndex: nil,
-            fraction: min(1, max(0, fraction)), updatedAt: Date())
+        positions["epub:\(hash)"] = SyncedReadingPosition(chapterIndex: spineIndex,
+            fraction: min(1, max(0, fraction)), updatedAt: Date(), chapterOffset: chapterOffset)
         save(positions)
     }
 
-    static func epubFraction(hash: String) -> Double? { all()["epub:\(hash)"]?.fraction }
+    static func epubPosition(hash: String) -> SyncedReadingPosition? { all()["epub:\(hash)"] }
 
     static func merge(_ remote: [String: SyncedReadingPosition], webBooks: [DownloadedWebNovel]) {
         var positions = all()
-        let defaults = UserDefaults.standard
+        let progress = ReadingProgressStore()
         for book in webBooks {
             let key = "web:\(book.id)"
-            if positions[key] == nil, defaults.object(forKey: "progress.\(book.id)") != nil {
+            if positions[key] == nil, let index = progress.chapterIndex(novelID: book.id) {
                 positions[key] = SyncedReadingPosition(
-                    chapterIndex: defaults.integer(forKey: "progress.\(book.id)"), fraction: nil,
-                    updatedAt: defaults.object(forKey: "progressTime.\(book.id)") as? Date ?? .distantPast)
+                    chapterIndex: index, fraction: nil,
+                    updatedAt: progress.updatedAt(novelID: book.id) ?? .distantPast)
             }
         }
-        for (key, value) in remote where value.updatedAt >= (positions[key]?.updatedAt ?? .distantPast) {
-            positions[key] = value
-        }
+        positions = SyncedReadingPosition.merged(positions, remote)
         for book in webBooks {
             if let position = positions["web:\(book.id)"], let index = position.chapterIndex {
-                defaults.set(index, forKey: "progress.\(book.id)")
-                defaults.set(position.updatedAt, forKey: "progressTime.\(book.id)")
+                progress.save(chapterIndex: index, updatedAt: position.updatedAt, novelID: book.id)
             }
         }
         save(positions)
@@ -272,13 +263,13 @@ private struct WebDAVClient {
 
 @MainActor
 final class WebDAVSyncStore: ObservableObject {
-    @Published var isEnabled: Bool { didSet { UserDefaults.standard.set(isEnabled, forKey: "webdav.enabled") } }
-    @Published var address: String { didSet { UserDefaults.standard.set(address, forKey: "webdav.address") } }
-    @Published var username: String { didSet { UserDefaults.standard.set(username, forKey: "webdav.username") } }
-    @Published var syncBooks: Bool { didSet { UserDefaults.standard.set(syncBooks, forKey: "webdav.syncBooks") } }
-    @Published var syncTags: Bool { didSet { UserDefaults.standard.set(syncTags, forKey: "webdav.syncTags") } }
-    @Published var syncBackgrounds: Bool { didSet { UserDefaults.standard.set(syncBackgrounds, forKey: "webdav.syncBackgrounds") } }
-    @Published var syncFonts: Bool { didSet { UserDefaults.standard.set(syncFonts, forKey: "webdav.syncFonts") } }
+    @Published var isEnabled: Bool { didSet { UserDefaults.standard.set(isEnabled, forKey: SettingsKey.WebDAV.enabled) } }
+    @Published var address: String { didSet { UserDefaults.standard.set(address, forKey: SettingsKey.WebDAV.address) } }
+    @Published var username: String { didSet { UserDefaults.standard.set(username, forKey: SettingsKey.WebDAV.username) } }
+    @Published var syncBooks: Bool { didSet { UserDefaults.standard.set(syncBooks, forKey: SettingsKey.WebDAV.syncBooks) } }
+    @Published var syncTags: Bool { didSet { UserDefaults.standard.set(syncTags, forKey: SettingsKey.WebDAV.syncTags) } }
+    @Published var syncBackgrounds: Bool { didSet { UserDefaults.standard.set(syncBackgrounds, forKey: SettingsKey.WebDAV.syncBackgrounds) } }
+    @Published var syncFonts: Bool { didSet { UserDefaults.standard.set(syncFonts, forKey: SettingsKey.WebDAV.syncFonts) } }
     @Published var password: String = ""
     @Published private(set) var isSyncing = false
     @Published private(set) var progressDetail = ""
@@ -289,13 +280,13 @@ final class WebDAVSyncStore: ObservableObject {
     private let keychainService = "cc.novelia.ios.port.webdav"
 
     init() {
-        isEnabled = UserDefaults.standard.object(forKey: "webdav.enabled") as? Bool ?? true
-        syncBooks = UserDefaults.standard.object(forKey: "webdav.syncBooks") as? Bool ?? true
-        syncTags = UserDefaults.standard.object(forKey: "webdav.syncTags") as? Bool ?? true
-        syncBackgrounds = UserDefaults.standard.bool(forKey: "webdav.syncBackgrounds")
-        syncFonts = UserDefaults.standard.bool(forKey: "webdav.syncFonts")
-        address = UserDefaults.standard.string(forKey: "webdav.address") ?? ""
-        username = UserDefaults.standard.string(forKey: "webdav.username") ?? ""
+        isEnabled = UserDefaults.standard.object(forKey: SettingsKey.WebDAV.enabled) as? Bool ?? true
+        syncBooks = UserDefaults.standard.object(forKey: SettingsKey.WebDAV.syncBooks) as? Bool ?? true
+        syncTags = UserDefaults.standard.object(forKey: SettingsKey.WebDAV.syncTags) as? Bool ?? true
+        syncBackgrounds = UserDefaults.standard.bool(forKey: SettingsKey.WebDAV.syncBackgrounds)
+        syncFonts = UserDefaults.standard.bool(forKey: SettingsKey.WebDAV.syncFonts)
+        address = UserDefaults.standard.string(forKey: SettingsKey.WebDAV.address) ?? ""
+        username = UserDefaults.standard.string(forKey: SettingsKey.WebDAV.username) ?? ""
         password = Self.readPassword(service: keychainService) ?? ""
     }
 
@@ -393,7 +384,7 @@ final class WebDAVSyncStore: ObservableObject {
                 for book in localWebWins {
                     try Task.checkCancellation()
                     let files = web.syncFiles(for: book)
-                    guard files.count == [book.chapterDataFilename, book.fileFilename].compactMap({ $0 }).count else {
+                    guard files.count == 1 else {
                         throw WebDAVSyncError.invalidAsset
                     }
                     let saved = try await remoteBook(book, title: book.novel.title, files: files, client: client)
@@ -446,9 +437,9 @@ final class WebDAVSyncStore: ObservableObject {
             }
             if includesFonts {
                 stage = "同步导入字体"; progressDetail = "正在同步导入字体…"
-                let local = try PrototypeLocalFonts.syncSnapshot()
+                let local = try EPUBLocalFonts.syncSnapshot()
                 let fonts = SyncedImportedFont.merged(local, manifest.fonts ?? [:])
-                let files = try PrototypeLocalFonts.syncFiles()
+                let files = try EPUBLocalFonts.syncFiles()
                 for (hash, record) in fonts {
                     guard hash == record.hash, ["ttf", "otf", "ttc"].contains(record.format) else { throw WebDAVSyncError.invalidAsset }
                     if record.deleted { continue }
@@ -470,7 +461,7 @@ final class WebDAVSyncStore: ObservableObject {
                     }
                 }
             }
-            if includesFonts { try PrototypeLocalFonts.applySync(manifest.fonts ?? [:], files: resourceFiles) }
+            if includesFonts { try EPUBLocalFonts.applySync(manifest.fonts ?? [:], files: resourceFiles) }
             completedUnits += 1
             progressDetail = "同步完成"
             let bookSummary = includesBooks ? "恢复 \(imported) 本书，网络小说 \(web.books.count) 本，文库 \(wenku.books.count) 本。" : ""

@@ -150,9 +150,7 @@ struct WenkuNovelRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            AsyncImage(url: novel.cover.flatMap(URL.init(string:))) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
+            CoverImage(url: novel.cover.flatMap(URL.init(string:))) {
                 RoundedRectangle(cornerRadius: 8).fill(NoveliaStyle.brandGreen.opacity(0.12))
                     .overlay(Image(systemName: "book.closed").foregroundStyle(NoveliaStyle.brandGreen))
             }
@@ -292,9 +290,7 @@ struct WenkuDetailView: View {
 
     private func header(_ detail: WenkuNovelDetail) -> some View {
         HStack(alignment: .top, spacing: 14) {
-            AsyncImage(url: detail.cover.flatMap(URL.init(string:))) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
+            CoverImage(url: detail.cover.flatMap(URL.init(string:))) {
                 RoundedRectangle(cornerRadius: 10).fill(NoveliaStyle.brandGreen.opacity(0.12))
                     .overlay(Image(systemName: "book.closed").font(.largeTitle).foregroundStyle(NoveliaStyle.brandGreen))
             }
@@ -390,18 +386,14 @@ struct WenkuDetailView: View {
             LazyHStack(spacing: 8) {
                 ForEach(Array(volumes.enumerated()), id: \.offset) { item in
                     let volume = item.element
-                    AsyncImage(url: URL(string: volume.coverHires ?? volume.cover)) { phase in
-                        if let image = phase.image {
-                            image.resizable().scaledToFill()
-                        } else {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(NoveliaStyle.brandGreen.opacity(0.1))
-                                .overlay {
-                                    Image(systemName: "book.closed")
-                                        .font(.title2)
-                                        .foregroundStyle(NoveliaStyle.brandGreen)
-                                }
-                        }
+                    CoverImage(url: URL(string: volume.coverHires ?? volume.cover)) {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(NoveliaStyle.brandGreen.opacity(0.1))
+                            .overlay {
+                                Image(systemName: "book.closed")
+                                    .font(.title2)
+                                    .foregroundStyle(NoveliaStyle.brandGreen)
+                            }
                     }
                     .frame(width: 112, height: 154)
                     .clipShape(RoundedRectangle(cornerRadius: 8))

@@ -27,7 +27,7 @@ Novelia iOS 是使用 SwiftUI 编写的 iPhone 客户端，连接 Novelia 网站
 | WebDAV 同步 | 在“我的 → WebDAV 同步”启用并配置 HTTPS WebDAV；在“我的下载”点同步开始，同步中再次点按可查看进度或取消；按书籍的下载/导入时间选择较新版本，阅读位置独立按更新时间合并；密码保存在 iOS 钥匙串。 |
 | 诊断 | 从“我的”页面导出最近 7 天的应用日志；包含 EPUB 下载状态、TXT 导入阶段、解码字节数、分章数量与耗时、失败的系统错误域/代码。导出摘要会统计 TXT 导入、解码与分章诊断记录数。 |
 
-EPUB 阅读器的容器解析、页面缓存、翻页界面和字体管理代码位于 [`iOSApp/EPUBPrototype/`](iOSApp/EPUBPrototype/)。排版依赖 [YueduCoreText 0.8.0](https://github.com/CHANG-JUI-LIN/YueduCoreText)。依赖说明见[阅读器依赖](iOSApp/EPUBPrototype/DEPENDENCIES.md)，当前限制见下文。
+EPUB 阅读器的容器解析、页面缓存、翻页界面和字体管理代码位于 [`iOSApp/EPUBReader/`](iOSApp/EPUBReader/)。排版依赖 [YueduCoreText 0.8.0](https://github.com/CHANG-JUI-LIN/YueduCoreText)。依赖说明见[阅读器依赖](iOSApp/EPUBReader/DEPENDENCIES.md)，当前限制见下文。
 
 WebDAV 使用方法：在“我的 → WebDAV 同步”打开同步开关，并填入可写的 HTTPS WebDAV 文件夹地址、用户名和密码（或应用密码）。之后在“我的下载”点同步按钮开始；同步过程中再次点按钮可打开进度浮窗并取消任务。另一台设备配置相同地址并同步后，会恢复云端较新的书籍记录。网络小说按下载时间、文库书按导入时间逐本比较；阅读位置分别按更新时间合并，网络小说记录章节序号，EPUB 记录文件哈希对应的阅读比例。同步采用追加与恢复：本地删除不会删除云端副本，后续同步可能再次恢复该书。取消不会回滚已经传输或恢复的文件，远端目录清单在同步最后阶段写入。服务器会生成 `NoveliaSync/v1/`，其中的下载文件与书目未做端到端加密。
 
@@ -38,7 +38,9 @@ WebDAV 使用方法：在“我的 → WebDAV 同步”打开同步开关，并�
 Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名。要从源码运行，使用 Xcode 打开 `NoveliaIOS.xcodeproj`，选择 `Novelia` scheme 和 iPhone 模拟器或已配置签名的设备。依赖由 Swift Package Manager 解析，锁定版本见 `NoveliaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`。
 
 
-项目主要目录：`iOSApp/` 为 SwiftUI 应用与 EPUB 阅读器，`Sources/NoveliaIOSCore/` 为 API、模型和存储代码，`NoveliaIOS.xcodeproj/` 为 Xcode 工程。
+项目主要目录：`iOSApp/` 为 SwiftUI 应用与 EPUB 阅读器，`Sources/NoveliaIOSCore/` 为 API、模型、论坛 Markdown、TXT 分章与同步合并等不依赖界面的代码，`Tests/` 为单元测试与合成 EPUB 样例，`NoveliaIOS.xcodeproj/` 为 Xcode 工程。
+
+单元测试在 iOS 模拟器上运行：`scripts/run_package_tests.sh [模拟器名称或 UDID]`。`scripts/scan_epub_layout.sh <书籍.epub>` 用阅读器默认设置排版一本本地 EPUB，报告两端对齐行的异常空隙和超出边距的行，书籍不会复制进仓库。
 
 启动时可自动检查公开 GitHub 仓库的最新正式 Release，发现新版本后可跳转下载、取消或忽略该版本；可在“我的 → 版本”关闭自动检查。
 
@@ -55,7 +57,7 @@ Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名�
 
 ## 许可与第三方软件
 
-App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完整依赖清单](iOSApp/Resources/ThirdPartyLicenses/INDEX.md)列出 `Package.resolved` 中全部 10 个 Swift Package 的版本、来源及许可文件。IPA 随附这些原始许可文本、YueduCoreText 的 MPL-2.0 许可和包含 Unicode License v3 的 NOTICE。YueduCoreText 对应源码为[精确锁定的提交](https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/783ce903d5faf4ff5d15c546e32a107537ba5efe)，本项目没有修改该依赖的上游源码。用户自行导入的字体保存在本机 App 文档目录，不随本项目 IPA 分发；字体文件仍受其自身许可约束。
+App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完整依赖清单](iOSApp/Resources/ThirdPartyLicenses/INDEX.md)列出 `Package.resolved` 中全部 3 个 Swift Package 的版本、来源及许可文件。IPA 随附这些原始许可文本、YueduCoreText 的 MPL-2.0 许可和包含 Unicode License v3 的 NOTICE。YueduCoreText 对应源码为[精确锁定的提交](https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/783ce903d5faf4ff5d15c546e32a107537ba5efe)，本项目没有修改该依赖的上游源码。用户自行导入的字体保存在本机 App 文档目录，不随本项目 IPA 分发；字体文件仍受其自身许可约束。
 
 **TXT 分章参考：** [Qingdu Reader](https://github.com/zengchen666/qingdu-reader) 使用 Apache License 2.0。本项目仅参考其公开说明中的设计思路，分章识别器为独立 Swift 实现；没有复制、修改或随包分发 Qingdu Reader 的源代码、二进制或资源。Apache-2.0 原文见 [Qingdu Reader LICENSE](https://github.com/zengchen666/qingdu-reader/blob/main/LICENSE)。
 
@@ -68,3 +70,23 @@ App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完�
 ## 反馈
 
 普通问题请通过 [Issues](https://github.com/Guanine000/novelia-swift/issues) 提交。公开反馈前请移除账号、令牌、WebDAV 凭据、私人书籍和个人信息。安全漏洞请通过[私密安全报告](https://github.com/Guanine000/novelia-swift/security/advisories/new)提交。
+
+## 本机构建与分发
+
+无需 GitHub Actions 或处理账单即可在 macOS／Xcode 本机构建。先按 VERSIONING.md 设置 Debug／Release 一致的版本与新构建号，再运行：
+
+```sh
+python3 -I scripts/build_local_release.py --simulator 'iPhone 18 Pro Max'
+```
+
+未提交的开发测试使用 `--allow-dirty`，例如：
+
+```sh
+python3 -I scripts/build_local_release.py --allow-dirty --simulator DFDA05C7-BA73-43B8-B711-511113CA3BCB
+```
+
+脚本运行 Swift 包逻辑／排版测试（不运行模拟器 UI 测试）、四项离线回归、Release 真机构建、原始依赖许可与包内资源核对、IPA 隐私检查，生成未签名 IPA、完整对应源码、锁定依赖完整源码／许可、BUILD.json 和 SHA256SUMS。产物位于忽略的 `build/local-releases/<版本>-<构建号>/`；只有出现 SUCCESS 才可分发。输出目录已存在时拒绝覆盖，源码在构建期间变化也会失败。脚本不修改版本、不提交、不推送、不发布。
+
+分发时一并提供 IPA、source.tar.gz、dependencies.tar.gz、BUILD.json 与 SHA256SUMS；未签名 IPA 需接收者自行重签。目录中的构建／测试日志仅供本机排障，可能含开发环境路径，不是应用的隐私过滤日志，不作为发布附件。
+
+ReaderSettings 共用字號、主题和背景入口；EPUB 特有排版选项与既有进度格式保留。在线／TXT 的分页迁移评估见 [READER_PAGINATION.md](READER_PAGINATION.md)。

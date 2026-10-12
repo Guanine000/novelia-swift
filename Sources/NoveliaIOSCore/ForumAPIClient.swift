@@ -153,12 +153,11 @@ public struct ForumAPIClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let token = tokenProvider(), !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body {
             request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
-        request.timeoutInterval = 30
+        request.timeoutInterval = NoveliaRequestTimeout.api
         let (data, response) = try await NoveliaSessionRenewal.data(session: session, request: request, app: "f", tokenProvider: tokenProvider)
         guard let http = response as? HTTPURLResponse else { throw ForumAPIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
