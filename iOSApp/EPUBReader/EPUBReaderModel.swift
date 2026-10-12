@@ -174,12 +174,17 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     @Published private(set) var status: Status = .idle
-    @Published private(set) var container: EPUBContainer?
+    @Published private(set) var source: (any EPUBChapterSource)?
+    /// The EPUB package when the source is one; TOC diagnostics and file-hash positions are EPUB only.
+    var container: EPUBContainer? { source as? EPUBContainer }
     private(set) var pageBook: EPUBPageBook?
     @Published private(set) var location = EPUBReadingLocation(spineIndex: 0, pageIndex: 0) {
         didSet {
             trimPageCaches()
-            if !isRestoringPosition, let openedBookHash, status == .ready {
+            guard !isRestoringPosition, status == .ready else { return }
+            if let positionHandler {
+                positionHandler(location.spineIndex, pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex))
+            } else if let openedBookHash {
                 ReaderSettings.shared.recordEPUBPosition(
                     hash: openedBookHash, fraction: overallProgress, spineIndex: location.spineIndex,
                     chapterOffset: pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex))
@@ -360,7 +365,7 @@ final class EPUBReaderModel: ObservableObject {
             }.value
             stage = "container"
             let container = try await EPUBContainer.open(fileURL: url)
-            self.container = container
+            self.source = container
             openedBookHash = bookHash
             location = EPUBReadingLocation(spineIndex: 0, pageIndex: 0)
             stage = "layout"
@@ -382,6 +387,53 @@ final class EPUBReaderModel: ObservableObject {
             lastLayoutFailure = EPUBLayoutLog.failure(error)
             status = .failed(describeLayoutError(error))
         }
+    }
+
+    /// Position callback for generated sources: (unit index, UTF-16 offset in the unit's text).
+    private var positionHandler: ((Int, Int?) -> Void)?
+
+    /// Opens generated chapters (TXT / online novel) at a unit and optional text offset.
+    /// Positions are reported through `onPosition` instead of the EPUB file-hash store.
+    func open(source: any EPUBChapterSource, unit: Int, offset: Int?,
+              onPosition: @escaping (Int, Int?) -> Void) async {
+        status = .opening
+        isRestoringPosition = true
+        positionHandler = onPosition
+        self.source = source
+        guard source.chapterCount > 0 else {
+            isRestoringPosition = false
+            status = .failed("没有可阅读的章节。")
+            return
+        }
+        let start = min(max(unit, 0), source.chapterCount - 1)
+        location = EPUBReadingLocation(spineIndex: start, pageIndex: 0)
+        await relayout(keepingCurrentSpine: true)
+        if status == .ready, let offset {
+            await restore(spineIndex: start, sourceOffset: offset)
+        }
+        isRestoringPosition = false
+        if status == .ready {
+            onPosition(location.spineIndex, pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex))
+        }
+    }
+
+    /// Re-lays out the current chapter after a failure (e.g. a network chapter that did not load).
+    func retry() {
+        guard case .failed = status, source != nil, !isLayingOut else { return }
+        status = .opening
+        Task { await relayout(keepingCurrentSpine: true) }
+    }
+
+    /// Neighbouring chapters whose prefetch failed for a reason other than cancellation.
+    @Published private(set) var failedChapters = Set<Int>()
+
+    var neighborLoadFailed: Bool {
+        failedChapters.contains(location.spineIndex + 1) || failedChapters.contains(location.spineIndex - 1)
+    }
+
+    func retryNeighbors() {
+        failedChapters.removeAll()
+        prefetchNeighbors(of: location.spineIndex)
     }
 
     /// Kind of the most recent layout/open error, for the open summary log.
@@ -454,7 +506,7 @@ final class EPUBReaderModel: ObservableObject {
     func setDarkMode(_ dark: Bool) {
         guard dark != isDarkMode, !isAnimating else { return }
         isDarkMode = dark
-        container?.themeTextColor = pageTextColor
+        source?.themeTextColor = pageTextColor
         Task { await relayout(keepingCurrentSpine: true) }
     }
 
@@ -467,7 +519,7 @@ final class EPUBReaderModel: ObservableObject {
         guard dark != isDarkMode || font != style.fontSize else { return }
         isDarkMode = dark
         style.fontSize = font
-        container?.themeTextColor = pageTextColor
+        source?.themeTextColor = pageTextColor
         Task { await relayout(keepingCurrentSpine: true) }
     }
 
@@ -492,7 +544,7 @@ final class EPUBReaderModel: ObservableObject {
 
     /// 重排当前章（以及前后相邻章的预取）。generation 递增使旧页面全部失效。
     private func relayout(keepingCurrentSpine: Bool) async {
-        guard let container else { return }
+        guard let container = source else { return }
         let wasRestoringPosition = isRestoringPosition
         isRestoringPosition = true
         defer { isRestoringPosition = wasRestoringPosition }
@@ -509,6 +561,7 @@ final class EPUBReaderModel: ObservableObject {
             ? pageBook?.sourceOffset(spineIndex: spineIndex, pageIndex: location.pageIndex)
             : nil
         spreadCache.removeAll()
+        failedChapters.removeAll()
         generation += 1
         let book = EPUBPageBook(generation: generation)
         book.onPagesChanged = { [weak self] in
@@ -570,15 +623,22 @@ final class EPUBReaderModel: ObservableObject {
 
     /// 空闲时预排前后相邻章，让跨章拖动时目标页位图已经就位。
     private func prefetchNeighbors(of spineIndex: Int) {
-        guard let container, let book = pageBook else { return }
+        guard let container = source, let book = pageBook else { return }
         let generationSnapshot = generation
-        for neighbor in [spineIndex + 1, spineIndex - 1] where container.spine.indices.contains(neighbor) {
+        for neighbor in [spineIndex + 1, spineIndex - 1] where (0..<container.chapterCount).contains(neighbor) {
             guard !book.hasChapter(neighbor) else { continue }
             let config = makeConfig()
             Task {
-                try? await book.layoutChapter(neighbor, container: container, config: config,
-                                aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS)
-                _ = generationSnapshot // 预取结果挂在当前 book 上，代次切换即整体作废
+                do {
+                    try await book.layoutChapter(neighbor, container: container, config: config,
+                                                 aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS)
+                    failedChapters.remove(neighbor)
+                } catch {
+                    // 预取结果挂在当前 book 上，代次切换即整体作废
+                    if generationSnapshot == generation, EPUBLayoutLog.failure(error).kind != "cancelled" {
+                        failedChapters.insert(neighbor)
+                    }
+                }
             }
         }
     }
@@ -596,7 +656,7 @@ final class EPUBReaderModel: ObservableObject {
 
     /// 空闲渲染相邻页位图，避免拖动开始/落页提交瞬间同步解码大图造成卡顿。
     private func schedulePrerender(around spineIndex: Int, pageIndex: Int) {
-        guard let pageBook, let container else { return }
+        guard let pageBook, let container = source else { return }
         let background = pageBackground
         var ids: [EPUBPageID] = [
             pageID(spineIndex, pageIndex - 1),
@@ -606,7 +666,7 @@ final class EPUBReaderModel: ObservableObject {
             ids.append(pageID(spineIndex - 1, pageCount(spineIndex: spineIndex - 1) - 1))
         }
         if pageIndex + 1 >= pageCount(spineIndex: spineIndex),
-           spineIndex + 1 < container.spine.count {
+           spineIndex + 1 < container.chapterCount {
             ids.append(pageID(spineIndex + 1, 0))
         }
         for id in ids where !(pageBook.isRendered(id)) && !scheduledRenders.contains(id) {
@@ -627,23 +687,28 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     var locationDescription: String {
-        guard let container else { return "" }
+        guard let source else { return "" }
         let total = pageCount(spineIndex: location.spineIndex)
-        return "spine \(location.spineIndex + 1)/\(container.spine.count) · 第 \(min(location.pageIndex + 1, max(total, 1)))/\(max(total, 1)) 页 · gen \(generation)"
+        let page = "第 \(min(location.pageIndex + 1, max(total, 1)))/\(max(total, 1)) 页"
+        guard container != nil else {
+            let chapter = (source as? TextChapterSource)?.tocEntry(containingUnit: location.spineIndex)
+            return "第 \((chapter ?? location.spineIndex) + 1)/\(max(source.toc.count, 1)) 章 · \(page)"
+        }
+        return "spine \(location.spineIndex + 1)/\(source.chapterCount) · \(page) · gen \(generation)"
     }
 
     /// 全书进度估计（0...1）：spine 粒度 + 当前章内页进度。
     /// 章节尚未全部排版时无法精确总页数，按章节平均权重近似。
     var overallProgress: Double {
-        guard let container, !container.spine.isEmpty else { return 0 }
+        guard let source, source.chapterCount > 0 else { return 0 }
         let chapterTotal = max(pageCount(spineIndex: location.spineIndex), 1)
         let chapterProgress = min(Double(location.pageIndex + 1), Double(chapterTotal)) / Double(chapterTotal)
-        return min((Double(location.spineIndex) + chapterProgress) / Double(container.spine.count), 1)
+        return min((Double(location.spineIndex) + chapterProgress) / Double(source.chapterCount), 1)
     }
 
     /// Reopens a book on the page that shows the saved chapter offset.
     private func restore(spineIndex: Int, sourceOffset: Int) async {
-        guard let container, let book = pageBook else { return }
+        guard let container = source, let book = pageBook else { return }
         if !book.isChapterComplete(spineIndex) {
             isLayingOut = true
             defer { isLayingOut = false }
@@ -665,10 +730,10 @@ final class EPUBReaderModel: ObservableObject {
     /// 拖动进度条后才定位，避免手指移动时反复排版和重建分页位图。
     func seek(to progress: Double) {
         guard !isAnimating, !isLayingOut, status == .ready,
-              let container, let book = pageBook, !container.spine.isEmpty else { return }
+              let container = source, let book = pageBook, container.chapterCount > 0 else { return }
         let fraction = min(max(progress, 0), 1)
-        let position = fraction * Double(container.spine.count)
-        let spineIndex = min(Int(position), container.spine.count - 1)
+        let position = fraction * Double(container.chapterCount)
+        let spineIndex = min(Int(position), container.chapterCount - 1)
         let pageFraction = fraction >= 1 ? 1 : position - Double(spineIndex)
         isLayingOut = true
         Task {
@@ -695,7 +760,7 @@ final class EPUBReaderModel: ObservableObject {
 
     /// 与当前阅读位置对应的目录条目序号：最后一个 spineIndex ≤ 当前章的条目。
     var currentTOCIndex: Int? {
-        guard let toc = container?.toc, !toc.isEmpty else { return nil }
+        guard let toc = source?.toc, !toc.isEmpty else { return nil }
         var match: Int?
         for (index, entry) in toc.enumerated() {
             if let spineIndex = entry.spineIndex, spineIndex <= location.spineIndex {
@@ -733,7 +798,7 @@ final class EPUBReaderModel: ObservableObject {
                                           pageCount(spineIndex: location.spineIndex - 1) - 1,
                                           background: background)
         }
-        if result.next == nil, let container, location.spineIndex + 1 < container.spine.count {
+        if result.next == nil, let source, location.spineIndex + 1 < source.chapterCount {
             result.next = cachedImage(location.spineIndex + 1, 0, background: background)
         }
         schedulePrerender(around: location.spineIndex, pageIndex: location.pageIndex)
@@ -836,8 +901,8 @@ final class EPUBReaderModel: ObservableObject {
     /// 书内链接跳转：href 相对当前章节目录解析并映射到 spine；
     /// 同章锚点暂不精确定位（停留原页），跨章跳到目标章首页。
     func openLink(_ href: String) {
-        guard !isAnimating, !isLayingOut, let container else { return }
-        let chapterHref = container.spine[location.spineIndex].href
+        guard !isAnimating, !isLayingOut, let container = source else { return }
+        let chapterHref = container.chapterHref(at: location.spineIndex)
         guard let targetSpine = container.spineIndex(forLinkHref: href, relativeTo: chapterHref) else {
             plainLinkMessage = "链接目标不在本书章节列表内（\(href)）"
             return
@@ -853,10 +918,23 @@ final class EPUBReaderModel: ObservableObject {
         Task {
             isLayingOut = true
             defer { isLayingOut = false }
-            guard let container, let book = pageBook, !book.hasChapter(spineIndex) else { return }
-            try? await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
-                                    aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS)
+            guard let container = source, let book = pageBook, !book.hasChapter(spineIndex) else { return }
+            do {
+                try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
+                                             aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS)
+                if pageBook === book { prefetchNeighbors(of: spineIndex) }
+            } catch {
+                guard pageBook === book, EPUBLayoutLog.failure(error).kind != "cancelled" else { return }
+                lastLayoutFailure = EPUBLayoutLog.failure(error)
+                status = .failed(describeLayoutError(error))
+            }
         }
+    }
+
+    /// Jumps to the first page of a unit (TOC of generated sources, chapter lists).
+    func jump(toUnit unit: Int) {
+        guard !isAnimating, !isLayingOut, let source, (0..<source.chapterCount).contains(unit) else { return }
+        navigateToSpine(unit)
     }
 
     func applyStyle(_ requested: EPUBReaderStyle) {

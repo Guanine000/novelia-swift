@@ -70,7 +70,7 @@ final class EPUBPageBook {
     /// 把一章交给 YueduCoreText 逐页排版。
     /// 每页之间让路主线程（yield）并立即发布已完成的页——真实书籍整章一次排完
     /// 会冻结 UI 数秒（卡顿），逐页增量让第一页立即可用、翻页预览尽早就绪。
-    func layoutChapter(_ spineIndex: Int, container: EPUBContainer,
+    func layoutChapter(_ spineIndex: Int, container: any EPUBChapterSource,
                        config: BrowserLayoutConfig, aspectRatio: CGFloat = 0.5,
                        readerCSS: String? = nil) async throws {
         let start = ContinuousClock.now
@@ -101,11 +101,11 @@ final class EPUBPageBook {
         tally?.logSummary(spineIndex: spineIndex)
     }
 
-    private func performLayout(_ spineIndex: Int, container: EPUBContainer,
+    private func performLayout(_ spineIndex: Int, container: any EPUBChapterSource,
                                config: BrowserLayoutConfig, aspectRatio: CGFloat,
                                readerCSS: String?) async throws {
         let html = try await container.chapterHTML(at: spineIndex)
-        let chapterHref = container.spine[spineIndex].href
+        let chapterHref = container.chapterHref(at: spineIndex)
         var css = await container.cssTexts(forChapterHTML: html, chapterHref: chapterHref,
                                            aspectRatio: aspectRatio)
         if let readerCSS { css.append(readerCSS) }

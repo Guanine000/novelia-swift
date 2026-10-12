@@ -11,6 +11,15 @@ import UniformTypeIdentifiers
 //
 // 分页不变量见 EPUBPageBook：预览页与落页共用同一份排版结果。
 
+/// Generated chapters (TXT / online novel) shown by the paged reader instead of an EPUB file.
+struct PagedTextBook {
+    let source: any EPUBChapterSource
+    let startUnit: Int
+    let startOffset: Int?
+    /// (unit index, UTF-16 offset in that unit's text), reported after each page turn.
+    let onPosition: (Int, Int?) -> Void
+}
+
 struct EPUBReaderView: View {
     @ObservedObject private var settings = ReaderSettings.shared
     @ObservedObject private var backgrounds = ReaderSettings.shared.backgrounds
@@ -26,6 +35,9 @@ struct EPUBReaderView: View {
     @State private var batteryLevel: Float = -1
     @State private var wasBatteryMonitoringEnabled = false
     let bookURL: URL?
+    var textBook: PagedTextBook? = nil
+    /// Extra top-bar controls supplied by the TXT / online wrappers.
+    var accessory: AnyView? = nil
 
     var body: some View {
         GeometryReader { geometry in
@@ -33,9 +45,19 @@ struct EPUBReaderView: View {
                 ReaderBackgroundView(dark: model.isDarkMode, fallback: model.pageBackgroundColor).ignoresSafeArea()
                 switch model.status {
                 case .idle, .opening:
-                    ProgressView("正在解析 EPUB…")
+                    ProgressView(textBook == nil ? "正在解析 EPUB…" : "正在排版…")
                 case .failed(let message):
-                    ContentUnavailableView("无法排版", systemImage: "exclamationmark.triangle", description: Text(message))
+                    ContentUnavailableView {
+                        Label("无法排版", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(message)
+                    } actions: {
+                        if model.source != nil {
+                            Button("重试") { model.retry() }
+                                .buttonStyle(.borderedProminent)
+                                .tint(NoveliaStyle.brandGreen)
+                        }
+                    }
                 case .ready:
                     EPUBReaderPageSurface(model: model, showChrome: $showChrome, size: geometry.size)
                         .equatable()
@@ -52,7 +74,20 @@ struct EPUBReaderView: View {
                     chapterHeader
                 }
             }
-            .overlay(alignment: .bottom) { bottomBar }
+            .overlay(alignment: .bottom) {
+                VStack(spacing: 8) {
+                    if model.status == .ready, model.neighborLoadFailed {
+                        Button("相邻章节加载失败，点击重试", systemImage: "arrow.clockwise") {
+                            model.retryNeighbors()
+                        }
+                        .font(.footnote.weight(.medium))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.thinMaterial, in: Capsule())
+                    }
+                    bottomBar
+                }
+            }
             .overlay(alignment: .bottom) {
                 // 常驻细进度条：工具栏隐藏时仍可见当前阅读进度。
                 Rectangle()
@@ -76,7 +111,12 @@ struct EPUBReaderView: View {
                 if model.viewportSize != geometry.size {
                     model.viewportSize = geometry.size
                 }
-                if model.status == .idle, let bookURL {
+                if model.status == .idle, let textBook {
+                    Task {
+                        await model.open(source: textBook.source, unit: textBook.startUnit,
+                                         offset: textBook.startOffset, onPosition: textBook.onPosition)
+                    }
+                } else if model.status == .idle, let bookURL {
                     Task { await model.open(url: bookURL) }
                 }
             }
@@ -131,10 +171,11 @@ struct EPUBReaderView: View {
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("返回")
-            Text(model.container?.bookTitle ?? "阅读器")
+            Text(model.source?.bookTitle ?? "阅读器")
                 .font(.system(size: 14, weight: .medium))
                 .lineLimit(1)
                 .frame(maxWidth: .infinity)
+            if let accessory { accessory }
             Button {
                 isShowingTOC = true
             } label: {
@@ -173,11 +214,11 @@ struct EPUBReaderView: View {
     }
 
     private var currentChapterTitle: String {
-        guard let container = model.container else { return "" }
+        guard let source = model.source else { return "" }
         if let index = model.currentTOCIndex {
-            return container.toc[index].title
+            return source.toc[index].title
         }
-        return container.bookTitle
+        return source.bookTitle
     }
 
     // MARK: 底部状态栏（页码 + 进度条）
@@ -285,7 +326,7 @@ struct EPUBReaderView: View {
                                     }
                                 }
                             }
-                            let tocEntries = model.container?.toc ?? []
+                            let tocEntries = model.source?.toc ?? []
                             ForEach(Array(tocEntries.enumerated()), id: \.offset) { index, entry in
                                 let isCurrent = model.currentTOCIndex == index
                                 Button {
@@ -298,7 +339,7 @@ struct EPUBReaderView: View {
                                                 .foregroundStyle(isCurrent
                                                     ? NoveliaStyle.brandGreen : .primary)
                                                 .fontWeight(isCurrent ? .semibold : .regular)
-                                            if let spineIndex = entry.spineIndex {
+                                            if model.container != nil, let spineIndex = entry.spineIndex {
                                                 Text("spine \(spineIndex + 1)")
                                                     .font(.caption2).foregroundStyle(.secondary)
                                             }

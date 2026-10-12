@@ -22,6 +22,14 @@ struct DownloadedWebNovelTXTReader: View {
     }
 
     var body: some View {
+        if settings.pagedTextReading {
+            TXTPagedReader(url: url, title: title, rules: rules)
+        } else {
+            scrollReader
+        }
+    }
+
+    private var scrollReader: some View {
         Group {
             if let chapters, chapters.indices.contains(chapterIndex) {
                 let chapter = chapters[chapterIndex]
@@ -80,6 +88,10 @@ struct DownloadedWebNovelTXTReader: View {
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                Button { settings.pagedTextReading = true } label: {
+                    Image(systemName: "book.pages")
+                }
+                .accessibilityLabel("分页阅读")
                 if chapters != nil {
                     Button { isShowingContents = true } label: {
                         Image(systemName: "list.bullet")
@@ -185,5 +197,67 @@ struct DownloadedWebNovelTXTReader: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
         .background(.regularMaterial)
+    }
+}
+
+/// TXT laid out by YueduCoreText. Long chapters are split into units; the position is
+/// kept per file content (SHA-256) as unit index + text offset.
+private struct TXTPagedReader: View {
+    @ObservedObject private var settings = ReaderSettings.shared
+    let url: URL
+    let title: String
+    let rules: TXTChapterRuleConfiguration
+    @State private var book: PagedTextBook?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if let book {
+                EPUBReaderView(bookURL: nil, textBook: book, accessory: AnyView(scrollButton))
+            } else if let errorMessage {
+                ContentUnavailableView("无法读取 TXT", systemImage: "doc.text.magnifyingglass", description: Text(errorMessage))
+            } else {
+                ProgressView("正在打开 TXT…")
+            }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
+        .task(id: url) { await load() }
+    }
+
+    private var scrollButton: some View {
+        Button { settings.pagedTextReading = false } label: {
+            Image(systemName: "scroll")
+                .frame(width: 36, height: 36)
+        }
+        .accessibilityLabel("滚动阅读")
+    }
+
+    private func load() async {
+        do {
+            let (hash, contents) = try await Task.detached(priority: .userInitiated) { [url, rules] in
+                let text = try TXTTextDecoder.decode(contentsOf: url)
+                let chapters = TXTChapterParser.parse(text, rules: rules)
+                let contents = chapters.map {
+                    TextChapterContent(title: $0.title, subtitle: $0.volumeTitle,
+                                       paragraphs: TextChapterXHTML.paragraphs(fromLines: $0.body))
+                }
+                return (try WebDAVFileHash.sha256(url), contents)
+            }.value
+            let units = TextChapterSource.units(splitting: contents)
+            let key = TXTPagedPosition.key(hash: hash)
+            let saved = TXTPagedPosition.load(key: key, unitCount: units.count)
+            book = PagedTextBook(
+                source: TextChapterSource(bookTitle: title, units: units),
+                startUnit: saved?.unit ?? 0, startOffset: saved?.offset,
+                onPosition: { unit, offset in
+                    TXTPagedPosition.save(TXTPagedPosition(unit: unit, offset: offset, unitCount: units.count), key: key)
+                })
+        } catch {
+            let nsError = error as NSError
+            TXTDiagnosticLog.logger.error("TXT reader load failed; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public)")
+            errorMessage = error.localizedDescription
+        }
     }
 }

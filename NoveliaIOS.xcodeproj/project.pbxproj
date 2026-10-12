@@ -24,6 +24,7 @@
 		A10000000000000000000018 /* ReadiumZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000004 /* ReadiumZIPFoundation */; };
 		A10000000000000000000019 /* EPUBContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000016 /* EPUBContainer.swift */; };
 		A10000000000000000000020 /* EPUBPageBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* EPUBPageBook.swift */; };
+		A10000000000000000000090 /* EPUBChapterSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000090 /* EPUBChapterSource.swift */; };
 		A10000000000000000000021 /* EPUBPagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000018 /* EPUBPagerView.swift */; };
 		A10000000000000000000022 /* EPUBReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* EPUBReaderModel.swift */; };
 		A10000000000000000000023 /* EPUBReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* EPUBReaderView.swift */; };
@@ -71,6 +72,7 @@
 		B10000000000000000000015 /* WenkuNovel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WenkuNovel.swift; sourceTree = "<group>"; };
 		B10000000000000000000016 /* EPUBContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBContainer.swift; sourceTree = "<group>"; };
 		B10000000000000000000017 /* EPUBPageBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBPageBook.swift; sourceTree = "<group>"; };
+		B10000000000000000000090 /* EPUBChapterSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBChapterSource.swift; sourceTree = "<group>"; };
 		B10000000000000000000018 /* EPUBPagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBPagerView.swift; sourceTree = "<group>"; };
 		B10000000000000000000019 /* EPUBReaderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBReaderModel.swift; sourceTree = "<group>"; };
 		B10000000000000000000020 /* EPUBReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBReaderView.swift; sourceTree = "<group>"; };
@@ -131,6 +133,7 @@
 			children = (
 				B10000000000000000000016 /* EPUBContainer.swift */,
 				B10000000000000000000017 /* EPUBPageBook.swift */,
+				B10000000000000000000090 /* EPUBChapterSource.swift */,
 				B10000000000000000000018 /* EPUBPagerView.swift */,
 				B10000000000000000000019 /* EPUBReaderModel.swift */,
 				B10000000000000000000020 /* EPUBReaderView.swift */,
@@ -345,6 +348,7 @@
 				A10000000000000000000014 /* WenkuNovel.swift in Sources */,
 				A10000000000000000000019 /* EPUBContainer.swift in Sources */,
 				A10000000000000000000020 /* EPUBPageBook.swift in Sources */,
+				A10000000000000000000090 /* EPUBChapterSource.swift in Sources */,
 				A10000000000000000000021 /* EPUBPagerView.swift in Sources */,
 				A10000000000000000000022 /* EPUBReaderModel.swift in Sources */,
 				A10000000000000000000023 /* EPUBReaderView.swift in Sources */,

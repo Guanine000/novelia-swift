@@ -35,7 +35,7 @@ let package = Package(
                 "EPUBReaderView.swift",
                 "EPUBSampleBook.swift",
             ],
-            sources: ["EPUBContainer.swift", "EPUBPageBook.swift"]
+            sources: ["EPUBChapterSource.swift", "EPUBContainer.swift", "EPUBPageBook.swift"]
         ),
         .testTarget(name: "NoveliaIOSCoreTests", dependencies: ["NoveliaIOSCore"], path: "Tests/NoveliaIOSCoreTests"),
         .testTarget(
