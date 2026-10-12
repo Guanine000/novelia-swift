@@ -88,38 +88,19 @@ struct ReaderView: View {
         Set((try? JSONDecoder().decode([String].self, from: Data(bookmarkIDsJSON.utf8))) ?? [])
     }
     private var isBookmarked: Bool { bookmarkIDs.contains(chapter.id) }
-    private var selectedTranslationParagraphs: [String]? {
-        guard let translations = chapter.translationsBySource else { return nil }
-        return translations[translationSource] ?? []
-    }
-    private var displayedTranslation: [String] {
-        selectedTranslationParagraphs ?? chapter.translatedText.components(separatedBy: "\n\n")
-    }
-    private var bilingualParagraphs: [NovelBilingualParagraph] {
-        if let selectedTranslationParagraphs {
-            let originals = chapter.originalText.components(separatedBy: "\n\n")
-            let count = max(originals.count, selectedTranslationParagraphs.count)
-            return (0..<count).compactMap { index in
-                let original = originals.indices.contains(index) ? originals[index] : ""
-                let translation = selectedTranslationParagraphs.indices.contains(index)
-                    ? selectedTranslationParagraphs[index] : ""
-                guard !original.isEmpty || !translation.isEmpty else { return nil }
-                return NovelBilingualParagraph(original: original, translation: translation)
-            }
-        }
-        if let paragraphs = chapter.bilingualParagraphs, !paragraphs.isEmpty { return paragraphs }
-        let originals = chapter.originalText.components(separatedBy: "\n\n")
-        let translations = chapter.translatedText.components(separatedBy: "\n\n")
-        let count = max(originals.count, translations.count)
-        return (0..<count).compactMap { index in
-            let original = originals.indices.contains(index) ? originals[index] : ""
-            let translation = translations.indices.contains(index) ? translations[index] : ""
-            guard !original.isEmpty || !translation.isEmpty else { return nil }
-            return NovelBilingualParagraph(original: original, translation: translation)
+    private var selectedTranslationParagraphs: [String]? { chapter.selectedTranslation(source: translationSource) }
+    private var displayedTranslation: [String] { chapter.displayedTranslation(source: translationSource) }
+    private var bilingualParagraphs: [NovelBilingualParagraph] { chapter.bilingualParagraphs(source: translationSource) }
+
+    var body: some View {
+        if settings.pagedTextReading {
+            OnlinePagedReader(novel: novel, chapterIndex: $chapterIndex)
+        } else {
+            scrollReader
         }
     }
 
-    var body: some View {
+    private var scrollReader: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 25) {
@@ -238,6 +219,9 @@ struct ReaderView: View {
                             }
                         }
                         Divider()
+                        Button("分页阅读", systemImage: "book.pages") {
+                            settings.pagedTextReading = true
+                        }
                         Button("缩小字号", systemImage: "textformat.size.smaller") {
                             settings.adjustFontSize(by: -1)
                         }
@@ -348,6 +332,67 @@ struct ReaderView: View {
             chapterError = error.localizedDescription
             return false
         }
+    }
+}
+
+extension NovelChapter {
+    /// Paragraphs of the chosen translation source when the chapter lists sources;
+    /// nil for chapters that only carry a single translated text.
+    func selectedTranslation(source: NovelTranslationSource) -> [String]? {
+        guard let translationsBySource else { return nil }
+        return translationsBySource[source] ?? []
+    }
+
+    func displayedTranslation(source: NovelTranslationSource) -> [String] {
+        selectedTranslation(source: source) ?? translatedText.components(separatedBy: "\n\n")
+    }
+
+    func bilingualParagraphs(source: NovelTranslationSource) -> [NovelBilingualParagraph] {
+        if let selected = selectedTranslation(source: source) {
+            return Self.pair(originalText.components(separatedBy: "\n\n"), selected)
+        }
+        if let bilingualParagraphs, !bilingualParagraphs.isEmpty { return bilingualParagraphs }
+        return Self.pair(originalText.components(separatedBy: "\n\n"), translatedText.components(separatedBy: "\n\n"))
+    }
+
+    /// Whether the reader shows the "no translation from this source" message.
+    func lacksTranslation(mode: ReaderMode, source: NovelTranslationSource) -> Bool {
+        switch mode {
+        case .original: false
+        case .translated: displayedTranslation(source: source).allSatisfy(\.isEmpty)
+        case .bilingual:
+            bilingualParagraphs(source: source).isEmpty
+                || selectedTranslation(source: source)?.allSatisfy(\.isEmpty) == true
+        }
+    }
+
+    private static func pair(_ originals: [String], _ translations: [String]) -> [NovelBilingualParagraph] {
+        (0..<max(originals.count, translations.count)).compactMap { index in
+            let original = originals.indices.contains(index) ? originals[index] : ""
+            let translation = translations.indices.contains(index) ? translations[index] : ""
+            guard !original.isEmpty || !translation.isEmpty else { return nil }
+            return NovelBilingualParagraph(original: original, translation: translation)
+        }
+    }
+
+    /// Chapter text for the paged reader in the selected display mode.
+    func pagedContent(novelTitle: String, mode: ReaderMode, source: NovelTranslationSource) -> TextChapterContent {
+        var paragraphs: [TextChapterParagraph] = []
+        switch mode {
+        case .original:
+            paragraphs = TextChapterXHTML.paragraphs(fromLines: originalText)
+        case .translated:
+            paragraphs = displayedTranslation(source: source).flatMap { TextChapterXHTML.paragraphs(fromLines: $0) }
+        case .bilingual:
+            for pair in bilingualParagraphs(source: source) {
+                paragraphs += TextChapterXHTML.paragraphs(fromLines: pair.original)
+                paragraphs += TextChapterXHTML.paragraphs(fromLines: pair.translation, role: .secondary)
+            }
+        }
+        if lacksTranslation(mode: mode, source: source) {
+            paragraphs.append(TextChapterParagraph(text: "当前章节暂无\(source.title)译文。可在右上角菜单切换译源。", role: .note))
+        }
+        return TextChapterContent(title: title, subtitle: novelTitle, paragraphs: paragraphs)
     }
 }
 
@@ -504,5 +549,120 @@ enum ReaderTextChunker {
             start = boundary
         }
         return result
+    }
+}
+
+/// Online chapters laid out by YueduCoreText. The unit index is the novel's chapter index;
+/// progress, server reading history and bookmarks stay chapter-level as in scroll mode.
+private struct OnlinePagedReader: View {
+    @ObservedObject private var settings = ReaderSettings.shared
+    @EnvironmentObject private var auth: AccountAuthStore
+    @EnvironmentObject private var readingHistory: ReadingHistoryStore
+    let novel: Novel
+    @Binding var chapterIndex: Int
+    @AppStorage(SettingsKey.readerMode) private var modeRaw = ReaderMode.bilingual.rawValue
+    @AppStorage(SettingsKey.readerTranslationSource) private var translationSourceRaw = NovelTranslationSource.gpt.rawValue
+    @AppStorage private var bookmarkIDsJSON: String
+    @AppStorage private var savedChapterIndex: Int
+    @State private var cache = OnlineChapterCache()
+
+    init(novel: Novel, chapterIndex: Binding<Int>) {
+        self.novel = novel
+        _chapterIndex = chapterIndex
+        _bookmarkIDsJSON = AppStorage(wrappedValue: "[]", SettingsKey.bookmarks(novelID: novel.id))
+        _savedChapterIndex = AppStorage(wrappedValue: 0, ReadingProgressStore.chapterKey(novelID: novel.id))
+    }
+
+    private var mode: ReaderMode { ReaderMode(rawValue: modeRaw) ?? .bilingual }
+    private var translationSource: NovelTranslationSource { NovelTranslationSource(rawValue: translationSourceRaw) ?? .gpt }
+    private var bookmarkIDs: Set<String> {
+        Set((try? JSONDecoder().decode([String].self, from: Data(bookmarkIDsJSON.utf8))) ?? [])
+    }
+    private var currentChapterID: String? {
+        novel.chapters.indices.contains(chapterIndex) ? novel.chapters[chapterIndex].id : nil
+    }
+
+    var body: some View {
+        // A display-mode or source change regenerates every chapter: reopen at the chapter start.
+        EPUBReaderView(bookURL: nil, textBook: makeBook(), accessory: AnyView(menu))
+            .id("\(modeRaw)|\(translationSourceRaw)")
+    }
+
+    private func makeBook() -> PagedTextBook {
+        let novel = novel, mode = mode, source = translationSource, cache = cache
+        let units = novel.chapters.map { listed in
+            TextChapterSource.Unit(tocTitle: listed.title) {
+                try await cache.chapter(listed, in: novel)
+                    .pagedContent(novelTitle: novel.title, mode: mode, source: source)
+            }
+        }
+        return PagedTextBook(
+            source: TextChapterSource(bookTitle: novel.title, units: units),
+            startUnit: chapterIndex, startOffset: nil,
+            onPosition: { unit, _ in chapterChanged(to: unit) })
+    }
+
+    private func chapterChanged(to unit: Int) {
+        // Called after every page turn; only a chapter change is recorded.
+        guard novel.chapters.indices.contains(unit), unit != cache.lastRecordedChapter else { return }
+        chapterIndex = unit
+        savedChapterIndex = unit
+        settings.recordWebPosition(id: novel.id, chapterIndex: unit)
+        cache.lastRecordedChapter = unit
+        guard novel.isRemote else { return }
+        let chapterID = novel.chapters[unit].id
+        Task { await readingHistory.recordRead(novel: novel, chapterId: chapterID, account: auth.username) }
+    }
+
+    private var menu: some View {
+        Menu {
+            Picker("显示内容", selection: $modeRaw) {
+                ForEach(ReaderMode.allCases) { Text($0.title).tag($0.rawValue) }
+            }
+            Picker("译文来源", selection: $translationSourceRaw) {
+                ForEach(NovelTranslationSource.allCases) { Text($0.title).tag($0.rawValue) }
+            }
+            Divider()
+            if let currentChapterID {
+                let marked = bookmarkIDs.contains(currentChapterID)
+                Button(marked ? "移除书签" : "添加书签", systemImage: marked ? "bookmark.fill" : "bookmark") {
+                    toggleBookmark(currentChapterID)
+                }
+            }
+            Button("滚动阅读", systemImage: "scroll") { settings.pagedTextReading = false }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .frame(width: 36, height: 36)
+        }
+        .accessibilityLabel("阅读选项")
+    }
+
+    private func toggleBookmark(_ id: String) {
+        var next = bookmarkIDs
+        if !next.insert(id).inserted { next.remove(id) }
+        bookmarkIDsJSON = String(data: (try? JSONEncoder().encode(Array(next).sorted())) ?? Data("[]".utf8), encoding: .utf8) ?? "[]"
+    }
+}
+
+/// Chapters fetched in paged mode, shared across display-mode changes of one reader.
+@MainActor
+private final class OnlineChapterCache {
+    private var chapters: [String: NovelChapter] = [:]
+    private var inFlight: [String: Task<NovelChapter, Error>] = [:]
+    /// Chapter last saved as progress; page turns inside it are not re-recorded.
+    var lastRecordedChapter: Int?
+
+    func chapter(_ listed: NovelChapter, in novel: Novel) async throws -> NovelChapter {
+        if let cached = chapters[listed.id] { return cached }
+        guard listed.originalText.isEmpty, novel.isRemote,
+              let providerId = novel.providerId, let novelId = novel.novelId else { return listed }
+        let task = inFlight[listed.id] ?? Task {
+            try await NoveliaAPIClient().chapter(providerId: providerId, novelId: novelId, chapterId: listed.id)
+        }
+        inFlight[listed.id] = task
+        defer { inFlight[listed.id] = nil }
+        let loaded = try await task.value
+        chapters[listed.id] = loaded
+        return loaded
     }
 }

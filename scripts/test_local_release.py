@@ -25,6 +25,15 @@ class LocalReleaseTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 release.project_version(text)
 
+    def test_derived_data_outside_home_folders(self):
+        for path in ["/Users/dev/project/build/local-release-cache", "/Users/dev", "/home/dev/cache"]:
+            with self.assertRaisesRegex(RuntimeError, "home"):
+                release.check_derived_data(Path(path))
+        for path in ["/private/var/folders/ab/xyz/T/novelia-derived-1", "/private/tmp/novelia-derived"]:
+            self.assertEqual(release.check_derived_data(Path(path)), Path(path))
+        import tempfile
+        release.check_derived_data(Path(tempfile.gettempdir()).resolve())
+
     def test_missing_notice_or_wrong_version_rejected(self):
         import plistlib
         import tempfile

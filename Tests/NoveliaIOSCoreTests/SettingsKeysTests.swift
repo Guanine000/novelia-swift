@@ -10,6 +10,7 @@ final class SettingsKeysTests: XCTestCase {
         XCTAssertEqual(SettingsKey.readerAppearance, "readerAppearance")
         XCTAssertEqual(SettingsKey.readerMode, "readerMode")
         XCTAssertEqual(SettingsKey.readerTranslationSource, "readerTranslationSource")
+        XCTAssertEqual(SettingsKey.readerPagedText, "readerPagedText")
         XCTAssertEqual(SettingsKey.appThemeColor, "appThemeColor")
         XCTAssertEqual(SettingsKey.appThemeCustomHex, "appThemeCustomHex")
         XCTAssertEqual(SettingsKey.importedFontSync, "readerFonts.sync.v1")

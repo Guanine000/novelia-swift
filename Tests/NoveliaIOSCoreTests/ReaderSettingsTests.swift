@@ -56,4 +56,16 @@ final class ReaderSettingsTests: XCTestCase {
         settings.progress.save(chapterIndex: 6, updatedAt: .distantPast, novelID: "example")
         XCTAssertEqual(defaults.integer(forKey: "progress.example"), 6)
     }
+
+    @MainActor
+    func testPagedTextReadingDefaultsOffAndPersists() throws {
+        let suite = "ReaderSettings-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = ReaderSettings(defaults: defaults)
+        XCTAssertFalse(settings.pagedTextReading)
+        XCTAssertNil(defaults.object(forKey: SettingsKey.readerPagedText), "reading must not write")
+        settings.pagedTextReading = true
+        XCTAssertTrue(ReaderSettings(defaults: defaults).pagedTextReading)
+    }
 }

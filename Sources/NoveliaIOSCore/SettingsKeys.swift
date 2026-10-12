@@ -9,6 +9,8 @@ enum SettingsKey {
     static let readerAppearance = "readerAppearance"
     static let readerMode = "readerMode"
     static let readerTranslationSource = "readerTranslationSource"
+    /// Online novels and TXT use YueduCoreText pages instead of scrolling (default off).
+    static let readerPagedText = "readerPagedText"
     static let appThemeColor = "appThemeColor"
     static let appThemeCustomHex = "appThemeCustomHex"
     /// Imported EPUB reader fonts as `[hash: SyncedImportedFont]` for WebDAV sync.

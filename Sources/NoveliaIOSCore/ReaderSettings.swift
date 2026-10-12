@@ -11,6 +11,7 @@ final class ReaderSettings: ObservableObject {
     let defaults: UserDefaults
     @Published private var storedFontSize: Double
     @Published private var storedAppearance: String
+    @Published private var storedPagedText: Bool
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -20,6 +21,7 @@ final class ReaderSettings: ObservableObject {
             ?? (epubStyle?["fontSize"] as? Double) ?? 20
         storedFontSize = Self.normalizedFontSize(previousFont)
         storedAppearance = Self.normalizedAppearance(defaults.string(forKey: SettingsKey.readerAppearance) ?? "system")
+        storedPagedText = defaults.bool(forKey: SettingsKey.readerPagedText)
     }
 
     var fontSize: Double {
@@ -45,6 +47,15 @@ final class ReaderSettings: ObservableObject {
             let value = Self.normalizedAppearance(newValue)
             if storedAppearance != value { storedAppearance = value }
             defaults.set(value, forKey: SettingsKey.readerAppearance)
+        }
+    }
+
+    /// Online novels and TXT use the paged reader; scrolling remains the default.
+    var pagedTextReading: Bool {
+        get { storedPagedText }
+        set {
+            if storedPagedText != newValue { storedPagedText = newValue }
+            defaults.set(newValue, forKey: SettingsKey.readerPagedText)
         }
     }
 
