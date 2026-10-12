@@ -585,7 +585,7 @@ final class EPUBContainer {
             let entries = Self.parseNavTOC(html: html)
             if !entries.isEmpty {
                 let mapped = mapToSpine(entries, baseDirectory: Self.directory(of: navItem.href))
-                Self.tocLog.fault("TOC nav entries=\(entries.count) mapped=\(mapped.filter { $0.spineIndex != nil }.count) navHref=\(navItem.href, privacy: .private)")
+                Self.tocLog.info("TOC nav mapped; entries=\(entries.count, privacy: .public), mapped=\(mapped.filter { $0.spineIndex != nil }.count, privacy: .public)")
                 if !mapped.isEmpty {
                     toc = await preferGeneratedTOCIfSparse(mapped)
                     return

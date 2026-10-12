@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import UIKit
 import YueduCoreText
 
@@ -72,6 +73,37 @@ final class EPUBPageBook {
     func layoutChapter(_ spineIndex: Int, container: EPUBContainer,
                        config: BrowserLayoutConfig, aspectRatio: CGFloat = 0.5,
                        readerCSS: String? = nil) async throws {
+        let start = ContinuousClock.now
+        var config = config
+        let tally = EPUBLayoutLog.traceEnabled ? EPUBLayoutTraceTally() : nil
+        if let tally {
+            let forward = config.onDiagnostic
+            config.onDiagnostic = { diagnostic in
+                tally.record(diagnostic)
+                EPUBLayoutLog.trace.debug("ENGINE_DIAG \(String(describing: diagnostic), privacy: .private)")
+                forward?(diagnostic)
+            }
+        }
+        do {
+            try await performLayout(spineIndex, container: container, config: config,
+                                    aspectRatio: aspectRatio, readerCSS: readerCSS)
+            EPUBLayoutLog.logger.info("EPUB chapter laid out; spine=\(spineIndex, privacy: .public), pages=\(self.pageCount(spineIndex: spineIndex), privacy: .public), elapsedMs=\(EPUBLayoutLog.milliseconds(since: start), privacy: .public)")
+        } catch {
+            let failure = EPUBLayoutLog.failure(error)
+            if failure.kind == "cancelled" {
+                EPUBLayoutLog.logger.info("EPUB chapter layout cancelled; spine=\(spineIndex, privacy: .public), elapsedMs=\(EPUBLayoutLog.milliseconds(since: start), privacy: .public)")
+            } else {
+                EPUBLayoutLog.logger.error("EPUB chapter layout failed; spine=\(spineIndex, privacy: .public), error=\(failure.kind, privacy: .public), code=\(failure.code, privacy: .public), elapsedMs=\(EPUBLayoutLog.milliseconds(since: start), privacy: .public)")
+            }
+            tally?.logSummary(spineIndex: spineIndex)
+            throw error
+        }
+        tally?.logSummary(spineIndex: spineIndex)
+    }
+
+    private func performLayout(_ spineIndex: Int, container: EPUBContainer,
+                               config: BrowserLayoutConfig, aspectRatio: CGFloat,
+                               readerCSS: String?) async throws {
         let html = try await container.chapterHTML(at: spineIndex)
         let chapterHref = container.spine[spineIndex].href
         var css = await container.cssTexts(forChapterHTML: html, chapterHref: chapterHref,
@@ -261,4 +293,104 @@ final class EPUBPageBook {
 struct EPUBReadingLocation: Equatable {
     var spineIndex: Int
     var pageIndex: Int
+}
+
+// MARK: - 排版日志
+
+/// One summary line per chapter layout. YueduCoreText's `onDiagnostic` is a trace hook,
+/// not an error channel: it reports every styled node, matched rule and laid-out line,
+/// thousands of events per chapter, and formatting them slows layout. Real failures are
+/// thrown and logged here; the trace runs only in Debug builds launched with
+/// `-EPUBEngineTrace`.
+enum EPUBLayoutLog {
+    static let logger = Logger(subsystem: "cc.novelia.ios.port", category: "epub")
+    static let trace = Logger(subsystem: "cc.novelia.ios.port", category: "enginediag")
+
+    static let traceEnabled: Bool = {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-EPUBEngineTrace")
+        #else
+        false
+        #endif
+    }()
+
+    static func milliseconds(since start: ContinuousClock.Instant) -> Int {
+        let elapsed = ContinuousClock.now - start
+        return Int(elapsed.components.seconds * 1_000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
+    }
+
+    /// A fixed kind name and numeric code; error descriptions may hold file paths or book text.
+    static func failure(_ error: Error) -> (kind: String, code: Int) {
+        if error is CancellationError { return ("cancelled", 0) }
+        if let error = error as? HTMLLayoutError {
+            switch error {
+            case .unsupported: return ("unsupported", 0)
+            case .resourceFailure: return ("resource", 0)
+            case .layoutFailure: return ("layout", 0)
+            case .cancelled: return ("cancelled", 0)
+            }
+        }
+        if let error = error as? EPUBLayoutFailure {
+            switch error {
+            case .unsupported: return ("unsupported", 0)
+            case .resource: return ("resource", 0)
+            case .layout: return ("layout", 0)
+            }
+        }
+        if let error = error as? EPUBError {
+            switch error {
+            case .cannotOpenArchive: return ("archive", 0)
+            case .missingContainer: return ("container", 0)
+            case .missingOPF: return ("opf", 0)
+            case .emptySpine: return ("spine", 0)
+            }
+        }
+        let nsError = error as NSError
+        switch nsError.domain {
+        case NSCocoaErrorDomain: return ("cocoa", nsError.code)
+        case NSPOSIXErrorDomain: return ("posix", nsError.code)
+        case NSURLErrorDomain: return ("url", nsError.code)
+        default: return ("other", 0)
+        }
+    }
+}
+
+/// Counts engine trace events by stage for the Debug-only per-chapter summary.
+final class EPUBLayoutTraceTally: @unchecked Sendable {
+    static let stages = ["html", "css", "selector", "style", "ingestion", "adapter", "allocation"]
+    private let lock = NSLock()
+    private var counts: [String: Int] = [:]
+
+    func record(_ diagnostic: CSSFrontendDiagnostic) {
+        let stage: String
+        switch diagnostic.stage {
+        case .html: stage = "html"
+        case .css: stage = "css"
+        case .selector: stage = "selector"
+        case .style: stage = "style"
+        case .ingestion: stage = "ingestion"
+        case .adapter: stage = "adapter"
+        case .allocation: stage = "allocation"
+        }
+        lock.lock()
+        counts[stage, default: 0] += 1
+        lock.unlock()
+    }
+
+    var snapshot: [String: Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return counts
+    }
+
+    func summary(spineIndex: Int) -> String {
+        let counts = snapshot
+        let total = counts.values.reduce(0, +)
+        let stages = Self.stages.map { "\($0)=\(counts[$0, default: 0])" }.joined(separator: ", ")
+        return "EPUB layout trace summary; spine=\(spineIndex), events=\(total), \(stages)"
+    }
+
+    func logSummary(spineIndex: Int) {
+        EPUBLayoutLog.trace.debug("\(self.summary(spineIndex: spineIndex), privacy: .public)")
+    }
 }

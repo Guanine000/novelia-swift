@@ -18,15 +18,43 @@ public enum ShareableLogPolicy {
             "Novel file response was empty",
             #"Novel EPUB download completed; bytes=[0-9]{1,12}, elapsedMs=[0-9]{1,12}"#,
         ],
-        "epubcontainer": [#"TOC fallback generated entries=[0-9]{1,12}, embedded entries=[0-9]{1,12}"#],
+        "epubcontainer": [
+            #"TOC fallback generated entries=[0-9]{1,12}, embedded entries=[0-9]{1,12}"#,
+            #"TOC nav mapped; entries=[0-9]{1,12}, mapped=[0-9]{1,12}"#,
+        ],
+        "epub": [
+            "EPUB import started",
+            #"EPUB import completed; bytes=[0-9]{1,12}, elapsedMs=[0-9]{1,12}"#,
+            #"EPUB import failed; stage=(?:copy|registration), domain=\#(domainPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
+            "EPUB open started",
+            #"EPUB open succeeded; spine=[0-9]{1,8}, toc=[0-9]{1,8}, pages=[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
+            #"EPUB open failed; stage=(?:hash|container|layout), error=\#(errorKindPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
+            #"EPUB open cancelled; elapsedMs=[0-9]{1,12}"#,
+            #"EPUB chapter laid out; spine=[0-9]{1,8}, pages=[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
+            #"EPUB chapter layout failed; spine=[0-9]{1,8}, error=\#(errorKindPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
+            #"EPUB chapter layout cancelled; spine=[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
+        ],
+        "enginediag": [
+            #"EPUB layout trace summary; spine=[0-9]{1,8}, events=[0-9]{1,12}, html=[0-9]{1,12}, css=[0-9]{1,12}, selector=[0-9]{1,12}, style=[0-9]{1,12}, ingestion=[0-9]{1,12}, adapter=[0-9]{1,12}, allocation=[0-9]{1,12}"#,
+        ],
     ]
+    /// Error kinds the EPUB reader logs: fixed names, never error descriptions.
+    public static let errorKinds = ["unsupported", "resource", "layout", "cancelled", "archive", "container", "opf", "spine", "cocoa", "posix", "url", "other"]
+    private static let errorKindPattern = "(?:" + errorKinds.joined(separator: "|") + ")"
+    private static let reviewedDomains = ["NSCocoaErrorDomain", "NSPOSIXErrorDomain", "NSURLErrorDomain"]
+    private static let domainPattern = "(?:" + (reviewedDomains + ["app"]).joined(separator: "|") + ")"
+
+    /// System error domains pass through; app-defined Swift error domains collapse to `app`.
+    public static func domainLabel(_ domain: String) -> String {
+        reviewedDomains.contains(domain) ? domain : "app"
+    }
     private static let expressions = patterns.mapValues { $0.compactMap { try? NSRegularExpression(pattern: "\\A(?:" + $0 + ")\\z") } }
 
     public static func message(subsystem: String, category: String, text: String) -> String? {
         guard subsystem == self.subsystem, text.utf8.count <= 512 else { return nil }
         // These events contain arbitrary engine/file details: export the event alone.
         if category == "enginediag", text.hasPrefix("ENGINE_DIAG ") {
-            return "EPUB layout diagnostic occurred; details omitted for privacy"
+            return "EPUB layout trace event (Debug -EPUBEngineTrace only); details omitted for privacy"
         }
         if category == "epubcontainer", text.hasPrefix("TOC nav entries=") {
             return "EPUB navigation mapping diagnostic occurred; file details omitted for privacy"
@@ -37,5 +65,45 @@ public enum ShareableLogPolicy {
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         guard expressions[category]?.contains(where: { $0.firstMatch(in: text, range: range) != nil }) == true else { return nil }
         return text
+    }
+}
+
+/// One exported log line before repeated events are folded together.
+public struct ShareableLogLine: Equatable {
+    public let secondsAgo: Int
+    public let level: String
+    public let category: String
+    public let message: String
+
+    public init(secondsAgo: Int, level: String, category: String, message: String) {
+        self.secondsAgo = secondsAgo
+        self.level = level
+        self.category = category
+        self.message = message
+    }
+}
+
+public enum ShareableLogAggregator {
+    /// Folds runs of the same level/category/message into one line with a count, so a
+    /// burst of identical events cannot crowd every other line out of the export.
+    /// Input is oldest first; `secondsAgo` therefore decreases along a run.
+    public static func collapse(_ lines: [ShareableLogLine]) -> [String] {
+        var output: [String] = []
+        var index = lines.startIndex
+        while index < lines.endIndex {
+            let first = lines[index]
+            var end = index + 1
+            while end < lines.endIndex, lines[end].level == first.level,
+                  lines[end].category == first.category, lines[end].message == first.message {
+                end += 1
+            }
+            let count = end - index
+            let last = lines[end - 1]
+            let time = first.secondsAgo == last.secondsAgo ? "-\(first.secondsAgo)s" : "-\(first.secondsAgo)s…-\(last.secondsAgo)s"
+            let repeats = count > 1 ? " (×\(count))" : ""
+            output.append("\(time) [\(first.level)] [\(first.category)] \(first.message)\(repeats)")
+            index = end
+        }
+        return output
     }
 }

@@ -349,25 +349,26 @@ private enum ApplicationLogExporter {
         let startDate = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? .distantPast
         let entries = try store.getEntries(at: store.position(date: startDate))
         let logEntries = entries.compactMap { $0 as? OSLogEntryLog }.filter { $0.subsystem == ShareableLogPolicy.subsystem }
-        let recentEntries = Array(logEntries.suffix(5_000))
-        let messages = recentEntries.compactMap { entry -> String? in
+        let now = Date()
+        let exported = logEntries.compactMap { entry -> ShareableLogLine? in
             guard let message = ShareableLogPolicy.message(
                 subsystem: entry.subsystem, category: entry.category, text: entry.composedMessage
             ) else { return nil }
-            let secondsAgo = max(0, Int(Date().timeIntervalSince(entry.date)))
-            return "-\(secondsAgo)s [\(entry.level)] [\(entry.category)] \(message)"
+            return ShareableLogLine(secondsAgo: max(0, Int(now.timeIntervalSince(entry.date))),
+                                    level: levelName(entry.level), category: entry.category, message: message)
         }
-        let txtDiagnosticCount = recentEntries.filter {
-            $0.subsystem == "cc.novelia.ios.port" && $0.category == "txt"
-        }.count
+        // Fold repeats before the line cap so a burst cannot push out older events.
+        let collapsed = ShareableLogAggregator.collapse(exported)
+        let messages = Array(collapsed.suffix(5_000))
+        let txtDiagnosticCount = logEntries.filter { $0.category == "txt" }.count
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "未知"
         var lines = [
             "Novelia iOS 应用诊断日志（隐私过滤版）",
             "版本：\(version) (\(build))",
-            "范围：最近 7 天，最多 5000 条当前进程日志",
-            "本次导出条数：\(messages.count)",
-            "省略未经审查的应用事件：\(recentEntries.count - messages.count)",
+            "范围：最近 7 天当前进程日志，连续重复事件合并为一行并标注 (×次数)，最多 5000 行",
+            "读取的应用事件：\(logEntries.count)；通过隐私过滤：\(exported.count)；合并后行数：\(collapsed.count)",
+            "省略未经审查的应用事件：\(logEntries.count - exported.count)",
             "不包含系统／框架日志；仅导出已审查的诊断格式，时间为距导出时的秒数。",
             "已读取的 TXT 导入 / 解码 / 分章事件数：\(txtDiagnosticCount)",
             ""
@@ -378,6 +379,17 @@ private enum ApplicationLogExporter {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
         return url
+    }
+
+    private static func levelName(_ level: OSLogEntryLog.Level) -> String {
+        switch level {
+        case .debug: "debug"
+        case .info: "info"
+        case .notice: "notice"
+        case .error: "error"
+        case .fault: "fault"
+        default: "undefined"
+        }
     }
 }
 
