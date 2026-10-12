@@ -10,3 +10,11 @@ build/
 *.xcarchive
 *.ipa
 *.dSYM
+
+# Local credentials and diagnostics
+.env
+.env.*
+*.p12
+*.p8
+*.mobileprovision
+*.log

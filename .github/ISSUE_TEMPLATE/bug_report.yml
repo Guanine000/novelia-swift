@@ -1,0 +1,30 @@
+name: 缺陷反馈
+description: 报告可复现的应用问题
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: "公开页面：勿上传密码、Token、Cookie、WebDAV 凭据、私人书籍或个人信息。安全漏洞使用 Security 私密报告。"
+  - type: input
+    id: version
+    attributes:
+      label: 应用版本与构建号
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: 设备型号与 iOS 版本
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤、预期与实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 已脱敏的截图或必要日志
+      description: 请检查文件名、日志和截图中的个人信息，仅提供定位所需内容。

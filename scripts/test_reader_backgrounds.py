@@ -10,8 +10,11 @@ source = (Path(__file__).resolve().parents[1]/'iOSApp/NoveliaApp.swift').read_te
 code = 'import SwiftUI\nimport UIKit\nimport ImageIO\nimport CryptoKit\n'
 code += 'enum WebDAVFileHash { static func sha256(_ url: URL) throws -> String { SHA256.hash(data: try Data(contentsOf: url)).map { String(format: "%02x", $0) }.joined() } }\n'
 code += source[source.index('enum AppThemeColor:'):source.index('enum NoveliaStyle')]
-code += source[source.index('@MainActor\nfinal class ReaderBackgroundStore:'):source.index('struct ReaderBackgroundView:')]
-code += source[source.index('struct SyncedReaderBackground:'):source.index('struct SyncedImportedFont:')]
+background = (Path(__file__).resolve().parents[1]/'iOSApp/ReaderBackground.swift').read_text()
+code += background[background.index('@MainActor\nfinal class ReaderBackgroundStore:'):background.index('struct ReaderBackgroundView:')]
+sync = (Path(__file__).resolve().parents[1]/'Sources/NoveliaIOSCore/SyncMerge.swift').read_text()
+code += sync[sync.index('struct SyncedReaderBackground:'):sync.index('struct SyncedImportedFont:')]
+code += background[background.index('@MainActor\nextension ReaderBackgroundStore'):]
 code += r'''
 @main struct TapRegressionApp: App {
  var body: some Scene { WindowGroup { CheckView() } }

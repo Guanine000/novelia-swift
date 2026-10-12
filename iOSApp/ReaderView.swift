@@ -49,17 +49,15 @@ enum ReaderAppearance: String, CaseIterable, Identifiable {
 }
 
 struct ReaderView: View {
+    @ObservedObject private var settings = ReaderSettings.shared
+    private var fontSize: Double { settings.fontSize }
     let novel: Novel
-    private let isOffline: Bool
-    private let offlineTranslationSource: NovelTranslationSource?
     @EnvironmentObject private var auth: AccountAuthStore
     @EnvironmentObject private var readingHistory: ReadingHistoryStore
     @Environment(\.colorScheme) private var systemColorScheme
     @State private var chapterIndex: Int
-    @AppStorage("readerAppearance") private var appearanceRaw = ReaderAppearance.system.rawValue
-    @AppStorage("readerMode") private var modeRaw = ReaderMode.bilingual.rawValue
-    @AppStorage("readerTranslationSource") private var translationSourceRaw = NovelTranslationSource.gpt.rawValue
-    @AppStorage("readerFontSize") private var fontSize = 20.0
+    @AppStorage(SettingsKey.readerMode) private var modeRaw = ReaderMode.bilingual.rawValue
+    @AppStorage(SettingsKey.readerTranslationSource) private var translationSourceRaw = NovelTranslationSource.gpt.rawValue
     @AppStorage private var bookmarkIDsJSON: String
     @AppStorage private var savedChapterIndex: Int
     @State private var loadedChapters: [String: NovelChapter] = [:]
@@ -67,19 +65,11 @@ struct ReaderView: View {
     @State private var chapterError: String?
     @State private var loadAttempt = 0
 
-    init(
-        novel: Novel,
-        startingAt: Int,
-        offlineChapters: [String: NovelChapter]? = nil,
-        offlineTranslationSource: NovelTranslationSource? = nil
-    ) {
+    init(novel: Novel, startingAt: Int) {
         self.novel = novel
-        isOffline = offlineChapters != nil
-        self.offlineTranslationSource = offlineTranslationSource
         _chapterIndex = State(initialValue: min(max(0, startingAt), max(0, novel.chapters.count - 1)))
-        _loadedChapters = State(initialValue: offlineChapters ?? [:])
-        _bookmarkIDsJSON = AppStorage(wrappedValue: "[]", "bookmarks.\(novel.id)")
-        _savedChapterIndex = AppStorage(wrappedValue: 0, "progress.\(novel.id)")
+        _bookmarkIDsJSON = AppStorage(wrappedValue: "[]", SettingsKey.bookmarks(novelID: novel.id))
+        _savedChapterIndex = AppStorage(wrappedValue: 0, ReadingProgressStore.chapterKey(novelID: novel.id))
     }
 
     private var chapter: NovelChapter {
@@ -87,13 +77,9 @@ struct ReaderView: View {
         return loadedChapters[listed.id] ?? listed
     }
     private var mode: ReaderMode { ReaderMode(rawValue: modeRaw) ?? .bilingual }
-    private var appearance: ReaderAppearance { ReaderAppearance(rawValue: appearanceRaw) ?? .system }
+    private var appearance: ReaderAppearance { settings.appearance }
     private var translationSource: NovelTranslationSource {
         NovelTranslationSource(rawValue: translationSourceRaw) ?? .gpt
-    }
-    private var availableTranslationSources: [NovelTranslationSource] {
-        guard isOffline else { return NovelTranslationSource.allCases }
-        return offlineTranslationSource.map { [$0] } ?? []
     }
     private var readerBackground: Color { appearance.background(system: systemColorScheme) }
     private var readerPrimaryText: Color { appearance.primaryText(system: systemColorScheme) }
@@ -209,7 +195,7 @@ struct ReaderView: View {
             .onChange(of: chapterIndex) { _, newIndex in
                 guard novel.chapters.indices.contains(newIndex) else { return }
                 savedChapterIndex = newIndex
-                ReadingPositionSync.recordWeb(id: novel.id, chapterIndex: newIndex)
+                settings.recordWebPosition(id: novel.id, chapterIndex: newIndex)
                 withAnimation(.easeInOut(duration: 0.2)) {
                     proxy.scrollTo(novel.chapters[newIndex].id, anchor: .top)
                 }
@@ -239,26 +225,24 @@ struct ReaderView: View {
                             }
                         }
                         Divider()
-                        if !availableTranslationSources.isEmpty {
-                            Picker("译文来源", selection: $translationSourceRaw) {
-                                ForEach(availableTranslationSources) { source in
-                                    Text(source.title).tag(source.rawValue)
-                                }
+                        Picker("译文来源", selection: $translationSourceRaw) {
+                            ForEach(NovelTranslationSource.allCases) { source in
+                                Text(source.title).tag(source.rawValue)
                             }
                         }
                         Divider()
                         NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
-                        Picker("阅读外观", selection: $appearanceRaw) {
+                        Picker("阅读外观", selection: $settings.appearanceRaw) {
                             ForEach(ReaderAppearance.allCases) { option in
                                 Text(option.title).tag(option.rawValue)
                             }
                         }
                         Divider()
                         Button("缩小字号", systemImage: "textformat.size.smaller") {
-                            fontSize = max(16, fontSize - 1)
+                            settings.adjustFontSize(by: -1)
                         }
                         Button("放大字号", systemImage: "textformat.size.larger") {
-                            fontSize = min(30, fontSize + 1)
+                            settings.adjustFontSize(by: 1)
                         }
                     } label: {
                         Image(systemName: "textformat.size")
@@ -269,8 +253,7 @@ struct ReaderView: View {
             }
             .onAppear {
                 savedChapterIndex = chapterIndex
-                ReadingPositionSync.recordWeb(id: novel.id, chapterIndex: chapterIndex)
-                if let offlineTranslationSource { translationSourceRaw = offlineTranslationSource.rawValue }
+                settings.recordWebPosition(id: novel.id, chapterIndex: chapterIndex)
             }
             .task(id: "\(chapter.id)-\(loadAttempt)-\(auth.username ?? "")") {
                 let chapterID = chapter.id
@@ -348,7 +331,6 @@ struct ReaderView: View {
         guard novel.isRemote,
               let providerId = novel.providerId,
               let novelId = novel.novelId else { return false }
-        if isOffline { return !chapter.originalText.isEmpty || !chapter.translatedText.isEmpty }
         guard chapter.originalText.isEmpty else { return true }
         isLoadingChapter = true
         chapterError = nil

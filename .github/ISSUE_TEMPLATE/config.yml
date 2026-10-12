@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 私密安全报告
+    url: https://github.com/Guanine000/novelia-swift/security/advisories/new
+    about: 安全漏洞通过此入口私密提交。

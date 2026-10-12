@@ -9,15 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 RESOLVED = ROOT / "NoveliaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
 NOTICES = ROOT / "iOSApp/Resources/ThirdPartyLicenses"
 PACKAGES = {
-    "cryptoswift": ("CryptoSwift", "Zlib"),
-    "differencekit": ("DifferenceKit", "Apache-2.0"),
-    "fuzi": ("Fuzi", "MIT"),
-    "gcdwebserver": ("GCDWebServer", "BSD-3-Clause"),
-    "sqlite.swift": ("SQLite.swift", "MIT"),
-    "swift-toolkit": ("swift-toolkit", "BSD-3-Clause"),
     "swiftsoup": ("SwiftSoup", "MIT"),
     "yueducoretext": ("YueduCoreText", "MPL-2.0"),
-    "zip": ("Zip", "MIT"),
     "zipfoundation": ("ZIPFoundation", "MIT"),
 }
 
@@ -42,7 +35,7 @@ def main() -> None:
         assert expected_row in index, f"Missing or stale index row: {name} {version}"
         if args.source_packages:
             checkout = args.source_packages / name
-            original = checkout / ("LICENSE.txt" if identity == "sqlite.swift" else "LICENSE")
+            original = checkout / "LICENSE"
             assert original.is_file(), f"Missing checkout license: {original}"
             assert license_file.read_bytes() == original.read_bytes(), f"Copied license differs: {name}"
             original_notice = checkout / "NOTICE"

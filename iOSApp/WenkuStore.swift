@@ -1,7 +1,5 @@
 import Combine
 import Foundation
-import ReadiumShared
-import ReadiumStreamer
 import UIKit
 import UniformTypeIdentifiers
 
@@ -427,23 +425,17 @@ final class WenkuLocalLibraryStore: ObservableObject {
     }
 
     private static func metadata(for url: URL) async -> (title: String?, description: String?, author: String?, cover: UIImage?) {
-        let httpClient = DefaultHTTPClient()
-        let assetRetriever = AssetRetriever(httpClient: httpClient)
-        let opener = PublicationOpener(parser: DefaultPublicationParser(httpClient: httpClient, assetRetriever: assetRetriever, pdfFactory: DefaultPDFDocumentFactory()))
-        guard let fileURL = FileURL(url: url),
-              let asset = try? await assetRetriever.retrieve(url: fileURL).get(),
-              let publication = try? await opener.open(asset: asset, allowUserInteraction: false).get(),
-              publication.conforms(to: .epub) else { return (nil, nil, nil, nil) }
-        let metadata = publication.metadata
+        guard let metadata = await EPUBContainer.metadata(
+            fileURL: url, coverMaxSize: CGSize(width: 240, height: 320)
+        ) else { return (nil, nil, nil, nil) }
         let title = metadata.title?.trimmingCharacters(in: .whitespacesAndNewlines)
         let description = metadata.description?
             .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
             .replacingOccurrences(of: "&nbsp;", with: " ")
             .replacingOccurrences(of: "&amp;", with: "&")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let author = metadata.authors.compactMap(\.name).joined(separator: ", ")
-        let cover = try? await publication.coverFitting(maxSize: CGSize(width: 240, height: 320)).get()
-        return (title?.isEmpty == false ? title : nil, description?.isEmpty == false ? description : nil, author.isEmpty ? nil : author, cover ?? nil)
+        let author = metadata.authors.joined(separator: ", ")
+        return (title?.isEmpty == false ? title : nil, description?.isEmpty == false ? description : nil, author.isEmpty ? nil : author, metadata.cover)
     }
 
     private static func safeFilename(_ filename: String, format: WebNovelFileFormat? = nil) -> String {
@@ -487,9 +479,7 @@ enum WebNovelFileFormat: String, Codable, CaseIterable, Identifiable {
 
 struct DownloadedWebNovel: Codable, Identifiable, Hashable {
     let novel: Novel
-    /// Kept for migration of chapter-by-chapter downloads created by older app versions.
-    let chapterDataFilename: String?
-    let fileFilename: String?
+    let fileFilename: String
     let downloadedAt: Date
     let translationSource: NovelTranslationSource?
     /// Optional so indexes created before language-mode selection remain readable.
@@ -499,7 +489,7 @@ struct DownloadedWebNovel: Codable, Identifiable, Hashable {
 
     var id: String { novel.id }
     var resolvedFileFormat: WebNovelFileFormat {
-        fileFormat ?? (fileFilename?.lowercased().hasSuffix(".txt") == true ? .txt : .epub)
+        fileFormat ?? (fileFilename.lowercased().hasSuffix(".txt") ? .txt : .epub)
     }
     var resolvedDownloadMode: WebNovelDownloadMode {
         downloadMode ?? (translationSource == nil ? .original : .translated)
@@ -525,28 +515,12 @@ final class WebNovelDownloadStore: ObservableObject {
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         if let data = try? Data(contentsOf: indexURL),
            let saved = try? JSONDecoder().decode([DownloadedWebNovel].self, from: data) {
-            books = saved.filter { book in
-                [book.chapterDataFilename, book.fileFilename]
-                    .compactMap { $0 }
-                    .contains { fileManager.fileExists(atPath: directory.appendingPathComponent($0).path) }
-            }
+            books = saved.filter { fileManager.fileExists(atPath: directory.appendingPathComponent($0.fileFilename).path) }
         }
     }
 
     func isDownloaded(_ novelID: String) -> Bool {
         books.contains { $0.id == novelID }
-    }
-
-    func chapters(for book: DownloadedWebNovel) async throws -> [String: NovelChapter] {
-        guard let chapterDataFilename = book.chapterDataFilename else {
-            throw CocoaError(.fileReadNoSuchFile)
-        }
-        let url = directory.appendingPathComponent(chapterDataFilename)
-        return try await Task.detached(priority: .userInitiated) {
-            let data = try Data(contentsOf: url)
-            let chapters = try JSONDecoder().decode([NovelChapter].self, from: data)
-            return Dictionary(chapters.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
-        }.value
     }
 
     func download(_ novel: Novel, mode: WebNovelDownloadMode, translationSource: NovelTranslationSource?) async {
@@ -576,7 +550,6 @@ final class WebNovelDownloadStore: ObservableObject {
 
             let record = DownloadedWebNovel(
                 novel: novel,
-                chapterDataFilename: nil,
                 fileFilename: dataURL.lastPathComponent,
                 downloadedAt: Date(),
                 translationSource: effectiveSource,
@@ -615,7 +588,7 @@ final class WebNovelDownloadStore: ObservableObject {
         let novel = book.sourceWebNovel?.novel ?? Novel(id: "local-\(book.id.uuidString)", title: book.title,
             author: book.author ?? "", summary: book.bookDescription ?? "",
             genres: [], chapters: [], accent: .plum)
-        let record = DownloadedWebNovel(novel: novel, chapterDataFilename: nil,
+        let record = DownloadedWebNovel(novel: novel,
             fileFilename: destination.lastPathComponent, downloadedAt: book.sourceWebNovel?.downloadedAt ?? Date(),
             translationSource: book.sourceWebNovel?.translationSource,
             downloadMode: book.sourceWebNovel?.downloadMode, fileFormat: format)
@@ -635,38 +608,26 @@ final class WebNovelDownloadStore: ObservableObject {
         removeStoredFile(for: book)
     }
 
-    func fileURL(for book: DownloadedWebNovel) -> URL? {
-        book.fileFilename.map { directory.appendingPathComponent($0) }
+    func fileURL(for book: DownloadedWebNovel) -> URL {
+        directory.appendingPathComponent(book.fileFilename)
     }
 
     func syncFiles(for book: DownloadedWebNovel) -> [String: URL] {
-        var files: [String: URL] = [:]
-        for filename in [book.chapterDataFilename, book.fileFilename].compactMap({ $0 }) {
-            let url = directory.appendingPathComponent(filename)
-            if fileManager.fileExists(atPath: url.path) { files[filename] = url }
-        }
-        return files
+        let url = fileURL(for: book)
+        return fileManager.fileExists(atPath: url.path) ? [book.fileFilename: url] : [:]
     }
 
     func restoreFromSync(_ book: DownloadedWebNovel, files: [String: URL]) throws {
         guard !books.contains(where: { $0.id == book.id }) else { return }
-        guard book.chapterDataFilename != nil || book.fileFilename != nil else {
-            throw CocoaError(.fileReadNoSuchFile)
-        }
+        guard let source = files[book.fileFilename] else { throw CocoaError(.fileReadNoSuchFile) }
         var copied: [URL] = []
         do {
-            var names: [String: String] = [:]
-            for filename in [book.chapterDataFilename, book.fileFilename].compactMap({ $0 }) {
-                guard let source = files[filename] else { throw CocoaError(.fileReadNoSuchFile) }
-                let destination = uniqueDestination(for: filename)
-                try fileManager.copyItem(at: source, to: destination)
-                copied.append(destination)
-                names[filename] = destination.lastPathComponent
-            }
+            let destination = uniqueDestination(for: book.fileFilename)
+            try fileManager.copyItem(at: source, to: destination)
+            copied.append(destination)
             let restored = DownloadedWebNovel(
                 novel: book.novel,
-                chapterDataFilename: book.chapterDataFilename.flatMap { names[$0] },
-                fileFilename: book.fileFilename.flatMap { names[$0] },
+                fileFilename: destination.lastPathComponent,
                 downloadedAt: book.downloadedAt,
                 translationSource: book.translationSource,
                 downloadMode: book.downloadMode,
@@ -686,22 +647,16 @@ final class WebNovelDownloadStore: ObservableObject {
     func replaceFromSync(_ book: DownloadedWebNovel, files: [String: URL]) throws {
         let previousBooks = books
         guard let old = previousBooks.first(where: { $0.id == book.id }),
-              book.chapterDataFilename != nil || book.fileFilename != nil else {
+              let source = files[book.fileFilename] else {
             throw CocoaError(.fileReadNoSuchFile)
         }
         var copied: [URL] = []
         do {
-            var names: [String: String] = [:]
-            for filename in [book.chapterDataFilename, book.fileFilename].compactMap({ $0 }) {
-                guard let source = files[filename] else { throw CocoaError(.fileReadNoSuchFile) }
-                let destination = uniqueDestination(for: filename)
-                try fileManager.copyItem(at: source, to: destination)
-                copied.append(destination)
-                names[filename] = destination.lastPathComponent
-            }
+            let destination = uniqueDestination(for: book.fileFilename)
+            try fileManager.copyItem(at: source, to: destination)
+            copied.append(destination)
             let replacement = DownloadedWebNovel(novel: book.novel,
-                chapterDataFilename: book.chapterDataFilename.flatMap { names[$0] },
-                fileFilename: book.fileFilename.flatMap { names[$0] }, downloadedAt: book.downloadedAt,
+                fileFilename: destination.lastPathComponent, downloadedAt: book.downloadedAt,
                 translationSource: book.translationSource, downloadMode: book.downloadMode,
                 fileFormat: book.fileFormat)
             guard let index = books.firstIndex(where: { $0.id == book.id }) else {
@@ -718,9 +673,7 @@ final class WebNovelDownloadStore: ObservableObject {
     }
 
     private func removeStoredFile(for book: DownloadedWebNovel) {
-        for filename in [book.chapterDataFilename, book.fileFilename].compactMap({ $0 }) {
-            try? fileManager.removeItem(at: directory.appendingPathComponent(filename))
-        }
+        try? fileManager.removeItem(at: fileURL(for: book))
     }
 
     private func uniqueDestination(for filename: String) -> URL {

@@ -132,16 +132,14 @@ public struct NoveliaAPIClient: Sendable {
 
         var request = URLRequest(url: url)
         request.setValue("application/epub+zip, application/octet-stream", forHTTPHeaderField: "Accept")
-        if let token = await NoveliaSessionRenewal.shared.token(app: "n", current: tokenProvider()), !token.isEmpty {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        request.timeoutInterval = 180
+        request.timeoutInterval = NoveliaRequestTimeout.generatedNovelFile
         let downloadStartedAt = ProcessInfo.processInfo.systemUptime
         Self.downloadLogger.info("Starting novel EPUB download; mode=\(apiMode, privacy: .public), translationsMode=\(translationsMode, privacy: .public)")
         let temporaryURL: URL
         let response: URLResponse
         do {
-            (temporaryURL, response) = try await session.download(for: request)
+            (temporaryURL, response) = try await NoveliaSessionRenewal.download(
+                session: session, request: request, app: "n", tokenProvider: tokenProvider)
         } catch {
             let nsError = error as NSError
             let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - downloadStartedAt) * 1_000)
@@ -234,11 +232,9 @@ public struct NoveliaAPIClient: Sendable {
         guard let url = components.url else { throw NoveliaAPIError.invalidURL }
         var request = URLRequest(url: url)
         request.setValue("application/epub+zip, application/octet-stream", forHTTPHeaderField: "Accept")
-        if let token = await NoveliaSessionRenewal.shared.token(app: "n", current: tokenProvider()), !token.isEmpty {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        request.timeoutInterval = 120
-        let (temporaryURL, response) = try await session.download(for: request)
+        request.timeoutInterval = NoveliaRequestTimeout.wenkuVolume
+        let (temporaryURL, response) = try await NoveliaSessionRenewal.download(
+            session: session, request: request, app: "n", tokenProvider: tokenProvider)
         guard let http = response as? HTTPURLResponse else { throw NoveliaAPIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
             let responseData = Self.responseData(from: temporaryURL)
@@ -387,10 +383,7 @@ public struct NoveliaAPIClient: Sendable {
         } else if method != "GET" && method != "HEAD" {
             request.httpBody = Data()
         }
-        if let token = await NoveliaSessionRenewal.shared.token(app: "n", current: tokenProvider()), !token.isEmpty {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        request.timeoutInterval = 30
+        request.timeoutInterval = NoveliaRequestTimeout.api
 
         let (data, response) = try await NoveliaSessionRenewal.data(session: session, request: request, app: "n", tokenProvider: tokenProvider)
         guard let http = response as? HTTPURLResponse else { throw NoveliaAPIError.invalidResponse }
@@ -861,6 +854,16 @@ private extension String {
 
 
 /// Coordinates each app's access-token renewal without sharing novel/forum sessions.
+/// Request timeouts shared by `NoveliaAPIClient` and `ForumAPIClient`.
+public enum NoveliaRequestTimeout {
+    /// JSON API calls.
+    public static let api: TimeInterval = 30
+    /// Light novel volume EPUBs.
+    public static let wenkuVolume: TimeInterval = 120
+    /// Web novel EPUB/TXT files, which the server generates on request.
+    public static let generatedNovelFile: TimeInterval = 180
+}
+
 public actor NoveliaSessionRenewal {
     public static let shared = NoveliaSessionRenewal()
     private var handlers: [String: @Sendable () async -> String?] = [:]
@@ -898,18 +901,62 @@ public actor NoveliaSessionRenewal {
         return refreshed
     }
 
+    /// JSON and other in-memory responses. See `send` for authentication and retries.
     public static func data(session: URLSession, request: URLRequest, app: String,
                             tokenProvider: @Sendable () -> String?) async throws -> (Data, URLResponse) {
+        try await send(request, app: app, tokenProvider: tokenProvider) { try await session.data(for: $0) }
+    }
+
+    /// Large files written to a temporary location. See `send` for authentication and retries.
+    public static func download(session: URLSession, request: URLRequest, app: String,
+                                tokenProvider: @Sendable () -> String?) async throws -> (URL, URLResponse) {
+        try await send(request, app: app, tokenProvider: tokenProvider) { try await session.download(for: $0) }
+    }
+
+    /// Requests from both API clients go through here: the account token is renewed shortly
+    /// before it expires, an HTTP 401 is retried once with a renewed token for the same
+    /// account, and GET/HEAD requests are retried once after a dropped connection or a
+    /// 502/503/504 from a proxy. Timeouts are not retried (file generation can take minutes),
+    /// nor are requests that change data.
+    static func send<Body>(_ request: URLRequest, app: String, tokenProvider: @Sendable () -> String?,
+                           perform: (URLRequest) async throws -> (Body, URLResponse)) async throws -> (Body, URLResponse) {
         let initial = tokenProvider()
         let token = await shared.token(app: app, current: initial)
         var authenticated = request
         authenticated.setValue(token.map { "Bearer \($0)" }, forHTTPHeaderField: "Authorization")
-        let result = try await session.data(for: authenticated)
+        let result = try await performRetryingTransientFailures(authenticated, perform: perform)
         guard (result.1 as? HTTPURLResponse)?.statusCode == 401, let token else { return result }
         let replacement = await shared.token(app: app, current: token, force: true)
         guard let replacement, replacement != token,
               Self.claims(tokenProvider() ?? "")?.subject == Self.claims(token)?.subject else { return result }
+        discard(result.0)
         authenticated.setValue("Bearer \(replacement)", forHTTPHeaderField: "Authorization")
-        return try await session.data(for: authenticated)
+        return try await performRetryingTransientFailures(authenticated, perform: perform)
+    }
+
+    /// Delay before retrying a transient failure; tests shorten it.
+    nonisolated(unsafe) static var transientRetryDelay: Duration = .seconds(1)
+    static let transientErrors: Set<URLError.Code> = [.networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed]
+    static let transientStatuses: Set<Int> = [502, 503, 504]
+
+    private static func performRetryingTransientFailures<Body>(
+        _ request: URLRequest, perform: (URLRequest) async throws -> (Body, URLResponse)
+    ) async throws -> (Body, URLResponse) {
+        let idempotent = ["GET", "HEAD"].contains(request.httpMethod?.uppercased() ?? "GET")
+        do {
+            let result = try await perform(request)
+            guard idempotent, let status = (result.1 as? HTTPURLResponse)?.statusCode,
+                  transientStatuses.contains(status) else { return result }
+            discard(result.0)
+        } catch let error as URLError where idempotent && transientErrors.contains(error.code) {
+            // Fall through to the single retry below.
+        }
+        try await Task.sleep(for: transientRetryDelay)
+        return try await perform(request)
+    }
+
+    /// A superseded download leaves its temporary file behind.
+    private static func discard<Body>(_ body: Body) {
+        if let file = body as? URL { try? FileManager.default.removeItem(at: file) }
     }
 }
