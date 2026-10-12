@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import plistlib
 import re
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -63,6 +64,14 @@ def project_version(text):
     return versions[0], builds[0]
 
 
+def check_derived_data(path):
+    # The unstripped Release binary records object-file paths under derived data (debug map),
+    # so a derived data directory under a home folder fails the IPA privacy check.
+    if re.match(r"/(?:Users|home)/[^/]+/", str(path) + "/"):
+        raise RuntimeError("Derived data must be outside home folders (Release binary records its object-file paths)")
+    return path
+
+
 def validate_ipa(ipa, version, build):
     with zipfile.ZipFile(ipa) as archive:
         if archive.testzip() is not None:
@@ -87,7 +96,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--allow-dirty", action="store_true", help="Explicitly package the current uncommitted source snapshot")
     parser.add_argument("--simulator", default="iPhone 18 Pro Max", help="Swift package test simulator name or UDID; no UI tests")
-    parser.add_argument("--derived-data", type=Path, default=ROOT / "build/local-release-cache")
+    parser.add_argument("--derived-data", type=Path,
+                        help="Xcode derived data outside home folders; default is a fresh system temp directory removed after success")
     parser.add_argument("--output", type=Path, help="New ignored directory under this repository's build/ directory")
     args = parser.parse_args()
     version, build = project_version((ROOT / "NoveliaIOS.xcodeproj/project.pbxproj").read_text())
@@ -99,10 +109,15 @@ def main():
         parser.error("Output must be under the ignored repository build/ directory")
     if out.exists():
         parser.error("Output already exists; use a new build number/directory instead of replacing it")
+    try:
+        derived = check_derived_data((args.derived_data or Path(tempfile.gettempdir())).resolve())
+    except RuntimeError as error:
+        parser.error(str(error))
+    if not args.derived_data:
+        derived = Path(tempfile.mkdtemp(prefix="novelia-derived-")).resolve()
     out.mkdir(parents=True)
     files = source_files()
     before = fingerprint(files)
-    derived = args.derived_data.resolve()
     prefix = f"novelia-{version}-test-build{build}" if status else f"novelia-{version}-build{build}"
     try:
         run(["python3", "-I", "scripts/test_local_release.py"], log=out / "packaging-tests.log")
@@ -159,9 +174,12 @@ def main():
         artifacts = [ipa, source, dependencies, metadata]
         (out / "SHA256SUMS").write_text("".join(hashlib.sha256(file.read_bytes()).hexdigest() + "  " + file.name + "\n" for file in artifacts))
         (out / "SUCCESS").write_text("All checks passed. IPA, source, dependencies and SHA256SUMS are ready.\n")
+        if not args.derived_data:
+            shutil.rmtree(derived)
         print(f"Local unsigned build ready: {out}")
     except Exception:
         (out / "FAILED-DO-NOT-DISTRIBUTE").write_text("Build/check failed. This folder is not a distribution. Inspect local logs.\n")
+        print(f"Derived data kept for inspection: {derived}")
         raise
 
 
