@@ -350,14 +350,21 @@ final class EPUBReaderModel: ObservableObject {
     func open(url: URL) async {
         status = .opening
         isRestoringPosition = true
+        let start = ContinuousClock.now
+        var stage = "hash"
+        EPUBLayoutLog.logger.info("EPUB open started")
+        defer { logOpenOutcome(stage: stage, start: start) }
         do {
             let bookHash = try await Task.detached(priority: .utility) {
                 try WebDAVFileHash.sha256(url)
             }.value
+            stage = "container"
             let container = try await EPUBContainer.open(fileURL: url)
             self.container = container
             openedBookHash = bookHash
             location = EPUBReadingLocation(spineIndex: 0, pageIndex: 0)
+            stage = "layout"
+            lastLayoutFailure = nil
             await relayout(keepingCurrentSpine: false)
             isRestoringPosition = false
             if status == .ready, let saved = ReaderSettings.shared.epubPosition(hash: bookHash) {
@@ -372,7 +379,28 @@ final class EPUBReaderModel: ObservableObject {
             }
         } catch {
             isRestoringPosition = false
+            lastLayoutFailure = EPUBLayoutLog.failure(error)
             status = .failed(describeLayoutError(error))
+        }
+    }
+
+    /// Kind of the most recent layout/open error, for the open summary log.
+    private var lastLayoutFailure: (kind: String, code: Int)?
+
+    /// One outcome line per book open; chapter lines carry the per-chapter details.
+    private func logOpenOutcome(stage: String, start: ContinuousClock.Instant) {
+        let elapsed = EPUBLayoutLog.milliseconds(since: start)
+        let failure = lastLayoutFailure
+        if Task.isCancelled || failure?.kind == "cancelled" {
+            EPUBLayoutLog.logger.info("EPUB open cancelled; elapsedMs=\(elapsed, privacy: .public)")
+        } else if case .failed = status {
+            let failure = failure ?? ("other", 0)
+            EPUBLayoutLog.logger.error("EPUB open failed; stage=\(stage, privacy: .public), error=\(failure.kind, privacy: .public), code=\(failure.code, privacy: .public), elapsedMs=\(elapsed, privacy: .public)")
+        } else {
+            let spine = container?.spine.count ?? 0
+            let toc = container?.toc.count ?? 0
+            let pages = pageCount(spineIndex: location.spineIndex)
+            EPUBLayoutLog.logger.info("EPUB open succeeded; spine=\(spine, privacy: .public), toc=\(toc, privacy: .public), pages=\(pages, privacy: .public), elapsedMs=\(elapsed, privacy: .public)")
         }
     }
 
@@ -459,9 +487,6 @@ final class EPUBReaderModel: ObservableObject {
         config.backgroundColor = ReaderSettings.shared.backgrounds.image(dark: isDarkMode, landscape: viewportSize.width > viewportSize.height) == nil ? pageBackground : .clear
         config.defaultTextAlignment = .natural
         EPUBPageBook.applyEngineWorkarounds(to: &config)
-        config.onDiagnostic = { diagnostic in
-            engineDiagLog.fault("ENGINE_DIAG \(String(describing: diagnostic), privacy: .private)")
-        }
         return config
     }
 
@@ -513,6 +538,7 @@ final class EPUBReaderModel: ObservableObject {
             }
         } catch {
             if book.generation == generation {
+                lastLayoutFailure = EPUBLayoutLog.failure(error)
                 status = .failed(describeLayoutError(error))
             }
         }
@@ -864,8 +890,6 @@ struct EPUBNote: Identifiable, Equatable {
 }
 
 /// 把 YueduCoreText 的排版错误翻译成可诊断的中文信息（真实 EPUB 排查必需）。
-private let engineDiagLog = Logger(subsystem: "cc.novelia.ios.port", category: "enginediag")
-
 private func describeLayoutError(_ error: Error) -> String {
     if let layoutError = error as? HTMLLayoutError {
         switch layoutError {
