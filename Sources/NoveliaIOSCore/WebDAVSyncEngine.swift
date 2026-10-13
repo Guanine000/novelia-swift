@@ -127,19 +127,22 @@ final class WebDAVSyncEngine {
                 let current = try local.background(dark: dark)
                 switch WebDAVSyncPlanner.planBackground(local: current, remote: backgrounds[key]) {
                 case .useRemote(let hashes):
+                    progress.totalUnits += hashes.count
                     for hash in hashes {
                         let file = try await remote.downloadBlob(hash)
                         temporaryFiles.append(file)
                         guard local.isValidBackgroundImage(file) else { throw WebDAVSyncError.invalidAsset }
                         resourceFiles[hash] = file
+                        progress.completedUnits += 1
                     }
                 case .useLocal:
                     backgrounds[key] = current
-                    for landscape in [false, true] {
-                        let file = local.backgroundImageURL(dark: dark, landscape: landscape)
-                        if FileManager.default.fileExists(atPath: file.path) {
-                            try await uploadIfNeeded(file, hash: contentHash(of: file))
-                        }
+                    let images = [false, true].map { local.backgroundImageURL(dark: dark, landscape: $0) }
+                        .filter { FileManager.default.fileExists(atPath: $0.path) }
+                    progress.totalUnits += images.count
+                    for file in images {
+                        try await uploadIfNeeded(file, hash: contentHash(of: file))
+                        progress.completedUnits += 1
                     }
                 }
             }
@@ -150,11 +153,14 @@ final class WebDAVSyncEngine {
             let fonts = SyncedImportedFont.merged(try local.fonts(), manifest.fonts ?? [:])
             let files = try local.fontFiles()
             let plan = try WebDAVSyncPlanner.planFonts(fonts, localHashes: Set(files.keys))
+            progress.totalUnits += plan.uploads.count + plan.downloads.count
             for hash in plan.uploads {
                 if let file = files[hash] { try await uploadIfNeeded(file, hash: hash) }
+                progress.completedUnits += 1
             }
             for hash in plan.downloads {
                 let file = try await remote.downloadBlob(hash); temporaryFiles.append(file); resourceFiles[hash] = file
+                progress.completedUnits += 1
             }
             manifest.fonts = fonts
         }
