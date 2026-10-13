@@ -48,11 +48,13 @@ final class WebDAVRedirectGuard: NSObject, URLSessionTaskDelegate {
     }
 }
 
-struct WebDAVClient: WebDAVRemote {
+/// 每次同步新建一个客户端；释放时让会话失效，否则带 delegate 的 URLSession 会一直被系统持有。
+final class WebDAVClient: WebDAVRemote {
     let base: URL
     let root: URL
     let authorization: String
-    private let session: URLSession
+    /// 仅供测试检查会话的生命周期。
+    let session: URLSession
 
     /// `configuration` 仅供测试注入 URLProtocol；应用使用默认的临时会话。
     init(address: String, username: String, password: String,
@@ -65,6 +67,10 @@ struct WebDAVClient: WebDAVRemote {
                   .appendingPathComponent("v1", isDirectory: true)
         authorization = "Basic " + Data("\(username):\(password)".utf8).base64EncodedString()
         session = URLSession(configuration: configuration, delegate: WebDAVRedirectGuard(), delegateQueue: nil)
+    }
+
+    deinit {
+        session.finishTasksAndInvalidate()
     }
 
     private func request(_ url: URL, method: String) -> URLRequest {
