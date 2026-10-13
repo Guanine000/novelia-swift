@@ -129,20 +129,12 @@ final class ReadiumEPUBReaderModel: ObservableObject {
                 contentDiagnostics = report
                 continue
             }
-            let isCSS = link.mediaType == .css || link.url().path.lowercased().hasSuffix(".css")
-            let isHTML = link.mediaType?.isHTML ?? ["xhtml", "html", "htm"].contains((link.url().path as NSString).pathExtension.lowercased())
             let error: ReadError?
-            if isHTML || isCSS {
-                switch await resource.read().asString() {
-                case .success: error = nil
-                case .failure(let failure): error = failure
-                }
-            } else {
-                // Stream binary assets without retaining full images/fonts in memory.
-                switch await resource.stream(consume: { _ in }) {
-                case .success: error = nil
-                case .failure(let failure): error = failure
-                }
+            // Read every resource as a stream, without retaining full images/fonts or forcing
+            // valid non-UTF8 documents through the diagnostic scanner's text decoder.
+            switch await resource.stream(consume: { _ in }) {
+            case .success: error = nil
+            case .failure(let failure): error = failure
             }
             guard !Task.isCancelled else { return }
             if let error {
