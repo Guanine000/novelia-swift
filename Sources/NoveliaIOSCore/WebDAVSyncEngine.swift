@@ -83,6 +83,8 @@ final class WebDAVSyncEngine {
         var manifest = fetchedManifest
         var imported = 0
         if options.books {
+            manifest.webBooks = WebDAVSyncPlanner.uniqueBooks(manifest.webBooks)
+            manifest.wenkuBooks = WebDAVSyncPlanner.uniqueBooks(manifest.wenkuBooks)
             let webPlan = WebDAVSyncPlanner.planBooks(local: web.books, remote: manifest.webBooks)
             let wenkuPlan = WebDAVSyncPlanner.planBooks(local: wenku.books, remote: manifest.wenkuBooks)
             progress.totalUnits = webPlan.unitCount { web.syncFiles(for: $0).count }
