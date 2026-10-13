@@ -11,6 +11,24 @@ spec.loader.exec_module(release)
 
 
 class LocalReleaseTests(unittest.TestCase):
+    def test_preferred_sources_match_runtime_versions_and_have_implementation(self):
+        directory = Path(__file__).parent / "vendor-npm-sources"
+        packages = [("@juggle/resize-observer", "3.4.0", "unused"), ("approx-string-match", "1.1.0", "unused")]
+        self.assertEqual(len(release.verify_preferred_sources(directory, packages)), 2)
+        with self.assertRaisesRegex(RuntimeError, "versions"):
+            release.verify_preferred_sources(directory, [("@juggle/resize-observer", "3.5.0", "unused")])
+
+    def test_public_source_note_points_to_exact_release_and_artifacts(self):
+        note = release.public_source_note("0.12.0", "57", "novelia-0.12.0-build57-unsigned.ipa",
+                                          "novelia-0.12.0-build57-source.tar.gz",
+                                          "novelia-0.12.0-build57-dependencies.tar.gz")
+        self.assertIn("https://github.com/Guanine000/novelia-swift/releases/tag/v0.12.0\n", note)
+        for filename in ["novelia-0.12.0-build57-unsigned.ipa", "novelia-0.12.0-build57-source.tar.gz",
+                         "novelia-0.12.0-build57-dependencies.tar.gz"]:
+            self.assertIn(filename, note)
+        self.assertNotIn("releases/latest", note)
+        self.assertNotIn("novelia-ios-port", note)
+
     def test_modified_date_read_from_settings(self):
         self.assertEqual(release.modified_date('    static let modifiedDate = "2026-10-13"\n'), "2026-10-13")
         with self.assertRaises(RuntimeError):

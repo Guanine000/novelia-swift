@@ -443,8 +443,8 @@ private struct ThirdPartyLicensesView: View {
                     licenseText("GPL-3.0-only.txt", title: "GNU GPL-3.0-only")
                 }
                 Text("本项目是参考 GPL-3.0-only 安卓客户端 nobYoQ/novelia 制作的 Swift iOS 移植版本，包含 iOS 平台实现及后续修改。上游版权声明：Copyright (C) 2026 Novelia Android contributors. 本 iOS 移植及新增部分：Copyright (C) 2026 Novelia iOS contributors。修改版本日期：\(Self.modifiedDate)。")
-                Link("查看对应版本的源码仓库", destination: URL(string: "https://github.com/Guanine000/novelia-swift")!)
-                Text("源码仓库公开可访问。Release 同时提供对应版本的完整源码及第三方许可材料。")
+                Link("查看公开项目仓库", destination: URL(string: "https://github.com/Guanine000/novelia-swift")!)
+                Text("对应源码及第三方许可材料由分发者随本构建提供，或在配套源码说明中注明下载地址。公开项目仓库可能不包含私密测试构建，请按安装包版本和构建号获取配套材料。")
             }
             Section {
                 Text("本应用使用的第三方软件及其原始许可文本。YueduCoreText 的 NOTICE 包含 Unicode License v3。")
@@ -464,10 +464,16 @@ private struct ThirdPartyLicensesView: View {
                 }
             }
             Section("附加声明") {
+                NavigationLink("Zip 内嵌 MiniZip / Info-ZIP 许可") {
+                    licenseText("Zip-MiniZip-NOTICE.txt", title: "MiniZip / Info-ZIP")
+                }
                 NavigationLink("YueduCoreText NOTICE / Unicode License v3") {
                     licenseText("YueduCoreText-NOTICE.txt", title: "附加声明")
                 }
                 Link("YueduCoreText 0.8.0 对应源码", destination: URL(string: "https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/783ce903d5faf4ff5d15c546e32a107537ba5efe")!)
+                Text("CryptoSwift 许可要求的致谢")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Text("This product includes software developed by the \"Marcin Krzyzanowski\" (http://krzyzanowskim.com/).")
                     .font(.footnote)
             }
@@ -485,14 +491,36 @@ private struct ThirdPartyLicensesView: View {
     private func licenseText(_ file: String, title: String) -> some View {
         let url = Bundle.main.url(forResource: file, withExtension: nil, subdirectory: "ThirdPartyLicenses")
         let content = url.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
-        return ScrollView {
-            Text(content ?? "许可文件未找到：\(file)")
-                .font(.system(.footnote, design: .monospaced))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-                .textSelection(.enabled)
-        }
+        return LicenseTextView(text: content ?? "许可文件未找到：\(file)")
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Render long license documents in a scrolling text view instead of one oversized SwiftUI Text.
+private struct LicenseTextView: UIViewRepresentable {
+    let text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.isEditable = false
+        view.isSelectable = true
+        view.alwaysBounceVertical = true
+        view.backgroundColor = .systemBackground
+        view.textColor = .label
+        view.font = UIFontMetrics(forTextStyle: .footnote).scaledFont(
+            for: .monospacedSystemFont(ofSize: 13, weight: .regular)
+        )
+        view.adjustsFontForContentSizeCategory = true
+        view.textContainerInset = UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        view.textContainer.lineFragmentPadding = 0
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        if view.text != text {
+            view.text = text
+            view.setContentOffset(.zero, animated: false)
+        }
     }
 }

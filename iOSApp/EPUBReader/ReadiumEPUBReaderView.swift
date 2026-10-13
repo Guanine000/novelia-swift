@@ -87,6 +87,9 @@ struct ReadiumEPUBReaderView: View {
         .onChange(of: settings.fontSize) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         .onChange(of: settings.appearanceRaw) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         .onChange(of: backgrounds.revision) { _, _ in model.refreshBackground() }
+        .task(id: model.status) {
+            if model.status == .ready { await model.scanBookDiagnostics() }
+        }
         .sheet(isPresented: $isShowingTOC) { tocSheet }
         .sheet(isPresented: $isShowingStyle) { styleSheet }
         .sheet(item: $model.activeNote) { note in noteSheet(note) }
@@ -116,6 +119,7 @@ struct ReadiumEPUBReaderView: View {
                 .background(NoveliaStyle.brandGreen.opacity(0.18), in: Capsule())
                 .accessibilityLabel("Readium 实验引擎")
             Button {
+                model.isTOCDiagnosticsExpanded = false
                 isShowingTOC = true
             } label: {
                 Image(systemName: "list.bullet").frame(width: 36, height: 36)
@@ -213,49 +217,54 @@ struct ReadiumEPUBReaderView: View {
 
     private var tocSheet: some View {
         NavigationStack {
-            Group {
-                if model.toc.isEmpty {
-                    ContentUnavailableView("没有目录", systemImage: "list.bullet.rectangle",
-                                           description: Text(model.tocNotice ?? "本书未提供目录。"))
-                } else {
-                    ScrollViewReader { proxy in
-                        List {
-                            if let notice = model.tocNotice {
-                                Section {
-                                    Label(notice, systemImage: "info.circle")
+            ScrollViewReader { proxy in
+                List {
+                    if !model.tocDiagnosticMessages.isEmpty {
+                    Section {
+                        DisclosureGroup(isExpanded: $model.isTOCDiagnosticsExpanded) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                ForEach(Array(model.tocDiagnosticMessages.enumerated()), id: \.offset) { _, message in
+                                    Text(message)
                                         .font(.footnote)
                                         .foregroundStyle(.secondary)
                                         .textSelection(.enabled)
                                 }
                             }
-                            ForEach(model.toc) { item in
-                            let isCurrent = model.currentTOCIndex == item.id
-                            Button {
-                                isShowingTOC = false
-                                model.jump(to: item)
-                            } label: {
-                                HStack {
-                                    Text(item.title)
-                                        .foregroundStyle(isCurrent ? NoveliaStyle.brandGreen : .primary)
-                                        .fontWeight(isCurrent ? .semibold : .regular)
-                                        .padding(.leading, CGFloat(item.level) * 14)
-                                    Spacer()
-                                    if isCurrent {
-                                        Image(systemName: "book.fill")
-                                            .font(.caption)
-                                            .foregroundStyle(NoveliaStyle.brandGreen)
-                                    }
-                                }
-                            }
-                            .id(item.id)
-                            }
-                        }
-                        .onAppear {
-                            if let current = model.currentTOCIndex {
-                                proxy.scrollTo(current, anchor: .center)
-                            }
+                            .padding(.vertical, 4)
+                        } label: {
+                            Label("目录诊断说明（\(model.tocDiagnosticMessages.count)）", systemImage: "info.circle")
+                                .font(.footnote)
                         }
                     }
+                    }
+                    if model.toc.isEmpty {
+                        ContentUnavailableView("没有目录", systemImage: "list.bullet.rectangle",
+                                               description: Text(model.tocNotice ?? "本书未提供目录。"))
+                    }
+                    ForEach(model.toc) { item in
+                        let isCurrent = model.currentTOCIndex == item.id
+                        Button {
+                            isShowingTOC = false
+                            model.jump(to: item)
+                        } label: {
+                            HStack {
+                                Text(item.title)
+                                    .foregroundStyle(isCurrent ? NoveliaStyle.brandGreen : .primary)
+                                    .fontWeight(isCurrent ? .semibold : .regular)
+                                    .padding(.leading, CGFloat(item.level) * 14)
+                                Spacer()
+                                if isCurrent {
+                                    Image(systemName: "book.fill")
+                                        .font(.caption)
+                                        .foregroundStyle(NoveliaStyle.brandGreen)
+                                }
+                            }
+                        }
+                        .id(item.id)
+                    }
+                }
+                .onAppear {
+                    if let current = model.currentTOCIndex { proxy.scrollTo(current, anchor: .center) }
                 }
             }
             .navigationTitle("目录")

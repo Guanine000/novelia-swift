@@ -38,6 +38,13 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published private(set) var toc: [ReadiumTOCItem] = []
     /// 目录兜底说明（改用正文标题生成的目录，或完全没有目录时的原因）。
     @Published private(set) var tocNotice: String?
+    @Published private(set) var contentDiagnostics = EPUBContentDiagnostics()
+    @Published private(set) var isScanningDiagnostics = false
+    @Published private(set) var diagnosticsComplete = false
+    @Published private(set) var diagnosticDocumentCount = 0
+    @Published private(set) var embeddedTOCCount = 0
+    @Published private(set) var tocReadFailed = false
+    @Published var isTOCDiagnosticsExpanded = false
     @Published private(set) var locator: Locator?
     @Published private(set) var style = EPUBReaderStyle()
     @Published private(set) var isDarkMode = false
@@ -75,6 +82,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
                 try WebDAVFileHash.sha256(url)
             }.value
             bookHash = hash
+            isTOCDiagnosticsExpanded = false
             let publication = try await Self.openPublication(url: url)
             self.publication = publication
             bookTitle = publication.metadata.title ?? url.deletingPathExtension().lastPathComponent
@@ -84,7 +92,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             var embedded: [ReadiumTOCItem] = []
             if case .success(let links) = await publication.tableOfContents() {
                 embedded = Self.flatten(links)
+            } else {
+                tocReadFailed = true
             }
+            embeddedTOCCount = embedded.count
             toc = await preferGeneratedTOCIfSparse(embedded, publication: publication)
             let initial = await savedLocator(publication: publication, hash: hash)
             try makeNavigator(initialLocation: initial)
@@ -94,6 +105,74 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             Self.logger.error("Readium EPUB open failed: \(String(describing: error), privacy: .public)")
             status = .failed(Self.describe(error))
         }
+    }
+
+    /// Read every local manifest resource, including unread chapters and independent assets.
+    /// Only actual failures are published. No external URL is fetched by this scan.
+    func scanBookDiagnostics() async {
+        guard !diagnosticsComplete, !isScanningDiagnostics, let publication else { return }
+        isScanningDiagnostics = true
+        defer { isScanningDiagnostics = false }
+        var seen = Set<String>()
+        let documents = (publication.readingOrder + publication.resources).filter { link in
+            let href = link.url().removingFragment().string
+            guard !href.lowercased().hasPrefix("http:"), !href.lowercased().hasPrefix("https:"), !href.hasPrefix("//") else { return false }
+            return seen.insert(href).inserted
+        }
+        diagnosticDocumentCount = documents.count
+        var report = EPUBContentDiagnostics()
+        for link in documents {
+            guard !Task.isCancelled else { return }
+            let href = link.url().removingFragment().string
+            guard let resource = publication.get(link) else {
+                report.recordFailure(path: href, reason: "未找到该资源。")
+                contentDiagnostics = report
+                continue
+            }
+            let isCSS = link.mediaType == .css || link.url().path.lowercased().hasSuffix(".css")
+            let isHTML = link.mediaType?.isHTML ?? ["xhtml", "html", "htm"].contains((link.url().path as NSString).pathExtension.lowercased())
+            let error: ReadError?
+            if isHTML || isCSS {
+                switch await resource.read().asString() {
+                case .success: error = nil
+                case .failure(let failure): error = failure
+                }
+            } else {
+                // Stream binary assets without retaining full images/fonts in memory.
+                switch await resource.stream(consume: { _ in }) {
+                case .success: error = nil
+                case .failure(let failure): error = failure
+                }
+            }
+            guard !Task.isCancelled else { return }
+            if let error {
+                if case .cancelled = error { return }
+                report.recordFailure(path: href, reason: Self.diagnosticReason(error))
+            } else {
+                report.recordSuccess(path: href)
+            }
+            contentDiagnostics = report
+        }
+        guard !Task.isCancelled else { return }
+        diagnosticsComplete = true
+    }
+
+    private static func diagnosticReason(_ error: ReadError) -> String {
+        switch error {
+        case .access: return "无法访问书内文件，文件可能缺失、损坏或受保护。"
+        case .decoding: return "内容无法解码，文本编码或压缩数据可能损坏。"
+        case .outOfMemory: return "资源过大，无法在可用内存中完成读取。"
+        case .unsupportedOperation: return "阅读器不支持该资源的读取方式。"
+        case .cancelled: return "读取已取消。"
+        }
+    }
+
+    var tocDiagnosticMessages: [String] {
+        var messages: [String] = []
+        if tocReadFailed { messages.append("Readium 内嵌目录读取失败。") }
+        if toc.count > embeddedTOCCount, let notice = tocNotice { messages.append(notice) }
+        messages.append(contentsOf: contentDiagnostics.messages)
+        return messages
     }
 
     private static func openPublication(url: URL) async throws -> Publication {

@@ -31,7 +31,7 @@
    - 分发可执行文件时，须让接收者以合理方式取得对应 MPL 覆盖源码；本次锁定的准确提交和取得方式见应用随附的 `ThirdPartyLicenses/INDEX.md`。
 2. **MIT（ReadiumZIPFoundation、SwiftSoup）**：保留版权与许可声明即可。
 3. 许可不授予 Yuedu / Yuedu-reader 的商标、Logo 或其他品牌素材使用权；清单中为说明软件来源而列出项目名称。本阅读器未使用其图标或 Logo。
-4. 书库导入时的 EPUB 元数据与封面提取也由 `EPUBContainer` 完成；App 已不再依赖 Readium swift-toolkit（2026-10-12 移除）。
+4. 书库导入时的 EPUB 元数据与封面提取由 `EPUBContainer` 完成；Readium swift-toolkit 3.11.0 用于实验性 EPUB 阅读器。Zip 内嵌 MiniZip / Info-ZIP 的独立许可与来源声明一并随包提供。
 
 ## 验证记录
 
@@ -40,4 +40,4 @@
 
 ## 应用级许可分发（2026-10-08 更新）
 
-上表只记录 EPUB 阅读器直接涉及的包。整个 App 的 **3 个锁定 Swift Package**、版本、许可证、源码地址及完整原始许可文件见 [`../Resources/ThirdPartyLicenses/INDEX.md`](../Resources/ThirdPartyLicenses/INDEX.md)。这些文本作为 Xcode 文件夹资源打入 IPA，并在“我的 → 开源许可”中可查看。YueduCoreText 的原始 `NOTICE`（含 Unicode License v3）一并提供。发布流水线检查全部文件确实进入 IPA。以上分发说明取代本文件此前仅列出阅读器三项依赖的简化说明。
+上表只记录 EPUB 阅读器直接涉及的包。整个 App 的 **10 个锁定 Swift Package**、版本、许可证、源码地址及完整原始许可文件见 [`../Resources/ThirdPartyLicenses/INDEX.md`](../Resources/ThirdPartyLicenses/INDEX.md)。这些文本作为 Xcode 文件夹资源打入 IPA，并在“我的 → 开源许可”中可查看。YueduCoreText 的原始 `NOTICE`（含 Unicode License v3）一并提供。发布流水线检查全部文件确实进入 IPA。

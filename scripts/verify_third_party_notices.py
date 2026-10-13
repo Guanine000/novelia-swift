@@ -77,6 +77,12 @@ def main() -> None:
     index = (NOTICES / "INDEX.md").read_text()
     assert "Unicode License v3" in index
     assert "Marcin Krzyzanowski" in index, "CryptoSwift attribution is required in the documentation"
+    minizip = NOTICES / "Zip-MiniZip-NOTICE.txt"
+    assert minizip.is_file() and "](Zip-MiniZip-NOTICE.txt)" in index, "Missing nested Zip license"
+    nested_notice = minizip.read_text()
+    for required in ["Copyright (C) 1990-2000 Info-ZIP", "2009-Jan-02", "Gilles Vollant", "Terry Thorsen",
+                     "Redistributions in binary form", "zlib", "Jean-loup Gailly", "Mark Adler"]:
+        assert required in nested_notice, f"Incomplete nested Zip notice: {required}"
     for identity, (name, license_id, checkout_license) in PACKAGES.items():
         pin = pins[identity]
         version = pin["state"]["version"]
