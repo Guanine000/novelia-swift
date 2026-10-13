@@ -158,7 +158,7 @@ struct DownloadedWebNovelTXTReader: View {
                 TXTDiagnosticLog.logger.info("TXT open requested; trace=\(trace, privacy: .public), source=open, mode=scroll, mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
                 let book = try await TXTBookCache.shared.book(at: url, rules: rules, source: .open, trace: trace)
                 guard !Task.isCancelled else { return }
-                if let saved = TXTReadingPosition.load(hash: book.contentHash) {
+                if let saved = ReadingPositionSync.txtPosition(hash: book.contentHash) {
                     chapterIndex = min(max(saved.chapter, 0), max(book.chapters.count - 1, 0))
                 }
                 contentHash = book.contentHash
@@ -172,8 +172,9 @@ struct DownloadedWebNovelTXTReader: View {
         }
         .onChange(of: chapterIndex) { _, newIndex in
             guard let contentHash else { return }
-            let saved = TXTReadingPosition.load(hash: contentHash) ?? TXTReadingPosition(chapter: newIndex)
-            saved.movingToChapter(newIndex).save(hash: contentHash)
+            let saved = ReadingPositionSync.txtPosition(hash: contentHash) ?? TXTReadingPosition(chapter: newIndex)
+            guard saved.chapter != newIndex || ReadingPositionSync.all()["txt:\(contentHash)"] == nil else { return }
+            ReadingPositionSync.recordTXT(hash: contentHash, position: saved.movingToChapter(newIndex))
         }
         .task(id: "\(url.path)|\(chapterIndex)|\(chapters?.count ?? 0)") {
             guard let chapters, chapters.indices.contains(chapterIndex) else { return }
@@ -259,13 +260,17 @@ private struct TXTPagedReader: View {
             guard !Task.isCancelled else { return }
             let hash = parsed.contentHash
             let source = TextChapterSource(bookTitle: title, units: units, layoutIdentity: identity)
-            let start = (TXTReadingPosition.load(hash: hash) ?? TXTReadingPosition(chapter: 0)).pagedStart(in: source)
+            let start = (ReadingPositionSync.txtPosition(hash: hash) ?? TXTReadingPosition(chapter: 0)).pagedStart(in: source)
             book = PagedTextBook(
                 source: source, startUnit: start.unit, startOffset: start.offset,
                 onPosition: { [weak source] unit, offset in
                     guard let source else { return }
-                    TXTReadingPosition(chapter: source.tocEntry(containingUnit: unit) ?? 0, unit: unit,
-                                       offset: offset, unitCount: source.chapterCount).save(hash: hash)
+                    let position = TXTReadingPosition(chapter: source.tocEntry(containingUnit: unit) ?? 0, unit: unit,
+                                                      offset: offset, unitCount: source.chapterCount)
+                    // Opening reports the restored page; re-stamping it would let this device
+                    // override a newer position from another device at the next sync.
+                    guard position != ReadingPositionSync.txtPosition(hash: hash) else { return }
+                    ReadingPositionSync.recordTXT(hash: hash, position: position)
                 })
         } catch {
             guard !Task.isCancelled else { return }

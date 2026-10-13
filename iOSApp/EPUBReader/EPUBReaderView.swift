@@ -777,6 +777,7 @@ struct EPUBReaderHost: View {
 /// this observed view when pagination, reading position, or cached pages change.
 private struct EPUBReaderPageSurface: View, Equatable {
     @ObservedObject var model: EPUBReaderModel
+    @Environment(\.openURL) private var openURL
     @Binding var showChrome: Bool
     let size: CGSize
 
@@ -794,7 +795,14 @@ private struct EPUBReaderPageSurface: View, Equatable {
             linkHitTest: { point in model.linkHit(at: point) },
             onNoteTap: { text in model.activeNote = EPUBNote(text: text) },
             onPlainLinkTap: { href in
-                model.openLink(href)
+                // Generated (online) chapters link web addresses: open them the way the scroll
+                // reader's links open. EPUB links keep resolving to chapters in the book.
+                if model.container == nil, let url = URL(string: href),
+                   ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                    openURL(url)
+                } else {
+                    model.openLink(href)
+                }
             },
             onCenterTap: { withAnimation(.easeInOut(duration: 0.15)) { showChrome.toggle() } },
             selectionRangeAt: { point in model.selectionRange(at: point) },

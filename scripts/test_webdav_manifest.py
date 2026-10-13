@@ -24,10 +24,12 @@ code += r'''
   manifest.blockedTags = ["标签": SyncedBlockedTag(blocked: true, updatedAt: Date(timeIntervalSince1970: 100))]
   manifest.fonts = ["hash": SyncedImportedFont(hash: "hash", format: "ttf", deleted: false, updatedAt: Date(timeIntervalSince1970: 100))]
   manifest.positions = ["web:a": SyncedReadingPosition(chapterIndex: 2, fraction: nil, updatedAt: Date(timeIntervalSince1970: 100))]
+  manifest.positions["txt:h"] = SyncedReadingPosition(chapterIndex: 4, fraction: nil, updatedAt: Date(timeIntervalSince1970: 100), chapterOffset: 80, unit: 9, unitCount: 120)
   let roundtrip = try JSONDecoder().decode(WebDAVManifest.self, from: JSONEncoder().encode(manifest))
   precondition(roundtrip.blockedTags == manifest.blockedTags, "blocked tags round-trip")
   precondition(roundtrip.fonts?["hash"]?.format == "ttf", "fonts round-trip")
   precondition(roundtrip.positions == manifest.positions, "positions round-trip")
+  precondition(roundtrip.positions["txt:h"]?.unit == 9, "TXT paged unit round-trips")
   print("WebDAV manifest passed: legacy decode and synced record round-trip")
  }
 }

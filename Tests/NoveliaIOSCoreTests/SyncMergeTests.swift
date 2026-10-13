@@ -94,6 +94,38 @@ final class SyncMergeTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(SyncedReadingPosition.self, from: JSONEncoder().encode(current)), current)
     }
 
+    /// TXT positions (`txt:<hash>`) add `unit` and `unitCount`. Positions written before them
+    /// still decode, the new fields round-trip, and a decoder that predates them (shape of
+    /// 0.12.0 (52) and older) reads the same JSON without failing.
+    func testTXTPositionFieldsAreBackwardCompatible() throws {
+        let earlier = try JSONDecoder().decode(SyncedReadingPosition.self,
+                                               from: Data(#"{"chapterIndex":7,"updatedAt":100,"chapterOffset":40}"#.utf8))
+        XCTAssertNil(earlier.unit)
+        XCTAssertNil(earlier.unitCount)
+        let txt = SyncedReadingPosition(chapterIndex: 7, fraction: nil, updatedAt: Date(timeIntervalSince1970: 300),
+                                        chapterOffset: 512, unit: 19, unitCount: 1_802)
+        let data = try JSONEncoder().encode(["txt:abc": txt, "web:n": SyncedReadingPosition(chapterIndex: 2, fraction: nil, updatedAt: Date(timeIntervalSince1970: 1))])
+        XCTAssertEqual(try JSONDecoder().decode([String: SyncedReadingPosition].self, from: data)["txt:abc"], txt)
+
+        struct OlderPosition: Codable, Equatable {
+            var chapterIndex: Int?
+            var fraction: Double?
+            var updatedAt: Date
+            var chapterOffset: Int?
+        }
+        let older = try JSONDecoder().decode([String: OlderPosition].self, from: data)
+        XCTAssertEqual(older["txt:abc"]?.chapterIndex, 7, "older versions ignore unit fields")
+        XCTAssertEqual(older["web:n"]?.chapterIndex, 2)
+
+        // A newer TXT position from another device wins; a local one is never removed.
+        let merged = SyncedReadingPosition.merged(
+            ["txt:abc": SyncedReadingPosition(chapterIndex: 3, fraction: nil, updatedAt: Date(timeIntervalSince1970: 200)),
+             "txt:local": SyncedReadingPosition(chapterIndex: 1, fraction: nil, updatedAt: Date(timeIntervalSince1970: 200))],
+            ["txt:abc": txt])
+        XCTAssertEqual(merged["txt:abc"], txt)
+        XCTAssertNotNil(merged["txt:local"], "a remote manifest without the key (older uploader) keeps the local position")
+    }
+
     func testManifestRecordsRoundTrip() throws {
         let value = SyncedReaderBackground(mode: "color", color: "112233", portraitHash: "p", landscapeHash: nil,
                                            updatedAt: Date(timeIntervalSince1970: 300))

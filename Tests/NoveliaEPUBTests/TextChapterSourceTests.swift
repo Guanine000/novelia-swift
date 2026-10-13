@@ -159,7 +159,7 @@ final class TextChapterSourceTests: XCTestCase {
         let suite = "TXTReadingPosition-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        XCTAssertEqual(TXTReadingPosition.key(hash: "abc"), "txtReadingPosition.v1.abc")
+        XCTAssertEqual(TXTReadingPosition.legacyKey(hash: "abc"), "txtReadingPosition.v1.abc")
         let units = TextChapterSource.units(lazilySplitting: (0..<5).map {
             TextChapterBody(title: "第\($0)章", subtitle: nil, body: String(repeating: "段落内容\n", count: $0 == 2 ? 6_000 : 10))
         })
@@ -168,8 +168,9 @@ final class TextChapterSourceTests: XCTestCase {
         XCTAssertGreaterThan(book.firstUnit(ofTOCEntry: 3)! - chapter2, 1, "chapter 2 spans several units")
 
         let paged = TXTReadingPosition(chapter: 2, unit: chapter2 + 1, offset: 40, unitCount: book.chapterCount)
-        paged.save(hash: "abc", defaults: defaults)
-        let loaded = try XCTUnwrap(TXTReadingPosition.load(hash: "abc", defaults: defaults))
+        // A 0.12.0 (52) record in the old local key is still read.
+        defaults.set(try JSONEncoder().encode(paged), forKey: TXTReadingPosition.legacyKey(hash: "abc"))
+        let loaded = try XCTUnwrap(TXTReadingPosition.legacy(hash: "abc", defaults: defaults))
         XCTAssertEqual(loaded, paged)
         XCTAssertEqual(loaded.pagedStart(in: book).unit, chapter2 + 1)
         XCTAssertEqual(loaded.pagedStart(in: book).offset, 40)
@@ -205,5 +206,42 @@ extension TextChapterSourceTests {
         // an -O build of the same code measured eager 143 ms vs lazy 4.8 ms. Print only.
         print("TXTUNITS chapters=1675 eager=\(eager) units=\(eagerCount) lazy=\(lazy) units=\(lazyCount)")
         XCTAssertEqual(lazyCount, eagerCount)
+    }
+}
+
+extension TextChapterSourceTests {
+    func testOnlineURLsBecomeEscapedLinks() {
+        let text = "见 https://n.novelia.cc/novel/a?x=1&y=<2> 与 ftp://host/f 以及 http://例子.测试/路径"
+        let html = TextChapterXHTML.document(TextChapterContent(title: nil, subtitle: nil,
+            paragraphs: [TextChapterParagraph(text: text)], linksURLs: true))
+        XCTAssertTrue(html.contains(#"<a href="https://n.novelia.cc/novel/a?x=1&amp;y="#), html)
+        XCTAssertFalse(html.contains("<2>"))
+        XCTAssertFalse(html.contains("<a href=\"ftp"), "only http(s) links")
+        XCTAssertTrue(html.contains("ftp://host/f"))
+        let plain = TextChapterXHTML.document(TextChapterContent(title: nil, subtitle: nil, paragraphs: [TextChapterParagraph(text: text)]))
+        XCTAssertFalse(plain.contains("<a "), "TXT keeps URLs as text")
+    }
+
+    /// A linked URL lays out as a tappable plain link region on its page.
+    func testLinkRegionHitsURL() async throws {
+        let url = "https://n.novelia.cc/forum/123"
+        let book = TextChapterSource(bookTitle: "在线", units: [.init(tocTitle: "第一话") {
+            TextChapterContent(title: "第一话", subtitle: nil, paragraphs: [TextChapterParagraph(text: "公告：\(url) 请阅读。")], linksURLs: true)
+        }])
+        let pages = EPUBPageBook(generation: 1)
+        try await pages.layoutChapter(0, container: book, config: EPUBLayoutTests.readerConfig(workarounds: true))
+        let id = EPUBPageID(generation: 1, spineIndex: 0, pageIndex: 0)
+        let lists = pages.displayLists(spineIndex: 0)
+        let rect = try XCTUnwrap(lists[0].items.compactMap { item -> CGRect? in
+            if case .text(let run) = item, run.text.contains("novelia") { return run.rect.rawValue } else { return nil }
+        }.first)
+        let insets = EPUBLayoutTests.readerConfig(workarounds: true).contentInsets
+        var hit: String?
+        for dx in stride(from: CGFloat(4), to: rect.width, by: 8) where hit == nil {
+            for point in [CGPoint(x: rect.minX + dx, y: rect.midY), CGPoint(x: rect.minX + dx + insets.left, y: rect.midY + insets.top)] where hit == nil {
+                hit = pages.linkRegion(at: point, for: id)?.href
+            }
+        }
+        XCTAssertEqual(hit, url)
     }
 }

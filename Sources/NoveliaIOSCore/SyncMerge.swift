@@ -5,6 +5,7 @@ import Foundation
 
 struct SyncedReadingPosition: Codable, Equatable {
     /// Web novels: chapter index. EPUBs: spine index (absent before offsets were stored).
+    /// TXT (`txt:<hash>`): chapter index under the reader's chapter rules.
     var chapterIndex: Int?
     /// EPUBs: progress through the whole book, kept for older app versions.
     var fraction: Double?
@@ -12,6 +13,10 @@ struct SyncedReadingPosition: Codable, Equatable {
     /// EPUBs: UTF-16 offset of the page's first text in the chapter source, which
     /// survives re-pagination after font or layout changes.
     var chapterOffset: Int? = nil
+    /// TXT only: paged unit and unit count; `chapterOffset` is then the offset in that unit.
+    /// Older app versions ignore both when decoding.
+    var unit: Int? = nil
+    var unitCount: Int? = nil
 
     /// A remote position replaces the local one when it is at least as recent.
     static func merged(_ local: [String: Self], _ remote: [String: Self]) -> [String: Self] {

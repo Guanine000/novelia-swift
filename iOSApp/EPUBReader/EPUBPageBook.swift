@@ -43,6 +43,8 @@ struct EPUBLayoutContext {
     /// Stable identity of the book content (EPUB file hash, TXT hash + rules). `nil` keeps the
     /// layout private to this page book: it is still de-duplicated but never cached.
     var bookID: String?
+    /// "epub", "txt" or "online": the log line prefix and `kind` field.
+    var kind = "epub"
     var trace = "00000000"
     var reason: EPUBLayoutReason = .first
     var totalSpine = 0
@@ -83,9 +85,10 @@ final class EPUBPageBook {
                        readerCSS: String? = nil, context: EPUBLayoutContext = EPUBLayoutContext()) async throws {
         let start = ContinuousClock.now
         let book = DiagnosticContext.bookTag(context.bookID ?? privateBookID)
+        let label = EPUBLayoutLog.label(kind: context.kind)
         let fields = "book=\(book), trace=\(context.trace), gen=\(generation), spine=\(spineIndex), totalSpine=\(context.totalSpine), currentSpine=\(context.currentSpine), reason=\(context.reason.rawValue)"
         if completedChapters.contains(spineIndex) {
-            EPUBLayoutLog.logger.info("EPUB chapter layout reused; \(fields, privacy: .public), pages=\(self.pageCount(spineIndex: spineIndex), privacy: .public), cacheHit=true, level=book, elapsedMs=0, thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+            EPUBLayoutLog.logger.info("\(label, privacy: .public) chapter layout reused; \(fields, privacy: .public), pages=\(self.pageCount(spineIndex: spineIndex), privacy: .public), cacheHit=true, level=book, elapsedMs=0, thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
             return
         }
         var config = config
@@ -122,9 +125,9 @@ final class EPUBPageBook {
             let elapsed = EPUBLayoutLog.milliseconds(since: start)
             switch outcome {
             case .executed:
-                EPUBLayoutLog.logger.info("EPUB chapter laid out; \(fields, privacy: .public), pages=\(layout.pages.count, privacy: .public), cacheHit=false, elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+                EPUBLayoutLog.logger.info("\(label, privacy: .public) chapter laid out; \(fields, privacy: .public), pages=\(layout.pages.count, privacy: .public), cacheHit=false, elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
             case .inflight, .memory:
-                EPUBLayoutLog.logger.info("EPUB chapter layout reused; \(fields, privacy: .public), pages=\(layout.pages.count, privacy: .public), cacheHit=true, level=\(outcome.rawValue, privacy: .public), elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+                EPUBLayoutLog.logger.info("\(label, privacy: .public) chapter layout reused; \(fields, privacy: .public), pages=\(layout.pages.count, privacy: .public), cacheHit=true, level=\(outcome.rawValue, privacy: .public), elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
             }
         } catch {
             let failure = EPUBLayoutLog.failure(error)
@@ -132,9 +135,9 @@ final class EPUBPageBook {
             if failure.kind == "cancelled" {
                 // A cancelled request keeps no partial pages: they may belong to a layout that stopped early.
                 if !completedChapters.contains(spineIndex) { chapters[spineIndex] = nil }
-                EPUBLayoutLog.logger.info("EPUB chapter layout cancelled; \(fields, privacy: .public), elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+                EPUBLayoutLog.logger.info("\(label, privacy: .public) chapter layout cancelled; \(fields, privacy: .public), elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
             } else {
-                EPUBLayoutLog.logger.error("EPUB chapter layout failed; \(fields, privacy: .public), error=\(failure.kind, privacy: .public), code=\(failure.code, privacy: .public), elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+                EPUBLayoutLog.logger.error("\(label, privacy: .public) chapter layout failed; \(fields, privacy: .public), error=\(failure.kind, privacy: .public), code=\(failure.code, privacy: .public), elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
             }
             tally?.logSummary(spineIndex: spineIndex)
             throw error
@@ -353,6 +356,15 @@ enum EPUBLayoutLog {
         false
         #endif
     }()
+
+    /// Log line prefix for a book kind; TXT and online chapters are not EPUB.
+    static func label(kind: String) -> String {
+        switch kind {
+        case "txt": "TXT"
+        case "online": "Online"
+        default: "EPUB"
+        }
+    }
 
     static func milliseconds(since start: ContinuousClock.Instant) -> Int {
         DiagnosticContext.milliseconds(since: start)
