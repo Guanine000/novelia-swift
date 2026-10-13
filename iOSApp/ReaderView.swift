@@ -192,6 +192,13 @@ struct ReaderView: View {
                     .accessibilityLabel("章节目录")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button { settings.pagedTextReading = true } label: {
+                        Image(systemName: "book.pages")
+                            .foregroundStyle(readerPrimaryText)
+                    }
+                    .accessibilityLabel("分页阅读")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button(action: toggleBookmark) {
                         Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
                             .foregroundStyle(NoveliaStyle.brandGreen)
@@ -219,9 +226,6 @@ struct ReaderView: View {
                             }
                         }
                         Divider()
-                        Button("分页阅读", systemImage: "book.pages") {
-                            settings.pagedTextReading = true
-                        }
                         Button("缩小字号", systemImage: "textformat.size.smaller") {
                             settings.adjustFontSize(by: -1)
                         }
@@ -584,7 +588,7 @@ private struct OnlinePagedReader: View {
 
     var body: some View {
         // A display-mode or source change regenerates every chapter: reopen at the chapter start.
-        EPUBReaderView(bookURL: nil, textBook: makeBook(), accessory: AnyView(menu))
+        EPUBReaderView(bookURL: nil, textBook: makeBook(), accessory: AnyView(HStack(spacing: 12) { scrollButton; menu }))
             .id("\(modeRaw)|\(translationSourceRaw)")
     }
 
@@ -614,6 +618,15 @@ private struct OnlinePagedReader: View {
         Task { await readingHistory.recordRead(novel: novel, chapterId: chapterID, account: auth.username) }
     }
 
+    /// Same control and place as the TXT paged reader.
+    private var scrollButton: some View {
+        Button { settings.pagedTextReading = false } label: {
+            Image(systemName: "scroll")
+                .frame(width: 36, height: 36)
+        }
+        .accessibilityLabel("滚动阅读")
+    }
+
     private var menu: some View {
         Menu {
             Picker("显示内容", selection: $modeRaw) {
@@ -629,7 +642,6 @@ private struct OnlinePagedReader: View {
                     toggleBookmark(currentChapterID)
                 }
             }
-            Button("滚动阅读", systemImage: "scroll") { settings.pagedTextReading = false }
         } label: {
             Image(systemName: "ellipsis.circle")
                 .frame(width: 36, height: 36)
