@@ -114,6 +114,16 @@ final class WebDAVSyncPlannerTests: XCTestCase {
         XCTAssertEqual(Set(kept.keys), ["web:a", "epub:\(hash("a"))", "txt:\(hash("b"))"])
     }
 
+    func testReferencedBlobsCoverBooksBackgroundsAndLiveFonts() {
+        var manifest = WebDAVManifest()
+        manifest.webBooks = [remote(web("a", at: 1), hashes: ["a"])]
+        manifest.wenkuBooks = [remote(wenku(UUID(), at: 1), hashes: ["b", "c"])]
+        manifest.backgrounds = ["dark": background(at: 1, portrait: hash("d"), landscape: hash("e")), "light": background(at: 1)]
+        manifest.fonts = [hash("f"): font(hash("f")), hash("9"): font(hash("9"), deleted: true)]
+        XCTAssertEqual(WebDAVSyncPlanner.referencedBlobs(in: manifest), Set(["a", "b", "c", "d", "e", "f"].map { hash(Character($0)) }),
+                       "a deleted font's blob may never have been uploaded")
+    }
+
     // MARK: 阅读背景
 
     private func background(at seconds: TimeInterval, portrait: String? = nil, landscape: String? = nil) -> SyncedReaderBackground {

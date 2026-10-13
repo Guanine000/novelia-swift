@@ -79,6 +79,16 @@ enum WebDAVSyncPlanner {
         LibraryOrganizer.uniqueRecords(books, id: { $0.record.id }, date: { $0.record.syncTimestamp })
     }
 
+    /// 清单引用的全部 blob：书籍文件、背景图片与未删除的字体。
+    static func referencedBlobs(in manifest: WebDAVManifest) -> Set<String> {
+        var hashes = Set((manifest.webBooks.flatMap(\.assets) + manifest.wenkuBooks.flatMap(\.assets)).map(\.hash))
+        for background in (manifest.backgrounds ?? [:]).values {
+            hashes.formUnion([background.portraitHash, background.landscapeHash].compactMap { $0 })
+        }
+        hashes.formUnion((manifest.fonts ?? [:]).values.filter { !$0.deleted }.map(\.hash))
+        return hashes
+    }
+
     /// 只保留清单中仍有书籍的阅读位置：网络小说按 id，EPUB/TXT 按文件哈希。
     static func positionsToSync(_ positions: [String: SyncedReadingPosition],
                                 in manifest: WebDAVManifest) -> [String: SyncedReadingPosition] {

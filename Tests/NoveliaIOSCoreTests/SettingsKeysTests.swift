@@ -20,9 +20,9 @@ final class SettingsKeysTests: XCTestCase {
         XCTAssertEqual(SettingsKey.bookmarks(novelID: "syosetu/n1"), "bookmarks.syosetu/n1")
         XCTAssertEqual([SettingsKey.WebDAV.enabled, SettingsKey.WebDAV.address, SettingsKey.WebDAV.username,
                         SettingsKey.WebDAV.syncBooks, SettingsKey.WebDAV.syncTags, SettingsKey.WebDAV.syncBackgrounds,
-                        SettingsKey.WebDAV.syncFonts],
+                        SettingsKey.WebDAV.syncFonts, SettingsKey.WebDAV.fileHashes],
                        ["webdav.enabled", "webdav.address", "webdav.username", "webdav.syncBooks", "webdav.syncTags",
-                        "webdav.syncBackgrounds", "webdav.syncFonts"])
+                        "webdav.syncBackgrounds", "webdav.syncFonts", "webdav.fileHashes.v1"])
         XCTAssertEqual(ReadingProgressStore.chapterKey(novelID: "syosetu/n1"), "progress.syosetu/n1")
         XCTAssertEqual(ReadingProgressStore.timeKey(novelID: "syosetu/n1"), "progressTime.syosetu/n1")
     }
