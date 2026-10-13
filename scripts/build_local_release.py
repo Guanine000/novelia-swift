@@ -5,6 +5,7 @@ Does not change versions, commit, push or publish. Update the project version fi
 Existing output directories are rejected so previously delivered builds stay immutable.
 """
 import argparse
+import base64
 import hashlib
 import json
 from pathlib import Path
@@ -14,6 +15,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import urllib.request
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +31,52 @@ def run(command, *, cwd=ROOT, log=None):
             raise RuntimeError(f"Check/build failed; see {log.name}")
     else:
         subprocess.run(command, cwd=cwd, check=True)
+
+
+NPM_REGISTRY = "https://registry.npmjs.org"
+READIUM_SCRIPTS_LOCK = "Sources/Navigator/EPUB/Scripts/pnpm-lock.yaml"
+MODIFIED_DATE = re.compile(r'static let modifiedDate = "(\d{4}-\d{2}-\d{2})"')
+
+
+def modified_date(settings_source: str) -> str:
+    """The GPL modification date shown in the app's licence screen."""
+    match = MODIFIED_DATE.search(settings_source)
+    if not match:
+        raise RuntimeError("SettingsViews.swift has no modifiedDate")
+    return match.group(1)
+
+
+def npm_packages(lockfile: str) -> list[tuple[str, str, str]]:
+    """(name, version, integrity) of every non-dev package in a pnpm v6 lockfile."""
+    packages = lockfile[lockfile.index("\npackages:"):]
+    result = []
+    for entry in re.split(r"\n  (?=/)", packages)[1:]:
+        if not re.search(r"\n    dev: false", entry):
+            continue
+        name, version = re.match(r"/(.+)@([^@:]+):", entry.strip()).groups()
+        integrity = re.search(r"integrity: (sha512-[A-Za-z0-9+/=]+)", entry).group(1)
+        result.append((name, version, integrity))
+    return result
+
+
+def matches_integrity(data: bytes, integrity: str) -> bool:
+    algorithm, expected = integrity.split("-", 1)
+    return algorithm == "sha512" and base64.b64encode(hashlib.sha512(data).digest()).decode() == expected
+
+
+def npm_tarball(name: str, version: str, integrity: str, cache: Path) -> Path:
+    """The published npm tarball, downloaded once and accepted only if it matches the lockfile."""
+    cache.mkdir(parents=True, exist_ok=True)
+    path = cache / (hashlib.sha256(integrity.encode()).hexdigest()[:24] + ".tgz")
+    if path.exists() and matches_integrity(path.read_bytes(), integrity):
+        return path
+    url = f"{NPM_REGISTRY}/{name}/-/{name.rsplit('/', 1)[-1]}-{version}.tgz"
+    with urllib.request.urlopen(url, timeout=60) as response:
+        data = response.read()
+    if not matches_integrity(data, integrity):
+        raise RuntimeError(f"npm tarball does not match the lockfile integrity: {name}@{version}")
+    path.write_bytes(data)
+    return path
 
 
 def git(*args, cwd=ROOT):
@@ -104,6 +152,10 @@ def main():
     status = git("status", "--porcelain=v1")
     if status and not args.allow_dirty:
         parser.error("Worktree is dirty; commit first or explicitly use --allow-dirty")
+    commit_date = git("log", "-1", "--format=%cd", "--date=format:%Y-%m-%d")
+    shown_date = modified_date((ROOT / "iOSApp/SettingsViews.swift").read_text())
+    if not status and shown_date != commit_date:
+        parser.error(f"GPL modification date {shown_date} in SettingsViews.swift must equal the commit date {commit_date}")
     out = (args.output or ROOT / f"build/local-releases/{version}-{build}").resolve()
     if not out.is_relative_to((ROOT / "build").resolve()):
         parser.error("Output must be under the ignored repository build/ directory")
@@ -158,6 +210,14 @@ def main():
                 names = subprocess.check_output(["git", "ls-files", "-z"], cwd=checkout).decode().split("\0")
                 for relative in filter(None, names):
                     archive.add(checkout / relative, arcname=name + "/" + relative, recursive=False)
+            # Readium's navigator scripts are minified bundles; ship the npm packages they were built
+            # from (the lockfile's production set, integrity-checked) as their corresponding source.
+            toolkit_pins = [pin for pin in pins if pin["identity"] == "swift-toolkit"]
+            if toolkit_pins:
+                toolkit = checkouts / toolkit_pins[0]["location"].rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
+                for name, version, integrity in npm_packages((toolkit / READIUM_SCRIPTS_LOCK).read_text()):
+                    tarball = npm_tarball(name, version, integrity, ROOT / "build/npm-cache")
+                    archive.add(tarball, arcname=f"swift-toolkit-npm-sources/{name}-{version}.tgz", recursive=False)
             archive.add(ROOT / NOTICES, arcname="ThirdPartyLicenses")
             archive.add(ROOT / PIN_FILE, arcname="Package.resolved")
         for file in [source, dependencies]:

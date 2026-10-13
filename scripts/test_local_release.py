@@ -11,6 +11,39 @@ spec.loader.exec_module(release)
 
 
 class LocalReleaseTests(unittest.TestCase):
+    def test_modified_date_read_from_settings(self):
+        self.assertEqual(release.modified_date('    static let modifiedDate = "2026-10-13"\n'), "2026-10-13")
+        with self.assertRaises(RuntimeError):
+            release.modified_date('static let modifiedDate = "13/10/2026"')
+        settings = (Path(__file__).resolve().parents[1] / "iOSApp/SettingsViews.swift").read_text()
+        self.assertRegex(release.modified_date(settings), r"^\d{4}-\d{2}-\d{2}$")
+
+    def test_npm_production_packages_and_integrity(self):
+        lock = """lockfileVersion: '6.0'
+
+packages:
+
+  /@juggle/resize-observer@3.4.0:
+    resolution: {integrity: sha512-AAAA}
+    dev: false
+
+  /babel-loader@8.4.1(@babel/core@7.29.7):
+    resolution: {integrity: sha512-BBBB}
+    dev: true
+
+  /approx-string-match@1.1.0:
+    resolution: {integrity: sha512-CCCC}
+    dev: false
+"""
+        self.assertEqual(release.npm_packages(lock), [("@juggle/resize-observer", "3.4.0", "sha512-AAAA"),
+                                                      ("approx-string-match", "1.1.0", "sha512-CCCC")])
+        import base64, hashlib
+        data = b"package"
+        integrity = "sha512-" + base64.b64encode(hashlib.sha512(data).digest()).decode()
+        self.assertTrue(release.matches_integrity(data, integrity))
+        self.assertFalse(release.matches_integrity(data + b"!", integrity))
+        self.assertFalse(release.matches_integrity(data, "sha1-" + integrity[7:]))
+
     def test_matching_debug_and_release(self):
         text = "MARKETING_VERSION = 0.11.3; CURRENT_PROJECT_VERSION = 49;\n" * 2
         self.assertEqual(release.project_version(text), ("0.11.3", "49"))

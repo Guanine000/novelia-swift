@@ -85,7 +85,7 @@ python3 -I scripts/build_local_release.py --simulator 'iPhone 18 Pro Max'
 python3 -I scripts/build_local_release.py --allow-dirty --simulator DFDA05C7-BA73-43B8-B711-511113CA3BCB
 ```
 
-脚本运行 Swift 包逻辑／排版测试（不运行模拟器 UI 测试）、四项离线回归、Release 真机构建、原始依赖许可与包内资源核对、IPA 隐私检查，生成未签名 IPA、完整对应源码、锁定依赖完整源码／许可、BUILD.json 和 SHA256SUMS。Xcode 派生数据默认放在系统临时目录下的新目录（成功后删除，失败时保留供排查）；Release 二进制会记录目标文件路径，`--derived-data` 不得位于用户主目录下，否则 IPA 隐私检查会失败。产物位于忽略的 `build/local-releases/<版本>-<构建号>/`；只有出现 SUCCESS 才可分发。输出目录已存在时拒绝覆盖，源码在构建期间变化也会失败。脚本不修改版本、不提交、不推送、不发布。
+脚本运行 Swift 包逻辑／排版测试（不运行模拟器 UI 测试）、四项离线回归、Release 真机构建、原始依赖许可与包内资源核对、IPA 隐私检查，生成未签名 IPA、完整对应源码、锁定依赖完整源码／许可（含 Readium 阅读器脚本所用 npm 包的原始发布包，按锁定文件 SHA-512 校验）、BUILD.json 和 SHA256SUMS。开源许可页的 GPL 修改日期（`SettingsViews.swift` 的 `modifiedDate`）必须等于发布提交的日期，否则脚本拒绝构建。Xcode 派生数据默认放在系统临时目录下的新目录（成功后删除，失败时保留供排查）；Release 二进制会记录目标文件路径，`--derived-data` 不得位于用户主目录下，否则 IPA 隐私检查会失败。产物位于忽略的 `build/local-releases/<版本>-<构建号>/`；只有出现 SUCCESS 才可分发。输出目录已存在时拒绝覆盖，源码在构建期间变化也会失败。脚本不修改版本、不提交、不推送、不发布。
 
 分发时一并提供 IPA、source.tar.gz、dependencies.tar.gz、BUILD.json 与 SHA256SUMS；未签名 IPA 需接收者自行重签。目录中的构建／测试日志仅供本机排障，可能含开发环境路径，不是应用的隐私过滤日志，不作为发布附件。
 

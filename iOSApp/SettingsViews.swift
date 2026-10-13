@@ -412,6 +412,9 @@ private struct LogActivitySheet: UIViewControllerRepresentable {
 }
 
 private struct ThirdPartyLicensesView: View {
+    /// GPL-3.0 §5(a) modification date. scripts/build_local_release.py requires it to equal the
+    /// release commit's date, so update it with each release build.
+    static let modifiedDate = "2026-10-13"
     private let packages: [(name: String, version: String, license: String, file: String)] = [
         ("SwiftSoup", "2.13.7", "MIT", "SwiftSoup-LICENSE.txt"),
         ("YueduCoreText", "0.8.0", "MPL-2.0", "YueduCoreText-LICENSE.txt"),
@@ -439,7 +442,7 @@ private struct ThirdPartyLicensesView: View {
                 NavigationLink("GNU GPL-3.0-only 完整文本") {
                     licenseText("GPL-3.0-only.txt", title: "GNU GPL-3.0-only")
                 }
-                Text("本项目是参考 GPL-3.0-only 安卓客户端 nobYoQ/novelia 制作的 Swift iOS 移植版本，包含 iOS 平台实现及后续修改。上游版权声明：Copyright (C) 2026 Novelia Android contributors. 本 iOS 移植及新增部分：Copyright (C) 2026 Novelia iOS contributors。修改版本日期：2026-10-10。")
+                Text("本项目是参考 GPL-3.0-only 安卓客户端 nobYoQ/novelia 制作的 Swift iOS 移植版本，包含 iOS 平台实现及后续修改。上游版权声明：Copyright (C) 2026 Novelia Android contributors. 本 iOS 移植及新增部分：Copyright (C) 2026 Novelia iOS contributors。修改版本日期：\(Self.modifiedDate)。")
                 Link("查看对应版本的源码仓库", destination: URL(string: "https://github.com/Guanine000/novelia-swift")!)
                 Text("源码仓库公开可访问。Release 同时提供对应版本的完整源码及第三方许可材料。")
             }
