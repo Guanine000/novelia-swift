@@ -439,7 +439,7 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     private func layoutContext(_ reason: EPUBLayoutReason) -> EPUBLayoutContext {
-        EPUBLayoutContext(bookID: layoutBookID, trace: traceID, reason: reason,
+        EPUBLayoutContext(bookID: layoutBookID, kind: bookKind, trace: traceID, reason: reason,
                           totalSpine: source?.chapterCount ?? 0, currentSpine: location.spineIndex)
     }
 
@@ -503,7 +503,7 @@ final class EPUBReaderModel: ObservableObject {
         layoutBookID = (source as? TextChapterSource)?.layoutIdentity
         bookKind = layoutBookID == nil ? "online" : "txt"
         let startTime = ContinuousClock.now
-        EPUBLayoutLog.logger.info("EPUB open started; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), source=open, mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+        EPUBLayoutLog.logger.info("\(EPUBLayoutLog.label(kind: self.bookKind), privacy: .public) open started; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), source=open, mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
         defer { logOpenOutcome(stage: "layout", start: startTime, restored: offset != nil) }
         guard source.chapterCount > 0 else {
             isRestoringPosition = false
@@ -550,16 +550,16 @@ final class EPUBReaderModel: ObservableObject {
         let failure = lastLayoutFailure
         let mono = DiagnosticContext.monotonicMilliseconds()
         if Task.isCancelled || failure?.kind == "cancelled" {
-            EPUBLayoutLog.logger.info("EPUB open cancelled; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), elapsedMs=\(elapsed, privacy: .public), mono=\(mono, privacy: .public)")
+            EPUBLayoutLog.logger.info("\(EPUBLayoutLog.label(kind: self.bookKind), privacy: .public) open cancelled; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), elapsedMs=\(elapsed, privacy: .public), mono=\(mono, privacy: .public)")
         } else if case .failed = status {
             let failure = failure ?? ("other", 0)
-            EPUBLayoutLog.logger.error("EPUB open failed; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), stage=\(stage, privacy: .public), error=\(failure.kind, privacy: .public), code=\(failure.code, privacy: .public), elapsedMs=\(elapsed, privacy: .public), mono=\(mono, privacy: .public)")
+            EPUBLayoutLog.logger.error("\(EPUBLayoutLog.label(kind: self.bookKind), privacy: .public) open failed; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), stage=\(stage, privacy: .public), error=\(failure.kind, privacy: .public), code=\(failure.code, privacy: .public), elapsedMs=\(elapsed, privacy: .public), mono=\(mono, privacy: .public)")
         } else {
             let book = DiagnosticContext.bookTag(layoutBookID ?? "private-\(traceID)")
             let spine = source?.chapterCount ?? 0
             let toc = source?.toc.count ?? 0
             let pages = pageCount(spineIndex: location.spineIndex)
-            EPUBLayoutLog.logger.info("EPUB open succeeded; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), book=\(book, privacy: .public), totalSpine=\(spine, privacy: .public), toc=\(toc, privacy: .public), currentSpine=\(self.location.spineIndex, privacy: .public), currentChapterPages=\(pages, privacy: .public), restored=\(restored, privacy: .public), elapsedMs=\(elapsed, privacy: .public), mono=\(mono, privacy: .public)")
+            EPUBLayoutLog.logger.info("\(EPUBLayoutLog.label(kind: self.bookKind), privacy: .public) open succeeded; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), book=\(book, privacy: .public), totalSpine=\(spine, privacy: .public), toc=\(toc, privacy: .public), currentSpine=\(self.location.spineIndex, privacy: .public), currentChapterPages=\(pages, privacy: .public), restored=\(restored, privacy: .public), elapsedMs=\(elapsed, privacy: .public), mono=\(mono, privacy: .public)")
         }
     }
 

@@ -396,7 +396,7 @@ extension NovelChapter {
         if lacksTranslation(mode: mode, source: source) {
             paragraphs.append(TextChapterParagraph(text: "当前章节暂无\(source.title)译文。可在右上角菜单切换译源。", role: .note))
         }
-        return TextChapterContent(title: title, subtitle: novelTitle, paragraphs: paragraphs)
+        return TextChapterContent(title: title, subtitle: novelTitle, paragraphs: paragraphs, linksURLs: true)
     }
 }
 

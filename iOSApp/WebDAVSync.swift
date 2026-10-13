@@ -27,6 +27,22 @@ enum ReadingPositionSync {
 
     static func epubPosition(hash: String) -> SyncedReadingPosition? { all()["epub:\(hash)"] }
 
+    /// TXT positions shared by the scroll and paged readers, synced with the book's file hash.
+    static func recordTXT(hash: String, position: TXTReadingPosition) {
+        var positions = all()
+        positions["txt:\(hash)"] = SyncedReadingPosition(chapterIndex: position.chapter, fraction: nil, updatedAt: Date(),
+            chapterOffset: position.offset, unit: position.unit, unitCount: position.unitCount)
+        save(positions)
+    }
+
+    static func txtPosition(hash: String) -> TXTReadingPosition? {
+        if let synced = all()["txt:\(hash)"], let chapter = synced.chapterIndex {
+            return TXTReadingPosition(chapter: chapter, unit: synced.unit, offset: synced.chapterOffset, unitCount: synced.unitCount)
+        }
+        // 0.12.0 (52) test builds kept TXT positions in a local-only key.
+        return TXTReadingPosition.legacy(hash: hash)
+    }
+
     static func merge(_ remote: [String: SyncedReadingPosition], webBooks: [DownloadedWebNovel]) {
         var positions = all()
         let progress = ReadingProgressStore()
@@ -400,9 +416,9 @@ final class WebDAVSyncStore: ObservableObject {
                     manifest.wenkuBooks.append(saved)
                 }
                 let webKeys = Set(manifest.webBooks.map { "web:\($0.record.id)" })
-                let epubKeys = Set((manifest.webBooks.flatMap(\.assets) + manifest.wenkuBooks.flatMap(\.assets))
-                    .map { "epub:\($0.hash)" })
-                manifest.positions = ReadingPositionSync.all().filter { webKeys.contains($0.key) || epubKeys.contains($0.key) }
+                let assetHashes = (manifest.webBooks.flatMap(\.assets) + manifest.wenkuBooks.flatMap(\.assets)).map(\.hash)
+                let fileKeys = Set(assetHashes.map { "epub:\($0)" } + assetHashes.map { "txt:\($0)" })
+                manifest.positions = ReadingPositionSync.all().filter { webKeys.contains($0.key) || fileKeys.contains($0.key) }
             }
             if includesTags {
                 manifest.blockedTags = BlockedTagsStore.merged(BlockedTagsStore.shared.syncStates, manifest.blockedTags ?? [:])

@@ -40,6 +40,8 @@ struct TextChapterContent: Equatable {
     var title: String?
     var subtitle: String?
     var paragraphs: [TextChapterParagraph]
+    /// Online prose: http(s) URLs become links, as in the scroll reader.
+    var linksURLs = false
 }
 
 enum TextChapterXHTML {
@@ -78,7 +80,8 @@ enum TextChapterXHTML {
             case .secondary: attribute = " class=\"secondary\""
             case .note: attribute = " class=\"note\""
             }
-            body.append("<p\(attribute)>\(escape(paragraph.text))</p>")
+            let text = content.linksURLs ? linked(paragraph.text) : escape(paragraph.text)
+            body.append("<p\(attribute)>\(text)</p>")
         }
         return """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -86,6 +89,24 @@ enum TextChapterXHTML {
         \(body.joined(separator: "\n"))
         </body></html>
         """
+    }
+
+    /// Escapes text and wraps http(s) URLs in links. Only the detected URL becomes the href.
+    static func linked(_ text: String) -> String {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+            return escape(text)
+        }
+        let source = text as NSString
+        var result = ""
+        var cursor = 0
+        for match in detector.matches(in: text, range: NSRange(location: 0, length: source.length)) {
+            guard let url = match.url, ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+                  match.range.location >= cursor else { continue }
+            result += escape(source.substring(with: NSRange(location: cursor, length: match.range.location - cursor)))
+            result += "<a href=\"\(escape(url.absoluteString))\">\(escape(source.substring(with: match.range)))</a>"
+            cursor = match.range.location + match.range.length
+        }
+        return result + escape(source.substring(from: cursor))
     }
 
     /// Reader stylesheet for generated chapters. Colours follow the theme text colour.
@@ -100,6 +121,7 @@ enum TextChapterXHTML {
         p.subtitle { font-size: 0.75em; color: #3C8F68; text-indent: 0; margin: 0; }
         p.secondary { color: \(secondary); }
         p.note { color: \(secondary); font-size: 0.85em; text-indent: 0; text-align: center; margin: 1em 0; }
+        a { color: \(isLightText ? "#64A8F0" : "#1F6FC5"); text-decoration: underline; }
         """
     }
 
@@ -275,14 +297,11 @@ struct TXTReadingPosition: Codable, Equatable {
     var offset: Int?
     var unitCount: Int?
 
-    static func key(hash: String) -> String { "txtReadingPosition.v1.\(hash)" }
+    /// Local-only key used by 0.12.0 (52); positions now live in the synced reading positions.
+    static func legacyKey(hash: String) -> String { "txtReadingPosition.v1.\(hash)" }
 
-    static func load(hash: String, defaults: UserDefaults = .standard) -> TXTReadingPosition? {
-        defaults.data(forKey: key(hash: hash)).flatMap { try? JSONDecoder().decode(TXTReadingPosition.self, from: $0) }
-    }
-
-    func save(hash: String, defaults: UserDefaults = .standard) {
-        if let data = try? JSONEncoder().encode(self) { defaults.set(data, forKey: Self.key(hash: hash)) }
+    static func legacy(hash: String, defaults: UserDefaults = .standard) -> TXTReadingPosition? {
+        defaults.data(forKey: legacyKey(hash: hash)).flatMap { try? JSONDecoder().decode(TXTReadingPosition.self, from: $0) }
     }
 
     /// The scroll reader moved to `chapter`; a paged location inside it is kept.
