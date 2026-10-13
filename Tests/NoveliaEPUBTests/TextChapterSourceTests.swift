@@ -118,15 +118,92 @@ final class TextChapterSourceTests: XCTestCase {
         XCTAssertEqual(attempts, 2, "successful chapters are cached")
     }
 
-    func testTXTPositionIgnoredWhenUnitsChange() throws {
-        let suite = "TXTPagedPosition-\(UUID())"
+    /// Lazy units keep every paragraph exactly once, in order, cut only at line breaks.
+    func testLazyUnitsMatchTextAndCutAtLines() async throws {
+        let lines = (0..<900).map { "　　\($0)：" + Self.paragraph }
+        let body = lines.joined(separator: "\r\n") + "\n\n尾行"
+        let chapters = [TextChapterBody(title: "第一章", subtitle: "第一卷", body: body),
+                        TextChapterBody(title: "第二章", subtitle: nil, body: "短\n"),
+                        TextChapterBody(title: "空章", subtitle: nil, body: "")]
+        let units = TextChapterSource.units(lazilySplitting: chapters, maximumUTF8: 36_000)
+        let book = TextChapterSource(bookTitle: "测试", units: units)
+        XCTAssertGreaterThan(book.chapterCount, 4)
+        XCTAssertEqual(book.toc.map(\.title), ["第一章", "第二章", "空章"])
+        var paragraphs: [String] = []
+        for index in 0..<book.chapterCount {
+            let content = try await units[index].load()
+            XCTAssertEqual(content.title != nil, book.toc.contains { $0.spineIndex == index })
+            paragraphs += content.paragraphs.map(\.text)
+            XCTAssertLessThanOrEqual(content.paragraphs.reduce(0) { $0 + $1.text.utf8.count }, 36_000 + 400)
+        }
+        let expected = TextChapterXHTML.paragraphs(fromLines: body).map(\.text) + ["短"]
+        XCTAssertEqual(paragraphs, expected)
+        let first = try await units[0].load()
+        XCTAssertEqual(first.subtitle, "第一卷")
+    }
+
+    func testTOCLookupUsesUnitOrder() {
+        let units = TextChapterSource.units(lazilySplitting: (0..<500).map {
+            TextChapterBody(title: "第\($0)章", subtitle: nil, body: $0 % 7 == 0 ? String(repeating: "长段落内容\n", count: 4_000) : "短")
+        })
+        let book = TextChapterSource(bookTitle: "目录", units: units)
+        for unit in 0..<book.chapterCount {
+            XCTAssertEqual(book.tocEntry(containingUnit: unit), book.toc.lastIndex { ($0.spineIndex ?? .max) <= unit })
+        }
+        XCTAssertNil(TextChapterSource(bookTitle: "空", units: []).tocEntry(containingUnit: 0))
+    }
+
+    /// Scroll and paged readers share one record: a chapter change from scroll mode drops a
+    /// stale page, the same chapter keeps it, and a changed split falls back to the chapter.
+    func testReadingPositionSharedBetweenModes() throws {
+        let suite = "TXTReadingPosition-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let key = TXTPagedPosition.key(hash: "abc")
-        XCTAssertEqual(key, "txtPagedPosition.v1.abc")
-        TXTPagedPosition.save(TXTPagedPosition(unit: 4, offset: 120, unitCount: 10), key: key, defaults: defaults)
-        XCTAssertEqual(TXTPagedPosition.load(key: key, unitCount: 10, defaults: defaults),
-                       TXTPagedPosition(unit: 4, offset: 120, unitCount: 10))
-        XCTAssertNil(TXTPagedPosition.load(key: key, unitCount: 11, defaults: defaults))
+        XCTAssertEqual(TXTReadingPosition.key(hash: "abc"), "txtReadingPosition.v1.abc")
+        let units = TextChapterSource.units(lazilySplitting: (0..<5).map {
+            TextChapterBody(title: "第\($0)章", subtitle: nil, body: String(repeating: "段落内容\n", count: $0 == 2 ? 6_000 : 10))
+        })
+        let book = TextChapterSource(bookTitle: "共享", units: units)
+        let chapter2 = try XCTUnwrap(book.firstUnit(ofTOCEntry: 2))
+        XCTAssertGreaterThan(book.firstUnit(ofTOCEntry: 3)! - chapter2, 1, "chapter 2 spans several units")
+
+        let paged = TXTReadingPosition(chapter: 2, unit: chapter2 + 1, offset: 40, unitCount: book.chapterCount)
+        paged.save(hash: "abc", defaults: defaults)
+        let loaded = try XCTUnwrap(TXTReadingPosition.load(hash: "abc", defaults: defaults))
+        XCTAssertEqual(loaded, paged)
+        XCTAssertEqual(loaded.pagedStart(in: book).unit, chapter2 + 1)
+        XCTAssertEqual(loaded.pagedStart(in: book).offset, 40)
+        XCTAssertEqual(loaded.movingToChapter(2), paged, "scroll mode reopening the same chapter keeps the page")
+
+        let scrolled = loaded.movingToChapter(4)
+        XCTAssertEqual(scrolled, TXTReadingPosition(chapter: 4))
+        XCTAssertEqual(scrolled.pagedStart(in: book).unit, book.firstUnit(ofTOCEntry: 4))
+        XCTAssertNil(scrolled.pagedStart(in: book).offset)
+
+        var resplit = paged
+        resplit.unitCount = book.chapterCount + 3
+        XCTAssertEqual(resplit.pagedStart(in: book).unit, chapter2, "another split keeps only the chapter")
+        XCTAssertEqual(TXTReadingPosition(chapter: 99).pagedStart(in: book).unit, book.firstUnit(ofTOCEntry: 4))
+    }
+}
+
+extension TextChapterSourceTests {
+    /// Building paged units for a 1,675-chapter book: eager paragraph splitting (0.12.0 (51))
+    /// against the boundary scan used now. Both produce the same units here.
+    func testLargeBookUnitBuildTiming() {
+        let body = String(repeating: "　　月光透过窗棂洒在书桌上，她轻轻合上那本旧书，指尖还残留着纸页的温度。\n", count: 140)
+        let bodies = (1...1_675).map { TextChapterBody(title: "第\($0)章", subtitle: nil, body: body) }
+        let clock = ContinuousClock()
+        var eagerCount = 0, lazyCount = 0
+        let eager = clock.measure {
+            eagerCount = TextChapterSource.units(splitting: bodies.map {
+                TextChapterContent(title: $0.title, subtitle: nil, paragraphs: TextChapterXHTML.paragraphs(fromLines: $0.body))
+            }).count
+        }
+        let lazy = clock.measure { lazyCount = TextChapterSource.units(lazilySplitting: bodies).count }
+        // Package tests build without optimisation, where the byte scan's bounds checks dominate;
+        // an -O build of the same code measured eager 143 ms vs lazy 4.8 ms. Print only.
+        print("TXTUNITS chapters=1675 eager=\(eager) units=\(eagerCount) lazy=\(lazy) units=\(lazyCount)")
+        XCTAssertEqual(lazyCount, eagerCount)
     }
 }

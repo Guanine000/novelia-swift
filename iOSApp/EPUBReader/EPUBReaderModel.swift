@@ -3,6 +3,9 @@ import CoreText
 import SwiftUI
 import UIKit
 import YueduCoreText
+#if canImport(NoveliaIOSCore)
+import NoveliaIOSCore
+#endif
 
 /// 阅读器自己的排版偏好；字体名称来自设备当前可用的 UIFont 字体族。
 struct EPUBReaderStyle: Codable, Equatable {
@@ -215,7 +218,8 @@ final class EPUBReaderModel: ObservableObject {
     var viewportSize: CGSize = .zero {
         didSet {
             if oldValue != viewportSize, oldValue != .zero, status == .ready {
-                Task { await relayout(keepingCurrentSpine: true) }
+                let rotated = (oldValue.width > oldValue.height) != (viewportSize.width > viewportSize.height)
+                scheduleRelayout(rotated ? .rotate : .resize)
             }
         }
     }
@@ -237,10 +241,24 @@ final class EPUBReaderModel: ObservableObject {
         leafWidth / max(viewportSize.height, 1)
     }
 
+    /// The pending generation relayout; a newer one cancels it.
     private var relayoutTask: Task<Void, Never>?
+    private var openTask: Task<Void, Never>?
+    /// Neighbour prefetches by spine; cancelled when the reader moves away or the generation changes.
+    private var prefetchTasks: [Int: Task<Void, Never>] = [:]
+    /// TOC / link / seek / debug-jump layouts of the current generation.
+    private var layoutTasks: [UUID: Task<Void, Never>] = [:]
+    private var navigateTaskID: UUID?
+    /// Correlates this reader session's open, layout and close lines.
+    private(set) var traceID = DiagnosticContext.newTraceID()
+    /// Content identity that scopes shared layout results; `nil` for online chapters.
+    private var layoutBookID: String?
+    private var bookKind = "epub"
+    private let layoutCoordinator: EPUBLayoutCoordinator
     private static let styleDefaultsKey = ReaderSettings.epubStyleKey
 
-    init() {
+    init(layoutCoordinator: EPUBLayoutCoordinator = .shared) {
+        self.layoutCoordinator = layoutCoordinator
         EPUBLocalFonts.registerSavedFonts()
         if let data = UserDefaults.standard.data(forKey: Self.styleDefaultsKey),
            let saved = try? JSONDecoder().decode(EPUBReaderStyle.self, from: data) {
@@ -352,32 +370,113 @@ final class EPUBReaderModel: ObservableObject {
 
     // MARK: 打开
 
+    /// Starts opening once; the reader view calls this from `onAppear` and `close()` on disappear.
+    func start(url: URL) {
+        guard status == .idle, openTask == nil else { return }
+        openTask = Task { [weak self] in
+            await self?.open(url: url)
+            if !Task.isCancelled { self?.openTask = nil }
+        }
+    }
+
+    func start(textBook: PagedTextBook) {
+        guard status == .idle, openTask == nil else { return }
+        openTask = Task { [weak self] in
+            await self?.open(source: textBook.source, unit: textBook.startUnit,
+                             offset: textBook.startOffset, onPosition: textBook.onPosition)
+            if !Task.isCancelled { self?.openTask = nil }
+        }
+    }
+
+    /// The reader left the screen: stop every layout it started. Completed chapter layouts stay
+    /// in the shared coordinator cache for the next open of the same book.
+    func close() {
+        var cancelled = cancelLayoutTasks()
+        if let openTask {
+            openTask.cancel()
+            cancelled += 1
+            self.openTask = nil
+        }
+        if status == .opening { status = .idle }
+        EPUBLayoutLog.logger.info("EPUB reader closed; trace=\(self.traceID, privacy: .public), gen=\(self.generation, privacy: .public), cancelledTasks=\(cancelled, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+    }
+
+    /// Cancels the pending relayout, prefetches and navigation layouts; returns how many ran.
+    @discardableResult
+    private func cancelLayoutTasks() -> Int {
+        var count = 0
+        if let relayoutTask { relayoutTask.cancel(); count += 1 }
+        relayoutTask = nil
+        for task in prefetchTasks.values { task.cancel(); count += 1 }
+        prefetchTasks.removeAll()
+        for task in layoutTasks.values { task.cancel(); count += 1 }
+        layoutTasks.removeAll()
+        navigateTaskID = nil
+        return count
+    }
+
+    /// Runs a layout operation of the current generation so a relayout or close can cancel it.
+    @discardableResult
+    private func track(_ operation: @escaping @MainActor () async -> Void) -> UUID {
+        let id = UUID()
+        layoutTasks[id] = Task { [weak self] in
+            await operation()
+            self?.layoutTasks[id] = nil
+        }
+        return id
+    }
+
+    /// Replaces any pending relayout: the old generation's layouts are cancelled, not left to finish.
+    private func scheduleRelayout(_ reason: EPUBLayoutReason) {
+        guard source != nil, status != .idle, status != .opening else { return }
+        let cancelled = cancelLayoutTasks()
+        EPUBLayoutLog.logger.info("EPUB relayout scheduled; trace=\(self.traceID, privacy: .public), gen=\(self.generation, privacy: .public), reason=\(reason.rawValue, privacy: .public), cancelledTasks=\(cancelled, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+        relayoutTask = Task { [weak self] in
+            await self?.relayout(keepingCurrentSpine: true, reason: reason)
+            // A replacement always cancels this task first, so an uncancelled finish is still current.
+            if !Task.isCancelled { self?.relayoutTask = nil }
+        }
+    }
+
+    private func layoutContext(_ reason: EPUBLayoutReason) -> EPUBLayoutContext {
+        EPUBLayoutContext(bookID: layoutBookID, trace: traceID, reason: reason,
+                          totalSpine: source?.chapterCount ?? 0, currentSpine: location.spineIndex)
+    }
+
     func open(url: URL) async {
         status = .opening
         isRestoringPosition = true
+        bookKind = "epub"
         let start = ContinuousClock.now
         var stage = "hash"
-        EPUBLayoutLog.logger.info("EPUB open started")
-        defer { logOpenOutcome(stage: stage, start: start) }
+        var restored = false
+        EPUBLayoutLog.logger.info("EPUB open started; kind=epub, trace=\(self.traceID, privacy: .public), source=open, mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+        defer { logOpenOutcome(stage: stage, start: start, restored: restored) }
         do {
             let bookHash = try await Task.detached(priority: .utility) {
                 try WebDAVFileHash.sha256(url)
             }.value
+            try Task.checkCancellation()
             stage = "container"
             let container = try await EPUBContainer.open(fileURL: url)
+            try Task.checkCancellation()
             self.source = container
             openedBookHash = bookHash
-            location = EPUBReadingLocation(spineIndex: 0, pageIndex: 0)
+            layoutBookID = "epub|" + bookHash
             stage = "layout"
             lastLayoutFailure = nil
-            await relayout(keepingCurrentSpine: false)
+            // Lay out the saved chapter directly instead of chapter 0 followed by a restore.
+            let saved = ReaderSettings.shared.epubPosition(hash: bookHash)
+            if let spine = saved?.chapterIndex, let offset = saved?.chapterOffset, container.spine.indices.contains(spine) {
+                restored = true
+                await relayout(keepingCurrentSpine: false, reason: .restore, target: (spine, offset))
+            } else {
+                await relayout(keepingCurrentSpine: false, reason: .first, target: (0, nil))
+            }
             isRestoringPosition = false
-            if status == .ready, let saved = ReaderSettings.shared.epubPosition(hash: bookHash) {
-                if let spine = saved.chapterIndex, let offset = saved.chapterOffset, container.spine.indices.contains(spine) {
-                    await restore(spineIndex: spine, sourceOffset: offset)
-                } else if let fraction = saved.fraction, fraction > 0 {
-                    seek(to: fraction)
-                }
+            if status == .ready, !restored, let fraction = saved?.fraction, fraction > 0 {
+                restored = true
+                seek(to: fraction)
             }
             if status == .ready {
                 prepareTOCDiagnosticsPrompt(bookHash: bookHash)
@@ -385,6 +484,7 @@ final class EPUBReaderModel: ObservableObject {
         } catch {
             isRestoringPosition = false
             lastLayoutFailure = EPUBLayoutLog.failure(error)
+            if error is CancellationError { return }
             status = .failed(describeLayoutError(error))
         }
     }
@@ -400,17 +500,18 @@ final class EPUBReaderModel: ObservableObject {
         isRestoringPosition = true
         positionHandler = onPosition
         self.source = source
+        layoutBookID = (source as? TextChapterSource)?.layoutIdentity
+        bookKind = layoutBookID == nil ? "online" : "txt"
+        let startTime = ContinuousClock.now
+        EPUBLayoutLog.logger.info("EPUB open started; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), source=open, mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+        defer { logOpenOutcome(stage: "layout", start: startTime, restored: offset != nil) }
         guard source.chapterCount > 0 else {
             isRestoringPosition = false
             status = .failed("没有可阅读的章节。")
             return
         }
         let start = min(max(unit, 0), source.chapterCount - 1)
-        location = EPUBReadingLocation(spineIndex: start, pageIndex: 0)
-        await relayout(keepingCurrentSpine: true)
-        if status == .ready, let offset {
-            await restore(spineIndex: start, sourceOffset: offset)
-        }
+        await relayout(keepingCurrentSpine: false, reason: offset == nil ? .first : .restore, target: (start, offset))
         isRestoringPosition = false
         if status == .ready {
             onPosition(location.spineIndex, pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex))
@@ -420,8 +521,12 @@ final class EPUBReaderModel: ObservableObject {
     /// Re-lays out the current chapter after a failure (e.g. a network chapter that did not load).
     func retry() {
         guard case .failed = status, source != nil, !isLayingOut else { return }
+        cancelLayoutTasks()
         status = .opening
-        Task { await relayout(keepingCurrentSpine: true) }
+        relayoutTask = Task { [weak self] in
+            await self?.relayout(keepingCurrentSpine: true, reason: .retry)
+            if !Task.isCancelled { self?.relayoutTask = nil }
+        }
     }
 
     /// Neighbouring chapters whose prefetch failed for a reason other than cancellation.
@@ -440,19 +545,21 @@ final class EPUBReaderModel: ObservableObject {
     private var lastLayoutFailure: (kind: String, code: Int)?
 
     /// One outcome line per book open; chapter lines carry the per-chapter details.
-    private func logOpenOutcome(stage: String, start: ContinuousClock.Instant) {
+    private func logOpenOutcome(stage: String, start: ContinuousClock.Instant, restored: Bool) {
         let elapsed = EPUBLayoutLog.milliseconds(since: start)
         let failure = lastLayoutFailure
+        let mono = DiagnosticContext.monotonicMilliseconds()
         if Task.isCancelled || failure?.kind == "cancelled" {
-            EPUBLayoutLog.logger.info("EPUB open cancelled; elapsedMs=\(elapsed, privacy: .public)")
+            EPUBLayoutLog.logger.info("EPUB open cancelled; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), elapsedMs=\(elapsed, privacy: .public), mono=\(mono, privacy: .public)")
         } else if case .failed = status {
             let failure = failure ?? ("other", 0)
-            EPUBLayoutLog.logger.error("EPUB open failed; stage=\(stage, privacy: .public), error=\(failure.kind, privacy: .public), code=\(failure.code, privacy: .public), elapsedMs=\(elapsed, privacy: .public)")
+            EPUBLayoutLog.logger.error("EPUB open failed; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), stage=\(stage, privacy: .public), error=\(failure.kind, privacy: .public), code=\(failure.code, privacy: .public), elapsedMs=\(elapsed, privacy: .public), mono=\(mono, privacy: .public)")
         } else {
-            let spine = container?.spine.count ?? 0
-            let toc = container?.toc.count ?? 0
+            let book = DiagnosticContext.bookTag(layoutBookID ?? "private-\(traceID)")
+            let spine = source?.chapterCount ?? 0
+            let toc = source?.toc.count ?? 0
             let pages = pageCount(spineIndex: location.spineIndex)
-            EPUBLayoutLog.logger.info("EPUB open succeeded; spine=\(spine, privacy: .public), toc=\(toc, privacy: .public), pages=\(pages, privacy: .public), elapsedMs=\(elapsed, privacy: .public)")
+            EPUBLayoutLog.logger.info("EPUB open succeeded; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), book=\(book, privacy: .public), totalSpine=\(spine, privacy: .public), toc=\(toc, privacy: .public), currentSpine=\(self.location.spineIndex, privacy: .public), currentChapterPages=\(pages, privacy: .public), restored=\(restored, privacy: .public), elapsedMs=\(elapsed, privacy: .public), mono=\(mono, privacy: .public)")
         }
     }
 
@@ -494,12 +601,12 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     private var backgroundRefreshTask: Task<Void, Never>?
+    /// Coalesces bursts of background / font notifications (a debounce, not a race fix).
     func refreshBackground() {
         backgroundRefreshTask?.cancel()
         backgroundRefreshTask = Task { [weak self] in
             do { try await Task.sleep(nanoseconds: 250_000_000) } catch { return }
-            guard let self else { return }
-            await self.relayout(keepingCurrentSpine: true)
+            self?.scheduleRelayout(.backgroundChange)
         }
     }
 
@@ -507,7 +614,7 @@ final class EPUBReaderModel: ObservableObject {
         guard dark != isDarkMode, !isAnimating else { return }
         isDarkMode = dark
         source?.themeTextColor = pageTextColor
-        Task { await relayout(keepingCurrentSpine: true) }
+        scheduleRelayout(.themeChange)
     }
 
     /// Apply shared font/theme changes in one reflow after an active turn/layout finishes.
@@ -517,10 +624,11 @@ final class EPUBReaderModel: ObservableObject {
         let dark = settings.isDark(systemIsDark: systemIsDark)
         let font = CGFloat(settings.fontSize)
         guard dark != isDarkMode || font != style.fontSize else { return }
+        let reason: EPUBLayoutReason = font != style.fontSize ? .fontChange : .themeChange
         isDarkMode = dark
         style.fontSize = font
         source?.themeTextColor = pageTextColor
-        Task { await relayout(keepingCurrentSpine: true) }
+        scheduleRelayout(reason)
     }
 
     private func makeConfig() -> BrowserLayoutConfig {
@@ -543,27 +651,32 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     /// 重排当前章（以及前后相邻章的预取）。generation 递增使旧页面全部失效。
-    private func relayout(keepingCurrentSpine: Bool) async {
+    /// `target` opens a chapter at a source offset (book open / saved-position restore).
+    private func relayout(keepingCurrentSpine: Bool, reason: EPUBLayoutReason,
+                          target: (spine: Int, offset: Int?)? = nil) async {
         guard let container = source else { return }
         let wasRestoringPosition = isRestoringPosition
         isRestoringPosition = true
         defer { isRestoringPosition = wasRestoringPosition }
         container.themeTextColor = pageTextColor
-        relayoutTask?.cancel()
-        let spineIndex = keepingCurrentSpine ? location.spineIndex : 0
+        // Prefetches and jumps belong to the generation being replaced.
+        for task in prefetchTasks.values { task.cancel() }
+        prefetchTasks.removeAll()
+        for task in layoutTasks.values { task.cancel() }
+        layoutTasks.removeAll()
+        let spineIndex = target?.spine ?? (keepingCurrentSpine ? location.spineIndex : 0)
         let previousCount = max(pageCount(spineIndex: spineIndex), 1)
-        let previousFraction = keepingCurrentSpine
+        let previousFraction = keepingCurrentSpine && target == nil
             ? CGFloat(location.pageIndex) / CGFloat(previousCount)
             : 0
         // Re-pagination keeps the same text on screen; the fraction is only a fallback
         // for pages without text.
-        let previousOffset = keepingCurrentSpine
-            ? pageBook?.sourceOffset(spineIndex: spineIndex, pageIndex: location.pageIndex)
-            : nil
+        let previousOffset = target != nil ? target?.offset
+            : (keepingCurrentSpine ? pageBook?.sourceOffset(spineIndex: spineIndex, pageIndex: location.pageIndex) : nil)
         spreadCache.removeAll()
         failedChapters.removeAll()
         generation += 1
-        let book = EPUBPageBook(generation: generation)
+        let book = EPUBPageBook(generation: generation, coordinator: layoutCoordinator)
         book.onPagesChanged = { [weak self] in
             self?.objectWillChange.send()
         }
@@ -575,7 +688,8 @@ final class EPUBReaderModel: ObservableObject {
         defer { isLayingOut = false }
         do {
             try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
-                                   aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS)
+                                         aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                         context: layoutContext(reason))
             if book.generation == generation {
                 status = .ready
                 location.spineIndex = spineIndex
@@ -592,7 +706,10 @@ final class EPUBReaderModel: ObservableObject {
         } catch {
             if book.generation == generation {
                 lastLayoutFailure = EPUBLayoutLog.failure(error)
-                status = .failed(describeLayoutError(error))
+                // A cancelled relayout was replaced by a newer one (or the reader closed).
+                if EPUBLayoutLog.failure(error).kind != "cancelled" {
+                    status = .failed(describeLayoutError(error))
+                }
             }
         }
     }
@@ -610,28 +727,40 @@ final class EPUBReaderModel: ObservableObject {
         didApplyDebugJump = true
         location.spineIndex = target
         location.pageIndex = 0
-        Task {
+        track { [weak self] in
+            guard let self else { return }
             isLayingOut = true
             defer { isLayingOut = false }
-            guard let book = pageBook, container != nil, !book.hasChapter(target) else { return }
+            guard let book = pageBook, !book.isChapterComplete(target) else { return }
             try? await book.layoutChapter(target, container: container, config: makeConfig(),
-                                   aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS)
+                                          aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                          context: layoutContext(.navigate))
         }
         prefetchNeighbors(of: target)
         #endif
     }
 
     /// 空闲时预排前后相邻章，让跨章拖动时目标页位图已经就位。
+    /// Only the two neighbours are prefetched; prefetches of chapters the reader moved away
+    /// from are cancelled, and a running one for the same chapter is not started twice.
     private func prefetchNeighbors(of spineIndex: Int) {
         guard let container = source, let book = pageBook else { return }
+        let neighbors = [spineIndex + 1, spineIndex - 1].filter { (0..<container.chapterCount).contains($0) }
+        for (spine, task) in prefetchTasks where !neighbors.contains(spine) {
+            task.cancel()
+            prefetchTasks[spine] = nil
+        }
         let generationSnapshot = generation
-        for neighbor in [spineIndex + 1, spineIndex - 1] where (0..<container.chapterCount).contains(neighbor) {
-            guard !book.hasChapter(neighbor) else { continue }
+        for neighbor in neighbors {
+            guard !book.isChapterComplete(neighbor), prefetchTasks[neighbor] == nil else { continue }
             let config = makeConfig()
-            Task {
+            let context = layoutContext(.prefetch)
+            prefetchTasks[neighbor] = Task { [weak self] in
+                guard let self else { return }
                 do {
                     try await book.layoutChapter(neighbor, container: container, config: config,
-                                                 aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS)
+                                                 aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                                 context: context)
                     failedChapters.remove(neighbor)
                 } catch {
                     // 预取结果挂在当前 book 上，代次切换即整体作废
@@ -639,6 +768,7 @@ final class EPUBReaderModel: ObservableObject {
                         failedChapters.insert(neighbor)
                     }
                 }
+                if generationSnapshot == generation { prefetchTasks[neighbor] = nil }
             }
         }
     }
@@ -706,27 +836,6 @@ final class EPUBReaderModel: ObservableObject {
         return min((Double(location.spineIndex) + chapterProgress) / Double(source.chapterCount), 1)
     }
 
-    /// Reopens a book on the page that shows the saved chapter offset.
-    private func restore(spineIndex: Int, sourceOffset: Int) async {
-        guard let container = source, let book = pageBook else { return }
-        if !book.isChapterComplete(spineIndex) {
-            isLayingOut = true
-            defer { isLayingOut = false }
-            do {
-                try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
-                                             aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS)
-            } catch {
-                status = .failed(describeLayoutError(error))
-                return
-            }
-        }
-        guard pageBook === book else { return }
-        var page = book.pageIndex(spineIndex: spineIndex, containingSourceOffset: sourceOffset) ?? 0
-        if usesDoublePage { page = (page / 2) * 2 }
-        location = EPUBReadingLocation(spineIndex: spineIndex, pageIndex: page)
-        prefetchNeighbors(of: spineIndex)
-    }
-
     /// 拖动进度条后才定位，避免手指移动时反复排版和重建分页位图。
     func seek(to progress: Double) {
         guard !isAnimating, !isLayingOut, status == .ready,
@@ -736,15 +845,18 @@ final class EPUBReaderModel: ObservableObject {
         let spineIndex = min(Int(position), container.chapterCount - 1)
         let pageFraction = fraction >= 1 ? 1 : position - Double(spineIndex)
         isLayingOut = true
-        Task {
+        track { [weak self] in
+            guard let self else { return }
             defer { isLayingOut = false }
             if !book.isChapterComplete(spineIndex) {
                 do {
                     try await book.layoutChapter(spineIndex, container: container,
                                                  config: makeConfig(), aspectRatio: viewportAspectRatio,
-                                                 readerCSS: style.readerCSS)
+                                                 readerCSS: style.readerCSS, context: layoutContext(.seek))
                 } catch {
-                    status = .failed(describeLayoutError(error))
+                    if EPUBLayoutLog.failure(error).kind != "cancelled", pageBook === book {
+                        status = .failed(describeLayoutError(error))
+                    }
                     return
                 }
             }
@@ -915,13 +1027,17 @@ final class EPUBReaderModel: ObservableObject {
     private func navigateToSpine(_ spineIndex: Int) {
         location.spineIndex = spineIndex
         location.pageIndex = 0
-        Task {
+        // A newer jump supersedes an unfinished one.
+        if let navigateTaskID, let previous = layoutTasks.removeValue(forKey: navigateTaskID) { previous.cancel() }
+        navigateTaskID = track { [weak self] in
+            guard let self else { return }
             isLayingOut = true
             defer { isLayingOut = false }
-            guard let container = source, let book = pageBook, !book.hasChapter(spineIndex) else { return }
+            guard let container = source, let book = pageBook, !book.isChapterComplete(spineIndex) else { return }
             do {
                 try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
-                                             aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS)
+                                             aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                             context: layoutContext(.navigate))
                 if pageBook === book { prefetchNeighbors(of: spineIndex) }
             } catch {
                 guard pageBook === book, EPUBLayoutLog.failure(error).kind != "cancelled" else { return }
@@ -951,12 +1067,13 @@ final class EPUBReaderModel: ObservableObject {
         updated.leftMargin = min(80, max(0, requested.leftMargin))
         updated.rightMargin = min(80, max(0, requested.rightMargin))
         guard updated != style else { return }
+        let fontChanged = updated.fontSize != style.fontSize
         style = updated
         if let data = try? JSONEncoder().encode(updated) {
             UserDefaults.standard.set(data, forKey: Self.styleDefaultsKey)
         }
         ReaderSettings.shared.fontSize = Double(updated.fontSize)
-        Task { await relayout(keepingCurrentSpine: true) }
+        scheduleRelayout(fontChanged ? .fontChange : .styleChange)
     }
 }
 

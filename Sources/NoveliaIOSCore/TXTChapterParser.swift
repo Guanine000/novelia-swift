@@ -8,19 +8,9 @@ enum TXTDiagnosticLog {
 }
 
 /// Reads common plain-text encodings used by downloaded and user-supplied novels.
+/// File reads, caching and diagnostics live in `TXTBookCache`; this type only converts bytes.
 enum TXTTextDecoder {
-    static func decode(contentsOf url: URL) throws -> String {
-        let startedAt = ProcessInfo.processInfo.systemUptime
-        let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        guard let text = decode(data: data), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000)
-            TXTDiagnosticLog.logger.error("TXT decode failed; bytes=\(data.count, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public), attempted=UTF-8/BOM-Unicode/GB18030/GBK/Big5/Shift_JIS")
-            throw TXTTextDecodingError.unrecognizedEncoding
-        }
-        let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000)
-        TXTDiagnosticLog.logger.info("TXT decode succeeded; bytes=\(data.count, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
-        return text
-    }
+    static let attemptedEncodings = "UTF-8/BOM-Unicode/GB18030/GBK/Big5/Shift_JIS"
 
     static func decode(data: Data) -> String? {
         if data.starts(with: [0x00, 0x00, 0xFE, 0xFF]) {
@@ -91,6 +81,13 @@ struct TXTChapterRule: Identifiable, Codable, Hashable, Sendable {
 struct TXTChapterRuleConfiguration: Sendable {
     let enabledBuiltInIDs: Set<String>
     let enabledCustomRules: [TXTChapterRule]
+
+    /// Identifies the rules that shape a parse; part of the TXT cache key.
+    var fingerprint: String {
+        let builtIn = enabledBuiltInIDs.sorted().joined(separator: ",")
+        let custom = enabledCustomRules.map { "\($0.id)=\($0.pattern)" }.joined(separator: "\u{1F}")
+        return builtIn + "|" + custom
+    }
 
     static let defaults = TXTChapterRuleConfiguration(
         enabledBuiltInIDs: Set(TXTChapterRule.builtInDefaults.map(\.id)),
@@ -193,10 +190,22 @@ enum TXTChapterParser {
         pattern: #"^(序|序章|序言|楔子|前言|引子|正文|后记|後記|尾声|尾聲|终章|終章|番外|番外篇)(?:[：:、.．\s—-]*(.{0,20}))?$"#
     )
 
+    /// Counts the cache logs next to each parse.
+    struct Statistics: Equatable, Sendable {
+        let lines: Int
+        let headings: Int
+        let fellBackToFullText: Bool
+    }
+
     static func parse(_ text: String, rules: TXTChapterRuleConfiguration = .defaults) -> [TXTChapter] {
-        let startedAt = ProcessInfo.processInfo.systemUptime
+        parseWithStatistics(text, rules: rules).chapters
+    }
+
+    static func parseWithStatistics(_ text: String, rules: TXTChapterRuleConfiguration = .defaults) -> (chapters: [TXTChapter], statistics: Statistics) {
         let lines = text.components(separatedBy: .newlines)
-        guard !lines.isEmpty else { return [TXTChapter(index: 0, title: "全文", body: text, volumeTitle: nil)] }
+        guard !lines.isEmpty else {
+            return ([TXTChapter(index: 0, title: "全文", body: text, volumeTitle: nil)], Statistics(lines: 0, headings: 0, fellBackToFullText: true))
+        }
         let customMatchers = rules.enabledCustomRules.compactMap { rule -> CustomMatcher? in
             guard let regex = try? NSRegularExpression(pattern: rule.pattern) else { return nil }
             return CustomMatcher(id: rule.id, regex: regex)
@@ -217,10 +226,9 @@ enum TXTChapterParser {
             return false
         }
         guard chapterHeadings.count >= 3 else {
-            let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000)
-            TXTDiagnosticLog.logger.info("TXT chapter detection fell back to full text; lines=\(lines.count, privacy: .public), headings=\(chapterHeadings.count, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
             let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return [TXTChapter(index: 0, title: "全文", body: body, volumeTitle: nil)]
+            return ([TXTChapter(index: 0, title: "全文", body: body, volumeTitle: nil)],
+                    Statistics(lines: lines.count, headings: chapterHeadings.count, fellBackToFullText: true))
         }
 
         var result: [TXTChapter] = []
@@ -268,9 +276,7 @@ enum TXTChapterParser {
             : result.enumerated().map { index, chapter in
                 TXTChapter(index: index, title: chapter.title, body: chapter.body, volumeTitle: chapter.volumeTitle)
             }
-        let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000)
-        TXTDiagnosticLog.logger.info("TXT chapters parsed; lines=\(lines.count, privacy: .public), chapters=\(chapters.count, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
-        return chapters
+        return (chapters, Statistics(lines: lines.count, headings: chapterHeadings.count, fellBackToFullText: false))
     }
 
     private static func parseHeading(
