@@ -639,29 +639,33 @@ final class EPUBContainer {
     }
 
     private func generateTOCFromSpineHeadings() async -> [EPUBTOCEntry] {
-        guard let headingPattern = try? NSRegularExpression(
-            pattern: "^(?:序章|序幕|プロローグ|Prologue|第\\s*[0-9０-９一二三四五六七八九十百]+\\s*(?:章|话|話|节|節|回|幕)|终章|終章|尾声|後日譚|后日谈|终幕|終幕|エピローグ|Epilogue)",
-            options: [.caseInsensitive]) else { return [] }
-
         var entries: [EPUBTOCEntry] = []
         var seenTitles = Set<String>()
         for (spineIndex, item) in spine.enumerated() {
             guard item.mediaType.contains("xhtml") || item.mediaType.contains("html"),
-                  let html = try? await chapterHTML(path: item.href) else { continue }
-            for paragraph in Self.paragraphTexts(in: html) {
-                let range = NSRange(paragraph.startIndex..., in: paragraph)
-                guard headingPattern.firstMatch(in: paragraph, range: range) != nil else { continue }
-                let title = paragraph
-                    .replacingOccurrences(of: "[\\s　]+", with: " ", options: .regularExpression)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !title.isEmpty, seenTitles.insert(title).inserted else { continue }
-                entries.append(EPUBTOCEntry(title: title, spineIndex: spineIndex))
-                // A chapter XHTML may contain examples or links that resemble later headings.
-                // The first matching title in each spine item is its navigation target.
-                break
-            }
+                  let html = try? await chapterHTML(path: item.href),
+                  let title = Self.fallbackTOCHeadings(inChapterHTML: html)
+                      .first(where: { seenTitles.insert($0).inserted }) else { continue }
+            entries.append(EPUBTOCEntry(title: title, spineIndex: spineIndex))
         }
         return entries
+    }
+
+    /// 备用目录候选：章节 XHTML 中形如「序章／第N章／终章／Epilogue」的段落标题，按出现顺序。
+    /// 章节内可能出现类似后续标题的例子或链接，调用方每个章节只取第一个未用过的标题。
+    /// YueduCoreText 与 Readium 阅读器共用此规则。
+    static func fallbackTOCHeadings(inChapterHTML html: String) -> [String] {
+        guard let headingPattern = try? NSRegularExpression(
+            pattern: "^(?:序章|序幕|プロローグ|Prologue|第\\s*[0-9０-９一二三四五六七八九十百]+\\s*(?:章|话|話|节|節|回|幕)|终章|終章|尾声|後日譚|后日谈|终幕|終幕|エピローグ|Epilogue)",
+            options: [.caseInsensitive]) else { return [] }
+        return paragraphTexts(in: html).compactMap { paragraph in
+            let range = NSRange(paragraph.startIndex..., in: paragraph)
+            guard headingPattern.firstMatch(in: paragraph, range: range) != nil else { return nil }
+            let title = paragraph
+                .replacingOccurrences(of: "[\\s　]+", with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return title.isEmpty ? nil : title
+        }
     }
 
     private static func paragraphTexts(in html: String) -> [String] {

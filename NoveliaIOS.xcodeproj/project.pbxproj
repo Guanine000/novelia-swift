@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A10000000000000000000300 /* ReadiumEPUBReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000300 /* ReadiumEPUBReaderModel.swift */; };
+		A10000000000000000000301 /* ReadiumEPUBReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000301 /* ReadiumEPUBReaderView.swift */; };
+		A10000000000000000000302 /* ReadiumShared in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000302 /* ReadiumShared */; };
+		A10000000000000000000303 /* ReadiumStreamer in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000303 /* ReadiumStreamer */; };
+		A10000000000000000000304 /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000304 /* ReadiumNavigator */; };
 		A10000000000000000000001 /* NoveliaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* NoveliaApp.swift */; };
 		A10000000000000000000002 /* ShelfViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000002 /* ShelfViews.swift */; };
 		A10000000000000000000003 /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000003 /* ReaderView.swift */; };
@@ -59,6 +64,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B10000000000000000000300 /* ReadiumEPUBReaderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumEPUBReaderModel.swift; sourceTree = "<group>"; };
+		B10000000000000000000301 /* ReadiumEPUBReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumEPUBReaderView.swift; sourceTree = "<group>"; };
 		B10000000000000000000001 /* NoveliaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoveliaApp.swift; sourceTree = "<group>"; };
 		B10000000000000000000002 /* ShelfViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfViews.swift; sourceTree = "<group>"; };
 		B10000000000000000000003 /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
@@ -116,6 +123,9 @@
 			files = (
 				A10000000000000000000017 /* YueduCoreText in Frameworks */,
 				A10000000000000000000018 /* ReadiumZIPFoundation in Frameworks */,
+				A10000000000000000000302 /* ReadiumShared in Frameworks */,
+				A10000000000000000000303 /* ReadiumStreamer in Frameworks */,
+				A10000000000000000000304 /* ReadiumNavigator in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -145,6 +155,8 @@
 				B10000000000000000000019 /* EPUBReaderModel.swift */,
 				B10000000000000000000020 /* EPUBReaderView.swift */,
 				B10000000000000000000021 /* EPUBSampleBook.swift */,
+				B10000000000000000000300 /* ReadiumEPUBReaderModel.swift */,
+				B10000000000000000000301 /* ReadiumEPUBReaderView.swift */,
 			);
 			path = iOSApp/EPUBReader;
 			sourceTree = "<group>";
@@ -226,6 +238,9 @@
 			packageProductDependencies = (
 				F31000000000000000000003 /* YueduCoreText */,
 				F31000000000000000000004 /* ReadiumZIPFoundation */,
+				F31000000000000000000302 /* ReadiumShared */,
+				F31000000000000000000303 /* ReadiumStreamer */,
+				F31000000000000000000304 /* ReadiumNavigator */,
 			);
 			name = Novelia;
 			productName = Novelia;
@@ -266,6 +281,7 @@
 			packageReferences = (
 				F30000000000000000000002 /* XCRemoteSwiftPackageReference "YueduCoreText" */,
 				F30000000000000000000003 /* XCRemoteSwiftPackageReference "ReadiumZIPFoundation" */,
+				F30000000000000000000300 /* XCRemoteSwiftPackageReference "swift-toolkit" */,
 			);
 		};
 /* End PBXProject section */
@@ -287,6 +303,14 @@
 				minimumVersion = 3.0.1;
 			};
 		};
+		F30000000000000000000300 /* XCRemoteSwiftPackageReference "swift-toolkit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/readium/swift-toolkit.git";
+			requirement = {
+				kind = exactVersion;
+				version = 3.11.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -301,6 +325,21 @@
 			productName = ReadiumZIPFoundation;
 		};
 
+		F31000000000000000000302 /* ReadiumShared */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F30000000000000000000300 /* XCRemoteSwiftPackageReference "swift-toolkit" */;
+			productName = ReadiumShared;
+		};
+		F31000000000000000000303 /* ReadiumStreamer */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F30000000000000000000300 /* XCRemoteSwiftPackageReference "swift-toolkit" */;
+			productName = ReadiumStreamer;
+		};
+		F31000000000000000000304 /* ReadiumNavigator */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F30000000000000000000300 /* XCRemoteSwiftPackageReference "swift-toolkit" */;
+			productName = ReadiumNavigator;
+		};
 /* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXResourcesBuildPhase section */
@@ -365,6 +404,8 @@
 				A10000000000000000000022 /* EPUBReaderModel.swift in Sources */,
 				A10000000000000000000023 /* EPUBReaderView.swift in Sources */,
 				A10000000000000000000024 /* EPUBSampleBook.swift in Sources */,
+				A10000000000000000000300 /* ReadiumEPUBReaderModel.swift in Sources */,
+				A10000000000000000000301 /* ReadiumEPUBReaderView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
