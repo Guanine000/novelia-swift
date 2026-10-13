@@ -15,6 +15,7 @@ struct LibraryView: View {
     @EnvironmentObject private var webDAVSync: WebDAVSyncStore
     @ObservedObject private var state = LibraryStateStore.shared
     @StateObject private var importer = LibraryImportModel()
+    @StateObject private var bookActions = LibraryBookActions()
     @State private var segment = Segment.books
     @State private var query = ""
     @State private var isSearching = false
@@ -30,8 +31,8 @@ struct LibraryView: View {
 
     var body: some View {
         let books = allBooks
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
+        List {
+            Group {
                 if books.isEmpty {
                     emptyLibrary
                 } else if isSearching && !LibraryOrganizer.normalized(query).isEmpty {
@@ -58,17 +59,16 @@ struct LibraryView: View {
                             .padding(.top, 20)
                         } else {
                             LibrarySortSummary(options: sortOptions) { state.setSortOptions($0, scope: nil) }
-                            LibraryBookList(books: sorted(ungrouped, options: sortOptions), open: open)
+                            LibraryBookList(books: sorted(ungrouped, options: sortOptions), actions: bookActions, open: open)
                         }
                     case .series:
                         seriesList(books)
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 6)
-            .padding(.bottom, 28)
+            .libraryListRow()
         }
+        .libraryListStyle()
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .top) { searchBar }
         .background(NoveliaStyle.paper.ignoresSafeArea())
@@ -124,6 +124,7 @@ struct LibraryView: View {
             Text("创建后，可在书籍的“更多”菜单中移入系列。")
         }
         .overlay { LibraryImportProgressOverlay(model: importer) }
+        .modifier(LibraryBookActionDialogs(actions: bookActions))
     }
 
     @ViewBuilder
@@ -205,7 +206,7 @@ struct LibraryView: View {
         if matches.isEmpty {
             ContentUnavailableView.search(text: query)
         } else {
-            LibraryBookList(books: sorted(matches, options: sortOptions), open: open)
+            LibraryBookList(books: sorted(matches, options: sortOptions), actions: bookActions, open: open)
         }
     }
 
@@ -217,8 +218,9 @@ struct LibraryView: View {
         } label: {
             Label("新建系列", systemImage: "plus.rectangle.on.rectangle")
                 .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(NoveliaStyle.brandGreen)
         }
-        .tint(NoveliaStyle.brandGreen)
+        .buttonStyle(.plain)
         let allSeries = state.series.activeSeries
         if allSeries.isEmpty {
             ContentUnavailableView {
@@ -231,13 +233,17 @@ struct LibraryView: View {
             ForEach(allSeries) { series in
                 let keys = state.series.bookKeys(inSeries: series.id)
                 let members = sorted(books.filter { keys.contains($0.key) }, options: state.sortOptions(scope: series.id))
-                NavigationLink {
-                    LibrarySeriesDetailView(seriesID: series.id)
-                } label: {
-                    LibrarySeriesRow(name: series.name, books: members)
-                }
-                .buttonStyle(.plain)
-                .contextMenu { LibrarySeriesMenuItems(seriesID: series.id, name: series.name) }
+                // 链接放在背景中，避免 List 为 NavigationLink 再加一个箭头。
+                LibrarySeriesRow(name: series.name, books: members)
+                    .background {
+                        NavigationLink {
+                            LibrarySeriesDetailView(seriesID: series.id)
+                        } label: {
+                            EmptyView()
+                        }
+                        .opacity(0)
+                    }
+                    .contextMenu { LibrarySeriesMenuItems(seriesID: series.id, name: series.name, actions: bookActions) }
             }
         }
     }
@@ -270,6 +276,7 @@ struct LibrarySeriesDetailView: View {
     @State private var isSearching = false
     @State private var readerTarget: LibraryBook?
     @State private var isAddingBooks = false
+    @StateObject private var bookActions = LibraryBookActions()
 
     private var series: LibrarySeries? {
         state.series.series[seriesID].flatMap { $0.deleted ? nil : $0 }
@@ -285,8 +292,8 @@ struct LibrarySeriesDetailView: View {
             options: options
         ) { state.sortItem(for: $0) }
 
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
+        List {
+            Group {
                 if members.isEmpty {
                     ContentUnavailableView {
                         Label("系列中还没有书", systemImage: "rectangle.stack")
@@ -303,14 +310,13 @@ struct LibrarySeriesDetailView: View {
                     if visible.isEmpty {
                         ContentUnavailableView.search(text: query)
                     } else {
-                        LibraryBookList(books: visible, showsSeries: false, open: open)
+                        LibraryBookList(books: visible, showsSeries: false, actions: bookActions, open: open)
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 6)
-            .padding(.bottom, 28)
+            .libraryListRow()
         }
+        .libraryListStyle()
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .top) { searchBar }
         .background(NoveliaStyle.paper.ignoresSafeArea())
@@ -328,7 +334,7 @@ struct LibrarySeriesDetailView: View {
                 LibrarySortMenu(options: options) { state.setSortOptions($0, scope: seriesID) }
                 Menu {
                     Button { isAddingBooks = true } label: { Label("添加书籍", systemImage: "plus") }
-                    LibrarySeriesMenuItems(seriesID: seriesID, name: series?.name ?? "")
+                    LibrarySeriesMenuItems(seriesID: seriesID, name: series?.name ?? "", actions: bookActions)
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -347,6 +353,7 @@ struct LibrarySeriesDetailView: View {
         .sheet(isPresented: $isAddingBooks) {
             LibraryAddToSeriesSheet(seriesID: seriesID, books: all)
         }
+        .modifier(LibraryBookActionDialogs(actions: bookActions))
     }
 
     @ViewBuilder
@@ -429,56 +436,124 @@ private struct LibraryAddToSeriesSheet: View {
     }
 }
 
-/// 系列的重命名与解散；用于系列行的长按菜单和系列详情的“更多”菜单。
+/// 系列的重命名与解散菜单项；用于系列行的长按菜单和系列详情的“更多”菜单。
+/// 菜单关闭后才能弹出对话框，所以对话框由页面上的 `LibraryBookActionDialogs` 统一显示。
 private struct LibrarySeriesMenuItems: View {
     let seriesID: String
     let name: String
-    @ObservedObject private var state = LibraryStateStore.shared
-    @State private var isRenaming = false
-    @State private var isConfirmingDelete = false
-    @State private var newName = ""
+    let actions: LibraryBookActions
 
     var body: some View {
         Button {
-            newName = name
-            isRenaming = true
+            actions.renameName = name
+            actions.renamingSeries = LibrarySeriesTarget(id: seriesID, name: name)
         } label: {
             Label("重命名系列", systemImage: "pencil")
         }
         Button(role: .destructive) {
-            isConfirmingDelete = true
+            actions.dissolvingSeries = LibrarySeriesTarget(id: seriesID, name: name)
         } label: {
             Label("解散系列", systemImage: "rectangle.stack.badge.minus")
-        }
-        .alert("重命名系列", isPresented: $isRenaming) {
-            TextField("系列名称", text: $newName)
-            Button("取消", role: .cancel) {}
-            Button("保存") { state.renameSeries(seriesID, to: newName) }
-        }
-        .confirmationDialog("解散系列“\(name)”？", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
-            Button("解散系列", role: .destructive) { state.deleteSeries(seriesID) }
-        } message: {
-            Text("系列中的书会移出系列，书籍文件和阅读进度都会保留。")
         }
     }
 }
 
 // MARK: - 书籍列表与操作
 
-/// 书籍列表：点击整行打开阅读；“更多”按钮与长按菜单提供系列、导出、移动和删除。
+/// 书籍操作触发的确认框与提示。由页面持有并只挂载一次，避免每一行各自附带弹窗修饰符而拖慢滚动。
+@MainActor
+final class LibraryBookActions: ObservableObject {
+    @Published var pendingDelete: LibraryBook?
+    @Published var newSeriesBook: LibraryBook?
+    @Published var newSeriesName = ""
+    @Published var actionError: String?
+    @Published var renamingSeries: LibrarySeriesTarget?
+    @Published var renameName = ""
+    @Published var dissolvingSeries: LibrarySeriesTarget?
+}
+
+struct LibrarySeriesTarget: Identifiable, Equatable {
+    let id: String
+    let name: String
+}
+
+/// 在页面层级挂载书籍操作的确认框与提示。
+struct LibraryBookActionDialogs: ViewModifier {
+    @ObservedObject var actions: LibraryBookActions
+    @EnvironmentObject private var webDownloads: WebNovelDownloadStore
+    @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog(
+                "删除《\(actions.pendingDelete?.title ?? "")》？",
+                isPresented: .init(get: { actions.pendingDelete != nil }, set: { if !$0 { actions.pendingDelete = nil } }),
+                titleVisibility: .visible,
+                presenting: actions.pendingDelete
+            ) { book in
+                Button("删除", role: .destructive) { delete(book) }
+            } message: { _ in
+                Text("将从本机删除书籍文件。WebDAV 中的副本不会删除，之后同步时可能恢复。")
+            }
+            .alert("新建系列", isPresented: .init(get: { actions.newSeriesBook != nil }, set: { if !$0 { actions.newSeriesBook = nil } })) {
+                TextField("系列名称", text: $actions.newSeriesName)
+                Button("取消", role: .cancel) { actions.newSeriesBook = nil }
+                Button("创建并移入") {
+                    if let book = actions.newSeriesBook {
+                        let state = LibraryStateStore.shared
+                        let id = state.createSeries(named: actions.newSeriesName.isEmpty ? book.title : actions.newSeriesName)
+                        state.assign(book, to: id)
+                    }
+                    actions.newSeriesBook = nil
+                }
+            }
+            .alert("重命名系列", isPresented: .init(get: { actions.renamingSeries != nil }, set: { if !$0 { actions.renamingSeries = nil } })) {
+                TextField("系列名称", text: $actions.renameName)
+                Button("取消", role: .cancel) { actions.renamingSeries = nil }
+                Button("保存") {
+                    if let target = actions.renamingSeries {
+                        LibraryStateStore.shared.renameSeries(target.id, to: actions.renameName)
+                    }
+                    actions.renamingSeries = nil
+                }
+            }
+            .confirmationDialog(
+                "解散系列“\(actions.dissolvingSeries?.name ?? "")”？",
+                isPresented: .init(get: { actions.dissolvingSeries != nil }, set: { if !$0 { actions.dissolvingSeries = nil } }),
+                titleVisibility: .visible,
+                presenting: actions.dissolvingSeries
+            ) { target in
+                Button("解散系列", role: .destructive) { LibraryStateStore.shared.deleteSeries(target.id) }
+            } message: { _ in
+                Text("系列中的书会移出系列，书籍文件和阅读进度都会保留。")
+            }
+            .alert("操作失败", isPresented: .init(get: { actions.actionError != nil }, set: { if !$0 { actions.actionError = nil } })) {
+                Button("好", role: .cancel) { actions.actionError = nil }
+            } message: {
+                Text(actions.actionError ?? "")
+            }
+    }
+
+    private func delete(_ book: LibraryBook) {
+        switch book.origin {
+        case .webNovel(let record): webDownloads.remove(record)
+        case .wenku(let record): wenkuDownloads.remove(record)
+        }
+    }
+}
+
+/// 书籍列表：点击整行打开阅读；“更多”菜单提供系列、导出、移动和删除。
 struct LibraryBookList: View {
     let books: [LibraryBook]
     /// 系列详情中不重复显示系列名。
     var showsSeries = true
+    /// 只用于触发弹窗，不观察其变化，弹窗状态改变时列表行不必重算。
+    let actions: LibraryBookActions
     let open: (LibraryBook) -> Void
 
     @EnvironmentObject private var webDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
     @ObservedObject private var state = LibraryStateStore.shared
-    @State private var pendingDelete: LibraryBook?
-    @State private var newSeriesBook: LibraryBook?
-    @State private var newSeriesName = ""
-    @State private var actionError: String?
 
     var body: some View {
         ForEach(books) { book in
@@ -490,7 +565,7 @@ struct LibraryBookList: View {
                 .buttonStyle(.plain)
                 .accessibilityHint("打开阅读")
                 Menu {
-                    actions(for: book)
+                    menuItems(for: book)
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 16, weight: .semibold))
@@ -503,38 +578,11 @@ struct LibraryBookList: View {
             .padding(.leading, 10)
             .padding(.vertical, 8)
             .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
-            .contextMenu { actions(for: book) }
-        }
-        .confirmationDialog(
-            "删除《\(pendingDelete?.title ?? "")》？",
-            isPresented: .init(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-            titleVisibility: .visible,
-            presenting: pendingDelete
-        ) { book in
-            Button("删除", role: .destructive) { delete(book) }
-        } message: { _ in
-            Text("将从本机删除书籍文件。WebDAV 中的副本不会删除，之后同步时可能恢复。")
-        }
-        .alert("新建系列", isPresented: .init(get: { newSeriesBook != nil }, set: { if !$0 { newSeriesBook = nil } })) {
-            TextField("系列名称", text: $newSeriesName)
-            Button("取消", role: .cancel) { newSeriesBook = nil }
-            Button("创建并移入") {
-                if let book = newSeriesBook {
-                    let id = state.createSeries(named: newSeriesName.isEmpty ? book.title : newSeriesName)
-                    state.assign(book, to: id)
-                }
-                newSeriesBook = nil
-            }
-        }
-        .alert("操作失败", isPresented: .init(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
-            Button("好", role: .cancel) { actionError = nil }
-        } message: {
-            Text(actionError ?? "")
         }
     }
 
     @ViewBuilder
-    private func actions(for book: LibraryBook) -> some View {
+    private func menuItems(for book: LibraryBook) -> some View {
         let currentSeries = state.series.seriesID(forBook: book.key)
         Button { open(book) } label: { Label("阅读", systemImage: "book") }
         Menu {
@@ -543,8 +591,8 @@ struct LibraryBookList: View {
             }
             Divider()
             Button {
-                newSeriesName = ""
-                newSeriesBook = book
+                actions.newSeriesName = ""
+                actions.newSeriesBook = book
             } label: {
                 Label("新建系列…", systemImage: "plus")
             }
@@ -564,7 +612,7 @@ struct LibraryBookList: View {
             Button {
                 Task {
                     do { try await LibraryMover.moveToWenku(record, web: webDownloads, wenku: wenkuDownloads, state: state) }
-                    catch { actionError = error.localizedDescription }
+                    catch { actions.actionError = error.localizedDescription }
                 }
             } label: {
                 Label("移至文库", systemImage: "arrow.right.arrow.left")
@@ -572,21 +620,14 @@ struct LibraryBookList: View {
         case .wenku(let record):
             Button {
                 do { try LibraryMover.moveToNetwork(record, web: webDownloads, wenku: wenkuDownloads, state: state) }
-                catch { actionError = error.localizedDescription }
+                catch { actions.actionError = error.localizedDescription }
             } label: {
                 Label("移至网络小说", systemImage: "arrow.right.arrow.left")
             }
         }
         Divider()
-        Button(role: .destructive) { pendingDelete = book } label: {
+        Button(role: .destructive) { actions.pendingDelete = book } label: {
             Label("删除", systemImage: "trash")
-        }
-    }
-
-    private func delete(_ book: LibraryBook) {
-        switch book.origin {
-        case .webNovel(let record): webDownloads.remove(record)
-        case .wenku(let record): wenkuDownloads.remove(record)
         }
     }
 }
@@ -854,6 +895,23 @@ extension LibrarySortMenu {
             Text("倒序").tag(false)
             Text("正序").tag(true)
         }
+    }
+}
+
+// MARK: - 列表样式
+
+private extension View {
+    /// 书库列表行：透明行背景、无分隔线，卡片间距由上下内边距形成。
+    func libraryListRow() -> some View {
+        listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+    }
+
+    /// 使用 List 而非 ScrollView + LazyVStack：List 复用行视图，书多时滚动不再逐行重建。
+    func libraryListStyle() -> some View {
+        listStyle(.plain)
+            .scrollContentBackground(.hidden)
     }
 }
 

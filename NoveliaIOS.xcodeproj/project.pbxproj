@@ -66,6 +66,7 @@
 		E50000000000000000000001 /* LibraryOrganizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000001 /* LibraryOrganizer.swift */; };
 		E50000000000000000000002 /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000002 /* LibraryStore.swift */; };
 		E50000000000000000000003 /* LibraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000003 /* LibraryViews.swift */; };
+		E50000000000000000000004 /* AppTabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000004 /* AppTabs.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -124,6 +125,7 @@
 		E51000000000000000000001 /* LibraryOrganizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryOrganizer.swift; sourceTree = "<group>"; };
 		E51000000000000000000002 /* LibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryStore.swift; sourceTree = "<group>"; };
 		E51000000000000000000003 /* LibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViews.swift; sourceTree = "<group>"; };
+		E51000000000000000000004 /* AppTabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTabs.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -223,6 +225,7 @@
 				C30000000000000000000004 /* TXTBookCache.swift */,
 				C30000000000000000000002 /* DiagnosticContext.swift */,
 				E51000000000000000000001 /* LibraryOrganizer.swift */,
+				E51000000000000000000004 /* AppTabs.swift */,
 			);
 			path = Sources/NoveliaIOSCore;
 			sourceTree = "<group>";
@@ -409,6 +412,7 @@
 				E50000000000000000000003 /* LibraryViews.swift in Sources */,
 				E50000000000000000000002 /* LibraryStore.swift in Sources */,
 				E50000000000000000000001 /* LibraryOrganizer.swift in Sources */,
+				E50000000000000000000004 /* AppTabs.swift in Sources */,
 				A10000000000000000000044 /* SettingsKeys.swift in Sources */,
 				D30000000000000000000003 /* ReaderSettingsAdapters.swift in Sources */,
 				D30000000000000000000001 /* ReaderSettings.swift in Sources */,
@@ -541,8 +545,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.13.0;
-				CURRENT_PROJECT_VERSION = 61;
+				MARKETING_VERSION = 0.14.0;
+				CURRENT_PROJECT_VERSION = 62;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -565,8 +569,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.13.0;
-				CURRENT_PROJECT_VERSION = 61;
+				MARKETING_VERSION = 0.14.0;
+				CURRENT_PROJECT_VERSION = 62;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
