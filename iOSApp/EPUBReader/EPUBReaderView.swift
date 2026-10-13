@@ -541,7 +541,7 @@ struct EPUBReaderView: View {
 }
 
 /// UIFont 列出的字体族包含系统字体以及已安装且对本 App 可见的设备字体。
-private struct EPUBFontPicker: View {
+struct EPUBFontPicker: View {
     @Binding var selection: String?
     var onDeleteImportedFamily: (String) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -736,6 +736,8 @@ struct EPUBFilePicker: UIViewControllerRepresentable {
 struct EPUBReaderHost: View {
     let initialURL: URL?
     @State private var resolvedURL: URL?
+    /// 实验：EPUB 改由 Readium（WKWebView）排版；TXT 与在线章节不受影响。
+    @AppStorage(SettingsKey.readerEPUBReadium) private var usesReadium = true
 
     /// 调试：Debug 构建中 `-prototypeBookPath <路径>` 直接打开指定 EPUB（自动化/真机排查用）。
     private var debugBookURL: URL? {
@@ -752,7 +754,11 @@ struct EPUBReaderHost: View {
     var body: some View {
         Group {
             if let resolvedURL {
-                EPUBReaderView(bookURL: resolvedURL)
+                if usesReadium {
+                    ReadiumEPUBReaderView(bookURL: resolvedURL)
+                } else {
+                    EPUBReaderView(bookURL: resolvedURL)
+                }
             } else {
                 ProgressView("准备样例书…")
             }

@@ -8,6 +8,7 @@ struct SettingsView: View {
     @EnvironmentObject private var auth: AccountAuthStore
     @AppStorage(SettingsKey.appThemeColor) private var themeColorRaw = AppThemeColor.novelia.rawValue
     @AppStorage(SettingsKey.appThemeCustomHex) private var themeCustomHex = "559775"
+    @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = true
     @ObservedObject private var readerSettings = ReaderSettings.shared
     @AppStorage(SettingsKey.readerMode) private var modeRaw = ReaderMode.bilingual.rawValue
     @State private var isExportingLogs = false
@@ -47,6 +48,13 @@ struct SettingsView: View {
             }
             Section("阅读体验") {
                 NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
+                Toggle(isOn: $epubUsesReadium) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("EPUB 使用 Readium 引擎（实验）")
+                        Text("支持表格、Flex/Grid、定位与透明度等完整 CSS；水平滑动翻页。下次打开书籍时生效。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Picker(selection: $themeColorRaw) {
                     ForEach(AppThemeColor.allCases) { option in
                         HStack(spacing: 8) {
