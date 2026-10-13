@@ -1,5 +1,25 @@
 import Foundation
 
+/// 统一书库中的来源筛选，不改变书籍原有归属。
+enum LibrarySourceFilter: String, CaseIterable, Identifiable {
+    case all, wenku, webNovel
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .all: "全部"
+        case .wenku: "文库"
+        case .webNovel: "网络小说"
+        }
+    }
+    func includes(isWenku: Bool) -> Bool {
+        switch self {
+        case .all: true
+        case .wenku: isWenku
+        case .webNovel: !isWenku
+        }
+    }
+}
+
 /// 书库排序字段。
 enum LibrarySortField: String, Codable, CaseIterable, Identifiable, Sendable {
     case importedAt
@@ -54,6 +74,25 @@ enum LibraryOrganizer {
             let haystack = normalized(field)
             return haystack.contains(needle) || haystack.filter { !$0.isWhitespace }.contains(compactNeedle)
         }
+    }
+
+    /// 同一持久标识只能对应一条记录；保留最新记录，时间相同时保留索引中第一条。
+    /// 按标识而非书名处理，避免合并同名的不同卷或不同来源书籍。
+    static func uniqueRecords<Element, ID: Hashable>(_ records: [Element],
+                                                    id: (Element) -> ID,
+                                                    date: (Element) -> Date) -> [Element] {
+        var indices: [ID: Int] = [:]
+        var result: [Element] = []
+        for record in records {
+            let key = id(record)
+            if let index = indices[key] {
+                if date(record) > date(result[index]) { result[index] = record }
+            } else {
+                indices[key] = result.count
+                result.append(record)
+            }
+        }
+        return result
     }
 
     /// 排序规则：

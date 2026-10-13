@@ -98,7 +98,9 @@ final class LibraryImportModel: ObservableObject {
         do {
             try await library.registerDownloadedFile(at: destination, title: title, source: .import, trace: trace)
         } catch let duplicate as LocalLibraryDuplicateError {
-            TXTDiagnosticLog.logger.info("TXT import skipped duplicate; trace=\(trace, privacy: .public), book=\(DiagnosticContext.bookTag(duplicate.contentHash), privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+            if extensionName == "txt" {
+                TXTDiagnosticLog.logger.info("TXT import skipped duplicate; trace=\(trace, privacy: .public), book=\(DiagnosticContext.bookTag(duplicate.contentHash), privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+            }
             throw duplicate
         } catch {
             if extensionName == "epub" { logEPUBImportFailure(error, stage: "registration", start: start) }

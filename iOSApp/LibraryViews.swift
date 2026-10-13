@@ -17,6 +17,7 @@ struct LibraryView: View {
     @StateObject private var importer = LibraryImportModel()
     @StateObject private var bookActions = LibraryBookActions()
     @State private var segment = Segment.books
+    @State private var sourceFilter = LibrarySourceFilter.all
     @State private var query = ""
     @State private var isSearching = false
     @State private var readerTarget: LibraryBook?
@@ -30,43 +31,53 @@ struct LibraryView: View {
     private var sortOptions: LibrarySortOptions { state.sortOptions(scope: nil) }
 
     var body: some View {
-        let books = allBooks
+        let sourceBooks = allBooks
+        let books = state.displayBooks(from: sourceBooks).filter { sourceFilter.includes(isWenku: $0.isWenku) }
         List {
-            Group {
-                if books.isEmpty {
-                    emptyLibrary
-                } else if isSearching && !LibraryOrganizer.normalized(query).isEmpty {
-                    searchResults(books)
-                } else {
-                    if let recent = recentBook(in: books) {
-                        LibraryContinueReadingCard(book: recent) { open(recent) }
-                    }
-                    // 已移入系列的书只在“系列”中显示，不在“全部书籍”中重复出现。
-                    let ungrouped = books.filter { state.series.seriesID(forBook: $0.key) == nil }
-                    Picker("书库内容", selection: $segment) {
-                        Text("全部书籍 \(ungrouped.count)").tag(Segment.books)
-                        Text("系列 \(state.series.activeSeries.count)").tag(Segment.series)
-                    }
-                    .pickerStyle(.segmented)
-                    switch segment {
-                    case .books:
-                        if ungrouped.isEmpty {
-                            ContentUnavailableView {
-                                Label("书籍都已在系列中", systemImage: "rectangle.stack")
-                            } description: {
-                                Text("在“系列”中查看，或从系列移出后回到这里。")
-                            }
-                            .padding(.top, 20)
-                        } else {
-                            LibrarySortSummary(options: sortOptions) { state.setSortOptions($0, scope: nil) }
-                            LibraryBookList(books: sorted(ungrouped, options: sortOptions), actions: bookActions, open: open)
+            if sourceBooks.isEmpty {
+                emptyLibrary.libraryListRow()
+            } else if isSearching && !LibraryOrganizer.normalized(query).isEmpty {
+                searchResults(books)
+            } else {
+                if let recent = recentBook(in: books) {
+                    LibraryContinueReadingCard(book: recent) { open(recent) }
+                        .libraryListRow()
+                }
+                // 已移入系列的书只在“系列”中显示，不在“全部书籍”中重复出现。
+                let ungrouped = books.filter { state.series.seriesID(forBook: $0.key) == nil }
+                Picker("书库内容", selection: $segment) {
+                    Text("全部书籍 \(ungrouped.count)").tag(Segment.books)
+                    Text("系列 \(visibleSeries(in: books).count)").tag(Segment.series)
+                }
+                .pickerStyle(.segmented)
+                .libraryListRow()
+                switch segment {
+                case .books:
+                    if ungrouped.isEmpty {
+                        sourceFilterMenu.libraryListRow()
+                        ContentUnavailableView {
+                            Label("没有可显示的书籍", systemImage: "books.vertical")
+                        } description: {
+                            Text("可以切换来源筛选，或到“系列”中查看已归类的书籍。")
                         }
-                    case .series:
-                        seriesList(books)
+                        .padding(.top, 20)
+                        .libraryListRow()
+                    } else {
+                        HStack {
+                            sourceFilterMenu
+                            Spacer()
+                            LibrarySortSummary(options: sortOptions) { state.setSortOptions($0, scope: nil) }
+                        }
+                        .libraryListRow()
+                        ForEach(sorted(ungrouped, options: sortOptions)) { book in
+                            LibraryBookRow(book: book, actions: bookActions, open: open)
+                                .libraryListRow()
+                        }
                     }
+                case .series:
+                    seriesList(books)
                 }
             }
-            .libraryListRow()
         }
         .libraryListStyle()
         .scrollDismissesKeyboard(.interactively)
@@ -91,7 +102,7 @@ struct LibraryView: View {
         .onAppear { state.reloadPositions() }
         .task { importer.attach(wenkuDownloads) }
         .task { await wenkuDownloads.refreshMissingMetadata() }
-        .task(id: books.map(\.key)) { await state.refreshHashes(for: books) }
+        .task(id: sourceBooks) { await state.refreshHashes(for: sourceBooks) }
         .fullScreenCover(isPresented: $importer.isShowingFileImporter) {
             EPUBFilePicker(contentTypes: [
                 UTType(filenameExtension: "txt") ?? .plainText,
@@ -125,6 +136,24 @@ struct LibraryView: View {
         }
         .overlay { LibraryImportProgressOverlay(model: importer) }
         .modifier(LibraryBookActionDialogs(actions: bookActions))
+    }
+
+    private var sourceFilterMenu: some View {
+        Menu {
+            Picker("书籍来源", selection: $sourceFilter) {
+                ForEach(LibrarySourceFilter.allCases) { filter in
+                    Text(filter.title).tag(filter)
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(sourceFilter.title)
+                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(NoveliaStyle.brandGreen)
+        }
+        .accessibilityLabel("书籍来源：\(sourceFilter.title)")
     }
 
     @ViewBuilder
@@ -199,14 +228,25 @@ struct LibraryView: View {
 
     @ViewBuilder
     private func searchResults(_ books: [LibraryBook]) -> some View {
+        sourceFilterMenu.libraryListRow()
         let matches = books.filter { LibraryOrganizer.matches(title: $0.title, author: $0.author, query: query) }
         Text(matches.isEmpty ? "没有找到匹配的书" : "找到 \(matches.count) 本")
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(NoveliaStyle.muted)
+            .libraryListRow()
         if matches.isEmpty {
-            ContentUnavailableView.search(text: query)
+            ContentUnavailableView.search(text: query).libraryListRow()
         } else {
-            LibraryBookList(books: sorted(matches, options: sortOptions), actions: bookActions, open: open)
+            ForEach(sorted(matches, options: sortOptions)) { book in
+                LibraryBookRow(book: book, actions: bookActions, open: open)
+                    .libraryListRow()
+            }
+        }
+    }
+
+    private func visibleSeries(in books: [LibraryBook]) -> [LibrarySeries] {
+        state.series.activeSeries.filter { series in
+            sourceFilter == .all || books.contains { state.series.seriesID(forBook: $0.key) == series.id }
         }
     }
 
@@ -221,7 +261,9 @@ struct LibraryView: View {
                 .foregroundStyle(NoveliaStyle.brandGreen)
         }
         .buttonStyle(.plain)
-        let allSeries = state.series.activeSeries
+        .libraryListRow()
+        sourceFilterMenu.libraryListRow()
+        let allSeries = visibleSeries(in: books)
         if allSeries.isEmpty {
             ContentUnavailableView {
                 Label("还没有系列", systemImage: "rectangle.stack")
@@ -229,6 +271,7 @@ struct LibraryView: View {
                 Text("新建系列后，在书籍的“更多”菜单中选择“移入系列”。导入和下载的书都可以加入。")
             }
             .padding(.top, 20)
+            .libraryListRow()
         } else {
             ForEach(allSeries) { series in
                 let keys = state.series.bookKeys(inSeries: series.id)
@@ -237,12 +280,13 @@ struct LibraryView: View {
                 LibrarySeriesRow(name: series.name, books: members)
                     .background {
                         NavigationLink {
-                            LibrarySeriesDetailView(seriesID: series.id)
+                            LibrarySeriesDetailView(seriesID: series.id, sourceFilter: sourceFilter)
                         } label: {
                             EmptyView()
                         }
                         .opacity(0)
                     }
+                    .libraryListRow()
                     .contextMenu { LibrarySeriesMenuItems(seriesID: series.id, name: series.name, actions: bookActions) }
             }
         }
@@ -267,6 +311,7 @@ struct LibraryView: View {
 
 struct LibrarySeriesDetailView: View {
     let seriesID: String
+    var sourceFilter = LibrarySourceFilter.all
 
     @EnvironmentObject private var webDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
@@ -283,9 +328,9 @@ struct LibrarySeriesDetailView: View {
     }
 
     var body: some View {
-        let all = state.books(web: webDownloads, wenku: wenkuDownloads)
+        let all = state.displayBooks(from: state.books(web: webDownloads, wenku: wenkuDownloads))
         let keys = state.series.bookKeys(inSeries: seriesID)
-        let members = all.filter { keys.contains($0.key) }
+        let members = all.filter { keys.contains($0.key) && sourceFilter.includes(isWenku: $0.isWenku) }
         let options = state.sortOptions(scope: seriesID)
         let visible = LibraryOrganizer.sorted(
             members.filter { LibraryOrganizer.matches(title: $0.title, author: $0.author, query: query) },
@@ -293,28 +338,30 @@ struct LibrarySeriesDetailView: View {
         ) { state.sortItem(for: $0) }
 
         List {
-            Group {
-                if members.isEmpty {
-                    ContentUnavailableView {
-                        Label("系列中还没有书", systemImage: "rectangle.stack")
-                    } description: {
-                        Text("把导入或下载的书移入这个系列。移出后书籍和阅读进度都会保留。")
-                    } actions: {
-                        Button("添加书籍") { isAddingBooks = true }
-                            .buttonStyle(.borderedProminent)
-                            .tint(NoveliaStyle.brandGreen)
-                    }
-                    .padding(.top, 40)
+            if members.isEmpty {
+                ContentUnavailableView {
+                    Label("系列中还没有书", systemImage: "rectangle.stack")
+                } description: {
+                    Text("把导入或下载的书移入这个系列。移出后书籍和阅读进度都会保留。")
+                } actions: {
+                    Button("添加书籍") { isAddingBooks = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(NoveliaStyle.brandGreen)
+                }
+                .padding(.top, 40)
+                .libraryListRow()
+            } else {
+                LibrarySortSummary(options: options, count: members.count) { state.setSortOptions($0, scope: seriesID) }
+                    .libraryListRow()
+                if visible.isEmpty {
+                    ContentUnavailableView.search(text: query).libraryListRow()
                 } else {
-                    LibrarySortSummary(options: options, count: members.count) { state.setSortOptions($0, scope: seriesID) }
-                    if visible.isEmpty {
-                        ContentUnavailableView.search(text: query)
-                    } else {
-                        LibraryBookList(books: visible, showsSeries: false, actions: bookActions, open: open)
+                    ForEach(visible) { book in
+                        LibraryBookRow(book: book, showsSeries: false, actions: bookActions, open: open)
+                            .libraryListRow()
                     }
                 }
             }
-            .libraryListRow()
         }
         .libraryListStyle()
         .scrollDismissesKeyboard(.interactively)
@@ -542,9 +589,10 @@ struct LibraryBookActionDialogs: ViewModifier {
     }
 }
 
-/// 书籍列表：点击整行打开阅读；“更多”菜单提供系列、导出、移动和删除。
-struct LibraryBookList: View {
-    let books: [LibraryBook]
+/// 每个 ForEach 元素只返回一行，使 List 能按书籍标识复用行，避免遍历多行子视图。
+/// 点击整行打开阅读；“更多”菜单提供系列、导出、移动和删除。
+struct LibraryBookRow: View {
+    let book: LibraryBook
     /// 系列详情中不重复显示系列名。
     var showsSeries = true
     /// 只用于触发弹窗，不观察其变化，弹窗状态改变时列表行不必重算。
@@ -556,29 +604,28 @@ struct LibraryBookList: View {
     @ObservedObject private var state = LibraryStateStore.shared
 
     var body: some View {
-        ForEach(books) { book in
-            HStack(alignment: .center, spacing: 4) {
-                Button { open(book) } label: {
-                    LibraryBookRowContent(book: book, status: state.status(for: book), seriesName: showsSeries ? state.seriesName(for: book) : nil)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("打开阅读")
-                Menu {
-                    menuItems(for: book)
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(NoveliaStyle.muted)
-                        .frame(width: 36, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel("更多操作：\(book.title)")
+        HStack(alignment: .center, spacing: 4) {
+            Button { open(book) } label: {
+                LibraryBookRowContent(book: book, status: state.status(for: book), seriesName: showsSeries ? state.seriesName(for: book) : nil)
+                    .contentShape(Rectangle())
             }
-            .padding(.leading, 10)
-            .padding(.vertical, 8)
-            .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
+            .buttonStyle(.plain)
+            .accessibilityHint("打开阅读")
+            .accessibilityIdentifier("library-book-\(book.key)")
+            Menu {
+                menuItems(for: book)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(NoveliaStyle.muted)
+                    .frame(width: 36, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("更多操作：\(book.title)")
         }
+        .padding(.leading, 10)
+        .padding(.vertical, 8)
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
     }
 
     @ViewBuilder

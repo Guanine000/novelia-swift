@@ -168,7 +168,9 @@ final class WenkuLocalLibraryStore: ObservableObject {
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         if let data = try? Data(contentsOf: indexURL),
            let saved = try? JSONDecoder().decode([LocalWenkuEPUB].self, from: data) {
-            books = saved.filter { fileManager.fileExists(atPath: directory.appendingPathComponent($0.filename).path) }
+            books = LibraryOrganizer.uniqueRecords(
+                saved.filter { fileManager.fileExists(atPath: directory.appendingPathComponent($0.filename).path) },
+                id: { $0.id }, date: { $0.addedAt })
         }
     }
 
@@ -256,12 +258,11 @@ final class WenkuLocalLibraryStore: ObservableObject {
         uniqueDestination(for: Self.safeFilename(filename))
     }
 
-    /// 内容相同的文库 TXT，通过 SHA-256 比较（按文件缓存哈希）。
-    private func existingTXT(withContentHash hash: String, excluding newFile: URL) async -> LocalWenkuEPUB? {
-        for book in books where book.resolvedFileFormat == .txt {
+    /// 内容相同的本地书籍，通过 SHA-256 比较（按文件缓存哈希）。
+    private func existingBook(withContentHash hash: String, format: WebNovelFileFormat) async -> LocalWenkuEPUB? {
+        for book in books where book.resolvedFileFormat == format {
             let url = directory.appendingPathComponent(book.filename)
-            guard url.standardizedFileURL != newFile.standardizedFileURL,
-                  fileManager.fileExists(atPath: url.path),
+            guard fileManager.fileExists(atPath: url.path),
                   let existing = try? await TXTBookCache.shared.contentHash(of: url) else { continue }
             if existing == hash { return book }
         }
@@ -291,8 +292,8 @@ final class WenkuLocalLibraryStore: ObservableObject {
                 try? fileManager.removeItem(at: fileURL)
                 throw WenkuLocalLibraryError.invalidTXT
             }
-            if let existing = await existingTXT(withContentHash: newHash, excluding: fileURL) {
-                try? fileManager.removeItem(at: fileURL)
+            if let existing = await existingBook(withContentHash: newHash, format: .txt) {
+                if existing.filename != fileURL.lastPathComponent { try? fileManager.removeItem(at: fileURL) }
                 throw LocalLibraryDuplicateError(existingTitle: existing.title, contentHash: newHash)
             }
             let book = LocalWenkuEPUB(
@@ -321,7 +322,13 @@ final class WenkuLocalLibraryStore: ObservableObject {
             throw WenkuLocalLibraryError.invalidEPUB
         }
 
+        let newHash = try await TXTBookCache.shared.contentHash(of: fileURL)
         let metadata = await Self.metadata(for: fileURL)
+        // 在元数据读取后检查，覆盖同一本 EPUB 被重复导入或下载的情况。
+        if let existing = await existingBook(withContentHash: newHash, format: .epub) {
+            if existing.filename != fileURL.lastPathComponent { try? fileManager.removeItem(at: fileURL) }
+            throw LocalLibraryDuplicateError(existingTitle: existing.title, contentHash: newHash)
+        }
         let id = UUID()
         let coverFilename = try? saveCover(metadata.cover, id: id)
         let book = LocalWenkuEPUB(
@@ -575,7 +582,9 @@ final class WebNovelDownloadStore: ObservableObject {
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         if let data = try? Data(contentsOf: indexURL),
            let saved = try? JSONDecoder().decode([DownloadedWebNovel].self, from: data) {
-            books = saved.filter { fileManager.fileExists(atPath: directory.appendingPathComponent($0.fileFilename).path) }
+            books = LibraryOrganizer.uniqueRecords(
+                saved.filter { fileManager.fileExists(atPath: directory.appendingPathComponent($0.fileFilename).path) },
+                id: { $0.id }, date: { $0.downloadedAt })
         }
     }
 
@@ -643,11 +652,14 @@ final class WebNovelDownloadStore: ObservableObject {
 
     func importForMove(from source: URL, book: LocalWenkuEPUB) throws -> DownloadedWebNovel {
         let format = book.resolvedFileFormat
-        let destination = uniqueDestination(for: source.lastPathComponent)
-        try fileManager.copyItem(at: source, to: destination)
         let novel = book.sourceWebNovel?.novel ?? Novel(id: "local-\(book.id.uuidString)", title: book.title,
             author: book.author ?? "", summary: book.bookDescription ?? "",
             genres: [], chapters: [], accent: .plum)
+        guard !books.contains(where: { $0.id == novel.id }) else {
+            throw WebNovelMoveError.alreadyExists
+        }
+        let destination = uniqueDestination(for: source.lastPathComponent)
+        try fileManager.copyItem(at: source, to: destination)
         let record = DownloadedWebNovel(novel: novel,
             fileFilename: destination.lastPathComponent, downloadedAt: book.sourceWebNovel?.downloadedAt ?? book.addedAt,
             translationSource: book.sourceWebNovel?.translationSource,
@@ -760,4 +772,11 @@ final class WebNovelDownloadStore: ObservableObject {
         try data.write(to: indexURL, options: .atomic)
     }
 
+}
+
+private enum WebNovelMoveError: LocalizedError {
+    case alreadyExists
+    var errorDescription: String? {
+        "网络小说中已经有这本书，请先处理已有书籍后再移动。原书和阅读进度已保留。"
+    }
 }

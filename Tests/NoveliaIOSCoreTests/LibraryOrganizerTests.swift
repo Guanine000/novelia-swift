@@ -17,6 +17,28 @@ final class LibraryOrganizerTests: XCTestCase {
         LibraryOrganizer.sorted(books, options: options) { $0 }.map(\.key)
     }
 
+    func testSourceFilterIncludesOnlySelectedCategory() {
+        XCTAssertTrue(LibrarySourceFilter.all.includes(isWenku: true))
+        XCTAssertTrue(LibrarySourceFilter.all.includes(isWenku: false))
+        XCTAssertTrue(LibrarySourceFilter.wenku.includes(isWenku: true))
+        XCTAssertFalse(LibrarySourceFilter.wenku.includes(isWenku: false))
+        XCTAssertTrue(LibrarySourceFilter.webNovel.includes(isWenku: false))
+        XCTAssertFalse(LibrarySourceFilter.webNovel.includes(isWenku: true))
+    }
+
+    func testDuplicateIdentifiersKeepNewestRecordWithoutMergingSameTitles() {
+        let records = [
+            LibrarySortItem(key: "a", title: "同名书", author: "甲", importedAt: date(100), lastReadAt: nil),
+            LibrarySortItem(key: "b", title: "同名书", author: "甲", importedAt: date(200), lastReadAt: nil),
+            LibrarySortItem(key: "a", title: "新版", author: "甲", importedAt: date(300), lastReadAt: nil),
+            LibrarySortItem(key: "a", title: "同时间旧记录", author: "甲", importedAt: date(300), lastReadAt: nil),
+        ]
+        let unique = LibraryOrganizer.uniqueRecords(records, id: { $0.key }, date: { $0.importedAt })
+        XCTAssertEqual(unique.map(\.key), ["a", "b"])
+        XCTAssertEqual(unique.map(\.title), ["新版", "同名书"])
+        XCTAssertTrue(LibraryOrganizer.uniqueRecords([LibrarySortItem](), id: { $0.key }, date: { $0.importedAt }).isEmpty)
+    }
+
     func testSearchMatchesTitleOrAuthor() {
         XCTAssertTrue(LibraryOrganizer.matches(title: "无职转生", author: "理不尽な孫の手", query: "转生"))
         XCTAssertTrue(LibraryOrganizer.matches(title: "无职转生", author: "理不尽な孫の手", query: "孫の手"))
