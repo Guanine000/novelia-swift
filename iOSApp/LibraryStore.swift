@@ -43,6 +43,11 @@ struct LibraryBook: Identifiable, Hashable {
 
     var id: String { key }
 
+    var isWenku: Bool {
+        if case .wenku = origin { return true }
+        return false
+    }
+
     var categoryTitle: String {
         switch origin {
         case .webNovel: "网络小说"
@@ -88,7 +93,7 @@ final class LibraryStateStore: ObservableObject {
 
     private let defaults: UserDefaults
     private let seriesURL: URL
-    private var isRefreshingHashes = false
+    private var hashRefreshGeneration = 0
 
     private enum Key {
         static let hashes = "library.fileHashes.v1"
@@ -113,6 +118,15 @@ final class LibraryStateStore: ObservableObject {
     func books(web: WebNovelDownloadStore, wenku: WenkuLocalLibraryStore) -> [LibraryBook] {
         web.books.map { LibraryBook(origin: .webNovel($0), fileURL: web.fileURL(for: $0), coverURL: nil) }
             + wenku.books.map { LibraryBook(origin: .wenku($0), fileURL: wenku.fileURL(for: $0), coverURL: wenku.coverFileURL(for: $0)) }
+    }
+
+    /// 相同来源、系列和文件内容只显示一条；保留所有文件和原始记录。
+    /// 哈希未就绪时仍按持久标识显示，避免把同名但内容不同的书合并。
+    func displayBooks(from books: [LibraryBook]) -> [LibraryBook] {
+        LibraryOrganizer.uniqueRecords(books, id: { book in
+            guard let hash = hashByBook[book.key] else { return book.key }
+            return "\(book.categoryTitle)|\(series.seriesID(forBook: book.key) ?? "")|\(book.positionPrefix)\(hash)"
+        }, date: { $0.importedAt })
     }
 
     func status(for book: LibraryBook) -> LibraryReadingStatus {
@@ -160,44 +174,36 @@ final class LibraryStateStore: ObservableObject {
         hashByBook[book.key]
     }
 
-    /// 在后台计算缺少的文件哈希（只计算一次并缓存），用于对应阅读进度。
-    /// 首次打开大量书籍时，界面每秒最多刷新一次，避免每算完一本就重排整个书库导致滚动卡顿。
+    /// 文件身份、哈希及缓存清理都在后台完成；只在批次结束时发布一次。
+    /// 取消旧批次时不提交部分结果，避免新增/删除书籍后旧任务覆盖新书库。
     func refreshHashes(for books: [LibraryBook]) async {
-        guard !isRefreshingHashes else { return }
-        isRefreshingHashes = true
-        defer { isRefreshingHashes = false }
+        hashRefreshGeneration += 1
+        let generation = hashRefreshGeneration
         let targets = books.map { (key: $0.key, url: $0.fileURL) }
-        let identities = await Task.detached(priority: .utility) {
-            targets.map { Self.identity(key: $0.key, url: $0.url) }
-        }.value
-        var valid = Set<String>()
-        var changed = false
-        var byBook: [String: String] = [:]
-        var lastPublish = ContinuousClock.now
-        for (target, identity) in zip(targets, identities) {
-            guard let identity else { continue }
-            valid.insert(identity)
-            if let hash = hashes[identity] {
+        let cached = hashes
+        let worker = Task.detached(priority: .utility) { () -> (cache: [String: String], byBook: [String: String])? in
+            var cache: [String: String] = [:]
+            var byBook: [String: String] = [:]
+            for target in targets {
+                guard !Task.isCancelled else { return nil }
+                guard let identity = Self.identity(key: target.key, url: target.url),
+                      let hash = cached[identity] ?? (try? WebDAVFileHash.sha256(target.url)) else { continue }
+                cache[identity] = hash
                 byBook[target.key] = hash
-                continue
             }
-            let url = target.url
-            guard let hash = try? await Task.detached(priority: .utility, operation: { try WebDAVFileHash.sha256(url) }).value else { continue }
-            hashes[identity] = hash
-            byBook[target.key] = hash
-            changed = true
-            if ContinuousClock.now - lastPublish > .seconds(1) {
-                hashByBook.merge(byBook) { $1 }
-                lastPublish = .now
-            }
+            return (cache, byBook)
         }
-        if byBook != hashByBook { hashByBook = byBook }
-        let stale = hashes.keys.filter { !valid.contains($0) }
-        if !stale.isEmpty {
-            stale.forEach { hashes[$0] = nil }
-            changed = true
+        let result = await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: {
+            worker.cancel()
         }
-        if changed { defaults.set(hashes, forKey: Key.hashes) }
+        guard !Task.isCancelled, generation == hashRefreshGeneration, let result else { return }
+        if result.byBook != hashByBook { hashByBook = result.byBook }
+        if result.cache != hashes {
+            hashes = result.cache
+            defaults.set(hashes, forKey: Key.hashes)
+        }
     }
 
     // MARK: 排序设置（仅保存在本机）
