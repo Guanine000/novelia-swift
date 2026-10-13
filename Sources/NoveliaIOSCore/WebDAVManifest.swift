@@ -38,7 +38,7 @@ struct WebDAVManifest: Codable {
     var librarySeries: LibrarySeriesState? = nil
 }
 
-enum WebDAVSyncError: LocalizedError {
+enum WebDAVSyncError: LocalizedError, Equatable {
     case invalidURL
     case missingCredentials
     case unexpectedResponse(Int)
