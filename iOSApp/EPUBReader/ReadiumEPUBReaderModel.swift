@@ -130,6 +130,9 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         )
         config.readiumCSSRSProperties.pageGutter = CSSPxLength(Double(style.leftMargin + style.rightMargin) / 2)
         config.readiumCSSRSProperties.textColor = CSSIntColor(Self.rgb(themeTextColor))
+        // 根背景透明：书籍未设背景时露出宿主绘制的阅读背景；书籍给 body 设的背景
+        // （如 `<body bgcolor>`）按 CSS 规则延伸到整个页面。
+        config.readiumCSSRSProperties.backgroundColor = TransparentCSSColor()
         let navigator = try EPUBNavigatorViewController(
             publication: publication, initialLocation: initialLocation, config: config)
         navigator.delegate = self
@@ -408,21 +411,9 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         return false
     }
 
-    /// 让 HTML 根背景透明，由宿主视图在导航器之下绘制阅读背景（颜色或图片）。
-    /// 只改根元素：根背景透明时，书籍给 body 设的背景（如 `<body bgcolor>`）会按 CSS
-    /// 规则延伸到整个页面；书籍未设背景时则露出阅读背景。
+    /// 新章节的 WebView 创建时触发（此时已开始加载，注入的脚本不保证作用于当页，
+    /// 所以根背景透明改由 RS__backgroundColor 在 HTML 注入阶段完成，见 makeNavigator）。
     func navigator(_ navigator: EPUBNavigatorViewController, setupUserScripts userContentController: WKUserContentController) {
-        let source = """
-        (function() {
-          var apply = function() {
-            document.documentElement.style.setProperty('background', 'transparent', 'important');
-          };
-          apply();
-          document.addEventListener('DOMContentLoaded', apply);
-        })();
-        """
-        userContentController.addUserScript(
-            WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
         // 此回调在新章节的 WebView 创建时触发；待其加入视图层级后再设为透明。
         DispatchQueue.main.async { [weak self] in self?.makeWebViewsTransparent() }
     }
@@ -452,4 +443,9 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         }
         return attributed.string.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+}
+
+/// ReadiumCSS 的颜色类型只输出 #RRGGBB；根背景需要 `transparent`。
+private struct TransparentCSSColor: CSSColor {
+    func css() -> String? { "transparent" }
 }
