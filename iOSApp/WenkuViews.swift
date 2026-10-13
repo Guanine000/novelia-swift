@@ -332,6 +332,8 @@ struct WenkuDetailView: View {
                 .buttonStyle(.borderedProminent).tint(NoveliaStyle.brandGreen)
             }
         }
+        // 根视图全局开启文本选择时，选择手势会吞掉作者/出版社搜索链接文字上的点按。
+        .textSelection(.disabled)
     }
 
     private func latestUpdateText(_ timestamp: Int64?) -> String? {
