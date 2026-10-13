@@ -29,6 +29,8 @@ swift-toolkit 3.11.0 的资源包随 App 分发以下第三方内容：
 | ReadiumCSS 字体 iA Writer Duospace（IBM Plex） | SIL OFL 1.1 | [ReadiumCSS-iAWriterDuospace-LICENSE.txt](ReadiumCSS-iAWriterDuospace-LICENSE.txt) |
 | OpenDyslexic 2.001 | Bitstream Vera License；改动部分 CC BY 3.0 | [OpenDyslexic-LICENSE.txt](OpenDyslexic-LICENSE.txt) |
 | 阅读器脚本中打包的 Hypothesis 代码与 92 个 npm 包 | BSD-2-Clause、MIT、Apache-2.0 | [Readium-JavaScript-NOTICES.txt](Readium-JavaScript-NOTICES.txt) |
+
+阅读器脚本是压缩后的打包文件。Release 的依赖源码包包含 swift-toolkit 的脚本源码与 pnpm 锁定文件，以及打包所用全部 npm 包的原始发布包（`swift-toolkit-npm-sources/`，按锁定文件中的 SHA-512 完整性校验）。
 本应用的 EPUB 原型代码为本项目新写，通过 Swift Package Manager 使用 YueduCoreText 公开 API；未修改上游文件。
 
 ## YueduCoreText 对应源码

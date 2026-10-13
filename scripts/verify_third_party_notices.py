@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import struct
 import re
 from pathlib import Path
 
@@ -29,6 +30,23 @@ READIUM_ASSET_NOTICES = {
     "ReadiumCSS-iAWriterDuospace-LICENSE.txt": f"{READIUM_FONTS}/LICENSE-IaWriterDuospace.md",
 }
 READIUM_SCRIPTS_LOCK = "Sources/Navigator/EPUB/Scripts/pnpm-lock.yaml"
+OPENDYSLEXIC_FONTS = ["Sources/Navigator/EPUB/Assets/Static/fonts", "Sources/Streamer/Assets/fonts"]
+
+
+def font_names(path: Path) -> dict[int, str]:
+    """Windows-platform name records of an OpenType font (copyright = 0, license = 13)."""
+    data = path.read_bytes()
+    tables = struct.unpack(">H", data[4:6])[0]
+    base = next(offset for tag, _, offset, _ in
+                (struct.unpack(">4sIII", data[12 + 16 * i:28 + 16 * i]) for i in range(tables)) if tag == b"name")
+    _, count, strings = struct.unpack(">HHH", data[base:base + 6])
+    names = {}
+    for i in range(count):
+        platform, _, _, name_id, length, offset = struct.unpack(">HHHHHH", data[base + 6 + 12 * i:base + 18 + 12 * i])
+        if platform == 3:
+            start = base + strings + offset
+            names[name_id] = data[start:start + length].decode("utf-16-be")
+    return names
 
 
 def checkout_name(pin: dict) -> str:
@@ -85,6 +103,12 @@ def main() -> None:
         toolkit = args.source_packages / checkout_name(pins["swift-toolkit"])
         for notice, original in READIUM_ASSET_NOTICES.items():
             assert (NOTICES / notice).read_bytes() == (toolkit / original).read_bytes(), f"Font license differs: {notice}"
+        dyslexic = (NOTICES / "OpenDyslexic-LICENSE.txt").read_text()
+        fonts = [font for folder in OPENDYSLEXIC_FONTS for font in sorted((toolkit / folder).glob("OpenDyslexic*"))]
+        assert fonts, "OpenDyslexic fonts not found in swift-toolkit"
+        for font in fonts:
+            for name_id in (0, 13):
+                assert font_names(font)[name_id] in dyslexic, f"OpenDyslexic notice not quoted verbatim: {font.name} name {name_id}"
         scripts = (NOTICES / "Readium-JavaScript-NOTICES.txt").read_text()
         for package in production_scripts(toolkit / READIUM_SCRIPTS_LOCK):
             assert f"\n{package} — " in scripts, f"Bundled script package missing from notices: {package}"

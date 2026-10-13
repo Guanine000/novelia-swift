@@ -1,9 +1,15 @@
 OpenDyslexic 2.001 (bundled by Readium swift-toolkit 3.11.0 in ReadiumNavigator and ReadiumStreamer)
 
-Notice embedded in the font files:
+Notices embedded in the font files, quoted verbatim from the OpenType name table.
 
-Original Fonts are (c) Bitstream. OpenDyslexic changes and additional glyphs by Abelardo Gonzalez are licensed under a Creative Commons Attribution 3.0 Unported License.
-Based on a work at http://dyslexicfonts.com. (c) 2012 by Abelardo Gonzalez. Copying is an act of love. Please copy.
+Copyright (name ID 0):
+Original Fonts are © Bitstream. OpenDyslexic changes and additional glyphs by Abelardo Gonzalez are licensed under a Creative Commons Attribution 3.0 Unported License.
+Based on a work at http://dyslexicfonts.com. ♡2012 by Abelardo Gonzalez. Copying is an act of love. Please copy.
+Bitstream license available here: http://opendyslexic.org/legal/
+
+License description (name ID 13):
+Fonts are © Bitstream. OpenDyslexic changes and additional glyphs by Abelardo Gonzalez are licensed under a Creative Commons Attribution 3.0 Unported License.
+Based on a work at http://dyslexicfonts.com. ♡2012 by Abelardo Gonzalez. Copying is an act of love. Please copy.
 Bitstream license available here: http://opendyslexic.org/legal/
 
 Creative Commons Attribution 3.0 Unported License: https://creativecommons.org/licenses/by/3.0/legalcode
