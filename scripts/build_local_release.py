@@ -150,7 +150,8 @@ def main():
         pins = json.loads((ROOT / PIN_FILE).read_text())["pins"]
         with tarfile.open(dependencies, "w:gz") as archive:
             for pin in pins:
-                name = {"swiftsoup": "SwiftSoup", "yueducoretext": "YueduCoreText", "zipfoundation": "ZIPFoundation"}[pin["identity"]]
+                # SwiftPM checks a package out under its repository name.
+                name = pin["location"].rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
                 checkout = checkouts / name
                 if git("rev-parse", "HEAD", cwd=checkout) != pin["state"]["revision"]:
                     raise RuntimeError(f"Dependency revision mismatch: {name}")
