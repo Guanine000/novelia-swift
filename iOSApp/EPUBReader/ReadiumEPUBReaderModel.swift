@@ -176,6 +176,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     var tocDiagnosticMessages: [String] {
         var messages: [String] = []
         if tocReadFailed { messages.append("Readium 内嵌目录读取失败。") }
+        if toc.count > embeddedTOCCount, let notice = tocNotice { messages.append(notice) }
         messages.append(contentsOf: contentDiagnostics.messages)
         return messages
     }
