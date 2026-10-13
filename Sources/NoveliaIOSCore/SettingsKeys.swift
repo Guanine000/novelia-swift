@@ -34,6 +34,7 @@ enum SettingsKey {
         static let syncTags = "webdav.syncTags"
         static let syncBackgrounds = "webdav.syncBackgrounds"
         static let syncFonts = "webdav.syncFonts"
+        static let syncStatistics = "webdav.syncStatistics"
         /// 本机文件的内容哈希缓存 `[文件身份: SHA-256]`，见 `WebDAVFileHash.identity`。
         static let fileHashes = "webdav.fileHashes.v1"
     }

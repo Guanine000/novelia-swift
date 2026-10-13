@@ -220,7 +220,7 @@ def main():
         run(["git", "diff", "--cached", "--check"])
         run([str(ROOT / "scripts/run_package_tests.sh"), args.simulator,
              "-test-timeouts-enabled", "YES", "-default-test-execution-time-allowance", "120"], log=out / "package-tests.log")
-        for script in ["test_forum_filters.py", "test_unified_login.py", "test_auth_login_bridge.py", "test_library_store.py"]:
+        for script in ["test_forum_filters.py", "test_unified_login.py", "test_auth_login_bridge.py", "test_library_store.py", "test_reading_statistics_store.py"]:
             run(["python3", "-I", str(ROOT / "scripts" / script)], log=out / f"{script}.log")
         run(["xcodebuild", "-project", "NoveliaIOS.xcodeproj", "-scheme", "Novelia", "-configuration", "Release",
              "-sdk", "iphoneos", "-destination", "generic/platform=iOS", "-derivedDataPath", str(derived),

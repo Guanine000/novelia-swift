@@ -58,7 +58,7 @@ final class WebDAVRedirectGuard: NSObject, URLSessionTaskDelegate {
 }
 
 /// 每次同步新建一个客户端；释放时让会话失效，否则带 delegate 的 URLSession 会一直被系统持有。
-final class WebDAVClient: WebDAVRemote {
+final class WebDAVClient: WebDAVRemote, ReadingStatisticsRemote {
     let base: URL
     let root: URL
     let authorization: String
@@ -161,6 +161,30 @@ final class WebDAVClient: WebDAVRemote {
         guard (200...299).contains(code) else { throw WebDAVSyncError.unexpectedResponse(code) }
     }
 
+    func fetchReadingStatistics() async throws -> (ReadingStatisticsSync, String?, Bool) {
+        let (data, response) = try await read(request(root.appendingPathComponent("reading-statistics.json"), method: "GET"))
+        let code = try status(response)
+        if code == 404 { return (ReadingStatisticsSync(), nil, false) }
+        guard code == 200 else { throw WebDAVSyncError.unexpectedResponse(code) }
+        let snapshot = try JSONDecoder().decode(ReadingStatisticsSync.self, from: data)
+        guard snapshot.isValid else { throw WebDAVSyncError.invalidStatistics }
+        return (snapshot, (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag"), true)
+    }
+
+    func putReadingStatistics(_ snapshot: ReadingStatisticsSync, etag: String?, existed: Bool) async throws {
+        guard snapshot.isValid else { throw WebDAVSyncError.invalidStatistics }
+        // 不允许无条件覆盖已存在的统计，避免多设备同时同步丢掉计时记录。
+        guard !existed || etag != nil else { throw WebDAVSyncError.missingStatisticsETag }
+        var put = request(root.appendingPathComponent("reading-statistics.json"), method: "PUT")
+        put.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let etag { put.setValue(etag, forHTTPHeaderField: "If-Match") }
+        else { put.setValue("*", forHTTPHeaderField: "If-None-Match") }
+        let (_, response) = try await session.upload(for: put, from: JSONEncoder().encode(snapshot))
+        let code = try status(response)
+        if code == 412 { throw WebDAVSyncError.concurrentChange }
+        guard (200...299).contains(code) else { throw WebDAVSyncError.unexpectedResponse(code) }
+    }
+
     private func blobURL(_ hash: String) throws -> URL {
         guard WebDAVAsset.isValidHash(hash) else { throw WebDAVSyncError.invalidAsset }
         return root.appendingPathComponent("blobs", isDirectory: true).appendingPathComponent(hash)
@@ -194,5 +218,32 @@ final class WebDAVClient: WebDAVRemote {
         let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.moveItem(at: temporary, to: destination)
         return destination
+    }
+}
+
+protocol ReadingStatisticsRemote {
+    func fetchReadingStatistics() async throws -> (ReadingStatisticsSync, String?, Bool)
+    func putReadingStatistics(_ snapshot: ReadingStatisticsSync, etag: String?, existed: Bool) async throws
+}
+
+struct ReadingStatisticsSynchronizer {
+    let remote: any ReadingStatisticsRemote
+
+    func sync(_ local: ReadingStatisticsSync) async throws -> ReadingStatisticsSync {
+        guard local.isValid else { throw WebDAVSyncError.invalidStatistics }
+        for attempt in 0..<3 {
+            try Task.checkCancellation()
+            let (snapshot, etag, existed) = try await remote.fetchReadingStatistics()
+            guard snapshot.isValid else { throw WebDAVSyncError.invalidStatistics }
+            let merged = ReadingStatisticsSync.merged(local, snapshot)
+            do {
+                try Task.checkCancellation()
+                try await remote.putReadingStatistics(merged, etag: etag, existed: existed)
+                return merged
+            } catch WebDAVSyncError.concurrentChange where attempt < 2 {
+                continue
+            }
+        }
+        throw WebDAVSyncError.concurrentChange
     }
 }

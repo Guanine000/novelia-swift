@@ -282,3 +282,90 @@ final class WebDAVClientTests: XCTestCase {
                           WebDAVSyncError.unexpectedResponse(418).localizedDescription)
     }
 }
+
+extension WebDAVClientTests {
+    func testStatisticsMissingStartsEmptyInSeparateFile() async throws {
+        let (snapshot, etag, existed) = try await client().fetchReadingStatistics()
+        XCTAssertTrue(snapshot.devices.isEmpty)
+        XCTAssertNil(etag)
+        XCTAssertFalse(existed)
+        XCTAssertEqual(WebDAVMock.keys, ["GET \(root)/reading-statistics.json"])
+    }
+
+    func testStatisticsFetchAndPutUseConditionalHeaders() async throws {
+        let path = "\(root)/reading-statistics.json"
+        let snapshot = ReadingStatisticsSync()
+        WebDAVMock.on("GET \(path)", Reply(headers: ["ETag": "\"s1\""], body: try JSONEncoder().encode(snapshot)))
+        WebDAVMock.on("PUT \(path)", Reply(status: 201))
+        let (_, etag, existed) = try await client().fetchReadingStatistics()
+        XCTAssertEqual(etag, "\"s1\"")
+        XCTAssertTrue(existed)
+        try await client().putReadingStatistics(snapshot, etag: etag, existed: existed)
+        try await client().putReadingStatistics(snapshot, etag: nil, existed: false)
+        let puts = WebDAVMock.requests.filter { $0.httpMethod == "PUT" }
+        XCTAssertEqual(puts[0].value(forHTTPHeaderField: "If-Match"), "\"s1\"")
+        XCTAssertEqual(puts[1].value(forHTTPHeaderField: "If-None-Match"), "*")
+        XCTAssertFalse(WebDAVMock.keys.contains { $0.contains("index.json") })
+    }
+
+    func testStatisticsRejectsUnconditionalOverwriteAndUnsupportedVersion() async throws {
+        await assertSyncError(.missingStatisticsETag) {
+            try await self.client().putReadingStatistics(ReadingStatisticsSync(), etag: nil, existed: true)
+        }
+        XCTAssertTrue(WebDAVMock.requests.isEmpty)
+        let invalid = ReadingStatisticsSync(version: 2)
+        WebDAVMock.on("GET \(root)/reading-statistics.json", Reply(body: try JSONEncoder().encode(invalid)))
+        await assertSyncError(.invalidStatistics) { try await self.client().fetchReadingStatistics() }
+    }
+
+    func testStatisticsRejectsConflict() async throws {
+        WebDAVMock.on("PUT \(root)/reading-statistics.json", Reply(status: 412))
+        await assertSyncError(.concurrentChange) {
+            try await self.client().putReadingStatistics(ReadingStatisticsSync(), etag: "\"old\"", existed: true)
+        }
+    }
+}
+
+private final class StatisticsMemoryRemote: ReadingStatisticsRemote {
+    var snapshots: [ReadingStatisticsSync] = []
+    var conflicts = 0
+    var writes: [ReadingStatisticsSync] = []
+    var reads = 0
+    func fetchReadingStatistics() async throws -> (ReadingStatisticsSync, String?, Bool) {
+        let value = snapshots[min(reads, snapshots.count - 1)]
+        reads += 1
+        return (value, "\"\(reads)\"", true)
+    }
+    func putReadingStatistics(_ snapshot: ReadingStatisticsSync, etag: String?, existed: Bool) async throws {
+        writes.append(snapshot)
+        if conflicts > 0 { conflicts -= 1; throw WebDAVSyncError.concurrentChange }
+    }
+}
+
+extension WebDAVClientTests {
+    func testStatisticsConcurrentWriteRetriesFreshMerge() async throws {
+        let remote = StatisticsMemoryRemote()
+        var remoteStats = ReadingStatistics(), localStats = ReadingStatistics()
+        let now = Date()
+        let book = ReadingBook(id: "book", title: "书", kind: .epub)
+        localStats.record(book: book, from: now, to: now.addingTimeInterval(20), duration: 20)
+        remoteStats.record(book: book, from: now, to: now.addingTimeInterval(30), duration: 30)
+        remote.snapshots = [ReadingStatisticsSync(), ReadingStatisticsSync(devices: ["b": remoteStats])]
+        remote.conflicts = 1
+        let merged = try await ReadingStatisticsSynchronizer(remote: remote).sync(.init(devices: ["a": localStats]))
+        XCTAssertEqual(remote.reads, 2)
+        XCTAssertEqual(merged.statistics.seconds(), 50)
+        XCTAssertEqual(remote.writes.last, merged)
+    }
+
+    func testStatisticsStopsAfterThreeConflictsWithoutChangingLocal() async {
+        let remote = StatisticsMemoryRemote()
+        remote.snapshots = [ReadingStatisticsSync()]
+        remote.conflicts = 3
+        await assertSyncError(.concurrentChange) {
+            try await ReadingStatisticsSynchronizer(remote: remote).sync(ReadingStatisticsSync())
+        }
+        XCTAssertEqual(remote.reads, 3)
+        XCTAssertEqual(remote.writes.count, 3)
+    }
+}

@@ -74,6 +74,43 @@ struct ReadingStatistics: Codable, Equatable, Sendable {
         return result
     }
 
+    /// 同一设备的单调累计值取大值，重复同步和旧快照不会使时长翻倍或倒退。
+    static func mergedMaximum(_ lhs: Self, _ rhs: Self) -> Self {
+        var result = lhs
+        for (id, incoming) in rhs.books {
+            guard var entry = result.books[id] else { result.books[id] = incoming; continue }
+            if incoming.lastReadAt > entry.lastReadAt { entry.book = incoming.book }
+            entry.lastReadAt = max(entry.lastReadAt, incoming.lastReadAt)
+            for (day, seconds) in incoming.days { entry.days[day] = max(entry.days[day] ?? 0, seconds) }
+            result.books[id] = entry
+        }
+        return result
+    }
+
+    /// 不同设备分别计时，展示时相加；本机计时器始终只持有本机数据。
+    static func combined(_ devices: [String: Self]) -> Self {
+        var result = Self()
+        for snapshot in devices.values {
+            for (id, incoming) in snapshot.books {
+                guard var entry = result.books[id] else { result.books[id] = incoming; continue }
+                if incoming.lastReadAt > entry.lastReadAt { entry.book = incoming.book }
+                entry.lastReadAt = max(entry.lastReadAt, incoming.lastReadAt)
+                for (day, seconds) in incoming.days { entry.days[day, default: 0] += seconds }
+                result.books[id] = entry
+            }
+        }
+        return result
+    }
+
+    var isValidForSync: Bool {
+        books.allSatisfy { id, entry in
+            id == entry.book.id && !id.isEmpty && entry.lastReadAt.timeIntervalSince1970.isFinite
+                && entry.days.allSatisfy { day, seconds in
+                    day.count == 10 && seconds.isFinite && seconds >= 0
+                }
+        }
+    }
+
     var readingDays: Int { dailyTotals.values.filter { $0 >= 60 }.count }
 }
 
@@ -96,9 +133,38 @@ struct ReadingTimeTracker {
         session = (id, current.book, date, uptime)
     }
 
+    mutating func mergeBaseline(_ remote: ReadingStatistics) {
+        statistics = .mergedMaximum(statistics, remote)
+    }
+
+    mutating func checkpointActive(date: Date, uptime: TimeInterval) {
+        if let current = session { checkpoint(id: current.id, date: date, uptime: uptime) }
+    }
+
+    mutating func stop(date: Date, uptime: TimeInterval) {
+        if let current = session { end(id: current.id, date: date, uptime: uptime) }
+    }
+
     mutating func end(id: UUID, date: Date, uptime: TimeInterval, calendar: Calendar = .current) {
         guard session?.id == id else { return }
         checkpoint(id: id, date: date, uptime: uptime, calendar: calendar)
         session = nil
     }
+}
+
+/// 独立于书目清单，旧版书籍同步不会覆盖统计。每个安装实例保留自己的累计快照。
+struct ReadingStatisticsSync: Codable, Equatable, Sendable {
+    var version = 1
+    var devices: [String: ReadingStatistics] = [:]
+
+    static func merged(_ lhs: Self, _ rhs: Self) -> Self {
+        var result = lhs
+        for (id, snapshot) in rhs.devices {
+            result.devices[id] = .mergedMaximum(result.devices[id] ?? ReadingStatistics(), snapshot)
+        }
+        return result
+    }
+
+    var statistics: ReadingStatistics { .combined(devices) }
+    var isValid: Bool { version == 1 && devices.allSatisfy { !$0.key.isEmpty && $0.value.isValidForSync } }
 }

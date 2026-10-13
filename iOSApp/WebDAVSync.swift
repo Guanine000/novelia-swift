@@ -108,6 +108,7 @@ final class WebDAVSyncStore: ObservableObject {
     @Published var syncTags: Bool { didSet { UserDefaults.standard.set(syncTags, forKey: SettingsKey.WebDAV.syncTags) } }
     @Published var syncBackgrounds: Bool { didSet { UserDefaults.standard.set(syncBackgrounds, forKey: SettingsKey.WebDAV.syncBackgrounds) } }
     @Published var syncFonts: Bool { didSet { UserDefaults.standard.set(syncFonts, forKey: SettingsKey.WebDAV.syncFonts) } }
+    @Published var syncStatistics: Bool { didSet { UserDefaults.standard.set(syncStatistics, forKey: SettingsKey.WebDAV.syncStatistics) } }
     @Published var password: String = ""
     @Published private(set) var isSyncing = false
     @Published private(set) var progressDetail = ""
@@ -120,11 +121,12 @@ final class WebDAVSyncStore: ObservableObject {
     private var stage = WebDAVSyncProgress().stage
 
     init() {
-        isEnabled = UserDefaults.standard.object(forKey: SettingsKey.WebDAV.enabled) as? Bool ?? true
+        isEnabled = UserDefaults.standard.object(forKey: SettingsKey.WebDAV.enabled) as? Bool ?? false
         syncBooks = UserDefaults.standard.object(forKey: SettingsKey.WebDAV.syncBooks) as? Bool ?? true
         syncTags = UserDefaults.standard.object(forKey: SettingsKey.WebDAV.syncTags) as? Bool ?? true
         syncBackgrounds = UserDefaults.standard.bool(forKey: SettingsKey.WebDAV.syncBackgrounds)
         syncFonts = UserDefaults.standard.bool(forKey: SettingsKey.WebDAV.syncFonts)
+        syncStatistics = UserDefaults.standard.bool(forKey: SettingsKey.WebDAV.syncStatistics)
         address = UserDefaults.standard.string(forKey: SettingsKey.WebDAV.address) ?? ""
         username = UserDefaults.standard.string(forKey: SettingsKey.WebDAV.username) ?? ""
         password = Self.readPassword(service: keychainService) ?? ""
@@ -167,6 +169,41 @@ final class WebDAVSyncStore: ObservableObject {
         } catch {
             let code = (error as? URLError).map { "（网络错误 \($0.code.rawValue)）" } ?? ""
             message = "同步失败（\(stage)）\(code)：\(error.localizedDescription)"
+        }
+    }
+
+    /// 阅读时长使用独立清单；该按钮只传输统计，不触发书籍/背景文件同步。
+    func syncReadingStatistics() async {
+        guard isEnabled, syncStatistics else {
+            message = "请先开启 WebDAV 总开关和阅读时长同步。"
+            return
+        }
+        guard !isSyncing else { return }
+        isSyncing = true
+        message = nil
+        stage = "同步阅读时长"
+        progressDetail = "正在合并多设备阅读统计…"
+        completedUnits = 0
+        totalUnits = 1
+        defer { isSyncing = false }
+        do {
+            let account = username.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !account.isEmpty, !account.contains(":"), !password.isEmpty else { throw WebDAVSyncError.missingCredentials }
+            try savePassword()
+            let client = try WebDAVClient(address: address.trimmingCharacters(in: .whitespacesAndNewlines),
+                                          username: account, password: password)
+            try await client.verifyConnection()
+            try await client.prepareFolders()
+            let snapshot = ReadingStatisticsStore.shared.syncSnapshot()
+            let merged = try await ReadingStatisticsSynchronizer(remote: client).sync(snapshot)
+            ReadingStatisticsStore.shared.applySynced(merged)
+            completedUnits = 1
+            progressDetail = "阅读时长同步完成"
+            message = "阅读时长同步完成，已合并各设备统计。"
+        } catch is CancellationError {
+            message = "阅读时长同步已取消。"
+        } catch {
+            message = "阅读时长同步失败：\(error.localizedDescription)"
         }
     }
 
@@ -229,6 +266,20 @@ struct WebDAVSyncView: View {
                 Text("同步内容")
             } footer: {
                 Text("书籍同步包含下载文件、阅读进度和书库系列；标签同步包含屏蔽与解除屏蔽记录。背景包含浅深色颜色及竖横屏图片；字体同步仅包含导入的字体文件，请确认字体许可允许同步。可独立开启，关闭的内容会保留在云端，不参与本次同步。")
+            }
+            .disabled(syncStore.isSyncing)
+            Section {
+                Toggle("阅读时长同步", isOn: $syncStore.syncStatistics)
+                Button {
+                    Task { await syncStore.syncReadingStatistics() }
+                } label: {
+                    Label("同步阅读时长", systemImage: "clock.arrow.circlepath")
+                }
+                .disabled(syncStore.isSyncing || !syncStore.isEnabled || !syncStore.syncStatistics)
+            } header: {
+                Text("阅读时长")
+            } footer: {
+                Text("默认关闭。使用下方服务器设置，手动合并各设备的每日与逐书时长；重复同步不会重复累计。关闭记录也可同步已有统计。")
             }
             .disabled(syncStore.isSyncing)
             Section("服务器") {

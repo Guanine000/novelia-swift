@@ -745,7 +745,7 @@ struct EPUBReaderHost: View {
     var statisticsTitle: String? = nil
     @State private var resolvedURL: URL?
     /// 实验：EPUB 改由 Readium（WKWebView）排版；TXT 与在线章节不受影响。
-    @AppStorage(SettingsKey.readerEPUBReadium) private var usesReadium = true
+    @AppStorage(SettingsKey.readerEPUBReadium) private var usesReadium = false
 
     private func descriptor(for url: URL) -> ReadingBook {
         ReadingBook(id: statisticsID ?? "epub:\(url.lastPathComponent)",
