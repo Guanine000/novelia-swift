@@ -67,6 +67,9 @@
 		E50000000000000000000002 /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000002 /* LibraryStore.swift */; };
 		E50000000000000000000003 /* LibraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000003 /* LibraryViews.swift */; };
 		E50000000000000000000004 /* AppTabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000004 /* AppTabs.swift */; };
+		E60000000000000000000001 /* LocalBookRecords.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000001 /* LocalBookRecords.swift */; };
+		E60000000000000000000002 /* WebDAVManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000002 /* WebDAVManifest.swift */; };
+		E60000000000000000000003 /* WebDAVSyncPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000003 /* WebDAVSyncPlanner.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -126,6 +129,9 @@
 		E51000000000000000000002 /* LibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryStore.swift; sourceTree = "<group>"; };
 		E51000000000000000000003 /* LibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViews.swift; sourceTree = "<group>"; };
 		E51000000000000000000004 /* AppTabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTabs.swift; sourceTree = "<group>"; };
+		E61000000000000000000001 /* LocalBookRecords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBookRecords.swift; sourceTree = "<group>"; };
+		E61000000000000000000002 /* WebDAVManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVManifest.swift; sourceTree = "<group>"; };
+		E61000000000000000000003 /* WebDAVSyncPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVSyncPlanner.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -226,6 +232,9 @@
 				C30000000000000000000002 /* DiagnosticContext.swift */,
 				E51000000000000000000001 /* LibraryOrganizer.swift */,
 				E51000000000000000000004 /* AppTabs.swift */,
+				E61000000000000000000001 /* LocalBookRecords.swift */,
+				E61000000000000000000002 /* WebDAVManifest.swift */,
+				E61000000000000000000003 /* WebDAVSyncPlanner.swift */,
 			);
 			path = Sources/NoveliaIOSCore;
 			sourceTree = "<group>";
@@ -413,6 +422,9 @@
 				E50000000000000000000002 /* LibraryStore.swift in Sources */,
 				E50000000000000000000001 /* LibraryOrganizer.swift in Sources */,
 				E50000000000000000000004 /* AppTabs.swift in Sources */,
+				E60000000000000000000001 /* LocalBookRecords.swift in Sources */,
+				E60000000000000000000002 /* WebDAVManifest.swift in Sources */,
+				E60000000000000000000003 /* WebDAVSyncPlanner.swift in Sources */,
 				A10000000000000000000044 /* SettingsKeys.swift in Sources */,
 				D30000000000000000000003 /* ReaderSettingsAdapters.swift in Sources */,
 				D30000000000000000000001 /* ReaderSettings.swift in Sources */,
