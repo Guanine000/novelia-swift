@@ -60,6 +60,160 @@ struct DiscoverShortcutChip: View {
     }
 }
 
+/// 仿网页端的页码条：上一页、首页、当前页附近的页码、末页、下一页；下方可输入页码跳转，点省略号也会弹出输入框。
+struct PageNavigator: View {
+    let page: Int
+    let pageCount: Int
+    var isLoading = false
+    let onSelect: (Int) -> Void
+
+    @State private var showsJump = false
+    @State private var jumpText = ""
+    @State private var inlineJumpText = ""
+    @FocusState private var inlineJumpFocused: Bool
+
+    private enum Item: Hashable {
+        case number(Int)
+        case gap(Int)
+    }
+
+    /// 例如共 500 页、当前第 7 页时为：1 … 6 7 8 … 500。
+    private var items: [Item] {
+        guard pageCount > 1 else { return [.number(1)] }
+        let window = max(1, page - 1)...min(pageCount, page + 1)
+        var numbers = Set(window)
+        numbers.formUnion([1, pageCount])
+        // 只差一页时直接显示该页，不用省略号。
+        if window.lowerBound == 3 { numbers.insert(2) }
+        if window.upperBound == pageCount - 2 { numbers.insert(pageCount - 1) }
+        var result: [Item] = []
+        var previous = 0
+        for number in numbers.sorted() {
+            if number - previous > 1 { result.append(.gap(number)) }
+            result.append(.number(number))
+            previous = number
+        }
+        return result
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            pageButtons
+            if pageCount > 1 { jumpRow }
+        }
+        .disabled(isLoading)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .alert("跳转到页码", isPresented: $showsJump) {
+            TextField("1–\(pageCount)", text: $jumpText)
+                .keyboardType(.numberPad)
+            Button("跳转") { jump(to: jumpText) }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("共 \(pageCount) 页")
+        }
+    }
+
+    /// 输入页码跳转，超出范围时取最近的有效页。
+    private var jumpRow: some View {
+        HStack(spacing: 8) {
+            Text("跳至")
+            TextField("\(page)", text: $inlineJumpText)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.center)
+                .monospacedDigit()
+                .focused($inlineJumpFocused)
+                .frame(width: 64, height: 32)
+                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(NoveliaStyle.muted.opacity(0.2), lineWidth: 1))
+                .onSubmit { submitInlineJump() }
+                .accessibilityLabel("页码")
+            Text("/ \(pageCount) 页")
+            Button("跳转") { submitInlineJump() }
+                .font(.system(size: 13, weight: .semibold))
+                .buttonStyle(.bordered)
+                .tint(NoveliaStyle.brandGreen)
+                .disabled(Int(inlineJumpText.trimmingCharacters(in: .whitespaces)) == nil)
+        }
+        .font(.system(size: 13, weight: .medium))
+        .foregroundStyle(NoveliaStyle.muted)
+        .toolbar {
+            // 数字键盘没有回车键，用键盘上方的按钮完成跳转。
+            if inlineJumpFocused {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("跳转") { submitInlineJump() }
+                }
+            }
+        }
+    }
+
+    private var pageButtons: some View {
+        HStack(spacing: 6) {
+            arrow("chevron.left", label: "上一页", target: page - 1)
+            ForEach(items, id: \.self) { item in
+                switch item {
+                case let .number(number):
+                    Button { select(number) } label: {
+                        Text("\(number)")
+                            .font(.system(size: 14, weight: number == page ? .bold : .medium, design: .rounded))
+                            .monospacedDigit()
+                            .frame(minWidth: 32, minHeight: 32)
+                            .padding(.horizontal, 2)
+                            .foregroundStyle(number == page ? Color.white : NoveliaStyle.ink)
+                            .background(number == page ? NoveliaStyle.brandGreen : NoveliaStyle.card,
+                                        in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .accessibilityLabel("第 \(number) 页")
+                    .accessibilityAddTraits(number == page ? .isSelected : [])
+                case .gap:
+                    Button {
+                        jumpText = ""
+                        showsJump = true
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .frame(width: 26, height: 32)
+                    }
+                    .accessibilityLabel("跳转到指定页")
+                }
+            }
+            arrow("chevron.right", label: "下一页", target: page + 1)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func submitInlineJump() {
+        jump(to: inlineJumpText)
+        inlineJumpText = ""
+        inlineJumpFocused = false
+    }
+
+    private func jump(to text: String) {
+        guard let number = Int(text.trimmingCharacters(in: .whitespaces)) else { return }
+        select(min(max(1, number), pageCount))
+    }
+
+    private func arrow(_ systemImage: String, label: String, target: Int) -> some View {
+        let enabled = (1...pageCount).contains(target)
+        return Button { select(target) } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .bold))
+                .frame(width: 32, height: 32)
+                .foregroundStyle(enabled ? NoveliaStyle.ink : NoveliaStyle.muted.opacity(0.4))
+                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 8))
+        }
+        .disabled(!enabled)
+        .accessibilityLabel(label)
+    }
+
+    private func select(_ target: Int) {
+        guard target != page, (1...max(1, pageCount)).contains(target) else { return }
+        onSelect(target)
+    }
+}
+
 struct DiscoverView: View {
     @ObservedObject private var blocked = BlockedTagsStore.shared
     @State private var query = ""
@@ -86,8 +240,10 @@ struct DiscoverView: View {
     }
 
     private var content: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                Color.clear.frame(height: 0).id(Self.topAnchor)
                 if !embedded {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("FIND YOUR NEXT STORY")
@@ -144,7 +300,7 @@ struct DiscoverView: View {
                     } description: {
                         Text(errorMessage)
                     } actions: {
-                        Button("重试") { Task { await store.search(query: query) } }
+                        Button("重试") { Task { await store.goTo(page: store.page) } }
                             .buttonStyle(.borderedProminent)
                             .tint(NoveliaStyle.brandGreen)
                     }
@@ -158,37 +314,10 @@ struct DiscoverView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                if store.isLoadingMore {
-                    ProgressView("正在加载更多作品…")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 18)
-                } else if let loadMoreError = store.loadMoreError {
-                    VStack(spacing: 8) {
-                        Text(loadMoreError)
-                            .font(.system(size: 13))
-                            .foregroundStyle(NoveliaStyle.muted)
-                        Button("重试加载") {
-                            Task { await store.loadMore() }
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(NoveliaStyle.brandGreen)
+                if !store.novels.isEmpty || store.page > 1 {
+                    PageNavigator(page: store.page, pageCount: store.pageCount, isLoading: store.isLoading) { target in
+                        Task { await store.goTo(page: target) }
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                } else if store.hasMore, let lastNovel = store.novels.last {
-                    Color.clear
-                        .frame(height: 1)
-                        .onAppear {
-                            Task { await store.loadMore() }
-                        }
-                        .accessibilityHidden(true)
-                        .id("search-page-trigger-\(lastNovel.id)")
-                } else if !store.novels.isEmpty {
-                    Text("已显示全部 \(store.novels.count) 部作品")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(NoveliaStyle.muted)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
                 }
                 if !store.wenkuNovels.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
@@ -225,8 +354,13 @@ struct DiscoverView: View {
             .padding(.bottom, 24)
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
-        .task(id: query) { await store.search(query: query) }
+        // 翻页后回到顶部，像网页端一样从新一页的第一部作品开始看。
+        .onChange(of: store.page) { proxy.scrollTo(Self.topAnchor, anchor: .top) }
+        }
+        .task(id: query) { await store.searchIfNeeded(query: query) }
     }
+
+    private static let topAnchor = "discover-top"
 }
 
 private struct RankingView: View {
@@ -237,6 +371,7 @@ private struct RankingView: View {
     private var requestKey: String { String(page) }
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 5) {
@@ -248,6 +383,7 @@ private struct RankingView: View {
                         .font(.system(size: 28, weight: .bold, design: .rounded))
                         .foregroundStyle(NoveliaStyle.ink)
                 }
+                .id("ranking-top")
 
                 HStack(spacing: 8) {
                     Image(systemName: "flame.fill")
@@ -293,21 +429,8 @@ private struct RankingView: View {
                     .buttonStyle(.plain)
                 }
 
-                if !store.novels.isEmpty && store.pageCount > 1 {
-                    HStack {
-                        Button("上一页") { page = max(1, page - 1) }
-                            .disabled(page <= 1 || store.isLoading)
-                        Spacer()
-                        Text("第 \(page) / \(store.pageCount) 页")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(NoveliaStyle.muted)
-                        Spacer()
-                        Button("下一页") { page = min(store.pageCount, page + 1) }
-                            .disabled(page >= store.pageCount || store.isLoading)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(NoveliaStyle.brandGreen)
-                    .padding(.vertical, 8)
+                if store.pageCount > 1 {
+                    PageNavigator(page: page, pageCount: store.pageCount, isLoading: store.isLoading) { page = $0 }
                 } else if !store.novels.isEmpty {
                     Text("共 \(store.novels.count) 部上榜作品")
                         .font(.system(size: 12, weight: .medium))
@@ -321,9 +444,11 @@ private struct RankingView: View {
             .padding(20)
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
+        .onChange(of: page) { proxy.scrollTo("ranking-top", anchor: .top) }
+        }
         .navigationTitle("小说排行榜")
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: requestKey) { await loadCurrentPage() }
+        .task(id: requestKey) { await store.loadIfNeeded(page: page) }
     }
 
     private func loadCurrentPage() async {
@@ -337,6 +462,7 @@ struct TagSearchResultsView: View {
     @StateObject private var store = DiscoverStore()
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -352,6 +478,7 @@ struct TagSearchResultsView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 4)
+                .id("tag-search-top")
 
                 if store.isLoading && store.novels.isEmpty {
                     HStack { Spacer(); ProgressView("正在搜索标签…"); Spacer() }
@@ -365,7 +492,7 @@ struct TagSearchResultsView: View {
                         Text(errorMessage)
                     } actions: {
                         Button("重试") {
-                            Task { await store.search(query: tag, exactTag: true) }
+                            Task { await store.goTo(page: store.page) }
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(NoveliaStyle.brandGreen)
@@ -381,33 +508,10 @@ struct TagSearchResultsView: View {
                     .buttonStyle(.plain)
                 }
 
-                if store.isLoadingMore {
-                    ProgressView("正在加载更多作品…")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 18)
-                } else if let loadMoreError = store.loadMoreError {
-                    VStack(spacing: 8) {
-                        Text(loadMoreError)
-                            .font(.system(size: 13))
-                            .foregroundStyle(NoveliaStyle.muted)
-                        Button("重试加载") { Task { await store.loadMore() } }
-                            .buttonStyle(.bordered)
-                            .tint(NoveliaStyle.brandGreen)
+                if !store.novels.isEmpty || store.page > 1 {
+                    PageNavigator(page: store.page, pageCount: store.pageCount, isLoading: store.isLoading) { target in
+                        Task { await store.goTo(page: target) }
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                } else if store.hasMore, let lastNovel = store.novels.last {
-                    Color.clear
-                        .frame(height: 1)
-                        .onAppear { Task { await store.loadMore() } }
-                        .accessibilityHidden(true)
-                        .id("tag-search-page-\(lastNovel.id)")
-                } else if !store.novels.isEmpty {
-                    Text("已显示全部 \(store.novels.count) 部作品")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(NoveliaStyle.muted)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
                 } else if !store.isLoading && store.errorMessage == nil {
                     ContentUnavailableView.search(text: tag)
                         .padding(.top, 8)
@@ -416,8 +520,10 @@ struct TagSearchResultsView: View {
             .padding(20)
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
+        .onChange(of: store.page) { proxy.scrollTo("tag-search-top", anchor: .top) }
+        }
         .navigationTitle("标签搜索")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await store.search(query: tag, exactTag: true) }
+        .task { await store.searchIfNeeded(query: tag, exactTag: true) }
     }
 }

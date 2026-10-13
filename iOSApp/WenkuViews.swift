@@ -51,7 +51,11 @@ struct WenkuView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             WenkuNovelList(novels: store.novels, loading: store.isLoading, error: store.errorMessage,
-                           filtersBlocked: true, loadMore: store.loadMore)
+                           filtersBlocked: true,
+                           pager: .init(page: store.page, pageCount: store.pageCount) { target in
+                               Task { await store.goTo(page: target) }
+                           },
+                           reload: { await store.goTo(page: store.page) })
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .environmentObject(store)
@@ -59,6 +63,7 @@ struct WenkuView: View {
             await localLibrary.refreshMissingMetadata()
         }
         .task(id: query) {
+            guard !store.hasLoaded(query) else { return }
             do { try await Task.sleep(nanoseconds: 350_000_000) } catch { return }
             await store.search(query)
         }
@@ -87,7 +92,7 @@ struct WenkuFavoritesView: View {
                 ContentUnavailableView("文库收藏为空", systemImage: "books.vertical", description: Text("搜索文库作品后，在详情页添加收藏。"))
             } else {
                 WenkuNovelList(novels: store.favorites, loading: false, error: store.favoriteErrorMessage,
-                               filtersBlocked: false) { await store.refreshFavorites(account: auth.username) }
+                               filtersBlocked: false, pager: nil) { await store.refreshFavorites(account: auth.username) }
             }
         }
         .padding(.top, 8)
@@ -99,6 +104,12 @@ struct WenkuFavoritesView: View {
 }
 
 private struct WenkuNovelList: View {
+    struct Pager {
+        let page: Int
+        let pageCount: Int
+        let select: (Int) -> Void
+    }
+
     @ObservedObject private var blocked = BlockedTagsStore.shared
     @EnvironmentObject private var localLibrary: WenkuLocalLibraryStore
     let novels: [WenkuNovelOutline]
@@ -106,45 +117,58 @@ private struct WenkuNovelList: View {
     let error: String?
     /// 搜索结果按标签屏蔽过滤；收藏保持原样。
     let filtersBlocked: Bool
-    let loadMore: () async -> Void
+    /// 搜索结果按页浏览；收藏一次加载全部，不分页。
+    let pager: Pager?
+    let reload: () async -> Void
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                if loading && novels.isEmpty {
-                    ProgressView("正在搜索文库…").padding(36)
-                } else if let error, novels.isEmpty {
-                    ContentUnavailableView("文库请求失败", systemImage: "wifi.exclamationmark", description: Text(error))
-                } else if novels.isEmpty {
-                    ContentUnavailableView("没有找到作品", systemImage: "books.vertical", description: Text("换个关键词试试。"))
-                }
-                ForEach(Array(novels.enumerated()).filter { !filtersBlocked || !blocked.hides(blocked.wenkuTags[$0.element.id] ?? []) }, id: \.element.id) { index, novel in
-                    NavigationLink {
-                        WenkuDetailView(outline: novel)
-                            .environmentObject(localLibrary)
-                    } label: {
-                        WenkuNovelRow(novel: novel)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    Color.clear.frame(height: 0).id(Self.topAnchor)
+                    if loading && novels.isEmpty {
+                        ProgressView("正在搜索文库…").padding(36)
+                    } else if let error, novels.isEmpty {
+                        ContentUnavailableView {
+                            Label("文库请求失败", systemImage: "wifi.exclamationmark")
+                        } description: {
+                            Text(error)
+                        } actions: {
+                            Button("重试") { Task { await reload() } }
+                                .buttonStyle(.borderedProminent)
+                                .tint(NoveliaStyle.brandGreen)
+                        }
+                    } else if novels.isEmpty {
+                        ContentUnavailableView("没有找到作品", systemImage: "books.vertical", description: Text("换个关键词试试。"))
                     }
-                    .buttonStyle(.plain)
-                    .task {
-                        if index >= novels.count - 4 { await loadMore() }
+                    ForEach(novels.filter { !filtersBlocked || !blocked.hides(blocked.wenkuTags[$0.id] ?? []) }) { novel in
+                        NavigationLink {
+                            WenkuDetailView(outline: novel)
+                                .environmentObject(localLibrary)
+                        } label: {
+                            WenkuNovelRow(novel: novel)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if let error, !novels.isEmpty {
+                        Text(error).font(.footnote).foregroundStyle(.red).padding()
+                    }
+                    if let pager, pager.pageCount > 1 || pager.page > 1 {
+                        PageNavigator(page: pager.page, pageCount: pager.pageCount, isLoading: loading,
+                                      onSelect: pager.select)
+                            .padding(.top, 8)
                     }
                 }
-                if filtersBlocked, !blocked.tags.isEmpty, !novels.isEmpty {
-                    Button("加载更多作品") { Task { await loadMore() } }
-                        .disabled(loading).padding()
-                }
-                if loading && !novels.isEmpty { ProgressView().padding() }
-                if let error, !novels.isEmpty {
-                    Text(error).font(.footnote).foregroundStyle(.red).padding()
-                    Button("重试加载") { Task { await loadMore() } }.padding(.bottom, 12)
-                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 20)
             }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 20)
+            .refreshable { await reload() }
+            // 翻页后回到顶部，像网页端一样从新一页的第一部作品开始看。
+            .onChange(of: pager?.page) { proxy.scrollTo(Self.topAnchor, anchor: .top) }
         }
-        .refreshable { await loadMore() }
     }
+
+    private static let topAnchor = "wenku-list-top"
 }
 
 struct WenkuNovelRow: View {

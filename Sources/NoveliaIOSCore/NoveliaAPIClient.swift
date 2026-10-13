@@ -21,7 +21,7 @@ public struct NoveliaAPIClient: Sendable {
         self.tokenProvider = tokenProvider
     }
 
-    public func searchNovels(query: String, page: Int = 1, exactTag: Bool = false) async throws -> [Novel] {
+    public func searchNovels(query: String, page: Int = 1, exactTag: Bool = false) async throws -> NoveliaRankPage {
         let searchQuery = exactTag ? "\(query)$" : query
         // 应用页码从 1 开始，小说搜索 API 的页码从 0 开始。
         let apiPage = max(page - 1, 0)
@@ -39,7 +39,10 @@ public struct NoveliaAPIClient: Sendable {
             ]
         )
 
-        return response.items.compactMap { $0.asNovel }
+        return NoveliaRankPage(
+            novels: response.items.compactMap { $0.asNovel },
+            pageCount: max(1, response.pageNumber ?? 1)
+        )
     }
 
     public func searchWenku(query: String, page: Int = 0, pageSize: Int = 24, level: Int = 0) async throws -> WenkuNovelPage {
@@ -61,10 +64,11 @@ public struct NoveliaAPIClient: Sendable {
     }
 
     public func siteRankedNovels(page: Int = 1) async throws -> NoveliaRankPage {
+        // 应用页码从 1 开始，API 从 0 开始；之前直接传入导致排行榜第 1 页跳过了前 20 名。
         let response: APIPage<APIWebOutline> = try await get(
             path: ["novel"],
             query: [
-                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "page", value: String(max(page - 1, 0))),
                 URLQueryItem(name: "pageSize", value: "20"),
                 URLQueryItem(name: "query", value: ""),
                 URLQueryItem(name: "provider", value: Self.providers.joined(separator: ",")),

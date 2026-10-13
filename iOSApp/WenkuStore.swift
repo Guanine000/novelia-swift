@@ -9,59 +9,48 @@ final class WenkuStore: ObservableObject {
     @Published private(set) var favorites: [WenkuNovelOutline] = []
     @Published private(set) var folders: [NoveliaCloudFolder] = []
     @Published private(set) var isLoading = false
-    @Published private(set) var isLoadingMore = false
-    @Published private(set) var hasMore = false
+    /// 当前页码，从 1 开始（API 从 0 开始）；与网页端一样按页浏览。
+    @Published private(set) var page = 1
+    @Published private(set) var pageCount = 1
     @Published private(set) var errorMessage: String?
     @Published private(set) var favoriteErrorMessage: String?
 
     private let api = NoveliaAPIClient()
     private let pageSize = 24
-    private var nextPage = 0
-    private var pageCount = 0
     private var query = ""
     private var searchGeneration = 0
     private var favoriteGeneration = 0
+    /// 最近一次成功加载的查询；从详情页返回时 `.task` 会重新触发，命中则不清空列表，保留滚动位置。
+    private var loadedQuery: String?
+
+    func hasLoaded(_ value: String) -> Bool {
+        loadedQuery == value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     func search(_ value: String) async {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed != query { pageCount = 1 }
+        query = trimmed
+        await goTo(page: 1)
+    }
+
+    /// 翻到当前查询的指定页；出错后重试也走这里。
+    func goTo(page target: Int) async {
         searchGeneration += 1
         let generation = searchGeneration
-        query = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        nextPage = 0
-        pageCount = 0
+        loadedQuery = nil
+        page = max(1, target)
         novels = []
-        hasMore = false
         errorMessage = nil
         isLoading = true
         defer { if generation == searchGeneration { isLoading = false } }
 
         do {
-            let result = try await api.searchWenku(query: query, page: 0, pageSize: pageSize)
+            let result = try await api.searchWenku(query: query, page: page - 1, pageSize: pageSize)
             guard generation == searchGeneration else { return }
             novels = result.novels
-            pageCount = result.pageCount
-            nextPage = 1
-            hasMore = nextPage < pageCount && !result.novels.isEmpty
-        } catch {
-            guard generation == searchGeneration else { return }
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    func loadMore() async {
-        guard hasMore, !isLoading, !isLoadingMore else { return }
-        let generation = searchGeneration
-        let page = nextPage
-        isLoadingMore = true
-        defer { if generation == searchGeneration { isLoadingMore = false } }
-        do {
-            let result = try await api.searchWenku(query: query, page: page, pageSize: pageSize)
-            guard generation == searchGeneration else { return }
-            let known = Set(novels.map(\.id))
-            novels.append(contentsOf: result.novels.filter { !known.contains($0.id) })
-            pageCount = result.pageCount
-            nextPage = page + 1
-            hasMore = nextPage < pageCount && !result.novels.isEmpty
-            errorMessage = nil
+            pageCount = max(1, result.pageCount)
+            loadedQuery = query
         } catch {
             guard generation == searchGeneration else { return }
             errorMessage = error.localizedDescription
