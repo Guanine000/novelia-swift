@@ -415,7 +415,21 @@ private struct ThirdPartyLicensesView: View {
     private let packages: [(name: String, version: String, license: String, file: String)] = [
         ("SwiftSoup", "2.13.7", "MIT", "SwiftSoup-LICENSE.txt"),
         ("YueduCoreText", "0.8.0", "MPL-2.0", "YueduCoreText-LICENSE.txt"),
-        ("ZIPFoundation", "3.0.1", "MIT", "ZIPFoundation-LICENSE.txt")
+        ("ZIPFoundation", "3.0.1", "MIT", "ZIPFoundation-LICENSE.txt"),
+        ("Readium swift-toolkit", "3.11.0", "BSD-3-Clause", "swift-toolkit-LICENSE.txt"),
+        ("CryptoSwift", "1.10.0", "CryptoSwift License", "CryptoSwift-LICENSE.txt"),
+        ("DifferenceKit", "1.3.0", "Apache-2.0", "DifferenceKit-LICENSE.txt"),
+        ("Fuzi", "4.0.1", "MIT", "Fuzi-LICENSE.txt"),
+        ("GCDWebServer", "4.0.1", "BSD-3-Clause", "GCDWebServer-LICENSE.txt"),
+        ("SQLite.swift", "0.16.0", "MIT", "SQLite.swift-LICENSE.txt"),
+        ("Zip", "2.1.2", "MIT", "Zip-LICENSE.txt")
+    ]
+    /// Fonts and scripts shipped inside Readium's resource bundles.
+    private let readiumAssets: [(name: String, file: String)] = [
+        ("ReadiumCSS 字体 AccessibleDfA（SIL OFL 1.1）", "ReadiumCSS-AccessibleDfA-LICENSE.txt"),
+        ("ReadiumCSS 字体 iA Writer Duospace（SIL OFL 1.1）", "ReadiumCSS-iAWriterDuospace-LICENSE.txt"),
+        ("OpenDyslexic 字体（Bitstream Vera / CC BY 3.0）", "OpenDyslexic-LICENSE.txt"),
+        ("Readium 阅读器脚本中的第三方代码", "Readium-JavaScript-NOTICES.txt")
     ]
 
     var body: some View {
@@ -451,6 +465,15 @@ private struct ThirdPartyLicensesView: View {
                     licenseText("YueduCoreText-NOTICE.txt", title: "附加声明")
                 }
                 Link("YueduCoreText 0.8.0 对应源码", destination: URL(string: "https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/783ce903d5faf4ff5d15c546e32a107537ba5efe")!)
+                Text("This product includes software developed by the \"Marcin Krzyzanowski\" (http://krzyzanowskim.com/).")
+                    .font(.footnote)
+            }
+            Section("Readium 随附字体与脚本") {
+                ForEach(readiumAssets, id: \.file) { asset in
+                    NavigationLink(asset.name) {
+                        licenseText(asset.file, title: asset.name)
+                    }
+                }
             }
         }
         .navigationTitle("开源许可")
