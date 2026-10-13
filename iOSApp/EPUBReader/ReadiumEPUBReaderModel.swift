@@ -409,12 +409,13 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     }
 
     /// 让 HTML 根背景透明，由宿主视图在导航器之下绘制阅读背景（颜色或图片）。
+    /// 只改根元素：根背景透明时，书籍给 body 设的背景（如 `<body bgcolor>`）会按 CSS
+    /// 规则延伸到整个页面；书籍未设背景时则露出阅读背景。
     func navigator(_ navigator: EPUBNavigatorViewController, setupUserScripts userContentController: WKUserContentController) {
         let source = """
         (function() {
           var apply = function() {
             document.documentElement.style.setProperty('background', 'transparent', 'important');
-            if (document.body) { document.body.style.setProperty('background', 'transparent', 'important'); }
           };
           apply();
           document.addEventListener('DOMContentLoaded', apply);
