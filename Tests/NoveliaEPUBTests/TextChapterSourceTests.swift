@@ -245,3 +245,21 @@ extension TextChapterSourceTests {
         XCTAssertEqual(hit, url)
     }
 }
+
+extension TextChapterSourceTests {
+    /// The progression the YueduCoreText reader writes for a page maps back to that page,
+    /// at the same and at another font size (Readium writes the same field).
+    func testChapterProgressionRestoresPage() async throws {
+        let book = source([TextChapterContent(title: "第一章", subtitle: nil,
+            paragraphs: Array(repeating: TextChapterParagraph(text: Self.paragraph), count: 120))])
+        let pages = EPUBPageBook(generation: 1)
+        try await pages.layoutChapter(0, container: book, config: EPUBLayoutTests.readerConfig(workarounds: true))
+        let length = try XCTUnwrap(pages.sourceLength(spineIndex: 0))
+        for page in [1, pages.pageCount(spineIndex: 0) / 2, pages.pageCount(spineIndex: 0) - 1] {
+            let offset = try XCTUnwrap(pages.sourceOffset(spineIndex: 0, pageIndex: page))
+            let progression = Double(offset) / Double(length)
+            let restored = Int((Double(length) * progression).rounded(.down))
+            XCTAssertEqual(pages.pageIndex(spineIndex: 0, containingSourceOffset: restored), page)
+        }
+    }
+}

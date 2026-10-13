@@ -207,6 +207,11 @@ final class EPUBPageBook {
         }.min()
     }
 
+    /// UTF-16 length of a laid-out chapter's text (the space `sourceOffset` measures).
+    func sourceLength(spineIndex: Int) -> Int? {
+        chapters[spineIndex].map { $0.sourceText.utf16.count }
+    }
+
     /// The page showing `offset`: the last laid-out page whose text starts at or before it.
     func pageIndex(spineIndex: Int, containingSourceOffset offset: Int) -> Int? {
         guard let chapter = chapters[spineIndex], !chapter.displayLists.isEmpty else { return nil }

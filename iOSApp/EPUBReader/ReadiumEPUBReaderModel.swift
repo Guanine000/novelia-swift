@@ -11,8 +11,8 @@ import WebKit
 // EPUB 由 Readium 解析，并在 WKWebView 中用 ReadiumCSS 分页；翻页为 Readium 自带的
 // 水平滑动。TXT 与在线章节仍走 YueduCoreText（EPUBReaderModel）。
 //
-// 进度：本机保存 Readium Locator（JSON）；同时按旧格式记录整书比例与章节序号
-// （chapterOffset 置空），旧版本与 WebDAV 同步仍可按比例恢复。
+// 进度：本机保存 Readium Locator（JSON）；同时记录整书比例、章节序号与章内比例
+// （chapterOffset 置空）。另一引擎或其他设备按章节 + 章内比例恢复，旧版本按整书比例。
 
 /// 目录项（展平 Readium 的嵌套目录）。
 struct ReadiumTOCItem: Identifiable {
@@ -351,7 +351,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         let spine = publication.readingOrder.firstIndexWithHREF(locator.href) ?? 0
         ReaderSettings.shared.recordEPUBPosition(
             hash: hash, fraction: locator.locations.totalProgression ?? 0,
-            spineIndex: spine, chapterOffset: nil)
+            spineIndex: spine, chapterOffset: nil, chapterProgression: locator.locations.progression)
     }
 
     /// 本机 Locator 优先；若 WebDAV 合并来的位置更新（例如来自旧引擎或其他设备），改按其恢复。
@@ -367,18 +367,22 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             }
         }
         guard let synced else { return nil }
-        // 旧引擎记录的是章节源码 UTF-16 偏移：按章节源码长度换算成章节内比例（近似）。
+        // 同一章内的比例：两个引擎都会写 chapterProgression；只有旧引擎的 UTF-16 偏移时，
+        // 按去掉标签后的正文长度换算（偏移量度的是排版文本，不含 HTML 标签）。
         if let chapter = synced.chapterIndex, publication.readingOrder.indices.contains(chapter) {
             let link = publication.readingOrder[chapter]
-            if let base = await publication.locate(link) {
-                var progression = 0.0
-                if let offset = synced.chapterOffset,
-                   let resource = publication.get(link),
-                   case .success(let html) = await resource.read().asString(),
-                   !html.isEmpty {
-                    progression = min(1, max(0, Double(offset) / Double(html.utf16.count)))
-                }
+            var progression = synced.chapterProgression
+            if progression == nil, let offset = synced.chapterOffset,
+               let resource = publication.get(link),
+               case .success(let html) = await resource.read().asString() {
+                progression = EPUBChapterProgress.progression(offset: offset, length: EPUBChapterProgress.textLength(html: html))
+            }
+            if let progression, let base = await publication.locate(link) {
                 return base.copy(locations: { $0.progression = progression })
+            }
+            // Neither: e.g. written by 0.12.0 (54); the whole-book fraction below is closer than the chapter start.
+            if (synced.fraction ?? 0) <= 0, let base = await publication.locate(link) {
+                return base
             }
         }
         if let fraction = synced.fraction, fraction > 0 {

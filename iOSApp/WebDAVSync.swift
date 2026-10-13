@@ -18,10 +18,11 @@ enum ReadingPositionSync {
         save(positions)
     }
 
-    static func recordEPUB(hash: String, fraction: Double, spineIndex: Int, chapterOffset: Int?) {
+    static func recordEPUB(hash: String, fraction: Double, spineIndex: Int, chapterOffset: Int?, chapterProgression: Double?) {
         var positions = all()
         positions["epub:\(hash)"] = SyncedReadingPosition(chapterIndex: spineIndex,
-            fraction: min(1, max(0, fraction)), updatedAt: Date(), chapterOffset: chapterOffset)
+            fraction: min(1, max(0, fraction)), updatedAt: Date(), chapterOffset: chapterOffset,
+            chapterProgression: chapterProgression.map { min(1, max(0, $0)) })
         save(positions)
     }
 
