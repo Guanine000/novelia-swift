@@ -129,6 +129,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             fontFamilyDeclarations: Self.importedFontDeclarations()
         )
         config.readiumCSSRSProperties.pageGutter = CSSPxLength(Double(style.leftMargin + style.rightMargin) / 2)
+        config.readiumCSSRSProperties.textColor = CSSIntColor(Self.rgb(themeTextColor))
         let navigator = try EPUBNavigatorViewController(
             publication: publication, initialLocation: initialLocation, config: config)
         navigator.delegate = self
@@ -157,16 +158,15 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     }
 
     private func preferences() -> EPUBPreferences {
-        let settings = ReaderSettings.shared
-        let background = UIColor(settings.backgrounds.color(dark: isDarkMode,
-            fallback: settings.appearance.background(system: isDarkMode ? .dark : .light)))
-        let text = UIColor(settings.appearance.primaryText(system: isDarkMode ? .dark : .light))
+        // 不提交背景色与文字色：ReadiumCSS 会以 !important 把它们套到所有元素，
+        // 抹掉书内的配色、白字光晕与元素背景。背景由宿主绘制（HTML 根透明），
+        // 默认文字色经 RS__textColor 设定（见 makeNavigator），书内颜色可正常覆盖。
+        // 深色模式仍用 Readium 夜间主题，强制可读的浅色文字。
         // 行距、段距、缩进属于 ReadiumCSS 的“高级设置”，需关闭出版社样式才生效；
         // 保持默认时沿用书籍原有 CSS。
         let overridesBook = style.lineSpacing > 0 || style.paragraphSpacing > 0 || style.firstLineIndentEm != nil
         let fontSize = Double(style.fontSize)
         return EPUBPreferences(
-            backgroundColor: ReadiumNavigator.Color(uiColor: background),
             fontFamily: style.fontFamily.map { FontFamily(rawValue: $0) },
             // WebKit 中 1 CSS px = 1 pt；浏览器默认根字号 16px。
             fontSize: fontSize / 16,
@@ -176,9 +176,19 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             publisherStyles: !overridesBook,
             scroll: false,
             spread: style.doublePage == true ? .always : .never,
-            textColor: ReadiumNavigator.Color(uiColor: text),
             theme: isDarkMode ? .dark : .light
         )
+    }
+
+    private var themeTextColor: UIColor {
+        UIColor(ReaderSettings.shared.appearance.primaryText(system: isDarkMode ? .dark : .light))
+    }
+
+    private static func rgb(_ color: UIColor) -> Int {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        func channel(_ value: CGFloat) -> Int { Int((min(max(value, 0), 1) * 255).rounded()) }
+        return (channel(red) << 16) | (channel(green) << 8) | channel(blue)
     }
 
     private static func importedFontDeclarations() -> [AnyHTMLFontFamilyDeclaration] {
@@ -198,9 +208,15 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         let dark = settings.isDark(systemIsDark: systemIsDark)
         let font = CGFloat(settings.fontSize)
         guard dark != isDarkMode || font != style.fontSize else { return }
+        let themeChanged = dark != isDarkMode
         isDarkMode = dark
         style.fontSize = font
-        navigator?.submitPreferences(preferences())
+        // 默认文字色属于导航器配置，切换深浅色需要重建。
+        if themeChanged, navigator != nil {
+            rebuildNavigator()
+        } else {
+            navigator?.submitPreferences(preferences())
+        }
     }
 
     /// 背景颜色变化后重新提交偏好（背景图由宿主视图绘制在导航器之下）。
