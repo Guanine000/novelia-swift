@@ -119,6 +119,7 @@ struct ReadiumEPUBReaderView: View {
                 .background(NoveliaStyle.brandGreen.opacity(0.18), in: Capsule())
                 .accessibilityLabel("Readium 实验引擎")
             Button {
+                model.isTOCDiagnosticsExpanded = false
                 isShowingTOC = true
             } label: {
                 Image(systemName: "list.bullet").frame(width: 36, height: 36)

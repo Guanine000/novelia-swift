@@ -44,13 +44,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published private(set) var diagnosticDocumentCount = 0
     @Published private(set) var embeddedTOCCount = 0
     @Published private(set) var tocReadFailed = false
-    @Published var isTOCDiagnosticsExpanded = false {
-        didSet {
-            if let bookHash {
-                UserDefaults.standard.set(isTOCDiagnosticsExpanded, forKey: "readium.bookDiagnostics.\(bookHash).expanded")
-            }
-        }
-    }
+    @Published var isTOCDiagnosticsExpanded = false
     @Published private(set) var locator: Locator?
     @Published private(set) var style = EPUBReaderStyle()
     @Published private(set) var isDarkMode = false
@@ -88,7 +82,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
                 try WebDAVFileHash.sha256(url)
             }.value
             bookHash = hash
-            isTOCDiagnosticsExpanded = UserDefaults.standard.bool(forKey: "readium.bookDiagnostics.\(hash).expanded")
+            isTOCDiagnosticsExpanded = false
             let publication = try await Self.openPublication(url: url)
             self.publication = publication
             bookTitle = publication.metadata.title ?? url.deletingPathExtension().lastPathComponent
