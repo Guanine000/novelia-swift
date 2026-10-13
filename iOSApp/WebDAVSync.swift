@@ -83,54 +83,6 @@ enum WebDAVFileHash {
     }
 }
 
-private struct WebDAVAsset: Codable {
-    let filename: String
-    let hash: String
-}
-
-private struct WebDAVBook<Record: Codable>: Codable {
-    let record: Record
-    let assets: [WebDAVAsset]
-}
-
-private struct WebDAVManifest: Codable {
-    var version = 1
-    var webBooks: [WebDAVBook<DownloadedWebNovel>] = []
-    var wenkuBooks: [WebDAVBook<LocalWenkuEPUB>] = []
-    var positions: [String: SyncedReadingPosition] = [:]
-    var blockedTags: [String: SyncedBlockedTag]? = nil
-    var backgrounds: [String: SyncedReaderBackground]? = nil
-    var fonts: [String: SyncedImportedFont]? = nil
-    /// 书库系列与书籍归属；随书籍同步，旧版应用解码时忽略。
-    var librarySeries: LibrarySeriesState? = nil
-}
-
-private enum WebDAVSyncError: LocalizedError {
-    case invalidURL
-    case missingCredentials
-    case unexpectedResponse(Int)
-    case unsupportedManifest
-    case invalidAsset
-    case concurrentChange
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidURL: "请输入 HTTPS WebDAV 文件夹地址。"
-        case .missingCredentials: "请填写用户名和密码。"
-        case .unexpectedResponse(401): "WebDAV 认证失败（HTTP 401）。坚果云请使用注册邮箱和单独生成的应用密码。"
-        case .unexpectedResponse(403): "WebDAV 拒绝访问（HTTP 403）。请确认应用密码有效且目标文件夹可写。"
-        case .unexpectedResponse(404): "WebDAV 路径不存在（HTTP 404）。请检查服务器地址是否包含 /dav/。"
-        case .unexpectedResponse(409): "WebDAV 目录冲突（HTTP 409）。请检查填写的父文件夹是否已存在。"
-        case .unexpectedResponse(429): "WebDAV 请求过于频繁（HTTP 429），请稍后再试。"
-        case .unexpectedResponse(507): "WebDAV 空间不足（HTTP 507）。"
-        case .unexpectedResponse(let status): "WebDAV 请求失败（HTTP \(status)）。"
-        case .unsupportedManifest: "远端同步数据版本不受支持，未修改本地书籍。"
-        case .invalidAsset: "远端书籍文件校验失败，未导入该文件。"
-        case .concurrentChange: "另一台设备刚更新了同步数据，请重新同步。"
-        }
-    }
-}
-
 private final class WebDAVRedirectGuard: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse,
@@ -243,9 +195,7 @@ private struct WebDAVClient {
     }
 
     private func blobURL(_ hash: String) throws -> URL {
-        guard hash.count == 64, hash.allSatisfy({ $0.isHexDigit && !$0.isUppercase }) else {
-            throw WebDAVSyncError.invalidAsset
-        }
+        guard WebDAVAsset.isValidHash(hash) else { throw WebDAVSyncError.invalidAsset }
         return root.appendingPathComponent("blobs", isDirectory: true).appendingPathComponent(hash)
     }
 
@@ -348,80 +298,53 @@ final class WebDAVSyncStore: ObservableObject {
             var manifest = fetchedManifest
             var imported = 0
             if includesBooks {
-                let remoteWeb = manifest.webBooks
-                let remoteWenku = manifest.wenkuBooks
-                let localWebByID = Dictionary(uniqueKeysWithValues: web.books.map { ($0.id, $0) })
-                let localWenkuByID = Dictionary(uniqueKeysWithValues: wenku.books.map { ($0.id, $0) })
-                let remoteWebByID = Dictionary(uniqueKeysWithValues: remoteWeb.map { ($0.record.id, $0) })
-                let remoteWenkuByID = Dictionary(uniqueKeysWithValues: remoteWenku.map { ($0.record.id, $0) })
-                let remoteWebWins = remoteWeb.filter { item in
-                    guard let local = localWebByID[item.record.id] else { return true }
-                    return item.record.downloadedAt > local.downloadedAt
-                }
-                let localWebWins = web.books.filter { book in
-                    guard let remote = remoteWebByID[book.id] else { return true }
-                    return book.downloadedAt >= remote.record.downloadedAt
-                }
-                let remoteWenkuWins = remoteWenku.filter { item in
-                    guard let local = localWenkuByID[item.record.id] else { return true }
-                    return item.record.addedAt > local.addedAt
-                }
-                let localWenkuWins = wenku.books.filter { book in
-                    guard let remote = remoteWenkuByID[book.id] else { return true }
-                    return book.addedAt >= remote.record.addedAt
-                }
-                totalUnits = remoteWebWins.reduce(0) { $0 + $1.assets.count }
-                    + remoteWenkuWins.reduce(0) { $0 + $1.assets.count }
-                    + localWebWins.reduce(0) { $0 + web.syncFiles(for: $1).count }
-                    + localWenkuWins.reduce(0) { $0 + wenku.syncFiles(for: $1).count }
+                let webPlan = WebDAVSyncPlanner.planBooks(local: web.books, remote: manifest.webBooks)
+                let wenkuPlan = WebDAVSyncPlanner.planBooks(local: wenku.books, remote: manifest.wenkuBooks)
+                totalUnits = webPlan.unitCount { web.syncFiles(for: $0).count }
+                    + wenkuPlan.unitCount { wenku.syncFiles(for: $0).count }
                     + 1
                 stage = "恢复远端下载"
-                for item in remoteWebWins {
+                for item in webPlan.downloads {
                     try Task.checkCancellation()
-                    let files = try await download(item.assets, title: item.record.novel.title, with: client)
+                    let record = item.book.record
+                    let files = try await download(item.book.assets, title: record.novel.title, with: client)
                     defer { files.values.forEach { try? FileManager.default.removeItem(at: $0) } }
-                    if localWebByID[item.record.id] != nil {
-                        try web.replaceFromSync(item.record, files: files)
+                    if item.replacesLocal {
+                        try web.replaceFromSync(record, files: files)
                     } else {
-                        try web.restoreFromSync(item.record, files: files)
+                        try web.restoreFromSync(record, files: files)
                         imported += 1
                     }
                 }
-                for item in remoteWenkuWins {
+                for item in wenkuPlan.downloads {
                     try Task.checkCancellation()
-                    let files = try await download(item.assets, title: item.record.title, with: client)
+                    let record = item.book.record
+                    let files = try await download(item.book.assets, title: record.title, with: client)
                     defer { files.values.forEach { try? FileManager.default.removeItem(at: $0) } }
-                    if localWenkuByID[item.record.id] != nil {
-                        try wenku.replaceFromSync(item.record, files: files)
+                    if item.replacesLocal {
+                        try wenku.replaceFromSync(record, files: files)
                     } else {
-                        try wenku.restoreFromSync(item.record, files: files)
+                        try wenku.restoreFromSync(record, files: files)
                         imported += 1
                     }
                 }
                 ReadingPositionSync.merge(manifest.positions, webBooks: web.books)
                 stage = "上传本地下载"
-                for book in localWebWins {
+                for book in webPlan.uploads {
                     try Task.checkCancellation()
                     let files = web.syncFiles(for: book)
                     guard files.count == 1 else {
                         throw WebDAVSyncError.invalidAsset
                     }
-                    let saved = try await remoteBook(book, title: book.novel.title, files: files, client: client)
-                    manifest.webBooks.removeAll { $0.record.id == book.id }
-                    manifest.webBooks.append(saved)
+                    manifest.webBooks.upsert(try await remoteBook(book, title: book.novel.title, files: files, client: client))
                 }
-                for book in localWenkuWins {
+                for book in wenkuPlan.uploads {
                     try Task.checkCancellation()
                     let files = wenku.syncFiles(for: book)
                     guard files[book.filename] != nil else { throw WebDAVSyncError.invalidAsset }
-                    let saved = try await remoteBook(book, title: book.title, files: files, client: client)
-                    manifest.wenkuBooks.removeAll { $0.record.id == book.id }
-                    manifest.wenkuBooks.append(saved)
+                    manifest.wenkuBooks.upsert(try await remoteBook(book, title: book.title, files: files, client: client))
                 }
-                let webKeys = Set(manifest.webBooks.map { "web:\($0.record.id)" })
-                let assetHashes = (manifest.webBooks.flatMap(\.assets) + manifest.wenkuBooks.flatMap(\.assets)).map(\.hash)
-                let fileKeys = Set(assetHashes.map { "epub:\($0)" } + assetHashes.map { "txt:\($0)" })
-                manifest.positions = ReadingPositionSync.all().filter { webKeys.contains($0.key) || fileKeys.contains($0.key) }
+                manifest.positions = WebDAVSyncPlanner.positionsToSync(ReadingPositionSync.all(), in: manifest)
                 manifest.librarySeries = LibrarySeriesState.merged(LibraryStateStore.shared.series, manifest.librarySeries ?? LibrarySeriesState())
             }
             if includesTags {
@@ -436,14 +359,15 @@ final class WebDAVSyncStore: ObservableObject {
                 for dark in [false, true] {
                     let key = dark ? "dark" : "light"
                     let local = try ReaderBackgroundStore.shared.syncSnapshot(dark: dark)
-                    if let remote = backgrounds[key], remote.updatedAt > local.updatedAt {
-                        for hash in [remote.portraitHash, remote.landscapeHash].compactMap({ $0 }) {
+                    switch WebDAVSyncPlanner.planBackground(local: local, remote: backgrounds[key]) {
+                    case .useRemote(let hashes):
+                        for hash in hashes {
                             let file = try await client.downloadBlob(hash)
                             temporaryFiles.append(file)
                             guard UIImage(contentsOfFile: file.path) != nil else { throw WebDAVSyncError.invalidAsset }
                             resourceFiles[hash] = file
                         }
-                    } else {
+                    case .useLocal:
                         backgrounds[key] = local
                         for landscape in [false, true] {
                             let file = ReaderBackgroundStore.shared.imageURL(dark: dark, landscape: landscape)
@@ -460,13 +384,12 @@ final class WebDAVSyncStore: ObservableObject {
                 let local = try EPUBLocalFonts.syncSnapshot()
                 let fonts = SyncedImportedFont.merged(local, manifest.fonts ?? [:])
                 let files = try EPUBLocalFonts.syncFiles()
-                for (hash, record) in fonts {
-                    guard hash == record.hash, ["ttf", "otf", "ttc"].contains(record.format) else { throw WebDAVSyncError.invalidAsset }
-                    if record.deleted { continue }
+                let plan = try WebDAVSyncPlanner.planFonts(fonts, localHashes: Set(files.keys))
+                for hash in plan.uploads {
                     if let file = files[hash] { try await client.uploadBlob(file, hash: hash) }
-                    else {
-                        let file = try await client.downloadBlob(hash); temporaryFiles.append(file); resourceFiles[hash] = file
-                    }
+                }
+                for hash in plan.downloads {
+                    let file = try await client.downloadBlob(hash); temporaryFiles.append(file); resourceFiles[hash] = file
                 }
                 manifest.fonts = fonts
             }
@@ -521,8 +444,7 @@ final class WebDAVSyncStore: ObservableObject {
         do {
             for asset in assets {
                 try Task.checkCancellation()
-                guard !asset.filename.isEmpty, asset.filename == URL(fileURLWithPath: asset.filename).lastPathComponent,
-                      asset.filename != ".", asset.filename != "..", files[asset.filename] == nil else {
+                guard WebDAVAsset.isSafeFilename(asset.filename), files[asset.filename] == nil else {
                     throw WebDAVSyncError.invalidAsset
                 }
                 progressDetail = "正在恢复：\(title) · \(asset.filename)"
