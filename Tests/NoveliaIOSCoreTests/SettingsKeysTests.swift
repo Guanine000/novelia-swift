@@ -2,8 +2,8 @@ import Foundation
 import XCTest
 @testable import NoveliaIOSCore
 
-/// Settings already stored on devices are found by these exact strings; renaming one
-/// silently resets that setting for every existing user.
+/// 已存储在设备上的设置通过这些精确字符串查找；修改任一名称
+/// 都会无提示地重置所有现有用户的对应设置。
 final class SettingsKeysTests: XCTestCase {
     func testPersistedKeysAreUnchanged() {
         XCTAssertEqual(SettingsKey.readerFontSize, "readerFontSize")

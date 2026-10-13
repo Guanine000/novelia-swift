@@ -3,12 +3,12 @@ import ImageIO
 import SwiftUI
 import UIKit
 
-/// Light novel covers cached in memory (downsampled for display) and on disk, so lists
-/// do not re-download or flash placeholders while scrolling.
+/// 轻小说封面同时缓存在内存（缩小采样用于显示）和磁盘中，
+/// 避免列表滚动时重复下载或闪现占位图。
 final class CoverImageLoader: @unchecked Sendable {
     static let shared = CoverImageLoader()
 
-    /// Largest cover shown is 112 × 154 pt; 480 px covers it at 3× scale.
+    /// 最大封面显示尺寸为 112 × 154 pt；480 px 足以覆盖 3× 分辨率。
     private static let maxPixelSize: CGFloat = 480
     private static let maxDiskBytes = 150 * 1024 * 1024
     private static let maxDiskAge: TimeInterval = 30 * 24 * 60 * 60
@@ -29,7 +29,7 @@ final class CoverImageLoader: @unchecked Sendable {
         Task.detached(priority: .background) { Self.prune(directory) }
     }
 
-    /// Synchronous memory lookup, so a cached cover appears on the first frame.
+    /// 同步查询内存缓存，使已缓存的封面在首帧即可显示。
     func cachedImage(for url: URL) -> UIImage? {
         memory.object(forKey: url as NSURL)
     }
@@ -93,7 +93,7 @@ final class CoverImageLoader: @unchecked Sendable {
         return UIImage(cgImage: image)
     }
 
-    /// Drops covers older than 30 days, then the oldest until the folder fits 150 MB.
+    /// 先移除超过 30 天的封面，再按从旧到新淘汰，直到文件夹不超过 150 MB。
     private static func prune(_ directory: URL) {
         let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey]
         guard let files = try? FileManager.default.contentsOfDirectory(
@@ -112,7 +112,7 @@ final class CoverImageLoader: @unchecked Sendable {
     }
 }
 
-/// A cover from `CoverImageLoader`, showing `placeholder` until it loads or when it fails.
+/// 从 `CoverImageLoader` 加载封面，加载中或失败时显示 `placeholder`。
 struct CoverImage<Placeholder: View>: View {
     let url: URL?
     @ViewBuilder var placeholder: () -> Placeholder

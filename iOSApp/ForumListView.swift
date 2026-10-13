@@ -334,8 +334,8 @@ private struct ForumPostRow: View {
     }
 }
 
-/// Keep category controls in the normal stack above List instead of a dynamic
-/// safe-area inset, so changing feeds cannot leave a stale collapsed inset.
+/// 将分类控件放在 List 上方的普通布局中，避免使用动态安全区插入，
+/// 防止切换内容列表后留下已折叠但未更新的安全区间距。
 private struct ForumCategoryBar: View {
     let categories: [ForumCategory]
     let selectedCategory: String

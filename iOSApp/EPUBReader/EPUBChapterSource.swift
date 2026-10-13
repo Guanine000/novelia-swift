@@ -28,8 +28,8 @@ extension EPUBContainer: EPUBChapterSource {
 
 // MARK: - 纯文本章节（TXT / 在线小说）
 
-/// One paragraph of generated chapter text. `secondary` uses the muted reader colour
-/// (bilingual translations); `note` is a centred status line such as a missing translation.
+/// 生成章节文本中的一个段落。`secondary` 使用较淡的阅读器文字色
+/// （用于双语译文）；`note` 是居中的状态提示，例如缺少译文。
 struct TextChapterParagraph: Equatable {
     enum Role: Equatable { case body, secondary, note }
     var text: String
@@ -40,13 +40,13 @@ struct TextChapterContent: Equatable {
     var title: String?
     var subtitle: String?
     var paragraphs: [TextChapterParagraph]
-    /// Online prose: http(s) URLs become links, as in the scroll reader.
+    /// 在线正文：与滚动阅读器一样，将 http(s) URL 转为链接。
     var linksURLs = false
 }
 
 enum TextChapterXHTML {
-    /// Escapes user text for XHTML. Characters XML forbids (most C0 controls) are dropped,
-    /// so arbitrary TXT bytes cannot break the document.
+    /// 将用户文本转义为 XHTML。丢弃 XML 禁止的字符（多数 C0 控制字符），
+    /// 避免任意 TXT 字节破坏文档结构。
     static func escape(_ text: String) -> String {
         var result = ""
         result.reserveCapacity(text.utf8.count)
@@ -91,7 +91,7 @@ enum TextChapterXHTML {
         """
     }
 
-    /// Escapes text and wraps http(s) URLs in links. Only the detected URL becomes the href.
+    /// 转义文本，并将 http(s) URL 包装为链接。仅检测到的 URL 用作 href。
     static func linked(_ text: String) -> String {
         guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
             return escape(text)
@@ -109,7 +109,7 @@ enum TextChapterXHTML {
         return result + escape(source.substring(from: cursor))
     }
 
-    /// Reader stylesheet for generated chapters. Colours follow the theme text colour.
+    /// 生成章节使用的阅读器样式表，颜色跟随主题文字色。
     static func css(textColor: UIColor) -> String {
         let (r, g, b) = textColor.rgbComponents
         let isLightText = 0.299 * Double(r) + 0.587 * Double(g) + 0.114 * Double(b) > 127.5
@@ -125,8 +125,8 @@ enum TextChapterXHTML {
         """
     }
 
-    /// Splits text into paragraphs: one per non-blank line, leading and trailing
-    /// whitespace (including the full-width indent many TXT files use) removed.
+    /// 将文本拆分为段落：每个非空行一个段落，移除首尾空白
+    /// （包括许多 TXT 文件使用的全角缩进）。
     static func paragraphs(fromLines text: String, role: TextChapterParagraph.Role = .body) -> [TextChapterParagraph] {
         text.split(omittingEmptySubsequences: true, whereSeparator: \.isNewline).compactMap { line in
             let trimmed = line.trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: "\u{3000}")))
@@ -135,8 +135,8 @@ enum TextChapterXHTML {
     }
 }
 
-/// Chapters produced in memory or loaded on demand, laid out by the EPUB page book.
-/// `load` runs once per unit; a failed load is retried on the next request.
+/// 在内存中生成或按需加载的章节，由 EPUB 分页书籍对象排版。
+/// 每个单元的 `load` 运行一次；加载失败时在下次请求中重试。
 final class TextChapterSource: EPUBChapterSource {
     struct Unit {
         let tocTitle: String?
@@ -146,9 +146,9 @@ final class TextChapterSource: EPUBChapterSource {
     let bookTitle: String
     let toc: [EPUBTOCEntry]
     var themeTextColor: UIColor = .black
-    /// Stable identity of the generated content (a TXT file hash + chapter rules). Set only
-    /// when the same identity always yields the same chapters; it lets layouts be cached
-    /// across reader sessions. `nil` (online chapters) keeps layouts private to one session.
+    /// 生成内容的稳定身份（TXT 文件哈希 + 章节规则）。仅在相同身份
+    /// 始终生成相同章节时设置，以便跨阅读器会话缓存排版结果。
+    /// `nil`（在线章节）使排版结果仅在当前会话内使用。
     let layoutIdentity: String?
     private let units: [Unit]
     private var cache: [Int: String] = [:]
@@ -181,13 +181,13 @@ final class TextChapterSource: EPUBChapterSource {
 
     func spineIndex(forLinkHref href: String, relativeTo chapterHref: String) -> Int? { nil }
 
-    /// Index of the unit a TOC entry starts at, for chapter-level positions.
+    /// 目录项起始单元的序号，用于章节级阅读位置。
     func firstUnit(ofTOCEntry entry: Int) -> Int? {
         toc.indices.contains(entry) ? toc[entry].spineIndex : nil
     }
 
-    /// TOC entry containing a unit (the last entry starting at or before it). Entries are
-    /// built in unit order, so this is a binary search; it runs on every page turn.
+    /// 包含某个单元的目录项（起始单元不晚于它的最后一项）。目录项
+    /// 按单元顺序构建，因此使用二分查找；每次翻页时都会调用。
     func tocEntry(containingUnit unit: Int) -> Int? {
         var low = 0, high = toc.count
         while low < high {
@@ -199,9 +199,9 @@ final class TextChapterSource: EPUBChapterSource {
 }
 
 extension TextChapterSource {
-    /// Long TXT chapters (or a whole book without headings) are split at paragraph
-    /// boundaries so one layout never holds megabytes of text. Only the first unit of a
-    /// chapter carries its heading and TOC entry.
+    /// 在段落边界拆分长 TXT 章节（或没有标题的整本书），
+    /// 避免一次排版持有数兆字节文本。仅章节的第一个单元
+    /// 包含标题和目录项。
     nonisolated static func units(splitting chapters: [TextChapterContent], maximumUTF16: Int = 12_000) -> [Unit] {
         var units: [Unit] = []
         for chapter in chapters {
@@ -228,7 +228,7 @@ extension TextChapterSource {
     }
 }
 
-/// A chapter's raw text before paragraph splitting (TXT).
+/// 拆分段落之前的章节原始文本（TXT）。
 struct TextChapterBody {
     var title: String?
     var subtitle: String?
@@ -236,10 +236,10 @@ struct TextChapterBody {
 }
 
 extension TextChapterSource {
-    /// Like `units(splitting:)`, but opening only scans each body's UTF-8 bytes for line
-    /// breaks to place unit boundaries; paragraphs are built when a unit is laid out. A
-    /// 9 MB TXT then opens without creating hundreds of thousands of paragraph strings.
-    /// Units hold about `maximumUTF8` bytes of text and always end at a line break.
+    /// 类似 `units(splitting:)`，但打开时仅扫描各正文的 UTF-8 字节，
+    /// 根据换行确定单元边界；段落在单元排版时才构建。
+    /// 因此打开 9 MB TXT 时无需创建数十万个段落字符串。
+    /// 单元约包含 `maximumUTF8` 字节文本，始终在换行处结束。
     nonisolated static func units(lazilySplitting chapters: [TextChapterBody], maximumUTF8: Int = 36_000) -> [Unit] {
         var units: [Unit] = []
         for chapter in chapters {
@@ -262,8 +262,8 @@ extension TextChapterSource {
 }
 
 extension TextChapterSource {
-    /// Byte offsets where units start (always 0 first, the body length last). Units end at a
-    /// line break once they would exceed `maximumUTF8` bytes of line text.
+    /// 单元起始字节偏移量（首项始终为 0，末项为正文长度）。行文本
+    /// 即将超过 `maximumUTF8` 字节时，单元在换行处结束。
     nonisolated static func unitCuts(utf8: String.UTF8View, maximumUTF8: Int) -> [Int] {
         let scan: (UnsafeBufferPointer<UInt8>) -> [Int] = { bytes in
             var cuts = [0]
@@ -288,29 +288,29 @@ extension TextChapterSource {
     }
 }
 
-/// Where a TXT file was last read, shared by the scroll and paged readers and keyed by
-/// file content (SHA-256). `chapter` is the TXT chapter index; the paged unit and text
-/// offset refine it only while they belong to the same units (same unit count) and chapter.
+/// TXT 最近阅读的位置，由滚动和分页阅读器共享，以文件内容
+/// （SHA-256）为键。`chapter` 是 TXT 章节序号；仅在分页单元及文本偏移量
+/// 仍属于相同单元划分（单元总数相同）和章节时，用它们进一步定位。
 struct TXTReadingPosition: Codable, Equatable {
     var chapter: Int
     var unit: Int?
     var offset: Int?
     var unitCount: Int?
 
-    /// Local-only key used by 0.12.0 (52); positions now live in the synced reading positions.
+    /// 0.12.0（52）使用的本地专属键；阅读位置现在保存在可同步的阅读位置中。
     static func legacyKey(hash: String) -> String { "txtReadingPosition.v1.\(hash)" }
 
     static func legacy(hash: String, defaults: UserDefaults = .standard) -> TXTReadingPosition? {
         defaults.data(forKey: legacyKey(hash: hash)).flatMap { try? JSONDecoder().decode(TXTReadingPosition.self, from: $0) }
     }
 
-    /// The scroll reader moved to `chapter`; a paged location inside it is kept.
+    /// 滚动阅读器移动到 `chapter`；保留该章节内的分页位置。
     func movingToChapter(_ chapter: Int) -> TXTReadingPosition {
         chapter == self.chapter ? self : TXTReadingPosition(chapter: chapter)
     }
 
-    /// Unit and offset the paged reader opens at: the saved page when it is still valid,
-    /// otherwise the first unit of the saved chapter.
+    /// 分页阅读器打开时使用的单元和偏移量：保存的页面仍有效时使用它，
+    /// 否则使用保存章节的第一个单元。
     @MainActor
     func pagedStart(in source: TextChapterSource) -> (unit: Int, offset: Int?) {
         if let unit, unitCount == source.chapterCount, (0..<source.chapterCount).contains(unit),

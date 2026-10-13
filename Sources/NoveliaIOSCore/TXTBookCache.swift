@@ -2,13 +2,13 @@ import CryptoKit
 import Foundation
 import OSLog
 
-/// Who asked for a TXT file, recorded with every decode and parse.
+/// TXT 文件请求的来源，每次解码和解析时都会记录。
 enum TXTLoadSource: String, Sendable {
     case `import`, download, open, restore
 }
 
-/// A decoded and chapter-split TXT book. `contentHash` is the SHA-256 hex of the file, the
-/// same value `WebDAVFileHash` produces, so reading positions keep their keys.
+/// 已解码并划分章节的 TXT 书籍。`contentHash` 是文件的 SHA-256 十六进制值，
+/// 与 `WebDAVFileHash` 的结果一致，因此阅读位置的键保持不变。
 struct TXTParsedBook: Sendable {
     let contentHash: String
     let byteCount: Int
@@ -17,13 +17,13 @@ struct TXTParsedBook: Sendable {
     let rulesFingerprint: String
 }
 
-/// Decodes and splits each TXT file once. Repeated opens and imports of the same content
-/// reuse the cached result, and concurrent requests for one file share a single task.
+/// 每份 TXT 内容只解码和划分章节一次。重复打开或导入相同内容时
+/// 复用缓存结果，同一文件的并发请求共享一个任务。
 ///
-/// Levels: file identity (path, size, modification date) → content hash; content hash →
-/// decoded text; content hash + chapter rules → chapters. The content hash is the key, so a
-/// second copy of the same file (a repeated import) also hits. The work runs in detached
-/// tasks; the actor only guards the tables.
+/// 缓存层级：文件身份（路径、大小、修改时间）→ 内容哈希；内容哈希 →
+/// 解码文本；内容哈希 + 章节规则 → 章节。以内容哈希为键，因此
+/// 同一文件的另一份副本（重复导入）也能命中缓存。实际工作在分离任务中运行，
+/// actor 仅保护缓存表。
 actor TXTBookCache {
     static let shared = TXTBookCache(diskCache: .standard)
 
@@ -43,7 +43,7 @@ actor TXTBookCache {
         let rulesFingerprint: String
     }
 
-    /// What the cache did for one request; tests and diagnostics read it.
+    /// 单次请求的缓存处理结果，供测试和诊断读取。
     struct Statistics: Equatable, Sendable {
         var decodes = 0
         var parses = 0
@@ -63,9 +63,9 @@ actor TXTBookCache {
     private var decodeTasks: [FileIdentity: Task<(hash: String, byteCount: Int), Error>] = [:]
     private(set) var statistics = Statistics()
 
-    /// Limits are in UTF-8 bytes of text; a parsed book also holds its chapter bodies (about
-    /// the same size again), so the defaults keep roughly two large novels.
-    /// Chapter splits kept across launches; nil keeps the cache in memory only (tests).
+    /// 限制按文本的 UTF-8 字节数计算；解析后的书籍还保存章节正文
+    /// （大约再占同样大小），因此默认值约能保留两本大型小说。
+    /// 跨启动保存的章节划分；nil 表示仅保存在内存中（用于测试）。
     private let diskCache: TXTChapterDiskCache?
 
     init(decodedCostLimit: Int = 48 << 20, parsedCostLimit: Int = 96 << 20, diskCache: TXTChapterDiskCache? = nil) {
@@ -74,9 +74,9 @@ actor TXTBookCache {
         self.diskCache = diskCache
     }
 
-    // MARK: Requests
+    // MARK: 请求
 
-    /// The decoded and parsed book, from cache when possible.
+    /// 已解码和解析的书籍，优先从缓存获取。
     func book(at url: URL, rules: TXTChapterRuleConfiguration, source: TXTLoadSource,
               trace: String = DiagnosticContext.newTraceID()) async throws -> TXTParsedBook {
         let start = ContinuousClock.now
@@ -110,8 +110,8 @@ actor TXTBookCache {
         return try await task.value
     }
 
-    /// Decodes without splitting chapters (import validation). The text stays cached, so the
-    /// first open afterwards only parses. Returns the content hash.
+    /// 仅解码，不划分章节（用于导入校验）。文本保留在缓存中，
+    /// 因此随后首次打开只需解析。返回内容哈希。
     @discardableResult
     func validateDecodable(at url: URL, source: TXTLoadSource,
                            trace: String = DiagnosticContext.newTraceID()) async throws -> String {
@@ -144,7 +144,7 @@ actor TXTBookCache {
         return try await task.value.hash
     }
 
-    /// SHA-256 of the file content, memoised per file identity.
+    /// 文件内容的 SHA-256，按文件身份缓存结果。
     func contentHash(of url: URL) async throws -> String {
         let identity = try Self.identity(of: url)
         if let hash = hashByIdentity[identity] { return hash }
@@ -160,7 +160,7 @@ actor TXTBookCache {
         parsed.removeAll()
     }
 
-    // MARK: Work (nonisolated: runs in the caller's detached task, hops here only for tables)
+    // MARK: 实际处理（nonisolated：在调用方的分离任务中运行，仅访问缓存表时切回 actor）
 
     private nonisolated func loadBook(url: URL, identity: FileIdentity, knownHash: String?, rules: TXTChapterRuleConfiguration,
                                       source: TXTLoadSource, trace: String, start: ContinuousClock.Instant) async throws -> TXTParsedBook {
@@ -168,12 +168,12 @@ actor TXTBookCache {
         let hash = knownHash ?? Self.sha256(data)
         await remember(hash: hash, for: identity)
         let key = ParsedKey(contentHash: hash, rulesFingerprint: rules.fingerprint)
-        // Same content under another path (a repeated import or a second copy).
+        // 另一条路径下的相同内容（重复导入或另一份副本）。
         if let hit = await parsedHit(key) {
             await logHit(level: "parsed", reason: "duplicate", book: hit, source: source, trace: trace, start: start)
             return hit
         }
-        // A split saved by an earlier launch: no decoding or parsing at all.
+        // 之前启动时保存的章节划分，无需再次解码或解析。
         if let diskCache, let chapters = diskCache.load(hash: hash, rulesFingerprint: key.rulesFingerprint) {
             let book = TXTParsedBook(contentHash: hash, byteCount: data.count, text: "",
                                      chapters: chapters, rulesFingerprint: key.rulesFingerprint)
@@ -217,7 +217,7 @@ actor TXTBookCache {
         return result
     }
 
-    // MARK: Tables
+    // MARK: 缓存表
 
     private func parsedHit(_ key: ParsedKey) -> TXTParsedBook? {
         guard let hit = parsed.value(for: key) else { return nil }
@@ -254,7 +254,7 @@ actor TXTBookCache {
         parsed.insert(book, for: key, cost: Self.cost(of: book))
     }
 
-    /// Text plus chapter bodies; a disk hit has no full text, only the bodies.
+    /// 文本加章节正文；磁盘命中时没有完整文本，仅有章节正文。
     private static func cost(of book: TXTParsedBook) -> Int {
         book.text.utf8.count + book.chapters.reduce(0) { $0 + $1.body.utf8.count }
     }
@@ -282,7 +282,7 @@ actor TXTBookCache {
         TXTDiagnosticLog.logger.info("TXT cache hit; trace=\(trace, privacy: .public), book=\(DiagnosticContext.bookTag(book.contentHash), privacy: .public), source=\(source.rawValue, privacy: .public), reason=\(reason, privacy: .public), level=\(level, privacy: .public), cacheHit=true, chapters=\(book.chapters.count, privacy: .public), elapsedMs=\(DiagnosticContext.milliseconds(since: start), privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
     }
 
-    // MARK: Helpers
+    // MARK: 辅助方法
 
     static func identity(of url: URL) throws -> FileIdentity {
         let standardized = url.standardizedFileURL
@@ -295,14 +295,14 @@ actor TXTBookCache {
     }
 }
 
-/// Chapter splits on disk, keyed by content hash, chapter rules and parser version, so a
-/// later launch opens a large TXT without decoding or parsing it again. Lives in Caches
-/// (the system may purge it); only the most recent books are kept.
+/// 磁盘上的章节划分，以内容哈希、章节规则和解析器版本为键，
+/// 使后续启动可以直接打开大型 TXT，无需重新解码或解析。保存在 Caches 中
+/// （系统可能清理），仅保留最近使用的书籍。
 ///
-/// File: 4-byte little-endian header length, JSON header (titles, volumes, body UTF-8
-/// lengths), then the bodies' UTF-8 bytes back to back. Any mismatch reads as a miss.
+/// 文件格式：4 字节小端序头部长度、JSON 头部（标题、卷名、正文 UTF-8 长度），
+/// 随后连续存放正文 UTF-8 字节。任何不匹配都视为缓存未命中。
 struct TXTChapterDiskCache: Sendable {
-    /// Bump when the parser or this format changes what a stored split means.
+    /// 解析器或格式变化导致已存章节划分的含义改变时，递增此版本。
     static let formatVersion = 1
     static let standard = TXTChapterDiskCache(
         directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -346,7 +346,7 @@ struct TXTChapterDiskCache: Sendable {
             chapters.append(TXTChapter(index: index, title: entry.title, body: body, volumeTitle: entry.volume))
             cursor += entry.bytes
         }
-        // Mark as recently used for eviction.
+        // 标记为最近使用，供淘汰策略参考。
         try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
         return chapters
     }

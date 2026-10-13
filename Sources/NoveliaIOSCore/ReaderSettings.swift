@@ -1,8 +1,8 @@
 import Combine
 import Foundation
 
-/// Shared preferences without changing the keys already stored on devices.
-/// EPUB-specific layout options remain in its existing style object.
+/// 共用阅读偏好，同时保持设备上已有的存储键不变。
+/// EPUB 专属排版选项仍保存在原有样式对象中。
 @MainActor
 final class ReaderSettings: ObservableObject {
     static let shared = ReaderSettings()
@@ -30,7 +30,7 @@ final class ReaderSettings: ObservableObject {
             let value = Self.normalizedFontSize(newValue)
             if storedFontSize != value { storedFontSize = value }
             defaults.set(value, forKey: SettingsKey.readerFontSize)
-            // Keep the old EPUB style readable by older versions and preserve unknown fields.
+            // 保持旧版应用能够读取 EPUB 样式，并保留未知字段。
             if let data = defaults.data(forKey: Self.epubStyleKey),
                var style = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 style["fontSize"] = value
@@ -50,7 +50,7 @@ final class ReaderSettings: ObservableObject {
         }
     }
 
-    /// Online novels and TXT use the paged reader; scrolling remains the default.
+    /// 在线小说与 TXT 使用分页阅读器；默认仍为滚动模式。
     var pagedTextReading: Bool {
         get { storedPagedText }
         set {

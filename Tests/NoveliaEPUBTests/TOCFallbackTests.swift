@@ -1,8 +1,8 @@
 import XCTest
 @testable import NoveliaEPUB
 
-/// Chapter headings used to build a fallback TOC when the embedded one is nearly empty.
-/// Both the YueduCoreText and the Readium readers rely on this rule.
+/// 内嵌目录几乎为空时，用于构建备用目录的章节标题。
+/// YueduCoreText 与 Readium 阅读器都依赖此规则。
 final class TOCFallbackTests: XCTestCase {
     func testFindsChapterHeadingsInParagraphOrder() {
         let html = """

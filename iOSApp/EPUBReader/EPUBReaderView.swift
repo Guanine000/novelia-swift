@@ -11,12 +11,12 @@ import UniformTypeIdentifiers
 //
 // 分页不变量见 EPUBPageBook：预览页与落页共用同一份排版结果。
 
-/// Generated chapters (TXT / online novel) shown by the paged reader instead of an EPUB file.
+/// 分页阅读器显示的生成章节（TXT / 在线小说），代替 EPUB 文件。
 struct PagedTextBook {
     let source: any EPUBChapterSource
     let startUnit: Int
     let startOffset: Int?
-    /// (unit index, UTF-16 offset in that unit's text), reported after each page turn.
+    /// （单元序号，单元文本中的 UTF-16 偏移量），每次翻页后报告。
     let onPosition: (Int, Int?) -> Void
 }
 
@@ -36,7 +36,7 @@ struct EPUBReaderView: View {
     @State private var wasBatteryMonitoringEnabled = false
     let bookURL: URL?
     var textBook: PagedTextBook? = nil
-    /// Extra top-bar controls supplied by the TXT / online wrappers.
+    /// TXT / 在线小说包装视图提供的额外顶部栏控件。
     var accessory: AnyView? = nil
 
     var body: some View {
@@ -118,7 +118,7 @@ struct EPUBReaderView: View {
                 }
             }
             .onDisappear {
-                // Stops layouts of a closed book; reopening reuses completed chapters from the cache.
+                // 停止已关闭书籍的排版；重新打开时复用缓存中已完成的章节。
                 model.close()
                 if !wasBatteryMonitoringEnabled {
                     UIDevice.current.isBatteryMonitoringEnabled = false
@@ -131,8 +131,8 @@ struct EPUBReaderView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
-        // The reader already displays time and battery in its own overlay.
-        // Toggling the system bar changes safe-area height and repaginates the book.
+        // 阅读器已经在自己的浮层中显示时间和电量。
+        // 切换系统状态栏会改变安全区高度，并触发书籍重新分页。
         .statusBarHidden(true)
         .sheet(isPresented: $isShowingTOC) { tocSheet }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NoveliaImportedFontsChanged"))) { _ in model.refreshBackground() }
@@ -326,7 +326,7 @@ struct EPUBReaderView: View {
                                 }
                             }
                             let tocEntries = model.source?.toc ?? []
-                            // Computed once per render: rows are lazy, but each used to rescan the whole TOC.
+                            // 每次渲染只计算一次：列表行是惰性加载的，但之前每行都会重新扫描整个目录。
                             let currentIndex = model.currentTOCIndex
                             ForEach(tocEntries.indices, id: \.self) { index in
                                 let entry = tocEntries[index]
@@ -781,8 +781,8 @@ struct EPUBReaderHost: View {
     }
 }
 
-/// Chrome-only changes reuse the page surface. Model changes still invalidate
-/// this observed view when pagination, reading position, or cached pages change.
+/// 仅阅读器界面控件变化时复用页面绘制视图。分页、阅读位置或缓存页面
+/// 变化时，模型仍会使此观察视图更新。
 private struct EPUBReaderPageSurface: View, Equatable {
     @ObservedObject var model: EPUBReaderModel
     @Environment(\.openURL) private var openURL
@@ -803,8 +803,8 @@ private struct EPUBReaderPageSurface: View, Equatable {
             linkHitTest: { point in model.linkHit(at: point) },
             onNoteTap: { text in model.activeNote = EPUBNote(text: text) },
             onPlainLinkTap: { href in
-                // Generated (online) chapters link web addresses: open them the way the scroll
-                // reader's links open. EPUB links keep resolving to chapters in the book.
+                // 生成的在线章节包含网页链接，按滚动阅读器的方式打开；
+                // EPUB 链接仍解析为书内章节。
                 if model.container == nil, let url = URL(string: href),
                    ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
                     openURL(url)

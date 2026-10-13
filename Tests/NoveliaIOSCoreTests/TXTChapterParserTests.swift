@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import NoveliaIOSCore
 
-/// Encoding detection and chapter splitting for imported TXT files.
+/// 导入 TXT 文件的编码识别和章节拆分。
 final class TXTChapterParserTests: XCTestCase {
     private func encoded(_ text: String, _ charset: String) -> Data {
         let cf = CFStringConvertIANACharSetNameToEncoding(charset as CFString)
@@ -39,7 +39,7 @@ final class TXTChapterParserTests: XCTestCase {
     }
 
     func testVolumesAndSpecialTitles() {
-        // Bodies span several lines: adjacent heading lines read as a table of contents.
+        // 正文跨越多行：相邻标题行会被识别为目录。
         let body = (1...4).map { "这是第\($0)段正文，写得足够长以免被当成目录。" }.joined(separator: "\n")
         let text = ["第一卷 春", "序章", body, "第一章 一", body, "第二章 二", body,
                     "第二卷 夏", "第三章 三", body, "后记", body].joined(separator: "\n")

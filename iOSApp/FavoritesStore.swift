@@ -49,8 +49,8 @@ final class FavoritesStore: ObservableObject {
             let api = try apiClient(for: account)
             var fetched: [Novel] = []
             let folders = try await api.cloudFavoriteFolders()
-            // The Android client exposes the aggregate "all" route only when
-            // there are multiple folders; a single-folder account uses its real ID.
+            // Android 客户端仅在有多个文件夹时开放聚合的“all”路由；
+            // 只有一个文件夹的账户使用该文件夹的实际 ID。
             let folderIDs = folders.count > 1 ? ["all"] : folders.map(\.id)
             for folderID in folderIDs {
                 for page in 0...100 {
@@ -100,7 +100,7 @@ final class FavoritesStore: ObservableObject {
         errorMessage = nil
     }
 
-    /// Applies account-specific favorite status returned with a signed-in novel detail.
+    /// 应用已登录小说详情返回的账户专属收藏状态。
     func updateStatus(from novel: Novel, account: String?) {
         guard let account, activeAccount == account else { return }
         guard let folderID = novel.cloudFavoriteFolderID else {
@@ -187,7 +187,7 @@ private enum NoveliaFavoritesError: LocalizedError {
         switch self {
         case .loginRequired: "请先登录 Novelia 账号，再同步网页收藏。"
         case .unsupportedNovel: "该作品不支持加入 Novelia 网页收藏。"
-        case .favoriteFolderUnavailable: "缺少云端收藏夹信息，请刷新书架后重试。"
+        case .favoriteFolderUnavailable: "缺少云端收藏夹信息，请刷新网页收藏后重试。"
         }
     }
 }

@@ -4,9 +4,9 @@ import SwiftUI
 import UIKit
 import WebKit
 
-/// `Text(AttributedString(markdown:))` preserves inline emphasis and links, but
-/// SwiftUI's `Text` flattens Markdown block structure. Render blocks separately
-/// so paragraphs, headings, lists, and quotes retain the hierarchy shown on web.
+/// `Text(AttributedString(markdown:))` 保留行内强调和链接，
+/// 但 SwiftUI 的 `Text` 会将 Markdown 块结构展平。分别渲染各块，
+/// 使段落、标题、列表和引用保留网页展示的层级。
 struct ForumMarkdownBody: View {
     let markdown: String
     var mode: ForumMarkdownMode = .article
@@ -92,8 +92,8 @@ struct ForumMarkdownBody: View {
     }
 }
 
-/// A bounded text width lets each row grow vertically instead of truncating
-/// cells under the horizontal scroll view's unconstrained width proposal.
+/// 限制文本宽度，让每行可以向下增长，避免水平滚动视图
+/// 提供无限宽度时单元格被截断。
 private struct ForumMarkdownTable: View {
     let rows: [[String]]
     let mode: ForumMarkdownMode
@@ -122,14 +122,14 @@ private struct ForumMarkdownTable: View {
             }
             .fixedSize(horizontal: true, vertical: false)
         }
-        // Keep the vertical origin at the top when a tall table exceeds its viewport.
+        // 高表格超出可视区域时，保持内容的纵向起点在顶部。
         .defaultScrollAnchor(.topLeading)
         .accessibilityIdentifier("forum-markdown-table")
     }
 }
 
-/// Measure each row independently so expanded cell backgrounds cannot alter
-/// the text origin or borrow height from another row.
+/// 独立测量每一行，避免扩展后的单元格背景
+/// 改变文字起点或占用其他行的高度。
 private struct ForumTableRowLayout: Layout {
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let sizes = subviews.map { $0.sizeThatFits(ProposedViewSize(width: 240, height: nil)) }
@@ -167,8 +167,8 @@ private struct ForumInlineMarkdownText: View {
     }
 }
 
-/// Use TextKit's explicit link interaction after revealing instead of reusing
-/// SwiftUI's selectable Text backing view that previously handled reveal taps.
+/// 揭示后使用 TextKit 显式处理链接交互，避免复用
+/// 之前处理揭示点击的 SwiftUI 可选择 Text 底层视图。
 private struct ForumRevealedSpoilerText: UIViewRepresentable {
     let text: AttributedString
     let baseSize: CGFloat
@@ -281,7 +281,7 @@ private struct ForumDetailsBlock: View {
     }
 }
 
-/// The in-app page for a novel or wenku link tapped in forum Markdown.
+/// 在论坛 Markdown 中点击小说或文库链接后打开的应用内页面。
 struct ForumNovelRouteView: View {
     let route: ForumNovelRoute
 

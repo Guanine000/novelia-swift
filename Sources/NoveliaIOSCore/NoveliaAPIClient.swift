@@ -23,7 +23,7 @@ public struct NoveliaAPIClient: Sendable {
 
     public func searchNovels(query: String, page: Int = 1, exactTag: Bool = false) async throws -> [Novel] {
         let searchQuery = exactTag ? "\(query)$" : query
-        // The app uses 1-based pages, while the novel search API is 0-based.
+        // 应用页码从 1 开始，小说搜索 API 的页码从 0 开始。
         let apiPage = max(page - 1, 0)
         let response: APIPage<APIWebOutline> = try await get(
             path: ["novel"],
@@ -92,7 +92,7 @@ public struct NoveliaAPIClient: Sendable {
         return response.asNovelChapter(id: chapterId)
     }
 
-    /// Downloads a complete web novel using the same generated-file endpoint as the Novelia website.
+    /// 使用与 Novelia 网站相同的文件生成接口下载完整网络小说。
     public func downloadWebNovelEPUB(
         to destinationURL: URL,
         providerId: String,
@@ -271,7 +271,7 @@ public struct NoveliaAPIClient: Sendable {
         return response.items.compactMap { $0.asReadingHistoryItem }
     }
 
-    /// Records the chapter most recently opened in the signed-in user's web novel history.
+    /// 在已登录用户的网络小说阅读历史中记录最近打开的章节。
     public func updateWebReadingHistory(providerId: String, novelId: String, chapterId: String) async throws {
         guard !providerId.isEmpty, !novelId.isEmpty, !chapterId.isEmpty else {
             throw NoveliaAPIError.invalidInput("阅读记录参数无效。")
@@ -404,7 +404,7 @@ public struct NoveliaAPIClient: Sendable {
         return (try? handle.read(upToCount: 64 * 1024)) ?? Data()
     }
 
-    // Mirrors the provider order used by the Android client's public novel-list request.
+    // 与 Android 客户端公开小说列表请求使用的翻译来源顺序一致。
     private static let providers = ["kakuyomu", "syosetu", "novelup", "hameln", "pixiv", "alphapolis"]
 
     public static func providerName(_ id: String) -> String {
@@ -521,8 +521,8 @@ private struct APICloudFolders: Decodable {
     }
 }
 
-/// Stores only the Novelia app access token. Authentication cookies stay in WKWebView's
-/// website data store, which is the browser-owned store used by the official login flow.
+/// 仅保存 Novelia 应用的访问令牌。认证 Cookie 保留在 WKWebView 的网站数据存储中，
+/// 该存储由浏览器管理，也是官方登录流程使用的存储。
 public enum NoveliaSessionTokenVault {
     private static let service = "cc.novelia.ios.session"
     private static let account = "novel-access-token"
@@ -541,7 +541,7 @@ public enum NoveliaSessionTokenVault {
             return token
         }
 #if targetEnvironment(simulator)
-        // Simulator builds may be ad-hoc signed without a Keychain access-group entitlement.
+        // 模拟器构建可能采用临时签名，没有钥匙串访问组授权。
         return UserDefaults.standard.string(forKey: simulatorFallbackKey)
 #else
         return nil
@@ -853,14 +853,14 @@ private extension String {
 }
 
 
-/// Coordinates each app's access-token renewal without sharing novel/forum sessions.
-/// Request timeouts shared by `NoveliaAPIClient` and `ForumAPIClient`.
+/// 分别协调各应用的访问令牌续期，不共享小说和论坛会话。
+/// `NoveliaAPIClient` 与 `ForumAPIClient` 共用的请求超时设置。
 public enum NoveliaRequestTimeout {
-    /// JSON API calls.
+    /// JSON API 请求。
     public static let api: TimeInterval = 30
-    /// Light novel volume EPUBs.
+    /// 文库小说分卷 EPUB 文件。
     public static let wenkuVolume: TimeInterval = 120
-    /// Web novel EPUB/TXT files, which the server generates on request.
+    /// 网络小说 EPUB/TXT 文件，由服务器按请求生成。
     public static let generatedNovelFile: TimeInterval = 180
 }
 
@@ -901,23 +901,23 @@ public actor NoveliaSessionRenewal {
         return refreshed
     }
 
-    /// JSON and other in-memory responses. See `send` for authentication and retries.
+    /// JSON 及其他内存响应。认证和重试逻辑见 `send`。
     public static func data(session: URLSession, request: URLRequest, app: String,
                             tokenProvider: @Sendable () -> String?) async throws -> (Data, URLResponse) {
         try await send(request, app: app, tokenProvider: tokenProvider) { try await session.data(for: $0) }
     }
 
-    /// Large files written to a temporary location. See `send` for authentication and retries.
+    /// 写入临时位置的大文件。认证和重试逻辑见 `send`。
     public static func download(session: URLSession, request: URLRequest, app: String,
                                 tokenProvider: @Sendable () -> String?) async throws -> (URL, URLResponse) {
         try await send(request, app: app, tokenProvider: tokenProvider) { try await session.download(for: $0) }
     }
 
-    /// Requests from both API clients go through here: the account token is renewed shortly
-    /// before it expires, an HTTP 401 is retried once with a renewed token for the same
-    /// account, and GET/HEAD requests are retried once after a dropped connection or a
-    /// 502/503/504 from a proxy. Timeouts are not retried (file generation can take minutes),
-    /// nor are requests that change data.
+    /// 两个 API 客户端的请求都经过这里：账户令牌在即将过期时续期；
+    /// HTTP 401 会使用同一账户续期后的令牌重试一次；
+    /// GET/HEAD 请求在连接中断，或代理返回 502/503/504 时重试一次。
+    /// 超时不重试（文件生成可能需要数分钟），
+    /// 修改数据的请求也不重试。
     static func send<Body>(_ request: URLRequest, app: String, tokenProvider: @Sendable () -> String?,
                            perform: (URLRequest) async throws -> (Body, URLResponse)) async throws -> (Body, URLResponse) {
         let initial = tokenProvider()
@@ -934,7 +934,7 @@ public actor NoveliaSessionRenewal {
         return try await performRetryingTransientFailures(authenticated, perform: perform)
     }
 
-    /// Delay before retrying a transient failure; tests shorten it.
+    /// 临时故障重试前的等待时间；测试中会缩短。
     nonisolated(unsafe) static var transientRetryDelay: Duration = .seconds(1)
     static let transientErrors: Set<URLError.Code> = [.networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed]
     static let transientStatuses: Set<Int> = [502, 503, 504]
@@ -949,13 +949,13 @@ public actor NoveliaSessionRenewal {
                   transientStatuses.contains(status) else { return result }
             discard(result.0)
         } catch let error as URLError where idempotent && transientErrors.contains(error.code) {
-            // Fall through to the single retry below.
+            // 继续执行下方唯一一次重试。
         }
         try await Task.sleep(for: transientRetryDelay)
         return try await perform(request)
     }
 
-    /// A superseded download leaves its temporary file behind.
+    /// 被新请求替代的下载会留下临时文件。
     private static func discard<Body>(_ body: Body) {
         if let file = body as? URL { try? FileManager.default.removeItem(at: file) }
     }

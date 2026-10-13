@@ -99,12 +99,7 @@ struct SettingsView: View {
                     Label("TXT 分章规则", systemImage: "text.alignleft")
                 }
             }
-            Section("下载") {
-                NavigationLink {
-                    MyDownloadsView()
-                } label: {
-                    Label("我的下载", systemImage: "arrow.down.circle")
-                }
+            Section("同步") {
                 NavigationLink {
                     WebDAVSyncView()
                 } label: {
@@ -365,7 +360,7 @@ private enum ApplicationLogExporter {
             return ShareableLogLine(secondsAgo: max(0, Int(now.timeIntervalSince(entry.date))),
                                     level: levelName(entry.level), category: entry.category, message: message)
         }
-        // Fold repeats before the line cap so a burst cannot push out older events.
+        // 在限制行数之前合并重复记录，防止大量重复事件挤掉较早的事件。
         let collapsed = ShareableLogAggregator.collapse(exported)
         let messages = Array(collapsed.suffix(5_000))
         let txtDiagnosticCount = logEntries.filter { $0.category == "txt" }.count
@@ -412,8 +407,8 @@ private struct LogActivitySheet: UIViewControllerRepresentable {
 }
 
 private struct ThirdPartyLicensesView: View {
-    /// GPL-3.0 §5(a) modification date. scripts/build_local_release.py requires it to equal the
-    /// release commit's date, so update it with each release build.
+    /// GPL-3.0 第 5(a) 条要求的修改日期。scripts/build_local_release.py 要求它等于
+    /// 发布提交的日期，因此每次发布构建时都需更新。
     static let modifiedDate = "2026-10-13"
     private let packages: [(name: String, version: String, license: String, file: String)] = [
         ("SwiftSoup", "2.13.7", "MIT", "SwiftSoup-LICENSE.txt"),
@@ -427,7 +422,7 @@ private struct ThirdPartyLicensesView: View {
         ("SQLite.swift", "0.16.0", "MIT", "SQLite.swift-LICENSE.txt"),
         ("Zip", "2.1.2", "MIT", "Zip-LICENSE.txt")
     ]
-    /// Fonts and scripts shipped inside Readium's resource bundles.
+    /// 随 Readium 资源包一起分发的字体和脚本。
     private let readiumAssets: [(name: String, file: String)] = [
         ("ReadiumCSS 字体 AccessibleDfA（SIL OFL 1.1）", "ReadiumCSS-AccessibleDfA-LICENSE.txt"),
         ("ReadiumCSS 字体 iA Writer Duospace（SIL OFL 1.1）", "ReadiumCSS-iAWriterDuospace-LICENSE.txt"),
@@ -497,7 +492,7 @@ private struct ThirdPartyLicensesView: View {
     }
 }
 
-/// Render long license documents in a scrolling text view instead of one oversized SwiftUI Text.
+/// 使用可滚动的文本视图渲染长许可证文档，避免单个 SwiftUI Text 过大。
 private struct LicenseTextView: UIViewRepresentable {
     let text: String
 

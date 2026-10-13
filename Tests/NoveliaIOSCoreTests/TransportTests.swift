@@ -34,7 +34,7 @@ private func jwt(_ subject: String, _ exp: Double) -> String {
         .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "") + ".signature"
 }
 
-/// Shared request handling of both API clients: retries and 401 renewal for data and downloads.
+/// 两个 API 客户端共用的请求处理：数据与下载请求的重试及 401 续期。
 final class TransportTests: XCTestCase {
     private var session: URLSession!
 

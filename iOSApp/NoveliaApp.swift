@@ -168,24 +168,19 @@ struct RootView: View {
     var body: some View {
         TabView {
             NavigationStack {
-                ShelfView()
+                LibraryView()
             }
-            .tabItem { Label("书架", systemImage: "books.vertical.fill") }
+            .tabItem { Label("书库", systemImage: "books.vertical.fill") }
 
             NavigationStack {
-                DiscoverView()
+                DiscoverHomeView()
             }
             .tabItem { Label("发现", systemImage: "sparkle.magnifyingglass") }
 
             NavigationStack {
-                WenkuView()
-            }
-            .tabItem { Label("文库", systemImage: "books.vertical") }
-
-            NavigationStack {
                 ForumView()
             }
-            .tabItem { Label("论坛", systemImage: "bubble.left.and.bubble.right") }
+            .tabItem { Label("社区", systemImage: "bubble.left.and.bubble.right") }
 
             NavigationStack {
                 SettingsView()
@@ -204,6 +199,8 @@ struct RootView: View {
         .environmentObject(webDAVSync)
         .task { await updates.check() }
         .task(id: auth.username) {
+            // 作品详情的收藏状态依赖这两份收藏；原先由“书架”页加载。
+            await favorites.refresh(account: auth.username)
             await wenkuStore.refreshFavorites(account: auth.username)
         }
         .onChange(of: checksUpdates) { _, enabled in

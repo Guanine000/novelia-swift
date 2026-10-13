@@ -1,7 +1,7 @@
 import Foundation
 
-/// Forum API contract follows the GPL-3.0 Android client at nobYoQ/novelia.
-/// This iOS adaptation is separately maintained under this repository's GPL-3.0-only license.
+/// 论坛 API 约定遵循 nobYoQ/novelia 中采用 GPL-3.0 的 Android 客户端。
+/// 此 iOS 适配由本仓库独立维护，采用 GPL-3.0-only 许可证。
 public struct ForumAPIClient: Sendable {
     public static let defaultBaseURL = URL(string: "https://forum.novelia.cc/api/v1/")!
 
@@ -78,7 +78,7 @@ public struct ForumAPIClient: Sendable {
         )
     }
 
-    /// Updates one of the authenticated user's comments (including a reply).
+    /// 更新已认证用户自己的一条评论（包括回复）。
     public func updateComment(postID: Int64, commentID: Int64, content: String) async throws -> ForumComment {
         guard postID > 0, commentID > 0 else { throw ForumAPIError.invalidInput("评论无效。") }
         let normalized = content.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -107,7 +107,7 @@ public struct ForumAPIClient: Sendable {
         )
     }
 
-    /// Matches the official forum editor's PATCH contract.
+    /// 与官方论坛编辑器的 PATCH 接口约定一致。
     public func updatePost(id: Int64, categoryID: Int64, title: String, content: String, tagIDs: [Int64] = []) async throws -> ForumPost {
         guard id > 0, categoryID > 0 else { throw ForumAPIError.invalidInput("帖子或分类无效。") }
         guard (2...100).contains(title.unicodeScalars.count) else { throw ForumAPIError.invalidInput("标题长度需为 2–100 个字符。") }

@@ -150,8 +150,8 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
         longPressGesture.delegate = self
         addGestureRecognizer(longPressGesture)
         tap.require(toFail: longPressGesture)
-        // Let a deliberate long press own the touch sequence so the paging pan
-        // cannot consume the drag before the selection focus has moved.
+        // 让明确的长按手势接管本次触摸序列，避免分页拖动手势
+        // 在选择焦点移动之前消耗拖动事件。
         pan.require(toFail: longPressGesture)
 
         editMenuInteraction = UIEditMenuInteraction(delegate: self)

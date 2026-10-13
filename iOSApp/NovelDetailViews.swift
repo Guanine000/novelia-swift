@@ -472,7 +472,7 @@ private struct WebNovelDownloadSheet: View {
             Form {
                 Section("下载内容") {
                     Text(novel.title).font(.headline)
-                    Text("通过 Novelia 官方整本下载接口获取文件，可在“我的下载”中阅读或导出。")
+                    Text("通过 Novelia 官方整本下载接口获取文件，可在“书库”中阅读或导出。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("语言") {
@@ -509,7 +509,7 @@ private struct WebNovelDownloadSheet: View {
                     Section { Text("下载失败：\(error)").font(.footnote).foregroundStyle(.red) }
                 }
                 if didFinish {
-                    Section { Label("\(selectedMode.title) EPUB 下载完成，可在“我的下载”中阅读或导出", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
+                    Section { Label("\(selectedMode.title) EPUB 下载完成，可在“书库”中阅读或导出", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
                 }
                 Section {
                     Button {

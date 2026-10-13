@@ -4,7 +4,7 @@ import UIKit
 import XCTest
 @testable import NoveliaIOSCore
 
-/// Forum Markdown blocks, inline attributes and spoilers (formerly scripts/test_forum_markdown.py).
+/// 论坛 Markdown 块、行内属性和剧透（原 scripts/test_forum_markdown.py）。
 final class ForumMarkdownTests: XCTestCase {
     private let spoilerPattern = try! NSRegularExpression(pattern: "!!!!([\\s\\S]+?)!!!!|!!([\\s\\S]+?)!!")
 
@@ -29,7 +29,7 @@ final class ForumMarkdownTests: XCTestCase {
         XCTAssertEqual(rows.count, 2)
         XCTAssertEqual(rows[1][0], "A")
 
-        // Short separator cells (as in forum post 263), reproduced with synthetic content.
+        // 较短的分隔单元格（如论坛帖子 263），使用合成内容复现。
         for mode in [ForumMarkdownMode.article, .comment] {
             for delimiter in ["-", "--", "---", ":-", "-:", ":--:"] {
                 let blocks = parseForumMarkdown("| 评分 | 链接 | 评语 | 日期 |\n| \(delimiter) | \(delimiter) | \(delimiter) | \(delimiter) |\n| ☆☆☆☆☆ | [小说](https://books.fishhawk.top/novel/hameln/example) | **更新** | 20250226 |\n|  | *分隔* | | |\n\n后文", mode: mode)

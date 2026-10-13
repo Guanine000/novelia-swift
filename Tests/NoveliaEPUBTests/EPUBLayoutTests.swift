@@ -4,12 +4,12 @@ import XCTest
 import YueduCoreText
 @testable import NoveliaEPUB
 
-/// Whole-book layout checks for justified CJK text.
+/// 中日韩文本两端对齐的全书排版检查。
 ///
-/// A "gap" is a CJK glyph whose advance, minus the kern the engine added, exceeds 1.3 em:
-/// the half-character holes Core Text leaves when it squeezes punctuation on a partly
-/// kerned line. A "width mismatch" is a line whose drawn width differs from its laid-out
-/// width by more than 1 pt, i.e. text that would run past the margin.
+/// “间隙”指中日韩字形的前进宽度减去引擎添加的字距后，仍超过 1.3 em：
+/// 这是 Core Text 在仅部分字符调整字距的行中压缩标点时留下的半字空隙。
+/// “宽度不匹配”指一行的实际绘制宽度与排版宽度相差超过 1 pt，
+/// 即文字可能越过页边距。
 final class EPUBLayoutTests: XCTestCase {
     struct Report: CustomStringConvertible {
         var pages = 0
@@ -23,7 +23,7 @@ final class EPUBLayoutTests: XCTestCase {
         }
     }
 
-    /// The reader's default page on a 440 × 956 pt phone (see EPUBReaderStyle).
+    /// 阅读器在 440 × 956 pt 手机上的默认页面（见 EPUBReaderStyle）。
     @MainActor
     static func readerConfig(workarounds: Bool) -> BrowserLayoutConfig {
         let size = CGSize(width: 440, height: 956)
@@ -65,7 +65,7 @@ final class EPUBLayoutTests: XCTestCase {
                         CTRunGetStringIndices(run, CFRange(location: 0, length: count), &indices)
                         for (advance, index) in zip(advances, indices) {
                             let kern = (attributed.attribute(.kern, at: index, effectiveRange: nil) as? NSNumber)?.doubleValue ?? 0
-                            // Only CJK glyphs: dashes and ellipses are legitimately wider than 1.3 em.
+                            // 仅检查中日韩字形：破折号和省略号超过 1.3 em 是正常情况。
                             let scalar = (attributed.string as NSString).character(at: index)
                             if scalar >= 0x3000, advance.width - CGFloat(kern) > text.font.pointSize * 1.3 { gap = true }
                         }
@@ -88,14 +88,14 @@ final class EPUBLayoutTests: XCTestCase {
         XCTAssertEqual(report.widthMismatches, 0, report.description)
     }
 
-    /// Guards the workaround: it fails once YueduCoreText no longer leaves gaps without it,
-    /// which is the signal to remove `EPUBPageBook.applyEngineWorkarounds`.
+    /// 验证兼容处理仍有必要：当 YueduCoreText 无需此处理也不再留下间隙时，测试失败，
+    /// 提示应移除 `EPUBPageBook.applyEngineWorkarounds`。
     func testEngineStillNeedsWorkaround() async throws {
         let report = try await Self.scan(try EPUBMetadataTests.fixture("justified_cjk"), workarounds: false)
         XCTAssertGreaterThan(report.gaps, 0, "YueduCoreText justifies cleanly without the workaround; remove it. \(report)")
     }
 
-    /// Reading positions are stored as a chapter offset; every page must map back to itself.
+    /// 阅读位置保存为章节偏移量；每页必须能映射回自身。
     @MainActor
     func testPageOffsetsRoundTrip() async throws {
         let container = try await EPUBContainer.open(fileURL: try EPUBMetadataTests.fixture("justified_cjk"))
@@ -113,7 +113,7 @@ final class EPUBLayoutTests: XCTestCase {
         }
     }
 
-    /// After a font size change the reader reopens on the page that draws the same text.
+    /// 字号变化后，阅读器重新打开显示同一文本的页面。
     @MainActor
     func testOffsetSurvivesRepagination() async throws {
         let container = try await EPUBContainer.open(fileURL: try EPUBMetadataTests.fixture("justified_cjk"))
@@ -135,7 +135,7 @@ final class EPUBLayoutTests: XCTestCase {
         }
     }
 
-    /// `scripts/scan_epub_layout.sh <book.epub>` runs this against any local EPUB.
+    /// `scripts/scan_epub_layout.sh <book.epub>` 可对任意本地 EPUB 运行此检查。
     func testScanExternalBook() async throws {
         guard let path = ProcessInfo.processInfo.environment["SCAN_EPUB"], !path.isEmpty else {
             throw XCTSkip("Set SCAN_EPUB (via scripts/scan_epub_layout.sh) to scan a local book.")

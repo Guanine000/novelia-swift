@@ -3,56 +3,102 @@ import OSLog
 import UIKit
 import UniformTypeIdentifiers
 
+/// “发现”页：顶部切换网络小说与文库，分别保留原有的搜索、排行榜与收藏入口。
+struct DiscoverHomeView: View {
+    private enum Catalog: String, CaseIterable, Identifiable {
+        case webNovel, wenku
+        var id: String { rawValue }
+        var title: String { self == .webNovel ? "网络小说" : "文库" }
+    }
+
+    @SceneStorage("discover.catalog") private var catalog = Catalog.webNovel
+    @State private var loaded = Set<Catalog>()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("发现内容", selection: $catalog) {
+                ForEach(Catalog.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+            // 两个分段首次打开后都保留，切换时不丢失搜索词和已加载的列表。
+            ZStack {
+                ForEach(Catalog.allCases.filter { loaded.contains($0) || $0 == catalog }) { item in
+                    Group {
+                        switch item {
+                        case .webNovel: DiscoverView(embedded: true)
+                        case .wenku: WenkuView(embedded: true)
+                        }
+                    }
+                    .opacity(item == catalog ? 1 : 0)
+                    .allowsHitTesting(item == catalog)
+                    .accessibilityHidden(item != catalog)
+                }
+            }
+        }
+        .onChange(of: catalog, initial: true) { _, value in loaded.insert(value) }
+        .background(NoveliaStyle.paper.ignoresSafeArea())
+        .navigationTitle("发现")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// 发现页搜索框下方的快捷入口。
+struct DiscoverShortcutChip: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(NoveliaStyle.ink)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(NoveliaStyle.card, in: Capsule())
+            .overlay(Capsule().stroke(NoveliaStyle.muted.opacity(0.18), lineWidth: 1))
+    }
+}
+
 struct DiscoverView: View {
     @ObservedObject private var blocked = BlockedTagsStore.shared
     @State private var query = ""
     @StateObject private var store = DiscoverStore()
     private let showsNavigationBar: Bool
+    /// 嵌入“发现”页的“网络小说”分段时，不显示自己的大标题，也不改动导航栏。
+    private let embedded: Bool
 
-    init(initialQuery: String = "", showsNavigationBar: Bool = false) {
+    init(initialQuery: String = "", showsNavigationBar: Bool = false, embedded: Bool = false) {
         _query = State(initialValue: initialQuery)
         self.showsNavigationBar = showsNavigationBar
+        self.embedded = embedded
     }
 
     var body: some View {
+        if embedded {
+            content
+        } else {
+            content
+                .navigationTitle(showsNavigationBar ? "搜索结果" : "")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar(showsNavigationBar ? .visible : .hidden, for: .navigationBar)
+        }
+    }
+
+    private var content: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("FIND YOUR NEXT STORY")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .tracking(1.4)
-                        .foregroundStyle(NoveliaStyle.brandGreen)
-                    Text("发现好故事")
-                        .font(.system(size: 31, weight: .bold, design: .rounded))
-                        .foregroundStyle(NoveliaStyle.ink)
-                }
-
-                NavigationLink {
-                    RankingView()
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "chart.line.uptrend.xyaxis")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 42, height: 42)
-                            .background(NoveliaStyle.brandGreen, in: RoundedRectangle(cornerRadius: 13))
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("小说排行榜")
-                                .font(.system(size: 15, weight: .bold, design: .rounded))
-                                .foregroundStyle(NoveliaStyle.ink)
-                            Text("查看 Novelia 站内热门作品")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(NoveliaStyle.muted)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(NoveliaStyle.muted)
+                if !embedded {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("FIND YOUR NEXT STORY")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .tracking(1.4)
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                        Text("发现好故事")
+                            .font(.system(size: 31, weight: .bold, design: .rounded))
+                            .foregroundStyle(NoveliaStyle.ink)
                     }
-                    .padding(13)
-                    .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 17))
                 }
-                .buttonStyle(.plain)
 
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
@@ -63,6 +109,21 @@ struct DiscoverView: View {
                 }
                 .padding(14)
                 .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        NavigationLink { RankingView() } label: {
+                            DiscoverShortcutChip(title: "排行榜", systemImage: "chart.line.uptrend.xyaxis")
+                        }
+                        NavigationLink { CloudFavoritesListView() } label: {
+                            DiscoverShortcutChip(title: "收藏", systemImage: "heart")
+                        }
+                        NavigationLink { CloudReadingHistoryListView() } label: {
+                            DiscoverShortcutChip(title: "阅读历史", systemImage: "clock.arrow.circlepath")
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 HStack(alignment: .firstTextBaseline) {
                     Text(query.isEmpty ? "热门作品" : "搜索结果")
@@ -164,9 +225,6 @@ struct DiscoverView: View {
             .padding(.bottom, 24)
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
-        .navigationTitle(showsNavigationBar ? "搜索结果" : "")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar(showsNavigationBar ? .visible : .hidden, for: .navigationBar)
         .task(id: query) { await store.search(query: query) }
     }
 }

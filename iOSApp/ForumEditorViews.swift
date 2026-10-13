@@ -40,9 +40,9 @@ private struct ForumComposeNotice: View {
     }
 }
 
-/// Opens links tapped in forum Markdown inside the app. Markdown also appears inside
-/// lazy lists and forms, where SwiftUI ignores navigation destinations, so each screen
-/// that shows it declares the destinations once at its root with this modifier.
+/// 在应用内打开论坛 Markdown 中点击的链接。Markdown 也用于
+/// 惰性列表和表单，而 SwiftUI 在其中忽略导航目标，因此每个展示页面
+/// 都通过此修饰器在根视图统一声明一次导航目标。
 struct ForumLinkActions {
     var openNovel: (ForumNovelRoute) -> Void
     var openNotice: (ForumNoticeDestination) -> Void

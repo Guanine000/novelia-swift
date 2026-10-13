@@ -37,13 +37,13 @@ enum EPUBLayoutFailure: LocalizedError {
     }
 }
 
-/// Correlation details for one chapter layout request (diagnostics only, except `bookID`,
-/// which also scopes the shared layout cache).
+/// 一次章节排版请求的关联信息（仅用于诊断，`bookID` 除外，
+/// 它还限定共享排版缓存的范围）。
 struct EPUBLayoutContext {
-    /// Stable identity of the book content (EPUB file hash, TXT hash + rules). `nil` keeps the
-    /// layout private to this page book: it is still de-duplicated but never cached.
+    /// 书籍内容的稳定身份（EPUB 文件哈希、TXT 哈希 + 规则）。为 `nil` 时，
+    /// 排版结果仅在此分页书籍对象内使用：仍合并重复请求，但不缓存。
     var bookID: String?
-    /// "epub", "txt" or "online": the log line prefix and `kind` field.
+    /// “epub”“txt”或“online”：用于日志行前缀和 `kind` 字段。
     var kind = "epub"
     var trace = "00000000"
     var reason: EPUBLayoutReason = .first
@@ -55,7 +55,7 @@ struct EPUBLayoutContext {
 final class EPUBPageBook {
     let generation: Int
     private let coordinator: EPUBLayoutCoordinator
-    /// Scopes uncached layouts (no book identity) to this page book.
+    /// 将没有书籍身份、不能缓存的排版限制在此分页书籍对象内。
     private let privateBookID = "private-" + UUID().uuidString
 
     private var chapters: [Int: EPUBChapterLayout] = [:]
@@ -69,10 +69,10 @@ final class EPUBPageBook {
         self.coordinator = coordinator
     }
 
-    /// YueduCoreText 0.8.0 justifies a line by kerning only some of its characters.
-    /// Core Text then squeezes unkerned CJK punctuation to half width and moves that
-    /// width into one large gap. A negligible kern on every character avoids this.
-    /// Shared by the reader and the layout regression tests.
+    /// YueduCoreText 0.8.0 仅调整一行中部分字符的字距来实现两端对齐。
+    /// Core Text 随后将未调整字距的中日韩标点挤为半宽，并把这部分宽度
+    /// 移到一个大间隙中。为每个字符设置极小字距可以避免此问题。
+    /// 阅读器与排版回归测试共用。
     static func applyEngineWorkarounds(to config: inout BrowserLayoutConfig) {
         config.letterSpacing = 0.001
     }
@@ -133,7 +133,7 @@ final class EPUBPageBook {
             let failure = EPUBLayoutLog.failure(error)
             let elapsed = EPUBLayoutLog.milliseconds(since: start)
             if failure.kind == "cancelled" {
-                // A cancelled request keeps no partial pages: they may belong to a layout that stopped early.
+                // 取消的请求不保留部分页面，它们可能属于中途停止的排版。
                 if !completedChapters.contains(spineIndex) { chapters[spineIndex] = nil }
                 EPUBLayoutLog.logger.info("\(label, privacy: .public) chapter layout cancelled; \(fields, privacy: .public), elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
             } else {
@@ -197,8 +197,8 @@ final class EPUBPageBook {
         chapters[spineIndex]?.pages.count ?? 0
     }
 
-    /// UTF-16 offset in the chapter source where a page's first text begins; `nil` for
-    /// pages without text (full-page images).
+    /// 页面首段文字在章节源文本中的 UTF-16 偏移量；
+    /// 无文字的页面（整页图片）为 `nil`。
     func sourceOffset(spineIndex: Int, pageIndex: Int) -> Int? {
         guard let chapter = chapters[spineIndex], chapter.displayLists.indices.contains(pageIndex) else { return nil }
         return chapter.displayLists[pageIndex].items.compactMap { item -> Int? in
@@ -207,12 +207,12 @@ final class EPUBPageBook {
         }.min()
     }
 
-    /// UTF-16 length of a laid-out chapter's text (the space `sourceOffset` measures).
+    /// 已排版章节文本的 UTF-16 长度（`sourceOffset` 所度量的文本范围）。
     func sourceLength(spineIndex: Int) -> Int? {
         chapters[spineIndex].map { $0.sourceText.utf16.count }
     }
 
-    /// The page showing `offset`: the last laid-out page whose text starts at or before it.
+    /// 显示 `offset` 的页面：文字起点不晚于该偏移量的最后一个已排版页面。
     func pageIndex(spineIndex: Int, containingSourceOffset offset: Int) -> Int? {
         guard let chapter = chapters[spineIndex], !chapter.displayLists.isEmpty else { return nil }
         var result = 0
@@ -326,7 +326,7 @@ final class EPUBPageBook {
         return image.cgImage
     }
 
-    /// The display list of every page laid out so far in a chapter (layout regression tests).
+    /// 章节中目前已排版的每个页面的显示列表（用于排版回归测试）。
     func displayLists(spineIndex: Int) -> [DisplayList] {
         chapters[spineIndex]?.displayLists ?? []
     }
@@ -345,11 +345,11 @@ struct EPUBReadingLocation: Equatable {
 
 // MARK: - 排版日志
 
-/// One summary line per chapter layout. YueduCoreText's `onDiagnostic` is a trace hook,
-/// not an error channel: it reports every styled node, matched rule and laid-out line,
-/// thousands of events per chapter, and formatting them slows layout. Real failures are
-/// thrown and logged here; the trace runs only in Debug builds launched with
-/// `-EPUBEngineTrace`.
+/// 每次章节排版记录一行摘要。YueduCoreText 的 `onDiagnostic` 是跟踪钩子，
+/// 并非错误通道：它报告每个带样式的节点、匹配的规则和排版行，
+/// 每章可产生数千个事件，格式化它们会拖慢排版。实际失败会抛出，
+/// 并在此处记录；跟踪仅在带有以下启动参数的 Debug 构建中启用：
+/// `-EPUBEngineTrace`。
 enum EPUBLayoutLog {
     static let logger = Logger(subsystem: "cc.novelia.ios.port", category: "epub")
     static let trace = Logger(subsystem: "cc.novelia.ios.port", category: "enginediag")
@@ -362,7 +362,7 @@ enum EPUBLayoutLog {
         #endif
     }()
 
-    /// Log line prefix for a book kind; TXT and online chapters are not EPUB.
+    /// 书籍类型对应的日志行前缀；TXT 和在线章节不属于 EPUB。
     static func label(kind: String) -> String {
         switch kind {
         case "txt": "TXT"
@@ -375,7 +375,7 @@ enum EPUBLayoutLog {
         DiagnosticContext.milliseconds(since: start)
     }
 
-    /// A fixed kind name and numeric code; error descriptions may hold file paths or book text.
+    /// 固定类型名与数字代码；错误描述可能包含文件路径或书籍文本。
     static func failure(_ error: Error) -> (kind: String, code: Int) {
         if error is CancellationError { return ("cancelled", 0) }
         if let error = error as? HTMLLayoutError {
@@ -411,7 +411,7 @@ enum EPUBLayoutLog {
     }
 }
 
-/// Counts engine trace events by stage for the Debug-only per-chapter summary.
+/// 按阶段统计引擎跟踪事件，供仅在 Debug 中启用的章节摘要使用。
 final class EPUBLayoutTraceTally: @unchecked Sendable {
     static let stages = ["html", "css", "selector", "style", "ingestion", "adapter", "allocation"]
     private let lock = NSLock()

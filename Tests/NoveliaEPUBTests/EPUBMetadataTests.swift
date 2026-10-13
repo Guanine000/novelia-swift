@@ -2,8 +2,8 @@ import UIKit
 import XCTest
 @testable import NoveliaEPUB
 
-/// Library metadata read on import. Expected values were cross-checked against the
-/// Readium parser this replaced (swift-toolkit 3.11.0) on the same fixtures.
+/// 导入时读取的书库元数据。预期值已使用相同样例，与此前被替换的
+/// Readium 解析器（swift-toolkit 3.11.0）交叉核对。
 final class EPUBMetadataTests: XCTestCase {
     struct Expected {
         let title: String
@@ -40,7 +40,7 @@ final class EPUBMetadataTests: XCTestCase {
         }
     }
 
-    /// The reader's title bar and the library list use the same title rule.
+    /// 阅读器标题栏和书库列表采用相同的标题选择规则。
     func testReaderTitleMatchesLibraryTitle() async throws {
         for name in Self.expectations.keys {
             let url = try Self.fixture(name)

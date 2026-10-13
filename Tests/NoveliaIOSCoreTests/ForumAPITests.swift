@@ -41,7 +41,7 @@ private final class PostEditMock: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Editing one's own forum post (formerly scripts/test_forum_post_edit.py).
+/// 编辑自己的论坛帖子（原 scripts/test_forum_post_edit.py）。
 final class ForumAPITests: XCTestCase {
     func testUpdatePost() async throws {
         PostEditMock.count = 0; PostEditMock.status = 200; PostEditMock.failures = []

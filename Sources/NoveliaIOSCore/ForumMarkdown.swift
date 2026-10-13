@@ -2,8 +2,8 @@ import Foundation
 import SwiftUI
 import UIKit
 
-// Forum Markdown parsing, spoiler handling and forum/novel link routing.
-// Pure logic shared by the forum views and the package tests.
+// 论坛 Markdown 解析、剧透处理，以及论坛和小说链接路由。
+// 论坛视图与 Swift 包测试共用的纯逻辑。
 
 struct ForumPostRoute: Identifiable {
     let postID: Int64
@@ -28,7 +28,7 @@ func isLocalForumURL(_ url: URL, postID: Int64) -> Bool {
 }
 
 func forumSpoilerMarkdown(_ markdown: String) -> String {
-    // Keep the entire link inside the reveal span when its label is spoiled.
+    // 链接文字被标为剧透时，将整个链接保留在可揭示的范围内。
     guard let links = try? NSRegularExpression(pattern: "\\[((?:!!!!|!!))([^\\]]+?)\\1\\]\\(([^)]+)\\)") else { return markdown }
     let source = markdown as NSString
     let codeRanges = forumInlineCodeRanges(markdown)
@@ -55,7 +55,7 @@ func forumSpoilerMatches(_ markdown: String, pattern: NSRegularExpression) -> [N
     }
 }
 
-/// `conceal` styles hidden spoiler text; links are always removed from it here.
+/// `conceal` 用于设置隐藏剧透文字的样式；这里始终移除其链接。
 func renderInlineMarkdown(_ markdown: String, spoilersRevealed: Bool, pattern: NSRegularExpression,
                           conceal: (inout AttributedString) -> Void = { _ in }) -> AttributedString {
     let normalized = forumSpoilerMarkdown(markdown)
@@ -74,8 +74,8 @@ func renderInlineMarkdown(_ markdown: String, spoilersRevealed: Bool, pattern: N
         }
         var spoiler = (try? forumInlineAttributes(ns.substring(with: spoilerRange))) ?? AttributedString(ns.substring(with: spoilerRange))
         if !spoilersRevealed {
-            // Concealed content cannot open invisible links; revealing restores
-            // the original Markdown link attributes on the next render.
+            // 隐藏内容不能打开不可见的链接；揭示后，在下一次渲染时
+            // 恢复原始 Markdown 链接属性。
             spoiler.link = nil
             conceal(&spoiler)
         }
@@ -281,8 +281,8 @@ func forumTableCells(_ line: String) -> [String] {
 }
 
 func forumInlineAttributes(_ input: String) throws -> AttributedString {
-    // Normalize a struck link label before splitting strike spans, preserving
-    // the complete Markdown link for Foundation's parser.
+    // 拆分删除线范围前先规范化带删除线的链接文字，
+    // 为 Foundation 解析器保留完整的 Markdown 链接。
     let text = input.replacingOccurrences(of: "\\[~~([^\\]]+?)~~\\]\\(([^)]+)\\)", with: "~~[$1]($2)~~", options: .regularExpression)
         .replacingOccurrences(of: "</?(?:del|s|strike)>", with: "~~", options: [.regularExpression, .caseInsensitive])
     guard let expression = try? NSRegularExpression(pattern: "~~([\\s\\S]+?)~~") else {
@@ -321,13 +321,13 @@ struct ForumNovelRoute: Hashable {
     }
 }
 
-// MARK: - Cache
+// MARK: - 缓存
 
-/// The spoiler syntax, compiled once: `!!text!!` or `!!!!text!!!!`.
+/// 仅编译一次的剧透语法：`!!text!!` 或 `!!!!text!!!!`。
 let forumSpoilerPattern = try! NSRegularExpression(pattern: "!!!!([\\s\\S]+?)!!!!|!!([\\s\\S]+?)!!")
 
-/// Parsed forum Markdown. SwiftUI re-evaluates view bodies on every scroll and state
-/// change, so long posts and comment lists would otherwise re-parse the same text.
+/// 已解析的论坛 Markdown。SwiftUI 在每次滚动或状态变化时重新计算视图主体，
+/// 如果不缓存，长帖子和评论列表就会反复解析相同文本。
 final class ForumMarkdownCache: @unchecked Sendable {
     static let shared = ForumMarkdownCache()
 
@@ -335,7 +335,7 @@ final class ForumMarkdownCache: @unchecked Sendable {
     private final class Inline { let value: AttributedString; init(_ value: AttributedString) { self.value = value } }
     private final class Flag { let value: Bool; init(_ value: Bool) { self.value = value } }
 
-    // NSCache is thread-safe and drops entries under memory pressure.
+    // NSCache 支持线程安全，并在内存压力下释放条目。
     private let blocks = NSCache<NSString, Blocks>()
     private let inline = NSCache<NSString, Inline>()
     private let spoilers = NSCache<NSString, Flag>()
@@ -362,7 +362,7 @@ final class ForumMarkdownCache: @unchecked Sendable {
         return value
     }
 
-    /// Hidden spoilers are cached with the caller's styling, so pass the same `conceal` every time.
+    /// 隐藏剧透的缓存包含调用方样式，因此每次应传入相同的 `conceal`。
     func inline(_ markdown: String, spoilersRevealed: Bool,
                 conceal: (inout AttributedString) -> Void = { _ in }) -> AttributedString {
         let key = "\(spoilersRevealed ? 1 : 0)\u{0}\(markdown)" as NSString

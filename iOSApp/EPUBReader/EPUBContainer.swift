@@ -54,7 +54,7 @@ final class EPUBContainer {
     private let manifestByID: [String: EPUBSpineItem]
     /// 目录为空时的可诊断原因。
     private(set) var tocDiagnostic: String?
-    /// When a sparse embedded TOC was replaced with headings recovered from the spine.
+    /// 内嵌目录过于稀疏，已用从 spine 恢复的标题替换时记录。
     private(set) var tocFallbackDiagnostic: String?
 
     private init(fileURL: URL, archive: Archive, opfDirectory: String,
@@ -626,8 +626,8 @@ final class EPUBContainer {
         }
     }
 
-    /// Some EPUBs ship a technically valid nav/NCX containing only a colophon or cover.
-    /// When that directory is clearly incomplete, recover chapter headings from the spine.
+    /// 部分 EPUB 的 nav/NCX 在格式上有效，却只包含版权页或封面。
+    /// 当该目录明显不完整时，从 spine 中恢复章节标题。
     private func preferGeneratedTOCIfSparse(_ embedded: [EPUBTOCEntry]) async -> [EPUBTOCEntry] {
         guard embedded.count <= 1 else { return embedded }
         let generated = await generateTOCFromSpineHeadings()

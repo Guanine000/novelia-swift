@@ -1,6 +1,6 @@
 import Foundation
 
-/// Records only actual failed reads, keyed by resource so retries never duplicate a warning.
+/// 仅记录实际读取失败，以资源为键，避免重试产生重复警告。
 struct EPUBContentDiagnostics: Sendable {
     private(set) var scannedResources = 0
     private var failures: [(path: String, reason: String)] = []

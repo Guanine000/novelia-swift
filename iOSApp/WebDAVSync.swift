@@ -28,7 +28,7 @@ enum ReadingPositionSync {
 
     static func epubPosition(hash: String) -> SyncedReadingPosition? { all()["epub:\(hash)"] }
 
-    /// TXT positions shared by the scroll and paged readers, synced with the book's file hash.
+    /// 滚动和分页阅读器共用的 TXT 阅读位置，以书籍文件哈希同步。
     static func recordTXT(hash: String, position: TXTReadingPosition) {
         var positions = all()
         positions["txt:\(hash)"] = SyncedReadingPosition(chapterIndex: position.chapter, fraction: nil, updatedAt: Date(),
@@ -40,7 +40,7 @@ enum ReadingPositionSync {
         if let synced = all()["txt:\(hash)"], let chapter = synced.chapterIndex {
             return TXTReadingPosition(chapter: chapter, unit: synced.unit, offset: synced.chapterOffset, unitCount: synced.unitCount)
         }
-        // 0.12.0 (52) test builds kept TXT positions in a local-only key.
+        // 0.12.0（52）测试构建将 TXT 阅读位置保存在仅本地使用的键中。
         return TXTReadingPosition.legacy(hash: hash)
     }
 
@@ -101,6 +101,8 @@ private struct WebDAVManifest: Codable {
     var blockedTags: [String: SyncedBlockedTag]? = nil
     var backgrounds: [String: SyncedReaderBackground]? = nil
     var fonts: [String: SyncedImportedFont]? = nil
+    /// 书库系列与书籍归属；随书籍同步，旧版应用解码时忽略。
+    var librarySeries: LibrarySeriesState? = nil
 }
 
 private enum WebDAVSyncError: LocalizedError {
@@ -420,6 +422,7 @@ final class WebDAVSyncStore: ObservableObject {
                 let assetHashes = (manifest.webBooks.flatMap(\.assets) + manifest.wenkuBooks.flatMap(\.assets)).map(\.hash)
                 let fileKeys = Set(assetHashes.map { "epub:\($0)" } + assetHashes.map { "txt:\($0)" })
                 manifest.positions = ReadingPositionSync.all().filter { webKeys.contains($0.key) || fileKeys.contains($0.key) }
+                manifest.librarySeries = LibrarySeriesState.merged(LibraryStateStore.shared.series, manifest.librarySeries ?? LibrarySeriesState())
             }
             if includesTags {
                 manifest.blockedTags = BlockedTagsStore.merged(BlockedTagsStore.shared.syncStates, manifest.blockedTags ?? [:])
@@ -471,6 +474,7 @@ final class WebDAVSyncStore: ObservableObject {
             progressDetail = "正在保存同步清单…"
             try await client.putManifest(manifest, etag: etag, existed: existed)
             if includesTags { BlockedTagsStore.shared.applySynced(manifest.blockedTags ?? [:]) }
+            if includesBooks, let series = manifest.librarySeries { LibraryStateStore.shared.applySynced(series) }
             if includesBackgrounds {
                 for dark in [false, true] {
                     if let value = manifest.backgrounds?[dark ? "dark" : "light"] {
@@ -573,7 +577,7 @@ struct WebDAVSyncView: View {
             Section {
                 Toggle("启用 WebDAV 同步", isOn: $syncStore.isEnabled)
             } footer: {
-                Text("关闭后，下载列表中的同步操作会停止；已保存的服务器地址和凭据会保留。")
+                Text("关闭后，书库中的同步操作会停止；已保存的服务器地址和凭据会保留。")
             }
             Section {
                 Toggle("书籍同步", isOn: $syncStore.syncBooks)
@@ -583,7 +587,7 @@ struct WebDAVSyncView: View {
             } header: {
                 Text("同步内容")
             } footer: {
-                Text("书籍同步包含下载文件和阅读进度；标签同步包含屏蔽与解除屏蔽记录。背景包含浅深色颜色及竖横屏图片；字体同步仅包含导入的字体文件，请确认字体许可允许同步。可独立开启，关闭的内容会保留在云端，不参与本次同步。")
+                Text("书籍同步包含下载文件、阅读进度和书库系列；标签同步包含屏蔽与解除屏蔽记录。背景包含浅深色颜色及竖横屏图片；字体同步仅包含导入的字体文件，请确认字体许可允许同步。可独立开启，关闭的内容会保留在云端，不参与本次同步。")
             }
             .disabled(syncStore.isSyncing)
             Section("服务器") {

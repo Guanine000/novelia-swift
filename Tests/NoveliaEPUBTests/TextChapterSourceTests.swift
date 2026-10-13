@@ -3,7 +3,7 @@ import XCTest
 import YueduCoreText
 @testable import NoveliaEPUB
 
-/// Generated TXT / online chapters laid out by the same page book as EPUB.
+/// 生成的 TXT / 在线章节由与 EPUB 相同的分页书籍对象排版。
 @MainActor
 final class TextChapterSourceTests: XCTestCase {
     private static let paragraph = "　　月光透过窗棂洒在书桌上，她轻轻合上那本旧书，指尖还残留着纸页的温度。「明天，」她低声说，「我们再去一次那座桥吧。」"
@@ -50,8 +50,8 @@ final class TextChapterSourceTests: XCTestCase {
         XCTAssertTrue(TextChapterXHTML.css(textColor: .white).contains("p.secondary { color: #ADADB5; }"))
     }
 
-    /// The same text paginates at two font sizes; a page's source offset finds the page
-    /// showing that text after re-pagination (what font changes and reopening rely on).
+    /// 相同文本以两种字号分页；重新分页后，页面的源文本偏移量
+    /// 可以找到显示同一文本的页面（字体变化和重新打开时依赖此行为）。
     func testLayoutAndOffsetRestoreAcrossFontSizes() async throws {
         let content = TextChapterContent(title: "第一章　桥", subtitle: "测试书",
                                          paragraphs: Array(repeating: TextChapterParagraph(text: Self.paragraph), count: 60)
@@ -82,7 +82,7 @@ final class TextChapterSourceTests: XCTestCase {
         }
     }
 
-    /// A unit at the split limit (the size TXT chapters are cut to) must lay out promptly.
+    /// 达到拆分上限的单元（TXT 章节拆分后的大小）必须及时完成排版。
     func testFullUnitLayoutTime() async throws {
         let book = source([TextChapterContent(title: "长章", subtitle: nil,
                                               paragraphs: Array(repeating: TextChapterParagraph(text: Self.paragraph), count: 1_000))])
@@ -118,7 +118,7 @@ final class TextChapterSourceTests: XCTestCase {
         XCTAssertEqual(attempts, 2, "successful chapters are cached")
     }
 
-    /// Lazy units keep every paragraph exactly once, in order, cut only at line breaks.
+    /// 惰性单元按顺序保留所有段落且不重复，仅在换行处拆分。
     func testLazyUnitsMatchTextAndCutAtLines() async throws {
         let lines = (0..<900).map { "　　\($0)：" + Self.paragraph }
         let body = lines.joined(separator: "\r\n") + "\n\n尾行"
@@ -153,8 +153,8 @@ final class TextChapterSourceTests: XCTestCase {
         XCTAssertNil(TextChapterSource(bookTitle: "空", units: []).tocEntry(containingUnit: 0))
     }
 
-    /// Scroll and paged readers share one record: a chapter change from scroll mode drops a
-    /// stale page, the same chapter keeps it, and a changed split falls back to the chapter.
+    /// 滚动与分页阅读器共享一条记录：滚动模式切换章节时清除过期页面，
+    /// 同一章节保留页面，单元划分变化时回退到章节位置。
     func testReadingPositionSharedBetweenModes() throws {
         let suite = "TXTReadingPosition-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -168,7 +168,7 @@ final class TextChapterSourceTests: XCTestCase {
         XCTAssertGreaterThan(book.firstUnit(ofTOCEntry: 3)! - chapter2, 1, "chapter 2 spans several units")
 
         let paged = TXTReadingPosition(chapter: 2, unit: chapter2 + 1, offset: 40, unitCount: book.chapterCount)
-        // A 0.12.0 (52) record in the old local key is still read.
+        // 仍能读取旧本地键中的 0.12.0（52）记录。
         defaults.set(try JSONEncoder().encode(paged), forKey: TXTReadingPosition.legacyKey(hash: "abc"))
         let loaded = try XCTUnwrap(TXTReadingPosition.legacy(hash: "abc", defaults: defaults))
         XCTAssertEqual(loaded, paged)
@@ -189,8 +189,8 @@ final class TextChapterSourceTests: XCTestCase {
 }
 
 extension TextChapterSourceTests {
-    /// Building paged units for a 1,675-chapter book: eager paragraph splitting (0.12.0 (51))
-    /// against the boundary scan used now. Both produce the same units here.
+    /// 为含 1,675 章的书籍构建分页单元：比较提前拆分段落（0.12.0（51））
+    /// 与当前边界扫描方式。这里两种方式应产生相同单元。
     func testLargeBookUnitBuildTiming() {
         let body = String(repeating: "　　月光透过窗棂洒在书桌上，她轻轻合上那本旧书，指尖还残留着纸页的温度。\n", count: 140)
         let bodies = (1...1_675).map { TextChapterBody(title: "第\($0)章", subtitle: nil, body: body) }
@@ -202,8 +202,8 @@ extension TextChapterSourceTests {
             }).count
         }
         let lazy = clock.measure { lazyCount = TextChapterSource.units(lazilySplitting: bodies).count }
-        // Package tests build without optimisation, where the byte scan's bounds checks dominate;
-        // an -O build of the same code measured eager 143 ms vs lazy 4.8 ms. Print only.
+        // Swift 包测试未启用优化，字节扫描的边界检查耗时占主要部分；
+        // 相同代码在 -O 构建中测得提前拆分为 143 ms、惰性拆分为 4.8 ms。仅打印耗时。
         print("TXTUNITS chapters=1675 eager=\(eager) units=\(eagerCount) lazy=\(lazy) units=\(lazyCount)")
         XCTAssertEqual(lazyCount, eagerCount)
     }
@@ -222,7 +222,7 @@ extension TextChapterSourceTests {
         XCTAssertFalse(plain.contains("<a "), "TXT keeps URLs as text")
     }
 
-    /// A linked URL lays out as a tappable plain link region on its page.
+    /// URL 链接排版后在页面上形成可点击的普通链接区域。
     func testLinkRegionHitsURL() async throws {
         let url = "https://n.novelia.cc/forum/123"
         let book = TextChapterSource(bookTitle: "在线", units: [.init(tocTitle: "第一话") {
@@ -247,8 +247,8 @@ extension TextChapterSourceTests {
 }
 
 extension TextChapterSourceTests {
-    /// The progression the YueduCoreText reader writes for a page maps back to that page,
-    /// at the same and at another font size (Readium writes the same field).
+    /// YueduCoreText 阅读器写入的页面进度，在相同字号及另一字号下
+    /// 都能映射回对应页面（Readium 写入相同字段）。
     func testChapterProgressionRestoresPage() async throws {
         let book = source([TextChapterContent(title: "第一章", subtitle: nil,
             paragraphs: Array(repeating: TextChapterParagraph(text: Self.paragraph), count: 120))])
