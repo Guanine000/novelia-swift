@@ -240,6 +240,19 @@ final class WebDAVClientTests: XCTestCase {
         await assertSyncError(.unexpectedResponse(404)) { try await self.client().downloadBlob(self.sha256(Data())) }
     }
 
+    // MARK: 生命周期
+
+    /// 带 delegate 的 URLSession 在失效前一直被系统持有；每次同步都会新建客户端。
+    func testReleasingClientReleasesItsSession() async throws {
+        weak var session: URLSession?
+        var client: WebDAVClient? = try client()
+        session = client?.session
+        try? await client?.verifyConnection()
+        client = nil
+        for _ in 0..<100 where session != nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertNil(session)
+    }
+
     // MARK: 重定向
 
     func testRedirectsStayOnSameHTTPSHostAndPort() {
