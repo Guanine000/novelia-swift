@@ -537,6 +537,8 @@ struct EPUBReaderView: View {
             }
         }
         .presentationDetents([.medium])
+        // 半屏 sheet 默认为半透明材质，注释正文需要不透明底色才易读。
+        .presentationBackground(Color(uiColor: .systemBackground))
     }
 }
 
