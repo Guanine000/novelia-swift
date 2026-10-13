@@ -6,14 +6,24 @@ import Foundation
 /// 可参与 WebDAV 书籍同步的本地记录；按 `syncTimestamp` 判断哪一端较新。
 protocol SyncableBook: Codable, Identifiable {
     var syncTimestamp: Date { get }
+    /// 进度提示中显示的书名。
+    var syncTitle: String { get }
+    /// 上传前确认本机文件齐全。
+    func hasRequiredSyncFiles(_ files: [String: URL]) -> Bool
 }
 
 extension DownloadedWebNovel: SyncableBook {
     var syncTimestamp: Date { downloadedAt }
+    var syncTitle: String { novel.title }
+    /// 网络小说只有一个正文文件；文件缺失时书库返回空表。
+    func hasRequiredSyncFiles(_ files: [String: URL]) -> Bool { files.count == 1 }
 }
 
 extension LocalWenkuEPUB: SyncableBook {
     var syncTimestamp: Date { addedAt }
+    var syncTitle: String { title }
+    /// 文库与导入书籍必须包含正文，封面等附属文件可选。
+    func hasRequiredSyncFiles(_ files: [String: URL]) -> Bool { files[filename] != nil }
 }
 
 struct BookSyncPlan<Record: SyncableBook> {
