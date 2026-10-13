@@ -16,7 +16,8 @@ public enum ShareableLogPolicy {
             #"TXT decode failed; trace=\#(hex8), book=\#(hex8), source=\#(txtSource), bytes=[0-9]{1,12}, elapsedMs=[0-9]{1,12}, attempted=UTF-8/BOM-Unicode/GB18030/GBK/Big5/Shift_JIS\#(tail)"#,
             #"TXT chapters parsed; trace=\#(hex8), book=\#(hex8), source=\#(txtSource), reason=\#(txtReason), cacheHit=false, lines=[0-9]{1,12}, chapters=[0-9]{1,12}, elapsedMs=[0-9]{1,12}\#(tail)"#,
             #"TXT chapter detection fell back to full text; trace=\#(hex8), book=\#(hex8), source=\#(txtSource), reason=\#(txtReason), cacheHit=false, lines=[0-9]{1,12}, headings=[0-9]{1,12}, elapsedMs=[0-9]{1,12}\#(tail)"#,
-            #"TXT cache hit; trace=\#(hex8), book=\#(hex8), source=\#(txtSource), reason=\#(txtReason), level=(?:parsed|decoded|inflight), cacheHit=true, (?:chapters|bytes)=[0-9]{1,12}, elapsedMs=[0-9]{1,12}\#(tail)"#,
+            #"TXT chapter cache write failed; domain=\#(domainPattern), code=-?[0-9]{1,8}"#,
+            #"TXT cache hit; trace=\#(hex8), book=\#(hex8), source=\#(txtSource), reason=\#(txtReason), level=(?:parsed|decoded|inflight|disk), cacheHit=true, (?:chapters|bytes)=[0-9]{1,12}, elapsedMs=[0-9]{1,12}\#(tail)"#,
             #"TXT open requested; trace=\#(hex8), source=\#(txtSource), mode=(?:scroll|paged), mono=[0-9]{1,12}"#,
             #"TXT import started; trace=\#(hex8), mono=[0-9]{1,12}"#,
             #"TXT import completed; trace=\#(hex8), book=\#(hex8), elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
@@ -62,7 +63,7 @@ public enum ShareableLogPolicy {
     private static let hex8 = "[0-9a-f]{8}"
     private static let tail = ", thread=(?:main|background), mono=[0-9]{1,12}"
     public static let txtSources = ["import", "download", "open", "restore"]
-    public static let txtReasons = ["first", "reopen", "concurrent", "duplicate", "evicted", "rulesChange"]
+    public static let txtReasons = ["first", "reopen", "concurrent", "duplicate", "evicted", "rulesChange", "launch"]
     /// Why a chapter layout ran; EPUBLayoutReason raw values.
     public static let layoutReasons = ["first", "restore", "prefetch", "navigate", "seek", "retry", "resize", "rotate", "fontChange", "styleChange", "themeChange", "backgroundChange"]
     private static let txtSource = "(?:" + txtSources.joined(separator: "|") + ")"

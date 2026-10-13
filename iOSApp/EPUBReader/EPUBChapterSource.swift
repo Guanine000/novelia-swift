@@ -164,9 +164,15 @@ final class TextChapterSource: EPUBChapterSource {
         toc.indices.contains(entry) ? toc[entry].spineIndex : nil
     }
 
-    /// TOC entry containing a unit (the last entry starting at or before it).
+    /// TOC entry containing a unit (the last entry starting at or before it). Entries are
+    /// built in unit order, so this is a binary search; it runs on every page turn.
     func tocEntry(containingUnit unit: Int) -> Int? {
-        toc.lastIndex { ($0.spineIndex ?? .max) <= unit }
+        var low = 0, high = toc.count
+        while low < high {
+            let middle = (low + high) / 2
+            if (toc[middle].spineIndex ?? .max) <= unit { low = middle + 1 } else { high = middle }
+        }
+        return low > 0 ? low - 1 : nil
     }
 }
 
@@ -200,23 +206,98 @@ extension TextChapterSource {
     }
 }
 
-/// Local paged position for a TXT file. A different unit count (changed chapter rules)
-/// invalidates the offset, which is only meaningful for the same units.
-struct TXTPagedPosition: Codable, Equatable {
-    var unit: Int
+/// A chapter's raw text before paragraph splitting (TXT).
+struct TextChapterBody {
+    var title: String?
+    var subtitle: String?
+    var body: String
+}
+
+extension TextChapterSource {
+    /// Like `units(splitting:)`, but opening only scans each body's UTF-8 bytes for line
+    /// breaks to place unit boundaries; paragraphs are built when a unit is laid out. A
+    /// 9 MB TXT then opens without creating hundreds of thousands of paragraph strings.
+    /// Units hold about `maximumUTF8` bytes of text and always end at a line break.
+    nonisolated static func units(lazilySplitting chapters: [TextChapterBody], maximumUTF8: Int = 36_000) -> [Unit] {
+        var units: [Unit] = []
+        for chapter in chapters {
+            var contiguous = chapter.body
+            contiguous.makeContiguousUTF8()
+            let body = contiguous
+            let offsets = Self.unitCuts(utf8: body.utf8, maximumUTF8: maximumUTF8)
+            let cuts = offsets.map { body.utf8.index(body.utf8.startIndex, offsetBy: $0) }
+            for part in 0..<(cuts.count - 1) {
+                let range = cuts[part]..<cuts[part + 1]
+                let first = part == 0
+                units.append(Unit(tocTitle: first ? (chapter.title ?? "") : nil) {
+                    TextChapterContent(title: first ? chapter.title : nil, subtitle: first ? chapter.subtitle : nil,
+                                       paragraphs: TextChapterXHTML.paragraphs(fromLines: String(body[range])))
+                })
+            }
+        }
+        return units
+    }
+}
+
+extension TextChapterSource {
+    /// Byte offsets where units start (always 0 first, the body length last). Units end at a
+    /// line break once they would exceed `maximumUTF8` bytes of line text.
+    nonisolated static func unitCuts(utf8: String.UTF8View, maximumUTF8: Int) -> [Int] {
+        let scan: (UnsafeBufferPointer<UInt8>) -> [Int] = { bytes in
+            var cuts = [0]
+            var unitBytes = 0
+            var lineStart = 0
+            for index in 0...bytes.count {
+                guard index == bytes.count || bytes[index] == 0x0A || bytes[index] == 0x0D else { continue }
+                let lineBytes = index - lineStart
+                if lineBytes > 0 {
+                    if unitBytes > 0, unitBytes + lineBytes > maximumUTF8 {
+                        cuts.append(lineStart)
+                        unitBytes = 0
+                    }
+                    unitBytes += lineBytes
+                }
+                lineStart = index + 1
+            }
+            cuts.append(bytes.count)
+            return cuts
+        }
+        return utf8.withContiguousStorageIfAvailable(scan) ?? Array(utf8).withUnsafeBufferPointer(scan)
+    }
+}
+
+/// Where a TXT file was last read, shared by the scroll and paged readers and keyed by
+/// file content (SHA-256). `chapter` is the TXT chapter index; the paged unit and text
+/// offset refine it only while they belong to the same units (same unit count) and chapter.
+struct TXTReadingPosition: Codable, Equatable {
+    var chapter: Int
+    var unit: Int?
     var offset: Int?
-    var unitCount: Int
+    var unitCount: Int?
 
-    static func key(hash: String) -> String { "txtPagedPosition.v1.\(hash)" }
+    static func key(hash: String) -> String { "txtReadingPosition.v1.\(hash)" }
 
-    static func load(key: String, unitCount: Int, defaults: UserDefaults = .standard) -> TXTPagedPosition? {
-        guard let data = defaults.data(forKey: key),
-              let saved = try? JSONDecoder().decode(TXTPagedPosition.self, from: data),
-              saved.unitCount == unitCount, (0..<unitCount).contains(saved.unit) else { return nil }
-        return saved
+    static func load(hash: String, defaults: UserDefaults = .standard) -> TXTReadingPosition? {
+        defaults.data(forKey: key(hash: hash)).flatMap { try? JSONDecoder().decode(TXTReadingPosition.self, from: $0) }
     }
 
-    static func save(_ position: TXTPagedPosition, key: String, defaults: UserDefaults = .standard) {
-        if let data = try? JSONEncoder().encode(position) { defaults.set(data, forKey: key) }
+    func save(hash: String, defaults: UserDefaults = .standard) {
+        if let data = try? JSONEncoder().encode(self) { defaults.set(data, forKey: Self.key(hash: hash)) }
+    }
+
+    /// The scroll reader moved to `chapter`; a paged location inside it is kept.
+    func movingToChapter(_ chapter: Int) -> TXTReadingPosition {
+        chapter == self.chapter ? self : TXTReadingPosition(chapter: chapter)
+    }
+
+    /// Unit and offset the paged reader opens at: the saved page when it is still valid,
+    /// otherwise the first unit of the saved chapter.
+    @MainActor
+    func pagedStart(in source: TextChapterSource) -> (unit: Int, offset: Int?) {
+        if let unit, unitCount == source.chapterCount, (0..<source.chapterCount).contains(unit),
+           source.tocEntry(containingUnit: unit) == chapter {
+            return (unit, offset)
+        }
+        return (source.firstUnit(ofTOCEntry: min(max(chapter, 0), max(source.toc.count - 1, 0))) ?? 0, nil)
     }
 }

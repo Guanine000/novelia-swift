@@ -226,3 +226,80 @@ final class LRUCacheTests: XCTestCase {
         XCTAssertNotNil(DiagnosticContext.newTraceID().range(of: "^[0-9a-f]{8}$", options: .regularExpression))
     }
 }
+
+extension TXTBookCacheTests {
+    /// A new launch (a fresh cache over the same disk directory) opens without decoding or parsing.
+    func testDiskCacheSkipsDecodeAndParseOnNextLaunch() async throws {
+        let url = try writeNovel(chapters: 80)
+        let disk = TXTChapterDiskCache(directory: directory.appendingPathComponent("chapters"))
+        let first = try await TXTBookCache(diskCache: disk).book(at: url, rules: .defaults, source: .open)
+        let relaunch = TXTBookCache(diskCache: disk)
+        let again = try await relaunch.book(at: url, rules: .defaults, source: .open)
+        XCTAssertEqual(again.chapters, first.chapters)
+        XCTAssertEqual(again.contentHash, first.contentHash)
+        let stats = await relaunch.statistics
+        XCTAssertEqual(stats.diskHits, 1)
+        XCTAssertEqual(stats.decodes, 0)
+        XCTAssertEqual(stats.parses, 0)
+        _ = try await relaunch.book(at: url, rules: .defaults, source: .open)
+        let memoryHit = await relaunch.statistics
+        XCTAssertEqual(memoryHit.diskHits, 1, "later opens use the in-memory entry")
+    }
+
+    func testDiskCacheMissesOnOtherRulesAndDamagedFiles() async throws {
+        let url = try writeNovel(chapters: 30)
+        let disk = TXTChapterDiskCache(directory: directory.appendingPathComponent("chapters"))
+        let book = try await TXTBookCache(diskCache: disk).book(at: url, rules: .defaults, source: .open)
+        let rules = TXTChapterRuleConfiguration(enabledBuiltInIDs: [], enabledCustomRules: [])
+        XCTAssertNil(disk.load(hash: book.contentHash, rulesFingerprint: rules.fingerprint))
+        XCTAssertEqual(disk.load(hash: book.contentHash, rulesFingerprint: book.rulesFingerprint), book.chapters)
+
+        let file = disk.fileURL(hash: book.contentHash, rulesFingerprint: book.rulesFingerprint)
+        var data = try Data(contentsOf: file)
+        data.removeLast(5)
+        try data.write(to: file)
+        XCTAssertNil(disk.load(hash: book.contentHash, rulesFingerprint: book.rulesFingerprint), "truncated file is a miss")
+        let reparsed = TXTBookCache(diskCache: disk)
+        let reparsedBook = try await reparsed.book(at: url, rules: .defaults, source: .open)
+        XCTAssertEqual(reparsedBook.chapters, book.chapters)
+        let stats = await reparsed.statistics
+        XCTAssertEqual(stats.parses, 1)
+        XCTAssertNotNil(disk.load(hash: book.contentHash, rulesFingerprint: book.rulesFingerprint), "rewritten after reparse")
+    }
+
+    func testDiskCacheKeepsMostRecentBooks() async throws {
+        var disk = TXTChapterDiskCache(directory: directory.appendingPathComponent("chapters"))
+        disk.maximumBooks = 2
+        for index in 0..<4 {
+            let url = try writeNovel("n\(index).txt", chapters: 5, marker: "\(index)")
+            _ = try await TXTBookCache(diskCache: disk).book(at: url, rules: .defaults, source: .open)
+        }
+        let files = try FileManager.default.contentsOfDirectory(atPath: disk.directory.path)
+        XCTAssertEqual(files.filter { $0.hasSuffix(".txtchapters") }.count, 2)
+    }
+}
+
+extension TXTBookCacheTests {
+    /// About the size of the 0.11.3 report (8.9 MB, 1,675 chapters): first launch versus a
+    /// later launch that reads the disk split. Timing is printed, not asserted tightly.
+    func testLargeBookSecondLaunchTiming() async throws {
+        var text = "书名\n"
+        let line = "　　月光透过窗棂洒在书桌上，她轻轻合上那本旧书，指尖还残留着纸页的温度。\n"
+        for index in 1...1_675 {
+            text += "第\(index)章 标题\n"
+            text += String(repeating: line, count: 60)
+        }
+        let url = directory.appendingPathComponent("large.txt")
+        try Data(text.utf8).write(to: url)
+        let disk = TXTChapterDiskCache(directory: directory.appendingPathComponent("chapters"))
+        let clock = ContinuousClock()
+        var first: TXTParsedBook?
+        let cold = try await clock.measure { first = try await TXTBookCache(diskCache: disk).book(at: url, rules: .defaults, source: .open) }
+        var second: TXTParsedBook?
+        let warm = try await clock.measure { second = try await TXTBookCache(diskCache: disk).book(at: url, rules: .defaults, source: .open) }
+        print("TXTLAUNCH bytes=\(text.utf8.count) chapters=\(first?.chapters.count ?? 0) firstLaunch=\(cold) nextLaunch=\(warm)")
+        XCTAssertEqual(first?.chapters.count, 1_676, "1,675 chapters plus the title line as a preface")
+        XCTAssertEqual(second?.chapters, first?.chapters)
+        XCTAssertLessThan(warm, cold)
+    }
+}

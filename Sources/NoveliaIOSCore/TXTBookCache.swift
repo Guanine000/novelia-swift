@@ -25,7 +25,7 @@ struct TXTParsedBook: Sendable {
 /// second copy of the same file (a repeated import) also hits. The work runs in detached
 /// tasks; the actor only guards the tables.
 actor TXTBookCache {
-    static let shared = TXTBookCache()
+    static let shared = TXTBookCache(diskCache: .standard)
 
     struct FileIdentity: Hashable, Sendable {
         let path: String
@@ -50,6 +50,7 @@ actor TXTBookCache {
         var parsedHits = 0
         var decodedHits = 0
         var inFlightJoins = 0
+        var diskHits = 0
     }
 
     private var hashByIdentity: [FileIdentity: String] = [:]
@@ -64,9 +65,13 @@ actor TXTBookCache {
 
     /// Limits are in UTF-8 bytes of text; a parsed book also holds its chapter bodies (about
     /// the same size again), so the defaults keep roughly two large novels.
-    init(decodedCostLimit: Int = 48 << 20, parsedCostLimit: Int = 96 << 20) {
+    /// Chapter splits kept across launches; nil keeps the cache in memory only (tests).
+    private let diskCache: TXTChapterDiskCache?
+
+    init(decodedCostLimit: Int = 48 << 20, parsedCostLimit: Int = 96 << 20, diskCache: TXTChapterDiskCache? = nil) {
         decoded = LRUCache(countLimit: 2, costLimit: decodedCostLimit)
         parsed = LRUCache(countLimit: 2, costLimit: parsedCostLimit)
+        self.diskCache = diskCache
     }
 
     // MARK: Requests
@@ -168,6 +173,14 @@ actor TXTBookCache {
             await logHit(level: "parsed", reason: "duplicate", book: hit, source: source, trace: trace, start: start)
             return hit
         }
+        // A split saved by an earlier launch: no decoding or parsing at all.
+        if let diskCache, let chapters = diskCache.load(hash: hash, rulesFingerprint: key.rulesFingerprint) {
+            let book = TXTParsedBook(contentHash: hash, byteCount: data.count, text: "",
+                                     chapters: chapters, rulesFingerprint: key.rulesFingerprint)
+            await storeDiskHit(book, for: key)
+            TXTDiagnosticLog.logger.info("TXT cache hit; trace=\(trace, privacy: .public), book=\(DiagnosticContext.bookTag(hash), privacy: .public), source=\(source.rawValue, privacy: .public), reason=launch, level=disk, cacheHit=true, chapters=\(chapters.count, privacy: .public), elapsedMs=\(DiagnosticContext.milliseconds(since: start), privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+            return book
+        }
         let text = try await decodedText(data: data, hash: hash, source: source, trace: trace)
         let reason = await parseReason(key)
         let parseStart = ContinuousClock.now
@@ -182,6 +195,7 @@ actor TXTBookCache {
         let book = TXTParsedBook(contentHash: hash, byteCount: text.byteCount, text: text.text,
                                  chapters: chapters, rulesFingerprint: key.rulesFingerprint)
         await storeParsed(book, for: key)
+        diskCache?.store(chapters, hash: hash, rulesFingerprint: key.rulesFingerprint)
         return book
     }
 
@@ -230,7 +244,19 @@ actor TXTBookCache {
         statistics.parses += 1
         everParsed.insert(key)
         parsedRulesByHash[key.contentHash, default: []].insert(key.rulesFingerprint)
-        parsed.insert(book, for: key, cost: book.text.utf8.count * 2)
+        parsed.insert(book, for: key, cost: Self.cost(of: book))
+    }
+
+    private func storeDiskHit(_ book: TXTParsedBook, for key: ParsedKey) {
+        statistics.diskHits += 1
+        everParsed.insert(key)
+        parsedRulesByHash[key.contentHash, default: []].insert(key.rulesFingerprint)
+        parsed.insert(book, for: key, cost: Self.cost(of: book))
+    }
+
+    /// Text plus chapter bodies; a disk hit has no full text, only the bodies.
+    private static func cost(of book: TXTParsedBook) -> Int {
+        book.text.utf8.count + book.chapters.reduce(0) { $0 + $1.body.utf8.count }
     }
 
     private func storeDecoded(_ text: DecodedText, for hash: String) {
@@ -266,5 +292,91 @@ actor TXTBookCache {
 
     static func sha256(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// Chapter splits on disk, keyed by content hash, chapter rules and parser version, so a
+/// later launch opens a large TXT without decoding or parsing it again. Lives in Caches
+/// (the system may purge it); only the most recent books are kept.
+///
+/// File: 4-byte little-endian header length, JSON header (titles, volumes, body UTF-8
+/// lengths), then the bodies' UTF-8 bytes back to back. Any mismatch reads as a miss.
+struct TXTChapterDiskCache: Sendable {
+    /// Bump when the parser or this format changes what a stored split means.
+    static let formatVersion = 1
+    static let standard = TXTChapterDiskCache(
+        directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("TXTChapters", isDirectory: true))
+
+    let directory: URL
+    var maximumBooks = 8
+
+    private struct Header: Codable {
+        var version: Int
+        var hash: String
+        var rules: String
+        var chapters: [Entry]
+    }
+
+    private struct Entry: Codable {
+        var title: String
+        var volume: String?
+        var bytes: Int
+    }
+
+    func fileURL(hash: String, rulesFingerprint: String) -> URL {
+        let rules = TXTBookCache.sha256(Data("\(Self.formatVersion)|\(rulesFingerprint)".utf8)).prefix(16)
+        return directory.appendingPathComponent("\(hash)-\(rules).txtchapters")
+    }
+
+    func load(hash: String, rulesFingerprint: String) -> [TXTChapter]? {
+        let url = fileURL(hash: hash, rulesFingerprint: rulesFingerprint)
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count >= 4 else { return nil }
+        let headerLength = data.prefix(4).enumerated().reduce(0) { $0 | Int($1.element) << (8 * $1.offset) }
+        guard headerLength > 0, 4 + headerLength <= data.count,
+              let header = try? JSONDecoder().decode(Header.self, from: data.subdata(in: 4..<(4 + headerLength))),
+              header.version == Self.formatVersion, header.hash == hash, header.rules == rulesFingerprint,
+              header.chapters.allSatisfy({ $0.bytes >= 0 }),
+              header.chapters.reduce(0, { $0 + $1.bytes }) == data.count - 4 - headerLength else { return nil }
+        var cursor = 4 + headerLength
+        var chapters: [TXTChapter] = []
+        chapters.reserveCapacity(header.chapters.count)
+        for (index, entry) in header.chapters.enumerated() {
+            guard let body = String(data: data.subdata(in: cursor..<(cursor + entry.bytes)), encoding: .utf8) else { return nil }
+            chapters.append(TXTChapter(index: index, title: entry.title, body: body, volumeTitle: entry.volume))
+            cursor += entry.bytes
+        }
+        // Mark as recently used for eviction.
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+        return chapters
+    }
+
+    func store(_ chapters: [TXTChapter], hash: String, rulesFingerprint: String) {
+        let bodies = chapters.map { Data($0.body.utf8) }
+        let header = Header(version: Self.formatVersion, hash: hash, rules: rulesFingerprint,
+                            chapters: zip(chapters, bodies).map { Entry(title: $0.title, volume: $0.volumeTitle, bytes: $1.count) })
+        guard let headerData = try? JSONEncoder().encode(header) else { return }
+        var data = Data(capacity: 4 + headerData.count + bodies.reduce(0) { $0 + $1.count })
+        withUnsafeBytes(of: UInt32(headerData.count).littleEndian) { data.append(contentsOf: $0) }
+        data.append(headerData)
+        bodies.forEach { data.append($0) }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(to: fileURL(hash: hash, rulesFingerprint: rulesFingerprint), options: .atomic)
+            evict()
+        } catch {
+            let nsError = error as NSError
+            TXTDiagnosticLog.logger.error("TXT chapter cache write failed; domain=\(ShareableLogPolicy.domainLabel(nsError.domain), privacy: .public), code=\(nsError.code, privacy: .public)")
+        }
+    }
+
+    private func evict() {
+        let keys: [URLResourceKey] = [.contentModificationDateKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys)
+            .filter({ $0.pathExtension == "txtchapters" }), files.count > maximumBooks else { return }
+        let dated = files.map { ($0, (try? $0.resourceValues(forKeys: Set(keys)).contentModificationDate) ?? .distantPast) }
+        for (url, _) in dated.sorted(by: { $0.1 > $1.1 }).dropFirst(maximumBooks) {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 }
