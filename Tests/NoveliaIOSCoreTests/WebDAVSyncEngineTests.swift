@@ -187,6 +187,8 @@ final class WebDAVSyncEngineTests: XCTestCase {
     private var web: FakeLibrary<DownloadedWebNovel>!
     private var wenku: FakeLibrary<LocalWenkuEPUB>!
     private var progress: [WebDAVSyncProgress] = []
+    private var suiteName = ""
+    private var defaults: UserDefaults!
 
     override func setUp() {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("WebDAVSyncEngineTests-\(UUID())")
@@ -197,10 +199,13 @@ final class WebDAVSyncEngineTests: XCTestCase {
         web = FakeLibrary("web", log: log)
         wenku = FakeLibrary("wenku", log: log)
         progress = []
+        suiteName = "WebDAVSyncEngineTests-\(UUID())"
+        defaults = UserDefaults(suiteName: suiteName)
     }
 
     override func tearDown() {
         try? FileManager.default.removeItem(at: directory)
+        defaults.removePersistentDomain(forName: suiteName)
     }
 
     // MARK: 辅助
@@ -244,7 +249,7 @@ final class WebDAVSyncEngineTests: XCTestCase {
 
     private func run(_ options: WebDAVSyncOptions = booksAndTags) async throws -> Int {
         let engine = WebDAVSyncEngine(remote: remote, local: local, web: web, wenku: wenku,
-                                      options: options) { [weak self] in self?.progress.append($0) }
+                                      options: options, defaults: defaults) { [weak self] in self?.progress.append($0) }
         return try await engine.run()
     }
 
@@ -319,8 +324,8 @@ final class WebDAVSyncEngineTests: XCTestCase {
         assertDownloadsDeleted()
     }
 
-    /// 已知低效：时间相同的书每次同步都会重新哈希并上传检查（远端已有时由服务器跳过）。
-    func testEqualTimestampsKeepLocalCopyAndRecheckUpload() async throws {
+    /// 时间相同时仍以本机记录写回清单（保留书名等元数据修改），但清单已引用的文件不再上传或询问服务器。
+    func testEqualTimestampsKeepLocalCopyWithoutTransfers() async throws {
         addLocal(webBook("a", at: 10), text: "same")
         remoteManifest { $0.webBooks = [WebDAVBook(record: webBook("a", at: 10), assets: [remote.seed("same", as: "a.epub")])] }
 
@@ -328,7 +333,44 @@ final class WebDAVSyncEngineTests: XCTestCase {
 
         XCTAssertEqual(log.count("remote.download"), 0)
         XCTAssertEqual(log.count("web.replace") + log.count("web.restore"), 0)
+        XCTAssertEqual(log.count("remote.upload"), 0)
+        XCTAssertEqual(remote.manifest?.webBooks.first?.assets.map(\.hash), [sha256(Data("same".utf8))])
+    }
+
+    private var cachedHashes: [String: String] {
+        defaults.dictionary(forKey: SettingsKey.WebDAV.fileHashes) as? [String: String] ?? [:]
+    }
+
+    func testUnchangedFilesReuseCachedHashAndChangedFilesAreRehashed() async throws {
+        let book = webBook("a", at: 10)
+        addLocal(book, text: "content")
+        let url = try XCTUnwrap(web.files["a"]?["a.epub"])
+        let identity = try XCTUnwrap(WebDAVFileHash.identity(of: url))
+        let stale = String(repeating: "f", count: 64)
+        defaults.set([identity: stale], forKey: SettingsKey.WebDAV.fileHashes)
+        remoteManifest { $0.webBooks = [WebDAVBook(record: book, assets: [WebDAVAsset(filename: "a.epub", hash: stale)])] }
+
+        _ = try await run()
+        XCTAssertEqual(remote.manifest?.webBooks.first?.assets.map(\.hash), [stale],
+                       "an unchanged file is not read again, so the cached hash is used")
+        XCTAssertEqual(log.count("remote.upload"), 0)
+
+        try Data("changed content".utf8).write(to: url)
+        _ = try await run()
+        let actual = sha256(Data("changed content".utf8))
+        XCTAssertEqual(remote.manifest?.webBooks.first?.assets.map(\.hash), [actual])
         XCTAssertEqual(log.count("remote.upload"), 1)
+        XCTAssertEqual(Array(cachedHashes.values), [actual], "the stale identity is pruned")
+    }
+
+    func testFailedSyncKeepsCachedHashesForBooksNotReached() async throws {
+        addLocal(webBook("a", at: 10), text: "a")
+        defaults.set(["other|1|1": String(repeating: "0", count: 64)], forKey: SettingsKey.WebDAV.fileHashes)
+        remote.putError = .concurrentChange
+
+        await assertFails(with: .concurrentChange)
+
+        XCTAssertEqual(Set(cachedHashes.values), [String(repeating: "0", count: 64), sha256(Data("a".utf8))])
     }
 
     func testDuplicateManifestEntriesAreRestoredOnceAndWrittenBackOnce() async throws {

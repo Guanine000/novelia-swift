@@ -58,21 +58,33 @@ final class WebDAVSyncEngine {
     private let options: WebDAVSyncOptions
     private let onProgress: (WebDAVSyncProgress) -> Void
     private(set) var progress = WebDAVSyncProgress() { didSet { onProgress(progress) } }
+    private let defaults: UserDefaults
+    /// 上次同步保存的文件哈希，键为 `WebDAVFileHash.identity`。
+    private let cachedHashes: [String: String]
+    /// 本次同步用到的文件哈希，结束时写回缓存。
+    private var usedHashes: [String: String] = [:]
+    /// 远端已有的 blob：清单引用的文件都在写清单之前上传过，不必再询问服务器。
+    private var knownBlobs: Set<String> = []
 
     init(remote: any WebDAVRemote, local: any WebDAVSyncLocalState,
          web: any SyncBookLibrary<DownloadedWebNovel>, wenku: any SyncBookLibrary<LocalWenkuEPUB>,
-         options: WebDAVSyncOptions, onProgress: @escaping (WebDAVSyncProgress) -> Void) {
+         options: WebDAVSyncOptions, defaults: UserDefaults = .standard,
+         onProgress: @escaping (WebDAVSyncProgress) -> Void) {
         self.remote = remote
         self.local = local
         self.web = web
         self.wenku = wenku
         self.options = options
+        self.defaults = defaults
+        cachedHashes = defaults.dictionary(forKey: SettingsKey.WebDAV.fileHashes) as? [String: String] ?? [:]
         self.onProgress = onProgress
     }
 
     /// 返回从远端新恢复的书籍数。取消或失败时已传输的文件不会回滚；清单只在最后写入，
     /// 标签、系列、背景与字体在清单写入成功后才套用到本机。
     func run() async throws -> Int {
+        var finished = false
+        defer { saveHashes(pruning: finished && options.books) }
         try await remote.verifyConnection()
         progress.stage = "创建同步目录"
         progress.detail = "正在检查同步目录…"
@@ -81,6 +93,7 @@ final class WebDAVSyncEngine {
         progress.detail = "正在读取远端书目…"
         let (fetchedManifest, etag, existed) = try await remote.fetchManifest()
         var manifest = fetchedManifest
+        knownBlobs = WebDAVSyncPlanner.referencedBlobs(in: fetchedManifest)
         var imported = 0
         if options.books {
             manifest.webBooks = WebDAVSyncPlanner.uniqueBooks(manifest.webBooks)
@@ -125,7 +138,7 @@ final class WebDAVSyncEngine {
                     for landscape in [false, true] {
                         let file = local.backgroundImageURL(dark: dark, landscape: landscape)
                         if FileManager.default.fileExists(atPath: file.path) {
-                            try await remote.uploadBlob(file, hash: contentHash(of: file))
+                            try await uploadIfNeeded(file, hash: contentHash(of: file))
                         }
                     }
                 }
@@ -138,7 +151,7 @@ final class WebDAVSyncEngine {
             let files = try local.fontFiles()
             let plan = try WebDAVSyncPlanner.planFonts(fonts, localHashes: Set(files.keys))
             for hash in plan.uploads {
-                if let file = files[hash] { try await remote.uploadBlob(file, hash: hash) }
+                if let file = files[hash] { try await uploadIfNeeded(file, hash: hash) }
             }
             for hash in plan.downloads {
                 let file = try await remote.downloadBlob(hash); temporaryFiles.append(file); resourceFiles[hash] = file
@@ -160,6 +173,7 @@ final class WebDAVSyncEngine {
         if options.fonts { try local.applyFonts(manifest.fonts ?? [:], files: resourceFiles) }
         progress.completedUnits += 1
         progress.detail = "同步完成"
+        finished = true
         return imported
     }
 
@@ -198,7 +212,7 @@ final class WebDAVSyncEngine {
             try Task.checkCancellation()
             progress.detail = "正在上传：\(record.syncTitle) · \(filename)"
             let hash = try await contentHash(of: url)
-            try await remote.uploadBlob(url, hash: hash)
+            try await uploadIfNeeded(url, hash: hash)
             assets.append(WebDAVAsset(filename: filename, hash: hash))
             progress.completedUnits += 1
         }
@@ -206,10 +220,30 @@ final class WebDAVSyncEngine {
     }
 
     /// 在后台读取文件计算哈希，书籍与背景图片可能很大，不能占用主线程。
+    /// 路径、大小与修改时间都未变的文件沿用上次的结果。
     private func contentHash(of url: URL) async throws -> String {
-        try await Task.detached(priority: .utility) {
-            try WebDAVFileHash.sha256(url)
+        let cached = cachedHashes
+        let (identity, hash) = try await Task.detached(priority: .utility) { () throws -> (String?, String) in
+            let identity = WebDAVFileHash.identity(of: url)
+            if let identity, let hash = cached[identity] { return (identity, hash) }
+            return (identity, try WebDAVFileHash.sha256(url))
         }.value
+        if let identity { usedHashes[identity] = hash }
+        return hash
+    }
+
+    private func uploadIfNeeded(_ file: URL, hash: String) async throws {
+        guard !knownBlobs.contains(hash) else { return }
+        try await remote.uploadBlob(file, hash: hash)
+        knownBlobs.insert(hash)
+    }
+
+    /// 书籍同步完整结束时只保留本次用到的条目，清掉已删除或已修改文件的旧哈希；
+    /// 失败或未同步书籍时只追加，避免丢掉尚未处理的书的缓存。
+    private func saveHashes(pruning: Bool) {
+        let hashes = pruning ? usedHashes : cachedHashes.merging(usedHashes) { $1 }
+        guard hashes != cachedHashes else { return }
+        defaults.set(hashes, forKey: SettingsKey.WebDAV.fileHashes)
     }
 
     /// 下载一本书的全部文件到临时位置；任何一个失败都删除已下载的文件。
