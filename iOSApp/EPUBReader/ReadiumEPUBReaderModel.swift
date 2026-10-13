@@ -113,58 +113,71 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         }
     }
 
-    /// Scan original HTML and CSS throughout the publication, independent of visited chapters.
-    /// Called by the view's cancellable task once ready; never fetches external references.
+    /// Read every local manifest resource, including unread chapters and independent assets.
+    /// Only actual failures are published. No external URL is fetched by this scan.
     func scanBookDiagnostics() async {
         guard !diagnosticsComplete, !isScanningDiagnostics, let publication else { return }
         isScanningDiagnostics = true
         defer { isScanningDiagnostics = false }
         var seen = Set<String>()
         let documents = (publication.readingOrder + publication.resources).filter { link in
-            let isCSS = link.mediaType == .css || link.url().path.lowercased().hasSuffix(".css")
-            let isHTML = link.mediaType?.isHTML ?? ["xhtml", "html", "htm"].contains((link.url().path as NSString).pathExtension.lowercased())
             let href = link.url().removingFragment().string
-            // The publication's resources should be local; skip remote manifest entries as well.
             guard !href.lowercased().hasPrefix("http:"), !href.lowercased().hasPrefix("https:"), !href.hasPrefix("//") else { return false }
-            return (isCSS || isHTML) && seen.insert(href).inserted
+            return seen.insert(href).inserted
         }
         diagnosticDocumentCount = documents.count
         var report = EPUBContentDiagnostics()
         for link in documents {
             guard !Task.isCancelled else { return }
-            guard let resource = publication.get(link), case .success(let text) = await resource.read().asString() else {
-                report.recordFailure()
+            let href = link.url().removingFragment().string
+            guard let resource = publication.get(link) else {
+                report.recordFailure(path: href, reason: "未找到该资源。")
                 contentDiagnostics = report
                 continue
             }
             let isCSS = link.mediaType == .css || link.url().path.lowercased().hasSuffix(".css")
-            let previous = report
-            report = await Task.detached(priority: .utility) {
-                var next = previous
-                next.inspect(text, isCSS: isCSS)
-                return next
-            }.value
+            let isHTML = link.mediaType?.isHTML ?? ["xhtml", "html", "htm"].contains((link.url().path as NSString).pathExtension.lowercased())
+            let error: ReadError?
+            if isHTML || isCSS {
+                switch await resource.read().asString() {
+                case .success: error = nil
+                case .failure(let failure): error = failure
+                }
+            } else {
+                // Stream binary assets without retaining full images/fonts in memory.
+                switch await resource.stream(consume: { _ in }) {
+                case .success: error = nil
+                case .failure(let failure): error = failure
+                }
+            }
             guard !Task.isCancelled else { return }
+            if let error {
+                if case .cancelled = error { return }
+                report.recordFailure(path: href, reason: Self.diagnosticReason(error))
+            } else {
+                report.recordSuccess(path: href)
+            }
             contentDiagnostics = report
         }
         guard !Task.isCancelled else { return }
         diagnosticsComplete = true
     }
 
-    var tocDiagnosticMessages: [String] {
-        var messages: [String] = []
-        if tocReadFailed { messages.append("Readium 未能读取内嵌目录；备用目录尝试从正文标题识别。") }
-        messages.append(tocNotice ?? "内嵌目录解析出 \(embeddedTOCCount) 项，当前目录 \(toc.count) 项。")
-        messages.append(contentsOf: contentDiagnostics.messages)
-        messages.append("扫描范围为全书本地 HTML 与 CSS 文档，包含未阅读章节及独立样式表，重复资源只统计一次。统计来自原始文档，不代表声明已生效，也不包含 WebKit 实际排版、脚本运行、独立 SVG／图片／字体解码的验证。")
-        return messages
+    private static func diagnosticReason(_ error: ReadError) -> String {
+        switch error {
+        case .access: return "无法访问书内文件，文件可能缺失、损坏或受保护。"
+        case .decoding: return "内容无法解码，文本编码或压缩数据可能损坏。"
+        case .outOfMemory: return "资源过大，无法在可用内存中完成读取。"
+        case .unsupportedOperation: return "阅读器不支持该资源的读取方式。"
+        case .cancelled: return "读取已取消。"
+        }
     }
 
-    var diagnosticScanSummary: String {
-        let processed = contentDiagnostics.scannedDocuments + contentDiagnostics.failedDocuments
-        if diagnosticsComplete { return "全书扫描完成：读取 \(contentDiagnostics.scannedDocuments)/\(diagnosticDocumentCount) 份 HTML/CSS 文档。" }
-        if isScanningDiagnostics { return "正在扫描全书内容：\(processed)/\(diagnosticDocumentCount) 份 HTML/CSS 文档。" }
-        return "全书内容诊断尚未完成。"
+    var tocDiagnosticMessages: [String] {
+        var messages: [String] = []
+        if tocReadFailed { messages.append("Readium 内嵌目录读取失败。") }
+        messages.append(contentsOf: contentDiagnostics.messages)
+        return messages
     }
 
     private static func openPublication(url: URL) async throws -> Publication {

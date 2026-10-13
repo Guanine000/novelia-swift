@@ -218,13 +218,10 @@ struct ReadiumEPUBReaderView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 List {
+                    if !model.tocDiagnosticMessages.isEmpty {
                     Section {
                         DisclosureGroup(isExpanded: $model.isTOCDiagnosticsExpanded) {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text(model.diagnosticScanSummary)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .textSelection(.enabled)
                                 ForEach(Array(model.tocDiagnosticMessages.enumerated()), id: \.offset) { _, message in
                                     Text(message)
                                         .font(.footnote)
@@ -237,6 +234,7 @@ struct ReadiumEPUBReaderView: View {
                             Label("目录诊断说明（\(model.tocDiagnosticMessages.count)）", systemImage: "info.circle")
                                 .font(.footnote)
                         }
+                    }
                     }
                     if model.toc.isEmpty {
                         ContentUnavailableView("没有目录", systemImage: "list.bullet.rectangle",
