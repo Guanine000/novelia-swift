@@ -216,10 +216,19 @@ struct ReadiumEPUBReaderView: View {
             Group {
                 if model.toc.isEmpty {
                     ContentUnavailableView("没有目录", systemImage: "list.bullet.rectangle",
-                                           description: Text("本书未提供目录。"))
+                                           description: Text(model.tocNotice ?? "本书未提供目录。"))
                 } else {
                     ScrollViewReader { proxy in
-                        List(model.toc) { item in
+                        List {
+                            if let notice = model.tocNotice {
+                                Section {
+                                    Label(notice, systemImage: "info.circle")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                            ForEach(model.toc) { item in
                             let isCurrent = model.currentTOCIndex == item.id
                             Button {
                                 isShowingTOC = false
@@ -239,6 +248,7 @@ struct ReadiumEPUBReaderView: View {
                                 }
                             }
                             .id(item.id)
+                            }
                         }
                         .onAppear {
                             if let current = model.currentTOCIndex {

@@ -36,6 +36,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published private(set) var status: Status = .idle
     @Published private(set) var bookTitle = ""
     @Published private(set) var toc: [ReadiumTOCItem] = []
+    /// 目录兜底说明（改用正文标题生成的目录，或完全没有目录时的原因）。
+    @Published private(set) var tocNotice: String?
     @Published private(set) var locator: Locator?
     @Published private(set) var style = EPUBReaderStyle()
     @Published private(set) var isDarkMode = false
@@ -79,9 +81,11 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             if case .success(let positions) = await publication.positions() {
                 positionCount = positions.count
             }
+            var embedded: [ReadiumTOCItem] = []
             if case .success(let links) = await publication.tableOfContents() {
-                toc = Self.flatten(links)
+                embedded = Self.flatten(links)
             }
+            toc = await preferGeneratedTOCIfSparse(embedded, publication: publication)
             let initial = await savedLocator(publication: publication, hash: hash)
             try makeNavigator(initialLocation: initial)
             status = .ready
@@ -118,6 +122,36 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         var items: [ReadiumTOCItem] = []
         flatten(links, into: &items)
         return items
+    }
+
+    /// 与 YueduCoreText 阅读器相同的兜底：内嵌目录不超过一项（常见只有版权页或封面）时，
+    /// 按 `EPUBContainer.fallbackTOCHeadings` 的规则从各章节正文识别标题生成备用目录。
+    private func preferGeneratedTOCIfSparse(_ embedded: [ReadiumTOCItem],
+                                            publication: Publication) async -> [ReadiumTOCItem] {
+        guard embedded.count <= 1 else { return embedded }
+        var generated: [ReadiumTOCItem] = []
+        var seenTitles = Set<String>()
+        for link in publication.readingOrder where link.mediaType?.isHTML ?? true {
+            guard let resource = publication.get(link),
+                  case .success(let html) = await resource.read().asString(),
+                  let title = EPUBContainer.fallbackTOCHeadings(inChapterHTML: html)
+                      .first(where: { seenTitles.insert($0).inserted }) else { continue }
+            generated.append(ReadiumTOCItem(id: generated.count, title: title, level: 0, link: link))
+        }
+        guard generated.count > embedded.count else {
+            if embedded.isEmpty {
+                tocNotice = "本书没有内嵌目录，正文中也未识别到「序章／第N章／终章」等章节标题。"
+            }
+            return embedded
+        }
+        if embedded.isEmpty {
+            tocNotice = "本书没有内嵌目录，已根据正文标题生成备用目录，共 \(generated.count) 项。"
+        } else {
+            let titles = embedded.map(\.title).joined(separator: "、")
+            tocNotice = "原书内嵌目录只有 \(embedded.count) 项（\(titles)），已根据正文标题生成备用目录，共 \(generated.count) 项。"
+        }
+        Self.logger.info("Readium TOC fallback generated \(generated.count, privacy: .public) entries, embedded \(embedded.count, privacy: .public)")
+        return generated
     }
 
     // MARK: 导航器
