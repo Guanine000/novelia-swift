@@ -38,6 +38,19 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published private(set) var toc: [ReadiumTOCItem] = []
     /// 目录兜底说明（改用正文标题生成的目录，或完全没有目录时的原因）。
     @Published private(set) var tocNotice: String?
+    @Published private(set) var contentDiagnostics = EPUBContentDiagnostics()
+    @Published private(set) var isScanningDiagnostics = false
+    @Published private(set) var diagnosticsComplete = false
+    @Published private(set) var diagnosticDocumentCount = 0
+    @Published private(set) var embeddedTOCCount = 0
+    @Published private(set) var tocReadFailed = false
+    @Published var isTOCDiagnosticsExpanded = false {
+        didSet {
+            if let bookHash {
+                UserDefaults.standard.set(isTOCDiagnosticsExpanded, forKey: "readium.bookDiagnostics.\(bookHash).expanded")
+            }
+        }
+    }
     @Published private(set) var locator: Locator?
     @Published private(set) var style = EPUBReaderStyle()
     @Published private(set) var isDarkMode = false
@@ -75,6 +88,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
                 try WebDAVFileHash.sha256(url)
             }.value
             bookHash = hash
+            isTOCDiagnosticsExpanded = UserDefaults.standard.bool(forKey: "readium.bookDiagnostics.\(hash).expanded")
             let publication = try await Self.openPublication(url: url)
             self.publication = publication
             bookTitle = publication.metadata.title ?? url.deletingPathExtension().lastPathComponent
@@ -84,7 +98,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             var embedded: [ReadiumTOCItem] = []
             if case .success(let links) = await publication.tableOfContents() {
                 embedded = Self.flatten(links)
+            } else {
+                tocReadFailed = true
             }
+            embeddedTOCCount = embedded.count
             toc = await preferGeneratedTOCIfSparse(embedded, publication: publication)
             let initial = await savedLocator(publication: publication, hash: hash)
             try makeNavigator(initialLocation: initial)
@@ -94,6 +111,60 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             Self.logger.error("Readium EPUB open failed: \(String(describing: error), privacy: .public)")
             status = .failed(Self.describe(error))
         }
+    }
+
+    /// Scan original HTML and CSS throughout the publication, independent of visited chapters.
+    /// Called by the view's cancellable task once ready; never fetches external references.
+    func scanBookDiagnostics() async {
+        guard !diagnosticsComplete, !isScanningDiagnostics, let publication else { return }
+        isScanningDiagnostics = true
+        defer { isScanningDiagnostics = false }
+        var seen = Set<String>()
+        let documents = (publication.readingOrder + publication.resources).filter { link in
+            let isCSS = link.mediaType == .css || link.url().path.lowercased().hasSuffix(".css")
+            let isHTML = link.mediaType?.isHTML ?? ["xhtml", "html", "htm"].contains((link.url().path as NSString).pathExtension.lowercased())
+            let href = link.url().removingFragment().string
+            // The publication's resources should be local; skip remote manifest entries as well.
+            guard !href.lowercased().hasPrefix("http:"), !href.lowercased().hasPrefix("https:"), !href.hasPrefix("//") else { return false }
+            return (isCSS || isHTML) && seen.insert(href).inserted
+        }
+        diagnosticDocumentCount = documents.count
+        var report = EPUBContentDiagnostics()
+        for link in documents {
+            guard !Task.isCancelled else { return }
+            guard let resource = publication.get(link), case .success(let text) = await resource.read().asString() else {
+                report.recordFailure()
+                contentDiagnostics = report
+                continue
+            }
+            let isCSS = link.mediaType == .css || link.url().path.lowercased().hasSuffix(".css")
+            let previous = report
+            report = await Task.detached(priority: .utility) {
+                var next = previous
+                next.inspect(text, isCSS: isCSS)
+                return next
+            }.value
+            guard !Task.isCancelled else { return }
+            contentDiagnostics = report
+        }
+        guard !Task.isCancelled else { return }
+        diagnosticsComplete = true
+    }
+
+    var tocDiagnosticMessages: [String] {
+        var messages: [String] = []
+        if tocReadFailed { messages.append("Readium 未能读取内嵌目录；备用目录尝试从正文标题识别。") }
+        messages.append(tocNotice ?? "内嵌目录解析出 \(embeddedTOCCount) 项，当前目录 \(toc.count) 项。")
+        messages.append(contentsOf: contentDiagnostics.messages)
+        messages.append("扫描范围为全书本地 HTML 与 CSS 文档，包含未阅读章节及独立样式表，重复资源只统计一次。统计来自原始文档，不代表声明已生效，也不包含 WebKit 实际排版、脚本运行、独立 SVG／图片／字体解码的验证。")
+        return messages
+    }
+
+    var diagnosticScanSummary: String {
+        let processed = contentDiagnostics.scannedDocuments + contentDiagnostics.failedDocuments
+        if diagnosticsComplete { return "全书扫描完成：读取 \(contentDiagnostics.scannedDocuments)/\(diagnosticDocumentCount) 份 HTML/CSS 文档。" }
+        if isScanningDiagnostics { return "正在扫描全书内容：\(processed)/\(diagnosticDocumentCount) 份 HTML/CSS 文档。" }
+        return "全书内容诊断尚未完成。"
     }
 
     private static func openPublication(url: URL) async throws -> Publication {

@@ -90,3 +90,5 @@ python3 -I scripts/build_local_release.py --allow-dirty --simulator DFDA05C7-BA7
 Release 分发时一并提供 IPA、source.tar.gz、dependencies.tar.gz、BUILD.json 与 SHA256SUMS；未签名 IPA 需接收者自行重签。公开正式版构建另加 `--public-release`，生成指向本版本固定公开 Release 页的 `novelia-<版本>-build<构建号>-source-info.txt`，并纳入 SHA256SUMS；发布公开 Release 时一并上传该 TXT。私密测试版默认不生成此文件。公开版通过网盘分享时，可仅上传配套 IPA 和 TXT，并在分享说明中提示源码取得方式；须保证对应 Release 的源码、依赖及许可材料完整、免费且持续可访问。不要给尚未公开对应源码的私密测试版套用公开版说明。目录中的构建／测试日志仅供本机排障，可能含开发环境路径，不是应用的隐私过滤日志，不作为发布附件。
 
 ReaderSettings 共用字號、主题和背景入口；EPUB 特有排版选项与既有进度格式保留。在线／TXT 的分页迁移评估见 [READER_PAGINATION.md](READER_PAGINATION.md)。
+
+Readium 目录页提供可折叠的全书内容诊断：后台扫描本地 HTML 与 CSS（包括未阅读章节），报告脚本、媒体查询、布局、透明度、阴影、内嵌 SVG、外部引用及读取失败；可选择复制，按书保留展开状态。统计是原始文档的静态观察，不验证 WebKit 实际排版或脚本运行，不访问外部地址。
