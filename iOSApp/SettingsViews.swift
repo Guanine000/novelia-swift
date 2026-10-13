@@ -8,7 +8,7 @@ struct SettingsView: View {
     @EnvironmentObject private var auth: AccountAuthStore
     @AppStorage(SettingsKey.appThemeColor) private var themeColorRaw = AppThemeColor.novelia.rawValue
     @AppStorage(SettingsKey.appThemeCustomHex) private var themeCustomHex = "559775"
-    @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = true
+    @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = false
     @ObservedObject private var readerSettings = ReaderSettings.shared
     @AppStorage(SettingsKey.readerMode) private var modeRaw = ReaderMode.bilingual.rawValue
     @State private var isExportingLogs = false
@@ -476,7 +476,7 @@ private struct LogActivitySheet: UIViewControllerRepresentable {
 private struct ThirdPartyLicensesView: View {
     /// GPL-3.0 第 5(a) 条要求的修改日期。scripts/build_local_release.py 要求它等于
     /// 发布提交的日期，因此每次发布构建时都需更新。
-    static let modifiedDate = "2026-10-13"
+    static let modifiedDate = "2026-10-14"
     private let packages: [(name: String, version: String, license: String, file: String)] = [
         ("SwiftSoup", "2.13.7", "MIT", "SwiftSoup-LICENSE.txt"),
         ("YueduCoreText", "0.8.0", "MPL-2.0", "YueduCoreText-LICENSE.txt"),

@@ -5,19 +5,55 @@ import Charts
 final class ReadingStatisticsStore: ObservableObject {
     static let shared = ReadingStatisticsStore()
     private static let key = "reading.statistics.v1"
+    private static let syncKey = "reading.statistics.devices.v1"
+    private static let deviceKey = "reading.statistics.deviceID"
+    private static let enabledKey = "reading.statistics.enabled"
+    private static let everEnabledKey = "reading.statistics.everEnabled"
     @Published private(set) var statistics: ReadingStatistics
+    @Published var isRecordingEnabled: Bool {
+        didSet {
+            defaults.set(isRecordingEnabled, forKey: Self.enabledKey)
+            if isRecordingEnabled { defaults.set(true, forKey: Self.everEnabledKey) }
+            else {
+                tracker.stop(date: Date(), uptime: ProcessInfo.processInfo.systemUptime)
+                persist()
+            }
+        }
+    }
+    var hasEnabledRecording: Bool { defaults.bool(forKey: Self.everEnabledKey) }
     private let defaults: UserDefaults
+    private let deviceID: String
+    private var synced: ReadingStatisticsSync
+    private var savedLocal: ReadingStatistics
     private var tracker: ReadingTimeTracker
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        let id = defaults.string(forKey: Self.deviceKey) ?? UUID().uuidString
+        deviceID = id
+        defaults.set(id, forKey: Self.deviceKey)
         let saved = defaults.data(forKey: Self.key)
             .flatMap { try? JSONDecoder().decode(ReadingStatistics.self, from: $0) } ?? ReadingStatistics()
-        statistics = saved
-        tracker = ReadingTimeTracker(statistics: saved)
+        var cache = defaults.data(forKey: Self.syncKey)
+            .flatMap { try? JSONDecoder().decode(ReadingStatisticsSync.self, from: $0) } ?? ReadingStatisticsSync()
+        let local = ReadingStatistics.mergedMaximum(saved, cache.devices[id] ?? ReadingStatistics())
+        cache.devices[id] = local
+        synced = cache
+        savedLocal = saved
+        statistics = cache.statistics
+        tracker = ReadingTimeTracker(statistics: local)
+        isRecordingEnabled = defaults.bool(forKey: Self.enabledKey)
+    }
+
+    /// 返回是否需要在首次启用时提示开启统计同步；“暂不开启”之后不重复弹窗。
+    func setRecordingEnabled(_ enabled: Bool, webDAVEnabled: Bool, statisticsSyncEnabled: Bool) -> Bool {
+        let firstEnable = enabled && !hasEnabledRecording
+        isRecordingEnabled = enabled
+        return firstEnable && webDAVEnabled && !statisticsSyncEnabled
     }
 
     func begin(id: UUID, book: ReadingBook) {
+        guard isRecordingEnabled else { return }
         tracker.begin(id: id, book: book, date: Date(), uptime: ProcessInfo.processInfo.systemUptime)
         persist()
     }
@@ -32,15 +68,37 @@ final class ReadingStatisticsStore: ObservableObject {
         persist()
     }
 
+    func syncSnapshot() -> ReadingStatisticsSync {
+        tracker.checkpointActive(date: Date(), uptime: ProcessInfo.processInfo.systemUptime)
+        persist()
+        var snapshot = synced
+        snapshot.devices[deviceID] = tracker.statistics
+        return snapshot
+    }
+
+    func applySynced(_ snapshot: ReadingStatisticsSync) {
+        synced = .merged(snapshot, syncSnapshot())
+        tracker.mergeBaseline(synced.devices[deviceID] ?? ReadingStatistics())
+        if let data = try? JSONEncoder().encode(synced) { defaults.set(data, forKey: Self.syncKey) }
+        persist()
+    }
+
     private func persist() {
-        guard statistics != tracker.statistics else { return }
-        statistics = tracker.statistics
-        if let data = try? JSONEncoder().encode(statistics) { defaults.set(data, forKey: Self.key) }
+        let local = tracker.statistics
+        if savedLocal != local {
+            if let data = try? JSONEncoder().encode(local) { defaults.set(data, forKey: Self.key) }
+            savedLocal = local
+        }
+        var snapshots = synced.devices
+        snapshots[deviceID] = local
+        let combined = ReadingStatistics.combined(snapshots)
+        if statistics != combined { statistics = combined }
     }
 }
 
 private struct ReadingTimeModifier: ViewModifier {
     @Environment(\.scenePhase) private var scenePhase
+    @ObservedObject private var store = ReadingStatisticsStore.shared
     @State private var sessionID = UUID()
     @State private var visible = false
     let book: ReadingBook
@@ -52,8 +110,9 @@ private struct ReadingTimeModifier: ViewModifier {
             .onDisappear { visible = false; ReadingStatisticsStore.shared.end(id: sessionID) }
             .onChange(of: scenePhase) { _, _ in update() }
             .onChange(of: ready) { _, _ in update() }
-            .task(id: visible && ready && scenePhase == .active) {
-                guard visible && ready && scenePhase == .active else { return }
+            .onChange(of: store.isRecordingEnabled) { _, _ in update() }
+            .task(id: visible && ready && scenePhase == .active && store.isRecordingEnabled) {
+                guard visible && ready && scenePhase == .active && store.isRecordingEnabled else { return }
                 while !Task.isCancelled {
                     do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
                     guard !Task.isCancelled else { return }
@@ -63,7 +122,7 @@ private struct ReadingTimeModifier: ViewModifier {
     }
 
     private func update() {
-        if visible && ready && scenePhase == .active {
+        if visible && ready && scenePhase == .active && store.isRecordingEnabled {
             ReadingStatisticsStore.shared.begin(id: sessionID, book: book)
         } else {
             ReadingStatisticsStore.shared.end(id: sessionID)
@@ -87,6 +146,8 @@ private enum ReadingDuration {
 }
 
 struct ReadingStatisticsView: View {
+    @EnvironmentObject private var syncStore: WebDAVSyncStore
+    @State private var showsSyncOffer = false
     @ObservedObject private var store = ReadingStatisticsStore.shared
     @State private var range = 7
     @State private var selectedDay: String?
@@ -106,6 +167,16 @@ struct ReadingStatisticsView: View {
             let today = ReadingStatistics.dayKey(context.date, calendar: calendar)
             let dates = (0..<range).reversed().compactMap { calendar.date(byAdding: .day, value: -$0, to: context.date) }
             List {
+                Section {
+                    Toggle("记录阅读时长", isOn: Binding(
+                        get: { store.isRecordingEnabled },
+                        set: { enabled in
+                            showsSyncOffer = store.setRecordingEnabled(enabled, webDAVEnabled: syncStore.isEnabled,
+                                                                        statisticsSyncEnabled: syncStore.syncStatistics)
+                        }))
+                } footer: {
+                    Text("默认关闭。开启后记录 EPUB、TXT 和在线阅读时长；关闭后暂停新增记录，已有统计保留。WebDAV 同步开关及按钮位于“我的 → WebDAV 同步”。")
+                }
                 Section("阅读概览") {
                     LabeledContent("今日", value: ReadingDuration.text(store.statistics.seconds(days: [today])))
                     LabeledContent("本周", value: ReadingDuration.text(weekSeconds(at: context.date)))
@@ -179,10 +250,16 @@ struct ReadingStatisticsView: View {
                     }
                 }
                 Section {
-                    Text("从启用此功能后开始记录。正文加载成功且阅读器处于前台时计时，无操作时继续累计；锁屏、后台或退出后暂停。当天累计达到 1 分钟计为一个阅读日。本周按系统日历计算，跨午夜按当天分配。数据仅保存在本机，删除书籍保留历史，暂不参与 WebDAV 同步。")
+                    Text("从启用此功能后开始记录。正文加载成功且阅读器处于前台时计时，无操作时继续累计；锁屏、后台或退出后暂停。当天累计达到 1 分钟计为一个阅读日。本周按系统日历计算，跨午夜按当天分配。删除书籍保留历史。开启阅读时长同步后，可在 WebDAV 页手动合并多设备统计；记录开关仅控制本机新增计时。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
+        }
+        .alert("开启阅读时长同步？", isPresented: $showsSyncOffer) {
+            Button("开启同步") { syncStore.syncStatistics = true }
+            Button("暂不开启", role: .cancel) {}
+        } message: {
+            Text("你已开启 WebDAV 同步。是否同时开启阅读时长同步？之后可在 WebDAV 页点击按钮合并各设备的阅读统计。")
         }
         .navigationTitle("阅读统计")
         .navigationBarTitleDisplayMode(.inline)

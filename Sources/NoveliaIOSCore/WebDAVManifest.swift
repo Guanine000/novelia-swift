@@ -44,6 +44,8 @@ enum WebDAVSyncError: LocalizedError, Equatable {
     case unexpectedResponse(Int)
     case unsupportedManifest
     case invalidAsset
+    case invalidStatistics
+    case missingStatisticsETag
     case concurrentChange
 
     var errorDescription: String? {
@@ -59,6 +61,8 @@ enum WebDAVSyncError: LocalizedError, Equatable {
         case .unexpectedResponse(let status): "WebDAV 请求失败（HTTP \(status)）。"
         case .unsupportedManifest: "远端同步数据版本不受支持，未修改本地书籍。"
         case .invalidAsset: "远端书籍文件校验失败，未导入该文件。"
+        case .invalidStatistics: "阅读统计数据格式无效或版本不受支持，未覆盖本机或云端统计。"
+        case .missingStatisticsETag: "服务器未提供 ETag，无法安全合并阅读统计。请使用支持 ETag 的 WebDAV 服务。"
         case .concurrentChange: "另一台设备刚更新了同步数据，请重新同步。"
         }
     }

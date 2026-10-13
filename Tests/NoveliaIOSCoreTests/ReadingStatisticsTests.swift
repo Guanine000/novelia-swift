@@ -112,3 +112,52 @@ final class ReadingStatisticsTests: XCTestCase {
         XCTAssertEqual(stats.seconds(), 300)
     }
 }
+
+extension ReadingStatisticsTests {
+    private func snapshot(_ seconds: TimeInterval, device: String, bookID: String = "same") -> ReadingStatisticsSync {
+        var stats = ReadingStatistics()
+        let date = Date(timeIntervalSince1970: 1_000_000)
+        stats.record(book: ReadingBook(id: bookID, title: "书", kind: .txt), from: date,
+                     to: date.addingTimeInterval(seconds), duration: seconds)
+        return ReadingStatisticsSync(devices: [device: stats])
+    }
+
+    func testSyncIsIdempotentAndSumsDifferentDevices() {
+        let a = snapshot(30, device: "a"), b = snapshot(40, device: "b")
+        let merged = ReadingStatisticsSync.merged(a, b)
+        XCTAssertEqual(merged.statistics.seconds(), 70)
+        XCTAssertEqual(ReadingStatisticsSync.merged(merged, b), merged)
+        XCTAssertEqual(ReadingStatisticsSync.merged(a, merged), merged)
+        XCTAssertEqual(merged.statistics.books["same"]?.seconds, 70)
+        XCTAssertEqual(merged.statistics.readingDays, 1)
+    }
+
+    func testStaleDeviceSnapshotCannotDecreaseOrDuplicateTime() {
+        let a = snapshot(30, device: "a")
+        let newer = snapshot(50, device: "a")
+        let merged = ReadingStatisticsSync.merged(a, newer)
+        XCTAssertEqual(merged.statistics.seconds(), 50)
+        XCTAssertEqual(ReadingStatisticsSync.merged(merged, a).statistics.seconds(), 50)
+        XCTAssertEqual(ReadingStatisticsSync.merged(newer, a), ReadingStatisticsSync.merged(a, newer))
+    }
+
+    func testSyncPreservesAllDaysAndBooksAcrossDevices() {
+        let a = snapshot(30, device: "a", bookID: "one")
+        let b = snapshot(40, device: "b", bookID: "two")
+        let merged = ReadingStatisticsSync.merged(a, b)
+        XCTAssertEqual(merged.statistics.books.count, 2)
+        XCTAssertEqual(merged.devices.count, 2)
+        XCTAssertEqual(merged.statistics.seconds(), 70)
+    }
+
+    func testSyncedBaselineKeepsOngoingSession() {
+        var tracker = ReadingTimeTracker()
+        let id = UUID(), now = Date(timeIntervalSince1970: 1_000_000)
+        let b = ReadingBook(id: "same", title: "书", kind: .txt)
+        tracker.begin(id: id, book: b, date: now, uptime: 0)
+        tracker.checkpoint(id: id, date: now.addingTimeInterval(30), uptime: 30)
+        tracker.mergeBaseline(snapshot(50, device: "a").devices["a"]!)
+        tracker.end(id: id, date: now.addingTimeInterval(40), uptime: 40)
+        XCTAssertEqual(tracker.statistics.seconds(), 60)
+    }
+}

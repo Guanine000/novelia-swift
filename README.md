@@ -2,7 +2,7 @@
 
 本项目为[轻小说机翻机器人](https://n.novelia.cc/)的第三方客户端。
 
-Novelia iOS 是使用 SwiftUI 编写的 iPhone 客户端，连接 Novelia 网站浏览网络小说与文库、阅读章节、管理收藏和下载 EPUB，并支持导入 TXT / EPUB 文件。EPUB 默认使用实验性 Readium 阅读器，可在设置中切回 YueduCoreText 原生分页阅读器；在线小说与 TXT 支持滚动和 YueduCoreText 分页两种模式。最低系统版本为 **iOS 17**。
+Novelia iOS 是使用 SwiftUI 编写的 iPhone 客户端，连接 Novelia 网站浏览网络小说与文库、阅读章节、管理收藏和下载 EPUB，并支持导入 TXT / EPUB 文件。EPUB 默认使用 YueduCoreText 原生分页阅读器，可在设置中启用实验性 Readium 阅读器；在线小说与 TXT 支持滚动和 YueduCoreText 分页两种模式。最低系统版本为 **iOS 17**。
 
 本项目参考 [nobYoQ/novelia](https://github.com/nobYoQ/novelia) 的产品功能；Novelia 网站与 API 来自 [AutoNovel](https://github.com/auto-novel/auto-novel)。这些项目及网站内容分别适用各自的权利与许可条件。
 
@@ -15,7 +15,7 @@ Novelia iOS 是使用 SwiftUI 编写的 iPhone 客户端，连接 Novelia 网站
 | 模块 | 当前能力 |
 | --- | --- |
 | 导航 | 底部为“书库 · 发现 · 社区 · 我的”四项：书库管理本机书籍，发现页顶部切换网络小说与文库，社区为论坛，我的为账号与设置。“我的 → 界面 → 自定义底栏”可拖动调整四项顺序，并选择启动时打开的页面（任一页面或上次使用的页面）。 |
-| 书库 | 集中显示导入的 TXT／EPUB 和下载的网络小说、文库 EPUB；顶部“继续阅读”打开最近读过的书并显示进度；点击整行即阅读。排序说明左侧可按来源筛选“全部／文库／网络小说”（本地导入的 TXT／EPUB 归入文库），继续阅读、搜索结果、书籍数量和系列随之联动。统一搜索栏同时匹配书名和作者；可按导入时间（下载的书为下载完成时间）、最近阅读或书名排序并切换正序／倒序，未读的书在“最近阅读”排序中始终排在最后。“系列”可新建、重命名、解散，书籍可从“更多”菜单移入或移出系列；移入系列的书只在该系列中列出，不在“全部书籍”中重复显示，统一搜索仍覆盖全部书籍；系列内同样支持搜索和排序；移出或解散系列不影响书籍与阅读进度。 |
+| 书库 | 集中显示导入的 TXT／EPUB 和下载的网络小说、文库 EPUB；顶部“继续阅读”打开最近读过的书并显示进度；点击整行即阅读。排序说明左侧可按来源筛选“全部／文库／网络小说”（本地导入的 TXT／EPUB 归入文库），继续阅读、搜索结果、书籍数量和系列随之联动。统一搜索栏同时匹配书名和作者；可按导入时间（下载的书为下载完成时间）、最近阅读或书名排序并切换正序／倒序，未读的书按导入时间参与“最近阅读”排序，方便及时打开新导入的书。“系列”可新建、重命名、解散，书籍可从“更多”菜单移入或移出系列；移入系列的书只在该系列中列出，不在“全部书籍”中重复显示，统一搜索仍覆盖全部书籍；系列内同样支持搜索和排序；移出或解散系列不影响书籍与阅读进度。 |
 | 发现与作品 | 搜索网络小说和文库，网络小说书源没有匹配结果时用文库结果兜底；筛选标签、查看站内热度榜与作品详情，作品详情显示原名，网络小说与文库详情可互相跳转。 |
 | 账号与收藏 | 使用 Novelia 统一认证；在“发现”页的“收藏”“阅读历史”“文库收藏”入口查看网页端收藏与阅读历史。 |
 | 论坛 | 浏览论坛分类与帖子，小说讨论支持按书单、工具、教程、资源标签筛选；三个分类均可按最近活跃、最新发布、最新更新、浏览最多或评论最多排序；搜索帖子、查看详情与回复；使用同一 Novelia 账号登录小说与论坛，支持发帖、评论、回复和收藏。 |
@@ -23,10 +23,11 @@ Novelia iOS 是使用 SwiftUI 编写的 iPhone 客户端，连接 Novelia 网站
 | 评论 | 查看网络小说与文库的网页评论和回复；登录后发表与回复。 |
 | EPUB 下载 | 使用 Novelia 官网整本接口下载网络小说 EPUB；下载文库译文或双语 EPUB；下载完成后显示在书库，可阅读、导出或删除。 |
 | 本地书籍导入 | 在书库右上角从“文件”多选导入 EPUB 和 TXT；浮窗显示批量处理进度，完成后加入书库，可阅读、导出或删除。 |
-| EPUB 阅读 | 默认使用实验性 Readium（WebKit + ReadiumCSS），支持水平滑动翻页、目录与书内链接、注脚弹层、字号／主题／背景／字体等阅读样式；“我的 → 阅读体验”可关闭 Readium，切回 YueduCoreText 的原生单页／双页、跟手平移翻页及多字选取。Readium 目录页提供默认折叠、可复制的全书读取失败及目录补全提示，没有提示时隐藏。 |
+| EPUB 阅读 | 默认使用 YueduCoreText，支持原生单页／双页、跟手平移翻页及多字选取；“我的 → 阅读体验”可启用实验性 Readium（WebKit + ReadiumCSS），支持水平滑动翻页、目录与书内链接、注脚弹层、字号／主题／背景／字体等阅读样式。Readium 目录页提供默认折叠、可复制的全书读取失败及目录补全提示，没有提示时隐藏。 |
 | TXT 导入与阅读 | 从“文件”多选导入 TXT；本地阅读支持常见中英文标题分章、卷标题、章节目录、字号与主题设置，以及滚动／分页模式切换；解码与分章结果缓存供后续打开复用，TXT 阅读位置可通过 WebDAV 同步。“我的 → 阅读体验 → TXT 分章规则”可启停内置规则，并添加、编辑或删除自定义整行正则。分章规则设计参考 [Qingdu Reader](https://github.com/zengchen666/qingdu-reader)（Apache-2.0），本项目为独立 Swift 实现。 |
 | 阅读样式 | 设置字号、字体、行间距、段落间距、首行缩进和四边边距；恢复默认；从“文件”导入 TTF/OTF/TTC，并在管理页选用或删除。 |
 | WebDAV 同步 | 在“我的 → WebDAV 同步”启用并配置 HTTPS WebDAV；在书库左上角点同步开始，同步中再次点按可查看进度或取消；按书籍的下载/导入时间选择较新版本，阅读位置与书库系列独立按更新时间合并；密码保存在 iOS 钥匙串。 |
+| 阅读时长统计 | “我的 → 阅读统计”查看 EPUB、TXT、在线阅读的今日／本周／累计时长、阅读天数、类型占比、7／30 天趋势和逐书每日记录。记录默认关闭，开启后仅累计正文已加载且阅读器处于前台的时间。首次开启记录时，若 WebDAV 总开关已开启，会提示是否开启阅读时长同步。WebDAV 页提供默认关闭的统计同步开关和手动同步按钮，多设备重复同步不会重复累计，删除书籍保留统计。 |
 | 诊断 | 从“我的”页面导出最近 7 天的应用日志；包含 EPUB 下载状态、TXT 导入阶段、解码字节数、分章数量与耗时、失败的系统错误域/代码。导出摘要会统计 TXT 导入、解码与分章诊断记录数。 |
 
 EPUB 阅读器的容器解析、页面缓存、翻页界面和字体管理代码位于 [`iOSApp/EPUBReader/`](iOSApp/EPUBReader/)。Readium 阅读器依赖 [swift-toolkit 3.11.0](https://github.com/readium/swift-toolkit)；原生分页依赖 [YueduCoreText 0.8.0](https://github.com/CHANG-JUI-LIN/YueduCoreText)。依赖说明见[阅读器依赖](iOSApp/EPUBReader/DEPENDENCIES.md)，当前限制见下文。
@@ -67,7 +68,7 @@ App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完�
 
 最新 Release 附有本项目对应版本源码归档，以及 YueduCoreText 锁定提交的源码和许可材料。分发 IPA 时应同时提供同一版本的完整对应源码与第三方许可材料。构建流程使用 [`scripts/verify_third_party_notices.py`](scripts/verify_third_party_notices.py) 核对锁定依赖、许可清单和原始文件，并检查许可资源是否进入 IPA。发布前还需运行 `python3 scripts/verify_release_privacy.py <IPA路径>`，检查包内是否包含开发者主目录路径或常见凭据特征。
 
-本仓库中由项目维护者拥有授权权利的 App 源代码和项目文档采用 **GNU GPL-3.0-only**（SPDX：`GPL-3.0-only`），完整条款见根目录 [LICENSE](LICENSE)。本 iOS 项目是参考 [GPL-3.0-only 安卓客户端](https://github.com/nobYoQ/novelia) 制作的 Swift 移植版本，包含平台适配和后续修改；上游版权声明 `Copyright (C) 2026 Novelia Android contributors.` 予以保留。本 iOS 移植及新增部分版权声明为 `Copyright (C) 2026 Novelia iOS contributors.`，修改版本日期为 2026-10-13。
+本仓库中由项目维护者拥有授权权利的 App 源代码和项目文档采用 **GNU GPL-3.0-only**（SPDX：`GPL-3.0-only`），完整条款见根目录 [LICENSE](LICENSE)。本 iOS 项目是参考 [GPL-3.0-only 安卓客户端](https://github.com/nobYoQ/novelia) 制作的 Swift 移植版本，包含平台适配和后续修改；上游版权声明 `Copyright (C) 2026 Novelia Android contributors.` 予以保留。本 iOS 移植及新增部分版权声明为 `Copyright (C) 2026 Novelia iOS contributors.`，修改版本日期为 2026-10-14。
 
 第三方组件、YueduCoreText、用户导入字体、Novelia 网站内容、小说与用户内容仍分别适用其自身许可证或权利声明，不被本仓库的 GPL 声明替代或重新授权。完整第三方清单、许可文本和 YueduCoreText 对应源码见上方清单及最新 Release 附件。默认书本图标由维护者使用 GPT 生成并提供，随本项目源码和 IPA 分发；其他非代码资源仍以其各自权利状态为准。
 
@@ -89,7 +90,7 @@ python3 -I scripts/build_local_release.py --simulator 'iPhone 18 Pro Max'
 python3 -I scripts/build_local_release.py --allow-dirty --simulator DFDA05C7-BA73-43B8-B711-511113CA3BCB
 ```
 
-脚本运行 Swift 包逻辑／排版测试（不运行模拟器 UI 测试）、四项离线回归、Release 真机构建、原始依赖许可与包内资源核对、IPA 隐私检查，生成未签名 IPA、完整对应源码、锁定依赖完整源码／许可（含 Readium 阅读器脚本所用 npm 包的原始发布包，按锁定文件 SHA-512 校验，并补充两项发布包缺失的 TypeScript 原始源码及构建配置）、BUILD.json 和 SHA256SUMS。开源许可页的 GPL 修改日期（`SettingsViews.swift` 的 `modifiedDate`）必须等于发布提交的日期，否则脚本拒绝构建。Xcode 派生数据默认放在系统临时目录下的新目录（成功后删除，失败时保留供排查）；Release 二进制会记录目标文件路径，`--derived-data` 不得位于用户主目录下，否则 IPA 隐私检查会失败。产物位于忽略的 `build/local-releases/<版本>-<构建号>/`；只有出现 SUCCESS 才可分发。输出目录已存在时拒绝覆盖，源码在构建期间变化也会失败。脚本不修改版本、不提交、不推送、不发布。
+脚本运行 Swift 包逻辑／排版测试（不运行模拟器 UI 测试）、五项离线回归、Release 真机构建、原始依赖许可与包内资源核对、IPA 隐私检查，生成未签名 IPA、完整对应源码、锁定依赖完整源码／许可（含 Readium 阅读器脚本所用 npm 包的原始发布包，按锁定文件 SHA-512 校验，并补充两项发布包缺失的 TypeScript 原始源码及构建配置）、BUILD.json 和 SHA256SUMS。开源许可页的 GPL 修改日期（`SettingsViews.swift` 的 `modifiedDate`）必须等于发布提交的日期，否则脚本拒绝构建。Xcode 派生数据默认放在系统临时目录下的新目录（成功后删除，失败时保留供排查）；Release 二进制会记录目标文件路径，`--derived-data` 不得位于用户主目录下，否则 IPA 隐私检查会失败。产物位于忽略的 `build/local-releases/<版本>-<构建号>/`；只有出现 SUCCESS 才可分发。输出目录已存在时拒绝覆盖，源码在构建期间变化也会失败。脚本不修改版本、不提交、不推送、不发布。
 
 Release 分发时一并提供 IPA、source.tar.gz、dependencies.tar.gz、BUILD.json 与 SHA256SUMS；未签名 IPA 需接收者自行重签。公开正式版构建另加 `--public-release`，生成指向本版本固定公开 Release 页的 `novelia-<版本>-build<构建号>-source-info.txt`，并纳入 SHA256SUMS；发布公开 Release 时一并上传该 TXT。私密测试版默认不生成此文件。公开版通过网盘分享时，可仅上传配套 IPA 和 TXT，并在分享说明中提示源码取得方式；须保证对应 Release 的源码、依赖及许可材料完整、免费且持续可访问。不要给尚未公开对应源码的私密测试版套用公开版说明。目录中的构建／测试日志仅供本机排障，可能含开发环境路径，不是应用的隐私过滤日志，不作为发布附件。
 
