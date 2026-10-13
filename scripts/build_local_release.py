@@ -215,9 +215,10 @@ def main():
             toolkit_pins = [pin for pin in pins if pin["identity"] == "swift-toolkit"]
             if toolkit_pins:
                 toolkit = checkouts / toolkit_pins[0]["location"].rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
-                for name, version, integrity in npm_packages((toolkit / READIUM_SCRIPTS_LOCK).read_text()):
-                    tarball = npm_tarball(name, version, integrity, ROOT / "build/npm-cache")
-                    archive.add(tarball, arcname=f"swift-toolkit-npm-sources/{name}-{version}.tgz", recursive=False)
+                # Distinct names: `version` is the app version written to BUILD.json below.
+                for package, package_version, integrity in npm_packages((toolkit / READIUM_SCRIPTS_LOCK).read_text()):
+                    tarball = npm_tarball(package, package_version, integrity, ROOT / "build/npm-cache")
+                    archive.add(tarball, arcname=f"swift-toolkit-npm-sources/{package}-{package_version}.tgz", recursive=False)
             archive.add(ROOT / NOTICES, arcname="ThirdPartyLicenses")
             archive.add(ROOT / PIN_FILE, arcname="Package.resolved")
         for file in [source, dependencies]:
@@ -227,6 +228,8 @@ def main():
                         archive.extractfile(member).read()
         if before != fingerprint(source_files()):
             raise RuntimeError("Source changed during packaging; do not distribute this output")
+        # Re-check against the IPA so BUILD.json cannot record a version other than the one built.
+        validate_ipa(ipa, version, build)
         metadata = out / "BUILD.json"
         metadata.write_text(json.dumps({"version": version, "build": build, "configuration": "iPhoneOS Release unsigned",
                                        "commit": git("rev-parse", "HEAD"), "dirty": bool(status), "source": "uncommitted worktree snapshot" if status else "commit",
