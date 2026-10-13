@@ -2,8 +2,10 @@ import Foundation
 import SwiftUI
 
 /// 书库中的一本书：网络小说下载或文库书（包括导入的 TXT/EPUB 和文库下载）。
+/// 显示与排序所需的字段在创建时取出一次；相等性只比较这些字段，
+/// 不逐项比较原始记录（网络小说记录含完整章节列表，比较代价很高）。
 struct LibraryBook: Identifiable, Hashable {
-    enum Origin: Hashable {
+    enum Origin {
         case webNovel(DownloadedWebNovel)
         case wenku(LocalWenkuEPUB)
     }
@@ -11,45 +13,35 @@ struct LibraryBook: Identifiable, Hashable {
     let origin: Origin
     let fileURL: URL
     let coverURL: URL?
+    /// 系列归属与“最近打开”使用的标识。
+    let key: String
+    let title: String
+    let author: String
+    let format: WebNovelFileFormat
+    /// 排序用的导入时间：导入的书为导入时间，下载的书为下载完成时间。
+    let importedAt: Date
+
+    init(origin: Origin, fileURL: URL, coverURL: URL?) {
+        self.origin = origin
+        self.fileURL = fileURL
+        self.coverURL = coverURL
+        switch origin {
+        case .webNovel(let book):
+            key = "web:\(book.id)"
+            title = book.novel.title
+            author = book.novel.author
+            format = book.resolvedFileFormat
+            importedAt = book.downloadedAt
+        case .wenku(let book):
+            key = "wenku:\(book.id.uuidString)"
+            title = book.title
+            author = book.author ?? ""
+            format = book.resolvedFileFormat
+            importedAt = book.addedAt
+        }
+    }
 
     var id: String { key }
-
-    /// 系列归属与“最近打开”使用的标识。
-    var key: String {
-        switch origin {
-        case .webNovel(let book): "web:\(book.id)"
-        case .wenku(let book): "wenku:\(book.id.uuidString)"
-        }
-    }
-
-    var title: String {
-        switch origin {
-        case .webNovel(let book): book.novel.title
-        case .wenku(let book): book.title
-        }
-    }
-
-    var author: String {
-        switch origin {
-        case .webNovel(let book): book.novel.author
-        case .wenku(let book): book.author ?? ""
-        }
-    }
-
-    var format: WebNovelFileFormat {
-        switch origin {
-        case .webNovel(let book): book.resolvedFileFormat
-        case .wenku(let book): book.resolvedFileFormat
-        }
-    }
-
-    /// 排序用的导入时间：导入的书为导入时间，下载的书为下载完成时间。
-    var importedAt: Date {
-        switch origin {
-        case .webNovel(let book): book.downloadedAt
-        case .wenku(let book): book.addedAt
-        }
-    }
 
     var categoryTitle: String {
         switch origin {
@@ -60,6 +52,16 @@ struct LibraryBook: Identifiable, Hashable {
 
     /// 阅读位置以文件内容哈希为键；该前缀与阅读器写入时一致。
     var positionPrefix: String { format == .txt ? "txt:" : "epub:" }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.key == rhs.key && lhs.title == rhs.title && lhs.author == rhs.author
+            && lhs.format == rhs.format && lhs.importedAt == rhs.importedAt
+            && lhs.fileURL == rhs.fileURL && lhs.coverURL == rhs.coverURL
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(key)
+    }
 }
 
 struct LibraryReadingStatus: Equatable {
@@ -146,11 +148,12 @@ final class LibraryStateStore: ObservableObject {
 
     // MARK: 文件哈希
 
-    private func identity(for book: LibraryBook) -> String? {
-        guard let values = try? book.fileURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
+    /// 文件身份：标识、文件名、大小与修改时间；任一变化即重新计算哈希。
+    nonisolated private static func identity(key: String, url: URL) -> String? {
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
               let size = values.fileSize else { return nil }
         let modified = values.contentModificationDate?.timeIntervalSince1970 ?? 0
-        return "\(book.key)|\(book.fileURL.lastPathComponent)|\(size)|\(Int(modified))"
+        return "\(key)|\(url.lastPathComponent)|\(size)|\(Int(modified))"
     }
 
     private func hash(for book: LibraryBook) -> String? {
@@ -158,26 +161,35 @@ final class LibraryStateStore: ObservableObject {
     }
 
     /// 在后台计算缺少的文件哈希（只计算一次并缓存），用于对应阅读进度。
+    /// 首次打开大量书籍时，界面每秒最多刷新一次，避免每算完一本就重排整个书库导致滚动卡顿。
     func refreshHashes(for books: [LibraryBook]) async {
         guard !isRefreshingHashes else { return }
         isRefreshingHashes = true
         defer { isRefreshingHashes = false }
+        let targets = books.map { (key: $0.key, url: $0.fileURL) }
+        let identities = await Task.detached(priority: .utility) {
+            targets.map { Self.identity(key: $0.key, url: $0.url) }
+        }.value
         var valid = Set<String>()
         var changed = false
         var byBook: [String: String] = [:]
-        for book in books {
-            guard let identity = identity(for: book) else { continue }
+        var lastPublish = ContinuousClock.now
+        for (target, identity) in zip(targets, identities) {
+            guard let identity else { continue }
             valid.insert(identity)
             if let hash = hashes[identity] {
-                byBook[book.key] = hash
+                byBook[target.key] = hash
                 continue
             }
-            let url = book.fileURL
+            let url = target.url
             guard let hash = try? await Task.detached(priority: .utility, operation: { try WebDAVFileHash.sha256(url) }).value else { continue }
             hashes[identity] = hash
-            byBook[book.key] = hash
-            hashByBook[book.key] = hash
+            byBook[target.key] = hash
             changed = true
+            if ContinuousClock.now - lastPublish > .seconds(1) {
+                hashByBook.merge(byBook) { $1 }
+                lastPublish = .now
+            }
         }
         if byBook != hashByBook { hashByBook = byBook }
         let stale = hashes.keys.filter { !valid.contains($0) }

@@ -15,6 +15,12 @@ enum SettingsKey {
     static let readerEPUBReadium = "readerEPUBReadium"
     static let appThemeColor = "appThemeColor"
     static let appThemeCustomHex = "appThemeCustomHex"
+    /// 底栏页面顺序，以逗号分隔的 `AppTab` 原始值保存。
+    static let tabBarOrder = "tabBar.order"
+    /// 启动时打开的页面：`AppTab` 原始值，或 `last` 表示上次使用的页面。
+    static let tabBarLaunch = "tabBar.launch"
+    /// 上次使用的底栏页面，仅在启动页面设为“上次使用”时读取。
+    static let tabBarLastSelected = "tabBar.lastSelected"
     /// 导入的 EPUB 阅读器字体，以 `[hash: SyncedImportedFont]` 形式参与 WebDAV 同步。
     static let importedFontSync = "readerFonts.sync.v1"
 

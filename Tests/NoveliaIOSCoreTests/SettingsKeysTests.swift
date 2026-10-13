@@ -13,6 +13,9 @@ final class SettingsKeysTests: XCTestCase {
         XCTAssertEqual(SettingsKey.readerPagedText, "readerPagedText")
         XCTAssertEqual(SettingsKey.appThemeColor, "appThemeColor")
         XCTAssertEqual(SettingsKey.appThemeCustomHex, "appThemeCustomHex")
+        XCTAssertEqual(SettingsKey.tabBarOrder, "tabBar.order")
+        XCTAssertEqual(SettingsKey.tabBarLaunch, "tabBar.launch")
+        XCTAssertEqual(SettingsKey.tabBarLastSelected, "tabBar.lastSelected")
         XCTAssertEqual(SettingsKey.importedFontSync, "readerFonts.sync.v1")
         XCTAssertEqual(SettingsKey.bookmarks(novelID: "syosetu/n1"), "bookmarks.syosetu/n1")
         XCTAssertEqual([SettingsKey.WebDAV.enabled, SettingsKey.WebDAV.address, SettingsKey.WebDAV.username,

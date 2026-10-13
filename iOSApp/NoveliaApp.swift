@@ -155,6 +155,15 @@ struct RootView: View {
     @StateObject private var wenkuStore = WenkuStore()
     @StateObject private var webNovelDownloads = WebNovelDownloadStore()
     @StateObject private var webDAVSync = WebDAVSyncStore()
+    @AppStorage(SettingsKey.tabBarOrder) private var tabOrderRaw = ""
+    /// 启动时按“我的 → 自定义底栏”的设置选中页面；之后只记录用户的切换。
+    @State private var selectedTab = AppTabLayout.initialTab(
+        launch: AppLaunchTab(rawValue: UserDefaults.standard.string(forKey: SettingsKey.tabBarLaunch)),
+        lastSelected: UserDefaults.standard.string(forKey: SettingsKey.tabBarLastSelected),
+        order: AppTabLayout.order(from: UserDefaults.standard.string(forKey: SettingsKey.tabBarOrder))
+    )
+
+    private var tabOrder: [AppTab] { AppTabLayout.order(from: tabOrderRaw) }
 
     /// 调试/自动化入口：Debug 构建中 `-openEPUBPrototype` 启动参数直接打开样例书。
     private var opensSampleReaderDirectly: Bool {
@@ -166,26 +175,24 @@ struct RootView: View {
     }
 
     var body: some View {
-        TabView {
-            NavigationStack {
-                LibraryView()
+        TabView(selection: $selectedTab) {
+            ForEach(tabOrder) { tab in
+                NavigationStack {
+                    switch tab {
+                    case .library: LibraryView()
+                    case .discover: DiscoverHomeView()
+                    case .community: ForumView()
+                    case .me: SettingsView()
+                    }
+                }
+                .tabItem { Label(tab.title, systemImage: tab.systemImage) }
+                .tag(tab)
             }
-            .tabItem { Label("书库", systemImage: "books.vertical.fill") }
-
-            NavigationStack {
-                DiscoverHomeView()
-            }
-            .tabItem { Label("发现", systemImage: "sparkle.magnifyingglass") }
-
-            NavigationStack {
-                ForumView()
-            }
-            .tabItem { Label("社区", systemImage: "bubble.left.and.bubble.right") }
-
-            NavigationStack {
-                SettingsView()
-            }
-            .tabItem { Label("我的", systemImage: "person.crop.circle") }
+        }
+        // 调整顺序后整体重建底栏；就地重排时系统底栏的图标不会随标题更新。
+        .id(tabOrderRaw)
+        .onChange(of: selectedTab) { _, tab in
+            UserDefaults.standard.set(tab.rawValue, forKey: SettingsKey.tabBarLastSelected)
         }
         .tint(AppThemeColor.color(for: appThemeColorRaw, customHex: appThemeCustomHex))
         .background(NoveliaStyle.paper)

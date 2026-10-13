@@ -46,6 +46,13 @@ struct SettingsView: View {
             Section("内容筛选") {
                 NavigationLink("标签屏蔽") { BlockedTagsView() }
             }
+            Section("界面") {
+                NavigationLink {
+                    TabBarSettingsView()
+                } label: {
+                    Label("自定义底栏", systemImage: "dock.rectangle")
+                }
+            }
             Section("阅读体验") {
                 NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
                 Toggle(isOn: $epubUsesReadium) {
@@ -163,6 +170,61 @@ struct SettingsView: View {
                 logExportError = error.localizedDescription
             }
             isExportingLogs = false
+        }
+    }
+}
+
+/// 调整底栏页面顺序，并选择每次打开 App 时显示的页面。
+/// 顺序先在本页编辑，离开本页时才写入：底栏会因顺序改变而重建，编辑中写入会把本页一并关闭。
+private struct TabBarSettingsView: View {
+    @AppStorage(SettingsKey.tabBarOrder) private var orderRaw = ""
+    @AppStorage(SettingsKey.tabBarLaunch) private var launchRaw = AppLaunchTab.default.rawValue
+    @State private var order: [AppTab] = AppTabLayout.order(from: UserDefaults.standard.string(forKey: SettingsKey.tabBarOrder))
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(order) { tab in
+                    Label(tab.title, systemImage: tab.systemImage)
+                }
+                .onMove { source, destination in
+                    order.move(fromOffsets: source, toOffset: destination)
+                }
+            } header: {
+                Text("底栏顺序")
+            } footer: {
+                Text("按住右侧把手拖动调整顺序，从上到下对应底栏从左到右；返回上一页后生效。")
+            }
+            Section {
+                Picker("启动时打开", selection: $launchRaw) {
+                    ForEach(order) { tab in
+                        Text(tab.title).tag(AppLaunchTab.fixed(tab).rawValue)
+                    }
+                    Text("上次使用的页面").tag(AppLaunchTab.lastUsedRawValue)
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } header: {
+                Text("启动时打开")
+            } footer: {
+                Text("下次打开 App 时生效。")
+            }
+            Section {
+                Button("恢复默认") {
+                    order = AppTabLayout.defaultOrder
+                    launchRaw = AppLaunchTab.default.rawValue
+                }
+                .disabled(order == AppTabLayout.defaultOrder && AppLaunchTab(rawValue: launchRaw) == .default)
+            }
+        }
+        .environment(\.editMode, .constant(.active))
+        .scrollContentBackground(.hidden)
+        .background(NoveliaStyle.paper)
+        .navigationTitle("自定义底栏")
+        .navigationBarTitleDisplayMode(.inline)
+        .onDisappear {
+            let stored = AppTabLayout.storedValue(for: order)
+            if stored != AppTabLayout.storedValue(for: AppTabLayout.order(from: orderRaw)) { orderRaw = stored }
         }
     }
 }
