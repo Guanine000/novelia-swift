@@ -1,0 +1,112 @@
+Zip 2.1.2 — bundled MiniZip and Info-ZIP-derived encryption code
+Source: https://github.com/marmelroy/Zip/tree/67fa55813b9e7b3b9acee9c0ae501def28746d76/Zip/minizip
+
+MiniZip: Copyright (C) 1998-2010 Gilles Vollant.
+Zip64 modifications: Copyright (C) 2009-2010 Mathias Svensson.
+AES / PKWARE disk spanning modifications: Copyright (C) 2010-2014 Nathan Moinvaziri.
+crypt.h: Copyright (C) 1998-2005 Gilles Vollant; Copyright (C) 2003 Terry Thorsen;
+Copyright (C) 1990-2000 Info-ZIP. All rights reserved.
+
+The vendored crypt.h is a modified version of Info-ZIP encryption code, as stated by
+its upstream header. This is the MiniZip version bundled by Zip, not an official
+Info-ZIP release. Novelia has not modified these upstream source files.
+Zip's root MIT license does not replace the following component licenses.
+
+MiniZip uses the zlib license. Original zlib license text, from zlib 1.2.8 zlib.h:
+https://github.com/madler/zlib/blob/v1.2.8/zlib.h
+
+/* zlib.h -- interface of the 'zlib' general purpose compression library
+  version 1.2.8, April 28th, 2013
+
+  Copyright (C) 1995-2013 Jean-loup Gailly and Mark Adler
+
+  This software is provided 'as-is', without any express or implied
+  warranty.  In no event will the authors be held liable for any damages
+  arising from the use of this software.
+
+  Permission is granted to anyone to use this software for any purpose,
+  including commercial applications, and to alter it and redistribute it
+  freely, subject to the following restrictions:
+
+  1. The origin of this software must not be misrepresented; you must not
+     claim that you wrote the original software. If you use this software
+     in a product, an acknowledgment in the product documentation would be
+     appreciated but is not required.
+  2. Altered source versions must be plainly marked as such, and must not be
+     misrepresented as being the original software.
+  3. This notice may not be removed or altered from any source distribution.
+
+  Jean-loup Gailly        Mark Adler
+  jloup@gzip.org          madler@alumni.caltech.edu
+
+
+  The data format used by the zlib library is described by RFCs (Request for
+  Comments) 1950 to 1952 in the files http://tools.ietf.org/html/rfc1950
+  (zlib format), rfc1951 (deflate format) and rfc1952 (gzip format).
+*/
+
+Info-ZIP license 2009-Jan-02 (crypt.h permits 2000-Apr-09 or later):
+https://infozip.sourceforge.net/license.html
+
+This is version 2009-Jan-02 of the Info-ZIP license.
+The definitive version of this document should be available at
+
+ftp://ftp.info-zip.org/pub/infozip/license.html indefinitely and
+a copy at http://www.info-zip.org/pub/infozip/license.html.
+
+Copyright (c) 1990-2009 Info-ZIP.  All rights reserved.
+
+For the purposes of this copyright and license, "Info-ZIP" is defined as
+the following set of individuals:
+
+   Mark Adler, John Bush, Karl Davis, Harald Denker, Jean-Michel Dubois,
+   Jean-loup Gailly, Hunter Goatley, Ed Gordon, Ian Gorman, Chris Herborth,
+   Dirk Haase, Greg Hartwig, Robert Heath, Jonathan Hudson, Paul Kienitz,
+   David Kirschbaum, Johnny Lee, Onno van der Linden, Igor Mandrichenko,
+   Steve P. Miller, Sergio Monesi, Keith Owens, George Petrov, Greg Roelofs,
+   Kai Uwe Rommel, Steve Salisbury, Dave Smith, Steven M. Schweda,
+   Christian Spieler, Cosmin Truta, Antoine Verheijen, Paul von Behren,
+   Rich Wales, Mike White.
+
+This software is provided "as is," without warranty of any kind, express
+or implied.  In no event shall Info-ZIP or its contributors be held liable
+for any direct, indirect, incidental, special or consequential damages
+arising out of the use of or inability to use this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the above disclaimer and the following restrictions:
+
+   Redistributions of source code (in whole or in part) must retain
+       the above copyright notice, definition, disclaimer, and this list
+       of conditions.
+
+   Redistributions in binary form (compiled executables and libraries)
+       must reproduce the above copyright notice, definition, disclaimer,
+       and this list of conditions in documentation and/or other materials
+       provided with the distribution.  Additional documentation is not needed
+       for executables where a command line license option provides these and
+       a note regarding this option is in the executable's startup banner.  The
+       sole exception to this condition is redistribution of a standard
+       UnZipSFX binary (including SFXWiz) as part of a self-extracting archive;
+       that is permitted without inclusion of this license, as long as the
+       normal SFX banner has not been removed from the binary or disabled.
+
+   Altered versions--including, but not limited to, ports to new operating
+       systems, existing ports with new graphical interfaces, versions with
+       modified or added functionality, and dynamic, shared, or static library
+       versions not from Info-ZIP--must be plainly marked as such and must not
+       be misrepresented as being the original source or, if binaries,
+       compiled from the original source.  Such altered versions also must not
+       be misrepresented as being Info-ZIP releases--including, but not
+       limited to, labeling of the altered versions with the names "Info-ZIP"
+       (or any variation thereof, including, but not limited to, different
+       capitalizations), "Pocket UnZip," "WiZ" or "MacZip" without the
+       explicit permission of Info-ZIP.  Such altered versions are further
+       prohibited from misrepresentative use of the Zip-Bugs or Info-ZIP
+       e-mail addresses or the Info-ZIP URL(s), such as to imply Info-ZIP
+       will provide support for the altered versions.
+
+   Info-ZIP retains the right to use the names "Info-ZIP," "Zip," "UnZip,"
+       "UnZipSFX," "WiZ," "Pocket UnZip," "Pocket Zip," and "MacZip" for its
+       own source and binary releases.

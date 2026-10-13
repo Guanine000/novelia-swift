@@ -21,6 +21,45 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 PIN_FILE = Path("NoveliaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved")
 NOTICES = Path("iOSApp/Resources/ThirdPartyLicenses")
+PREFERRED_SOURCES = Path("scripts/vendor-npm-sources")
+
+
+def verify_preferred_sources(directory, packages):
+    """Check exact upstream source archives supplementing generated npm distributions."""
+    locked = {(name, version) for name, version, _ in packages}
+    entries = json.loads((directory / "INDEX.json").read_text())
+    expected = {("@juggle/resize-observer", "3.4.0"), ("approx-string-match", "1.1.0")}
+    if {(entry["name"], entry["version"]) for entry in entries} != expected or not expected <= locked:
+        raise RuntimeError("Preferred-source manifest must match the reviewed npm versions")
+    for entry in entries:
+        archive = directory / entry["file"]
+        if archive.parent != directory or hashlib.sha256(archive.read_bytes()).hexdigest() != entry["sha256"]:
+            raise RuntimeError(f"Preferred-source archive mismatch: {entry['name']}")
+        with tarfile.open(archive) as source:
+            members = {member.name.split("/", 1)[-1]: member for member in source if member.isfile()}
+            for required in entry["required"]:
+                if required not in members:
+                    raise RuntimeError(f"Missing preferred source: {entry['name']} {required}")
+            metadata = json.load(source.extractfile(members["package.json"]))
+            if (metadata["name"], metadata["version"]) != (entry["name"], entry["sourcePackageVersion"]):
+                raise RuntimeError(f"Preferred-source package version mismatch: {entry['name']}")
+    return entries
+
+
+def public_source_note(version, build, ipa_name, source_name, dependencies_name):
+    """Directions for the specific public release, suitable for sharing beside its IPA."""
+    return (
+        f"Novelia {version}（构建 {build}）源码与许可说明\n\n"
+        f"对应安装包：{ipa_name}\n\n"
+        "本安装包的对应项目源码、第三方依赖源码及许可材料，可从以下公开发行页面免费取得：\n"
+        f"https://github.com/Guanine000/novelia-swift/releases/tag/v{version}\n\n"
+        "请在该页面的 Assets（附件）中下载：\n"
+        f"- {source_name}\n- {dependencies_name}\n\n"
+        "本应用代码采用 GPL-3.0-only；第三方组件适用各自的许可证。\n"
+        "IPA 未签名，安装前需自行签名。\n"
+        "通过网盘分享时，请把本说明与上述安装包放在同一目录，并在分享说明中提示源码地址见本文件。\n"
+        "本说明仅对应上述安装包；分发其他版本或构建时，请使用其配套说明。\n"
+    )
 
 
 def run(command, *, cwd=ROOT, log=None):
@@ -143,6 +182,8 @@ def validate_ipa(ipa, version, build):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--allow-dirty", action="store_true", help="Explicitly package the current uncommitted source snapshot")
+    parser.add_argument("--public-release", action="store_true",
+                        help="Also generate a source-directions TXT for the public v<version> release; private builds omit it")
     parser.add_argument("--simulator", default="iPhone 18 Pro Max", help="Swift package test simulator name or UDID; no UI tests")
     parser.add_argument("--derived-data", type=Path,
                         help="Xcode derived data outside home folders; default is a fresh system temp directory removed after success")
@@ -150,6 +191,8 @@ def main():
     args = parser.parse_args()
     version, build = project_version((ROOT / "NoveliaIOS.xcodeproj/project.pbxproj").read_text())
     status = git("status", "--porcelain=v1")
+    if status and args.public_release:
+        parser.error("Public release source directions require a clean committed source snapshot")
     if status and not args.allow_dirty:
         parser.error("Worktree is dirty; commit first or explicitly use --allow-dirty")
     commit_date = git("log", "-1", "--format=%cd", "--date=format:%Y-%m-%d")
@@ -216,9 +259,12 @@ def main():
             if toolkit_pins:
                 toolkit = checkouts / toolkit_pins[0]["location"].rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
                 # Distinct names: `version` is the app version written to BUILD.json below.
-                for package, package_version, integrity in npm_packages((toolkit / READIUM_SCRIPTS_LOCK).read_text()):
+                script_packages = npm_packages((toolkit / READIUM_SCRIPTS_LOCK).read_text())
+                verify_preferred_sources(ROOT / PREFERRED_SOURCES, script_packages)
+                for package, package_version, integrity in script_packages:
                     tarball = npm_tarball(package, package_version, integrity, ROOT / "build/npm-cache")
                     archive.add(tarball, arcname=f"swift-toolkit-npm-sources/{package}-{package_version}.tgz", recursive=False)
+                archive.add(ROOT / PREFERRED_SOURCES, arcname="npm-preferred-sources")
             archive.add(ROOT / NOTICES, arcname="ThirdPartyLicenses")
             archive.add(ROOT / PIN_FILE, arcname="Package.resolved")
         for file in [source, dependencies]:
@@ -236,6 +282,10 @@ def main():
                                        "source_fingerprint": hashlib.sha256(json.dumps(before, sort_keys=True).encode()).hexdigest(),
                                        "pins": pins}, indent=2) + "\n")
         artifacts = [ipa, source, dependencies, metadata]
+        if args.public_release:
+            directions = out / f"{prefix}-source-info.txt"
+            directions.write_text(public_source_note(version, build, ipa.name, source.name, dependencies.name), encoding="utf-8")
+            artifacts.append(directions)
         (out / "SHA256SUMS").write_text("".join(hashlib.sha256(file.read_bytes()).hexdigest() + "  " + file.name + "\n" for file in artifacts))
         (out / "SUCCESS").write_text("All checks passed. IPA, source, dependencies and SHA256SUMS are ready.\n")
         if not args.derived_data:

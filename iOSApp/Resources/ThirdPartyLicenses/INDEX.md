@@ -15,6 +15,8 @@
 | SQLite.swift | 0.16.0 | MIT | https://github.com/stephencelis/SQLite.swift | [SQLite.swift-LICENSE.txt](SQLite.swift-LICENSE.txt) |
 | Zip | 2.1.2 | MIT | https://github.com/marmelroy/Zip | [Zip-LICENSE.txt](Zip-LICENSE.txt) |
 
+Zip 内嵌 MiniZip（zlib）与 Info-ZIP 衍生加密代码，独立版权与完整许可见 [Zip-MiniZip-NOTICE.txt](Zip-MiniZip-NOTICE.txt)；Zip 根目录 MIT 不替代这些子组件的许可。
+
 YueduCoreText 另附 [NOTICE](YueduCoreText-NOTICE.txt)。swift-toolkit（Readium）及其后六项为实验性 Readium EPUB 阅读器引入的依赖，均未修改上游源码。
 
 This product includes software developed by the "Marcin Krzyzanowski" (http://krzyzanowskim.com/).（CryptoSwift 许可要求的致谢）
@@ -31,6 +33,7 @@ swift-toolkit 3.11.0 的资源包随 App 分发以下第三方内容：
 | 阅读器脚本中打包的 Hypothesis 代码与 92 个 npm 包 | BSD-2-Clause、MIT、Apache-2.0 | [Readium-JavaScript-NOTICES.txt](Readium-JavaScript-NOTICES.txt) |
 
 阅读器脚本是压缩后的打包文件。Release 的依赖源码包包含 swift-toolkit 的脚本源码与 pnpm 锁定文件，以及打包所用全部 npm 包的原始发布包（`swift-toolkit-npm-sources/`，按锁定文件中的 SHA-512 完整性校验）。
+依赖源码附件另包含 `npm-preferred-sources/`，提供 @juggle/resize-observer 3.4.0 和 approx-string-match 1.1.0 在 npm 发布包中缺少的 TypeScript 实现、构建配置及精确来源/校验清单。
 本应用的 EPUB 原型代码为本项目新写，通过 Swift Package Manager 使用 YueduCoreText 公开 API；未修改上游文件。
 
 ## YueduCoreText 对应源码

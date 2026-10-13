@@ -1,0 +1,33 @@
+[
+  {
+    "name": "@juggle/resize-observer",
+    "version": "3.4.0",
+    "repository": "https://github.com/juggle/resize-observer",
+    "revision": "fb44934975714ad2030843fb4c0d277e7a60fbd8",
+    "file": "resize-observer-3.4.0-source.tar.gz",
+    "sha256": "516ffceb05356e1a821a68468159736e006e0e99559f0a1044ff0dc7de281db1",
+    "required": [
+      "src/ResizeObserver.ts",
+      "tsconfig.json",
+      "package.json",
+      "LICENSE"
+    ],
+    "tag": "v3.4.0",
+    "sourcePackageVersion": "3.3.1"
+  },
+  {
+    "name": "approx-string-match",
+    "version": "1.1.0",
+    "repository": "https://github.com/robertknight/approx-string-match-js",
+    "revision": "cc3c3a8acf38b936135f97a65577a0ee1fb660ad",
+    "file": "approx-string-match-1.1.0-source.tar.gz",
+    "sha256": "7447bc01f3d90749daa24391fb47786e44c1310a3849f5d82ec06a23b2020de3",
+    "required": [
+      "src/index.ts",
+      "tsconfig.json",
+      "package.json"
+    ],
+    "tag": "v1.1.0",
+    "sourcePackageVersion": "1.1.0"
+  }
+]
