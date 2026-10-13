@@ -331,6 +331,21 @@ final class WebDAVSyncEngineTests: XCTestCase {
         XCTAssertEqual(log.count("remote.upload"), 1)
     }
 
+    func testDuplicateManifestEntriesAreRestoredOnceAndWrittenBackOnce() async throws {
+        remoteManifest {
+            $0.webBooks = [
+                WebDAVBook(record: webBook("a", at: 1), assets: [remote.seed("old", as: "a.epub")]),
+                WebDAVBook(record: webBook("a", at: 2), assets: [remote.seed("new", as: "a.epub")]),
+            ]
+        }
+
+        let imported = try await run()
+
+        XCTAssertEqual(imported, 1)
+        XCTAssertEqual(web.received["a"], ["a.epub": Data("new".utf8)])
+        XCTAssertEqual(remote.manifest?.webBooks.map(\.record.downloadedAt), [date(2)])
+    }
+
     func testMissingLocalFileFailsBeforeManifestWrite() async throws {
         web.books = [webBook("a", at: 10)]
         await assertFails(with: .invalidAsset)

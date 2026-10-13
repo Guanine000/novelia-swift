@@ -71,6 +71,18 @@ final class WebDAVSyncPlannerTests: XCTestCase {
         XCTAssertEqual(plan.uploads.map(\.id), [localOnly])
     }
 
+    func testDuplicateBookIDsKeepNewestEntryInsteadOfCrashing() {
+        let duplicated = [remote(web("a", at: 1), hashes: ["a"]), remote(web("b", at: 1)), remote(web("a", at: 3), hashes: ["c"]),
+                          remote(web("a", at: 2))]
+        XCTAssertEqual(WebDAVSyncPlanner.uniqueBooks(duplicated).map(\.record.id), ["a", "b"])
+        XCTAssertEqual(WebDAVSyncPlanner.uniqueBooks(duplicated).first?.record.downloadedAt, date(3))
+
+        let plan = WebDAVSyncPlanner.planBooks(local: [web("b", at: 5), web("b", at: 0)], remote: duplicated)
+        XCTAssertEqual(plan.downloads.map(\.book.record.id), ["a"])
+        XCTAssertEqual(plan.downloads.first?.book.assets.map(\.hash), [hash("c")])
+        XCTAssertEqual(plan.uploads.map(\.downloadedAt), [date(5)])
+    }
+
     func testUnitCountAddsRemoteAssetsAndLocalFiles() {
         let plan = WebDAVSyncPlanner.planBooks(
             local: [web("up", at: 1)],

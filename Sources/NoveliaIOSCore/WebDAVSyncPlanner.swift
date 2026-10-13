@@ -59,6 +59,8 @@ struct FontSyncPlan: Equatable {
 enum WebDAVSyncPlanner {
     /// 远端时间晚于本地才下载；时间相同时以本地为准并重新上传（已存在的 blob 不会重复传输）。
     static func planBooks<Record: SyncableBook>(local: [Record], remote: [WebDAVBook<Record>]) -> BookSyncPlan<Record> {
+        let local = LibraryOrganizer.uniqueRecords(local, id: \.id, date: \.syncTimestamp)
+        let remote = uniqueBooks(remote)
         let localByID = Dictionary(uniqueKeysWithValues: local.map { ($0.id, $0) })
         let remoteByID = Dictionary(uniqueKeysWithValues: remote.map { ($0.record.id, $0) })
         let downloads = remote.compactMap { item -> BookSyncPlan<Record>.Download? in
@@ -70,6 +72,11 @@ enum WebDAVSyncPlanner {
             return book.syncTimestamp >= item.record.syncTimestamp
         }
         return BookSyncPlan(downloads: downloads, uploads: uploads)
+    }
+
+    /// 同一本书在清单中出现多次时（旧版本或手工编辑造成）只保留时间最新的一条，位置取首次出现处。
+    static func uniqueBooks<Record: SyncableBook>(_ books: [WebDAVBook<Record>]) -> [WebDAVBook<Record>] {
+        LibraryOrganizer.uniqueRecords(books, id: { $0.record.id }, date: { $0.record.syncTimestamp })
     }
 
     /// 只保留清单中仍有书籍的阅读位置：网络小说按 id，EPUB/TXT 按文件哈希。
