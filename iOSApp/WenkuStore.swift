@@ -134,7 +134,7 @@ private enum WenkuStoreError: LocalizedError {
     }
 }
 
-struct LocalWenkuEPUB: Codable, Identifiable, Hashable {
+struct LocalWenkuEPUB: Codable, Identifiable, Hashable, Sendable {
     let id: UUID
     var title: String
     let filename: String
@@ -157,6 +157,8 @@ final class WenkuLocalLibraryStore: ObservableObject {
     private let fileManager: FileManager
     private let directory: URL
     private let indexURL: URL
+    private let indexWriter = LocalLibraryIndexWriter()
+    private var isRefreshingMetadata = false
 
     init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -241,9 +243,13 @@ final class WenkuLocalLibraryStore: ObservableObject {
     }
 
     func coverURL(for book: LocalWenkuEPUB) -> URL? {
-        guard let coverFilename = book.coverFilename else { return nil }
-        let url = directory.appendingPathComponent(coverFilename)
+        guard let url = coverFileURL(for: book) else { return nil }
         return fileManager.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// A cheap URL for row rendering; existence and image decoding are checked by the loader off-main.
+    func coverFileURL(for book: LocalWenkuEPUB) -> URL? {
+        book.coverFilename.map { directory.appendingPathComponent($0) }
     }
 
     func downloadDestination(for filename: String) -> URL {
@@ -404,18 +410,30 @@ final class WenkuLocalLibraryStore: ObservableObject {
     }
 
     func refreshMissingMetadata() async {
-        for index in books.indices where books[index].metadataLoaded != true {
-            let bookID = books[index].id
-            let url = fileURL(for: books[index])
-            let metadata = await Self.metadata(for: url)
-            guard let currentIndex = books.firstIndex(where: { $0.id == bookID }) else { continue }
-            if let title = metadata.title { books[currentIndex].title = title }
-            books[currentIndex].bookDescription = metadata.description
-            books[currentIndex].author = metadata.author
-            books[currentIndex].coverFilename = try? saveCover(metadata.cover, id: bookID)
-            books[currentIndex].metadataLoaded = true
+        guard !isRefreshingMetadata else { return }
+        let pending = books.filter { $0.metadataLoaded != true }
+        // Opening a fully populated library must not encode or rewrite its entire index.
+        guard !pending.isEmpty else { return }
+        isRefreshingMetadata = true
+        defer { isRefreshingMetadata = false }
+        var changed = false
+        for book in pending {
+            if Task.isCancelled { break }
+            let metadata = await Self.metadata(for: fileURL(for: book))
+            if Task.isCancelled { break }
+            let coverFilename = try? await saveCoverInBackground(metadata.cover, id: book.id)
+            guard let currentIndex = books.firstIndex(where: { $0.id == book.id }),
+                  books[currentIndex].metadataLoaded != true else { continue }
+            var updated = books[currentIndex]
+            if let title = metadata.title { updated.title = title }
+            updated.bookDescription = metadata.description
+            updated.author = metadata.author
+            updated.coverFilename = coverFilename
+            updated.metadataLoaded = true
+            books[currentIndex] = updated
+            changed = true
         }
-        try? persistIndex()
+        if changed { try? await persistIndexInBackground() }
     }
 
     private func uniqueDestination(for filename: String) -> URL {
@@ -430,8 +448,22 @@ final class WenkuLocalLibraryStore: ObservableObject {
     }
 
     private func persistIndex() throws {
-        let data = try JSONEncoder().encode(books)
-        try data.write(to: indexURL, options: .atomic)
+        try indexWriter.writeSync(books, to: indexURL)
+    }
+
+    private func persistIndexInBackground() async throws {
+        try await indexWriter.write(books, to: indexURL)
+    }
+
+    private func saveCoverInBackground(_ image: UIImage?, id: UUID) async throws -> String? {
+        guard let image else { return nil }
+        let filename = "cover-\(id.uuidString).jpg"
+        let url = directory.appendingPathComponent(filename)
+        return try await Task.detached(priority: .utility) {
+            guard let data = image.jpegData(compressionQuality: 0.82) else { return nil }
+            try data.write(to: url, options: .atomic)
+            return filename
+        }.value
     }
 
     private func saveCover(_ image: UIImage?, id: UUID) throws -> String? {
@@ -441,7 +473,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
         return filename
     }
 
-    private static func metadata(for url: URL) async -> (title: String?, description: String?, author: String?, cover: UIImage?) {
+    nonisolated private static func metadata(for url: URL) async -> (title: String?, description: String?, author: String?, cover: UIImage?) {
         guard let metadata = await EPUBContainer.metadata(
             fileURL: url, coverMaxSize: CGSize(width: 240, height: 320)
         ) else { return (nil, nil, nil, nil) }
@@ -495,7 +527,7 @@ struct WebNovelDownloadProgress: Equatable {
     var fraction: Double { total == 0 ? 0 : Double(completed) / Double(total) }
 }
 
-enum WebNovelFileFormat: String, Codable, CaseIterable, Identifiable {
+enum WebNovelFileFormat: String, Codable, CaseIterable, Identifiable, Sendable {
     case epub
     case txt
 
@@ -504,7 +536,7 @@ enum WebNovelFileFormat: String, Codable, CaseIterable, Identifiable {
     var fileExtension: String { rawValue }
 }
 
-struct DownloadedWebNovel: Codable, Identifiable, Hashable {
+struct DownloadedWebNovel: Codable, Identifiable, Hashable, Sendable {
     let novel: Novel
     let fileFilename: String
     let downloadedAt: Date

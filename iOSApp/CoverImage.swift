@@ -48,6 +48,12 @@ final class CoverImageLoader: @unchecked Sendable {
     }
 
     private func load(_ url: URL) async -> UIImage? {
+        if url.isFileURL {
+            guard let image = Self.downsampledFile(url) else { return nil }
+            memory.setObject(image, forKey: url as NSURL,
+                             cost: image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0)
+            return image
+        }
         let file = directory.appendingPathComponent(Self.filename(for: url))
         var data = try? Data(contentsOf: file)
         if data == nil {
@@ -68,8 +74,17 @@ final class CoverImageLoader: @unchecked Sendable {
     }
 
     private static func downsampled(_ data: Data) -> UIImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
-              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        return thumbnail(source)
+    }
+
+    private static func downsampledFile(_ url: URL) -> UIImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+        return thumbnail(source)
+    }
+
+    private static func thumbnail(_ source: CGImageSource) -> UIImage? {
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                   kCGImageSourceCreateThumbnailFromImageAlways: true,
                   kCGImageSourceCreateThumbnailWithTransform: true,
                   kCGImageSourceShouldCacheImmediately: true,

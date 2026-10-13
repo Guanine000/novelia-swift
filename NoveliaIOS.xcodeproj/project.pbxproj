@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E40000000000000000000003 /* LocalLibraryIndexWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000000000000000000004 /* LocalLibraryIndexWriter.swift */; };
 		E40000000000000000000001 /* EPUBContentDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000000000000000000002 /* EPUBContentDiagnostics.swift */; };
 		A10000000000000000000300 /* ReadiumEPUBReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000300 /* ReadiumEPUBReaderModel.swift */; };
 		A10000000000000000000301 /* ReadiumEPUBReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000301 /* ReadiumEPUBReaderView.swift */; };
@@ -65,6 +66,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		E40000000000000000000004 /* LocalLibraryIndexWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLibraryIndexWriter.swift; sourceTree = "<group>"; };
 		E40000000000000000000002 /* EPUBContentDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBContentDiagnostics.swift; sourceTree = "<group>"; };
 		B10000000000000000000300 /* ReadiumEPUBReaderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumEPUBReaderModel.swift; sourceTree = "<group>"; };
 		B10000000000000000000301 /* ReadiumEPUBReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumEPUBReaderView.swift; sourceTree = "<group>"; };
@@ -197,6 +199,7 @@
 		D10000000000000000000003 /* Sources/NoveliaIOSCore */ = {
 			isa = PBXGroup;
 			children = (
+				E40000000000000000000004 /* LocalLibraryIndexWriter.swift */,
 				E40000000000000000000002 /* EPUBContentDiagnostics.swift */,
 				B10000000000000000000004 /* Novel.swift */,
 				B10000000000000000000008 /* NoveliaAPIClient.swift */,
@@ -365,6 +368,7 @@
 				A10000000000000000000001 /* NoveliaApp.swift in Sources */,
 				A10000000000000000000002 /* ShelfViews.swift in Sources */,
 				A10000000000000000000003 /* ReaderView.swift in Sources */,
+				E40000000000000000000003 /* LocalLibraryIndexWriter.swift in Sources */,
 				E40000000000000000000001 /* EPUBContentDiagnostics.swift in Sources */,
 				A10000000000000000000004 /* Novel.swift in Sources */,
 				A10000000000000000000006 /* DiscoverStore.swift in Sources */,
@@ -525,8 +529,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.12.0;
-				CURRENT_PROJECT_VERSION = 59;
+				MARKETING_VERSION = 0.12.1;
+				CURRENT_PROJECT_VERSION = 60;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -549,8 +553,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.12.0;
-				CURRENT_PROJECT_VERSION = 59;
+				MARKETING_VERSION = 0.12.1;
+				CURRENT_PROJECT_VERSION = 60;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
