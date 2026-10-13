@@ -21,6 +21,7 @@ struct ReadiumEPUBReaderView: View {
     @State private var batteryLevel: Float = -1
     @State private var wasBatteryMonitoringEnabled = false
     let bookURL: URL
+    var statisticsBook: ReadingBook? = nil
 
     private var pageBackground: Color {
         settings.appearance.background(system: model.isDarkMode ? .dark : .light)
@@ -66,6 +67,9 @@ struct ReadiumEPUBReaderView: View {
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .statusBarHidden(true)
+        .trackReadingTime(statisticsBook ?? ReadingBook(id: "epub:\(bookURL.lastPathComponent)",
+                                                       title: bookURL.deletingPathExtension().lastPathComponent, kind: .epub),
+                          ready: model.status == .ready)
         .onAppear {
             wasBatteryMonitoringEnabled = UIDevice.current.isBatteryMonitoringEnabled
             UIDevice.current.isBatteryMonitoringEnabled = true

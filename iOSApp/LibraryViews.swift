@@ -971,9 +971,9 @@ struct LibraryReaderDestination: View {
 
     var body: some View {
         if book.format == .txt {
-            DownloadedWebNovelTXTReader(url: book.fileURL, title: book.title, rules: rules.configuration)
+            DownloadedWebNovelTXTReader(url: book.fileURL, title: book.title, rules: rules.configuration, statisticsID: book.key)
         } else {
-            EPUBReaderHost(initialURL: book.fileURL)
+            EPUBReaderHost(initialURL: book.fileURL, statisticsID: book.key, statisticsTitle: book.title)
         }
     }
 }

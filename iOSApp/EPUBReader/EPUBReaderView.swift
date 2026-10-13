@@ -38,6 +38,7 @@ struct EPUBReaderView: View {
     var textBook: PagedTextBook? = nil
     /// TXT / 在线小说包装视图提供的额外顶部栏控件。
     var accessory: AnyView? = nil
+    var statisticsBook: ReadingBook? = nil
 
     var body: some View {
         GeometryReader { geometry in
@@ -134,6 +135,9 @@ struct EPUBReaderView: View {
         // 阅读器已经在自己的浮层中显示时间和电量。
         // 切换系统状态栏会改变安全区高度，并触发书籍重新分页。
         .statusBarHidden(true)
+        .trackReadingTime(statisticsBook ?? ReadingBook(id: "epub:\(bookURL?.lastPathComponent ?? "sample")",
+                                                       title: bookURL?.deletingPathExtension().lastPathComponent ?? "样例书", kind: .epub),
+                          ready: model.status == .ready)
         .sheet(isPresented: $isShowingTOC) { tocSheet }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NoveliaImportedFontsChanged"))) { _ in model.refreshBackground() }
         .onChange(of: settings.fontSize) { _, _ in synchronizeSettings(systemIsDark: colorScheme == .dark) }
@@ -737,9 +741,16 @@ struct EPUBFilePicker: UIViewControllerRepresentable {
 
 struct EPUBReaderHost: View {
     let initialURL: URL?
+    var statisticsID: String? = nil
+    var statisticsTitle: String? = nil
     @State private var resolvedURL: URL?
     /// 实验：EPUB 改由 Readium（WKWebView）排版；TXT 与在线章节不受影响。
     @AppStorage(SettingsKey.readerEPUBReadium) private var usesReadium = true
+
+    private func descriptor(for url: URL) -> ReadingBook {
+        ReadingBook(id: statisticsID ?? "epub:\(url.lastPathComponent)",
+                    title: statisticsTitle ?? url.deletingPathExtension().lastPathComponent, kind: .epub)
+    }
 
     /// 调试：Debug 构建中 `-prototypeBookPath <路径>` 直接打开指定 EPUB（自动化/真机排查用）。
     private var debugBookURL: URL? {
@@ -757,9 +768,9 @@ struct EPUBReaderHost: View {
         Group {
             if let resolvedURL {
                 if usesReadium {
-                    ReadiumEPUBReaderView(bookURL: resolvedURL)
+                    ReadiumEPUBReaderView(bookURL: resolvedURL, statisticsBook: descriptor(for: resolvedURL))
                 } else {
-                    EPUBReaderView(bookURL: resolvedURL)
+                    EPUBReaderView(bookURL: resolvedURL, statisticsBook: descriptor(for: resolvedURL))
                 }
             } else {
                 ProgressView("准备样例书…")

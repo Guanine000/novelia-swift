@@ -53,6 +53,11 @@ struct SettingsView: View {
                     Label("自定义底栏", systemImage: "dock.rectangle")
                 }
             }
+            Section("阅读统计") {
+                NavigationLink { ReadingStatisticsView() } label: {
+                    Label("阅读统计", systemImage: "chart.bar.xaxis")
+                }
+            }
             Section("阅读体验") {
                 NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
                 Toggle(isOn: $epubUsesReadium) {

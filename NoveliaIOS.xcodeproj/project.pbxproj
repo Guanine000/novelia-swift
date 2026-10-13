@@ -64,6 +64,8 @@
 		D30000000000000000000001 /* ReaderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000002 /* ReaderSettings.swift */; };
 		D30000000000000000000003 /* ReaderSettingsAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000004 /* ReaderSettingsAdapters.swift */; };
 		E50000000000000000000001 /* LibraryOrganizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000001 /* LibraryOrganizer.swift */; };
+		E70000000000000000000001 /* ReadingStatistics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71000000000000000000001 /* ReadingStatistics.swift */; };
+		E70000000000000000000002 /* ReadingStatisticsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71000000000000000000002 /* ReadingStatisticsViews.swift */; };
 		E50000000000000000000002 /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000002 /* LibraryStore.swift */; };
 		E50000000000000000000003 /* LibraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000003 /* LibraryViews.swift */; };
 		E50000000000000000000004 /* AppTabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000004 /* AppTabs.swift */; };
@@ -128,6 +130,8 @@
 		D30000000000000000000002 /* ReaderSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSettings.swift; sourceTree = "<group>"; };
 		D30000000000000000000004 /* ReaderSettingsAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSettingsAdapters.swift; sourceTree = "<group>"; };
 		E51000000000000000000001 /* LibraryOrganizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryOrganizer.swift; sourceTree = "<group>"; };
+		E71000000000000000000001 /* ReadingStatistics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingStatistics.swift; sourceTree = "<group>"; };
+		E71000000000000000000002 /* ReadingStatisticsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingStatisticsViews.swift; sourceTree = "<group>"; };
 		E51000000000000000000002 /* LibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryStore.swift; sourceTree = "<group>"; };
 		E51000000000000000000003 /* LibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViews.swift; sourceTree = "<group>"; };
 		E51000000000000000000004 /* AppTabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTabs.swift; sourceTree = "<group>"; };
@@ -212,6 +216,7 @@
 				D30000000000000000000004 /* ReaderSettingsAdapters.swift */,
 				E51000000000000000000003 /* LibraryViews.swift */,
 				E51000000000000000000002 /* LibraryStore.swift */,
+				E71000000000000000000002 /* ReadingStatisticsViews.swift */,
 			);
 			path = iOSApp;
 			sourceTree = "<group>";
@@ -235,6 +240,7 @@
 				C30000000000000000000004 /* TXTBookCache.swift */,
 				C30000000000000000000002 /* DiagnosticContext.swift */,
 				E51000000000000000000001 /* LibraryOrganizer.swift */,
+				E71000000000000000000001 /* ReadingStatistics.swift */,
 				E51000000000000000000004 /* AppTabs.swift */,
 				E61000000000000000000001 /* LocalBookRecords.swift */,
 				E61000000000000000000002 /* WebDAVManifest.swift */,
@@ -427,6 +433,8 @@
 				E50000000000000000000003 /* LibraryViews.swift in Sources */,
 				E50000000000000000000002 /* LibraryStore.swift in Sources */,
 				E50000000000000000000001 /* LibraryOrganizer.swift in Sources */,
+				E70000000000000000000001 /* ReadingStatistics.swift in Sources */,
+				E70000000000000000000002 /* ReadingStatisticsViews.swift in Sources */,
 				E50000000000000000000004 /* AppTabs.swift in Sources */,
 				E60000000000000000000001 /* LocalBookRecords.swift in Sources */,
 				E60000000000000000000002 /* WebDAVManifest.swift in Sources */,
@@ -565,8 +573,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.16.0;
-				CURRENT_PROJECT_VERSION = 65;
+				MARKETING_VERSION = 0.17.0;
+				CURRENT_PROJECT_VERSION = 66;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -589,8 +597,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.16.0;
-				CURRENT_PROJECT_VERSION = 65;
+				MARKETING_VERSION = 0.17.0;
+				CURRENT_PROJECT_VERSION = 66;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;

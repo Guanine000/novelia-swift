@@ -55,10 +55,23 @@ final class LibraryOrganizerTests: XCTestCase {
         XCTAssertEqual(keys(.init(field: .importedAt, ascending: true)), ["d", "a", "c", "b"])
     }
 
-    func testRecentReadingKeepsUnreadLast() {
+    func testRecentReadingUsesImportTimeForUnreadBooks() {
         XCTAssertEqual(keys(.init(field: .lastRead, ascending: false)), ["c", "a", "b", "d"])
-        XCTAssertEqual(keys(.init(field: .lastRead, ascending: true)), ["a", "c", "b", "d"],
-                       "unread stay last, newest import first, in both directions")
+        XCTAssertEqual(keys(.init(field: .lastRead, ascending: true)), ["d", "b", "a", "c"])
+    }
+
+    func testNewImportAppearsBeforePreviouslyReadBooksWithoutMarkingItRead() {
+        let imported = LibrarySortItem(key: "new", title: "新导入", author: "", importedAt: date(1000), lastReadAt: nil)
+        let items = books + [imported]
+        let sorted = LibraryOrganizer.sorted(items, options: .init(field: .lastRead, ascending: false)) { $0 }
+        XCTAssertEqual(sorted.map(\.key), ["new", "c", "a", "b", "d"])
+        XCTAssertNil(sorted.first?.lastReadAt)
+
+        var resumed = books[0]
+        resumed.lastReadAt = date(1100)
+        let afterReading = LibraryOrganizer.sorted([resumed] + items.filter { $0.key != resumed.key },
+                                                   options: .init(field: .lastRead, ascending: false)) { $0 }
+        XCTAssertEqual(afterReading.map(\.key), ["a", "new", "c", "b", "d"])
     }
 
     func testTitleSortIsNumericAndReversible() {
