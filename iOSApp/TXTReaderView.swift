@@ -10,6 +10,7 @@ struct DownloadedWebNovelTXTReader: View {
     let url: URL
     let title: String
     let rules: TXTChapterRuleConfiguration
+    var statisticsID: String? = nil
     @State private var chapters: [TXTChapter]?
     @State private var chapterIndex = 0
     /// 加载后的内容哈希，用作阅读位置的键（与分页模式共享）。
@@ -25,9 +26,11 @@ struct DownloadedWebNovelTXTReader: View {
 
     var body: some View {
         if settings.pagedTextReading {
-            TXTPagedReader(url: url, title: title, rules: rules)
+            TXTPagedReader(url: url, title: title, rules: rules, statisticsID: statisticsID)
         } else {
             scrollReader
+                .trackReadingTime(ReadingBook(id: statisticsID ?? "txt:\(url.lastPathComponent)", title: title, kind: .txt),
+                                  ready: chapters?.indices.contains(chapterIndex) == true && bodyChunksChapterIndex == chapterIndex)
         }
     }
 
@@ -223,13 +226,15 @@ private struct TXTPagedReader: View {
     let url: URL
     let title: String
     let rules: TXTChapterRuleConfiguration
+    var statisticsID: String? = nil
     @State private var book: PagedTextBook?
     @State private var errorMessage: String?
 
     var body: some View {
         Group {
             if let book {
-                EPUBReaderView(bookURL: nil, textBook: book, accessory: AnyView(scrollButton))
+                EPUBReaderView(bookURL: nil, textBook: book, accessory: AnyView(scrollButton),
+                               statisticsBook: ReadingBook(id: statisticsID ?? "txt:\(url.lastPathComponent)", title: title, kind: .txt))
             } else if let errorMessage {
                 ContentUnavailableView("无法读取 TXT", systemImage: "doc.text.magnifyingglass", description: Text(errorMessage))
             } else {

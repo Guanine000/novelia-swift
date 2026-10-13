@@ -97,6 +97,8 @@ struct ReaderView: View {
             OnlinePagedReader(novel: novel, chapterIndex: $chapterIndex)
         } else {
             scrollReader
+                .trackReadingTime(ReadingBook(id: "online:\(novel.id)", title: novel.title, kind: .online),
+                                  ready: !chapter.originalText.isEmpty)
         }
     }
 
@@ -588,7 +590,8 @@ private struct OnlinePagedReader: View {
 
     var body: some View {
         // 显示模式或来源变化会重新生成所有章节：从章节开头重新打开。
-        EPUBReaderView(bookURL: nil, textBook: makeBook(), accessory: AnyView(HStack(spacing: 12) { scrollButton; menu }))
+        EPUBReaderView(bookURL: nil, textBook: makeBook(), accessory: AnyView(HStack(spacing: 12) { scrollButton; menu }),
+                       statisticsBook: ReadingBook(id: "online:\(novel.id)", title: novel.title, kind: .online))
             .id("\(modeRaw)|\(translationSourceRaw)")
     }
 

@@ -97,7 +97,7 @@ enum LibraryOrganizer {
 
     /// 排序规则：
     /// - 导入时间、书名按所选方向排序，相同值依次按导入时间（新在前）、书名、标识排序，结果稳定。
-    /// - 最近阅读：已读的书按最后阅读时间排序；未读的书无论正序倒序都排在最后，彼此按导入时间新在前。
+    /// - 最近阅读：已读的书按最后阅读时间、未读的书按导入时间参与排序，让新导入的书及时出现在前面。
     static func sorted<Element>(_ elements: [Element], options: LibrarySortOptions,
                                 item: (Element) -> LibrarySortItem) -> [Element] {
         let pairs = elements.map { (element: $0, item: item($0)) }
@@ -118,12 +118,10 @@ enum LibraryOrganizer {
                 return options.ascending ? order == .orderedAscending : order == .orderedDescending
             }
         case .lastRead:
-            switch (lhs.lastReadAt, rhs.lastReadAt) {
-            case let (left?, right?) where left != right:
+            let left = lhs.lastReadAt ?? lhs.importedAt
+            let right = rhs.lastReadAt ?? rhs.importedAt
+            if left != right {
                 return options.ascending ? left < right : left > right
-            case (.some, nil): return true
-            case (nil, .some): return false
-            default: break
             }
         }
         return tieBreak(lhs, rhs)
