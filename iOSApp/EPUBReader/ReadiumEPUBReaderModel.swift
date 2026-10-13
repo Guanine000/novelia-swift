@@ -126,10 +126,6 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         guard let publication else { return }
         var config = EPUBNavigatorViewController.Configuration(
             preferences: preferences(),
-            contentInset: [
-                .compact: (top: style.topMargin, bottom: style.bottomMargin),
-                .regular: (top: style.topMargin, bottom: style.bottomMargin),
-            ],
             fontFamilyDeclarations: Self.importedFontDeclarations()
         )
         config.readiumCSSRSProperties.pageGutter = CSSPxLength(Double(style.leftMargin + style.rightMargin) / 2)
@@ -365,6 +361,15 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
         self.locator = locator
         save(locator)
+        makeWebViewsTransparent()
+    }
+
+    /// 上下边距从安全区边缘起算，与 YueduCoreText 阅读器一致，章节名与正文不再重叠。
+    /// Readium 默认取安全区与配置边距的较大值，会让正文顶到章节名所在位置。
+    func navigatorContentInset(_ navigator: VisualNavigator) -> UIEdgeInsets? {
+        let safeArea = (navigator as? UIViewController)?.view.window?.safeAreaInsets ?? .zero
+        return UIEdgeInsets(top: safeArea.top + style.topMargin, left: 0,
+                            bottom: safeArea.bottom + style.bottomMargin, right: 0)
     }
 
     /// Readium 每次应用设置都会把根视图涂成背景色；清空以露出宿主绘制的阅读背景。
@@ -401,6 +406,22 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         """
         userContentController.addUserScript(
             WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+        // 此回调在新章节的 WebView 创建时触发；待其加入视图层级后再设为透明。
+        DispatchQueue.main.async { [weak self] in self?.makeWebViewsTransparent() }
+    }
+
+    /// Readium 只为固定版式书籍关闭 WebView 的不透明绘制；流式书籍的 WebView 会画出
+    /// 自己的底色盖住阅读背景，因此逐个关闭。
+    private func makeWebViewsTransparent() {
+        guard let root = navigator?.view else { return }
+        var stack: [UIView] = [root]
+        while let view = stack.popLast() {
+            if let webView = view as? WKWebView, webView.isOpaque {
+                webView.isOpaque = false
+                webView.underPageBackgroundColor = .clear
+            }
+            stack.append(contentsOf: view.subviews)
+        }
     }
 
     private static func plainText(fromHTML html: String) -> String {

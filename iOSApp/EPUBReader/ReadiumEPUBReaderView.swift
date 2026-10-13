@@ -42,7 +42,8 @@ struct ReadiumEPUBReaderView: View {
                 case .ready:
                     ReadiumNavigatorHost(model: model)
                         .id(model.navigatorRevision)
-                        .ignoresSafeArea()
+                        // 只延伸到上下边缘；横屏时左右仍避开刘海。
+                        .ignoresSafeArea(edges: .vertical)
                 }
             }
             .overlay(alignment: .top) {
