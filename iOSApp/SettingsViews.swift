@@ -51,7 +51,7 @@ struct SettingsView: View {
                 Toggle(isOn: $epubUsesReadium) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("EPUB 使用 Readium 引擎（实验）")
-                        Text("支持表格、Flex/Grid、定位与透明度等完整 CSS；水平滑动翻页。下次打开书籍时生效。")
+                        Text("支持表格、Flex/Grid、定位与透明度等 CSS 样式；水平滑动翻页。下次打开书籍时生效。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
