@@ -90,6 +90,7 @@ struct MyDownloadsView: View {
                         Label("导入 TXT / EPUB", systemImage: "square.and.arrow.down")
                     }
                     .accessibilityLabel("导入 TXT 或 EPUB")
+                    .disabled(isImporting)
                 }
             }
         }
@@ -160,36 +161,47 @@ struct MyDownloadsView: View {
 
     /// 从 Files 批量导入：逐项复制并登记到本地书库，完成后留在列表页。
     private func importFiles(_ pickedURLs: [URL]) async {
-        guard !pickedURLs.isEmpty else { return }
+        // One import at a time: a second picker callback while copying would register the same files again.
+        guard !pickedURLs.isEmpty, !isImporting else { return }
         isImporting = true
         importCompletedCount = 0
         importTotalCount = pickedURLs.count
         defer { isImporting = false }
 
         var failures: [String] = []
+        var duplicates: [String] = []
+        // The same file picked twice in one batch is imported once.
+        var seenPaths = Set<String>()
         for (index, pickedURL) in pickedURLs.enumerated() {
+            defer { importCompletedCount = index + 1 }
+            guard seenPaths.insert(pickedURL.standardizedFileURL.path).inserted else { continue }
             do {
                 try await importFile(pickedURL)
+            } catch let duplicate as LocalLibraryDuplicateError {
+                duplicates.append("\(pickedURL.lastPathComponent)：已存在（《\(duplicate.existingTitle)》）")
             } catch {
                 failures.append("\(pickedURL.lastPathComponent)：\(error.localizedDescription)")
             }
-            importCompletedCount = index + 1
         }
 
-        if pickedURLs.count > failures.count {
+        let succeeded = seenPaths.count - failures.count - duplicates.count
+        if succeeded > 0 || !duplicates.isEmpty {
             selectedTab = .wenku
         }
-        if !failures.isEmpty {
-            let succeeded = pickedURLs.count - failures.count
-            importError = "批量导入完成：成功 \(succeeded) 个，失败 \(failures.count) 个。\n" + failures.joined(separator: "\n")
+        if !failures.isEmpty || !duplicates.isEmpty {
+            var summary = "批量导入完成：成功 \(succeeded) 个"
+            if !duplicates.isEmpty { summary += "，已存在 \(duplicates.count) 个" }
+            if !failures.isEmpty { summary += "，失败 \(failures.count) 个" }
+            importError = summary + "。\n" + (duplicates + failures).joined(separator: "\n")
         }
     }
 
     private func importFile(_ pickedURL: URL) async throws {
         let extensionName = pickedURL.pathExtension.lowercased()
         let start = ContinuousClock.now
+        let trace = DiagnosticContext.newTraceID()
         if extensionName == "txt" {
-            TXTDiagnosticLog.logger.info("TXT import started")
+            TXTDiagnosticLog.logger.info("TXT import started; trace=\(trace, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
         } else if extensionName == "epub" {
             epubImportLog.info("EPUB import started")
         }
@@ -220,7 +232,10 @@ struct MyDownloadsView: View {
         }
         let title = pickedURL.deletingPathExtension().lastPathComponent
         do {
-            try await wenkuDownloads.registerDownloadedFile(at: destination, title: title)
+            try await wenkuDownloads.registerDownloadedFile(at: destination, title: title, source: .import, trace: trace)
+        } catch let duplicate as LocalLibraryDuplicateError {
+            TXTDiagnosticLog.logger.info("TXT import skipped duplicate; trace=\(trace, privacy: .public), book=\(DiagnosticContext.bookTag(duplicate.contentHash), privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+            throw duplicate
         } catch {
             if extensionName == "epub" { logEPUBImportFailure(error, stage: "registration", start: start) }
             if extensionName == "txt" {
@@ -230,7 +245,8 @@ struct MyDownloadsView: View {
             throw error
         }
         if extensionName == "txt" {
-            TXTDiagnosticLog.logger.info("TXT import completed")
+            let hash = (try? await TXTBookCache.shared.contentHash(of: destination)) ?? ""
+            TXTDiagnosticLog.logger.info("TXT import completed; trace=\(trace, privacy: .public), book=\(DiagnosticContext.bookTag(hash), privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
         } else {
             let bytes = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             epubImportLog.info("EPUB import completed; bytes=\(bytes, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")

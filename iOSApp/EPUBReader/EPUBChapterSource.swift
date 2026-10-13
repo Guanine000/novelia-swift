@@ -124,11 +124,16 @@ final class TextChapterSource: EPUBChapterSource {
     let bookTitle: String
     let toc: [EPUBTOCEntry]
     var themeTextColor: UIColor = .black
+    /// Stable identity of the generated content (a TXT file hash + chapter rules). Set only
+    /// when the same identity always yields the same chapters; it lets layouts be cached
+    /// across reader sessions. `nil` (online chapters) keeps layouts private to one session.
+    let layoutIdentity: String?
     private let units: [Unit]
     private var cache: [Int: String] = [:]
 
-    init(bookTitle: String, units: [Unit]) {
+    init(bookTitle: String, units: [Unit], layoutIdentity: String? = nil) {
         self.bookTitle = bookTitle
+        self.layoutIdentity = layoutIdentity
         self.units = units
         toc = units.enumerated().compactMap { index, unit in
             unit.tocTitle.map { EPUBTOCEntry(title: $0, spineIndex: index) }
@@ -169,7 +174,7 @@ extension TextChapterSource {
     /// Long TXT chapters (or a whole book without headings) are split at paragraph
     /// boundaries so one layout never holds megabytes of text. Only the first unit of a
     /// chapter carries its heading and TOC entry.
-    static func units(splitting chapters: [TextChapterContent], maximumUTF16: Int = 12_000) -> [Unit] {
+    nonisolated static func units(splitting chapters: [TextChapterContent], maximumUTF16: Int = 12_000) -> [Unit] {
         var units: [Unit] = []
         for chapter in chapters {
             var parts: [[TextChapterParagraph]] = [[]]

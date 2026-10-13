@@ -250,7 +250,20 @@ final class WenkuLocalLibraryStore: ObservableObject {
         uniqueDestination(for: Self.safeFilename(filename))
     }
 
-    func registerDownloadedFile(at fileURL: URL, title: String) async throws {
+    /// A library TXT with the same content, compared by SHA-256 (memoised per file).
+    private func existingTXT(withContentHash hash: String, excluding newFile: URL) async -> LocalWenkuEPUB? {
+        for book in books where book.resolvedFileFormat == .txt {
+            let url = directory.appendingPathComponent(book.filename)
+            guard url.standardizedFileURL != newFile.standardizedFileURL,
+                  fileManager.fileExists(atPath: url.path),
+                  let existing = try? await TXTBookCache.shared.contentHash(of: url) else { continue }
+            if existing == hash { return book }
+        }
+        return nil
+    }
+
+    func registerDownloadedFile(at fileURL: URL, title: String, source: TXTLoadSource = .download,
+                                trace: String = DiagnosticContext.newTraceID()) async throws {
         guard fileURL.deletingLastPathComponent().standardizedFileURL == directory.standardizedFileURL else {
             throw WenkuLocalLibraryError.invalidEPUB
         }
@@ -264,13 +277,17 @@ final class WenkuLocalLibraryStore: ObservableObject {
         }
 
         if format == .txt {
-            let isReadableTXT = await Task.detached(priority: .utility) {
-                guard let text = try? TXTTextDecoder.decode(contentsOf: fileURL) else { return false }
-                return !text.isEmpty
-            }.value
-            guard isReadableTXT else {
+            // Decoded once here; the cached text makes the first open parse-only.
+            let newHash: String
+            do {
+                newHash = try await TXTBookCache.shared.validateDecodable(at: fileURL, source: source, trace: trace)
+            } catch {
                 try? fileManager.removeItem(at: fileURL)
                 throw WenkuLocalLibraryError.invalidTXT
+            }
+            if let existing = await existingTXT(withContentHash: newHash, excluding: fileURL) {
+                try? fileManager.removeItem(at: fileURL)
+                throw LocalLibraryDuplicateError(existingTitle: existing.title, contentHash: newHash)
             }
             let book = LocalWenkuEPUB(
                 id: UUID(), title: title, filename: fileURL.lastPathComponent,
@@ -445,6 +462,16 @@ final class WenkuLocalLibraryStore: ObservableObject {
         let cleaned = String(base.unicodeScalars.map { allowed.contains($0) ? Character($0) : "_" })
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return "\(cleaned.isEmpty ? "wenku" : cleaned).\(resolvedFormat.fileExtension)"
+    }
+}
+
+/// The imported TXT has the same content as a book already in the library; the new copy is removed.
+struct LocalLibraryDuplicateError: LocalizedError {
+    let existingTitle: String
+    let contentHash: String
+
+    var errorDescription: String? {
+        "书库中已存在相同内容的《\(existingTitle)》，未重复导入。"
     }
 }
 

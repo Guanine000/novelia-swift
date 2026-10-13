@@ -111,16 +111,15 @@ struct EPUBReaderView: View {
                 if model.viewportSize != geometry.size {
                     model.viewportSize = geometry.size
                 }
-                if model.status == .idle, let textBook {
-                    Task {
-                        await model.open(source: textBook.source, unit: textBook.startUnit,
-                                         offset: textBook.startOffset, onPosition: textBook.onPosition)
-                    }
-                } else if model.status == .idle, let bookURL {
-                    Task { await model.open(url: bookURL) }
+                if let textBook {
+                    model.start(textBook: textBook)
+                } else if let bookURL {
+                    model.start(url: bookURL)
                 }
             }
             .onDisappear {
+                // Stops layouts of a closed book; reopening reuses completed chapters from the cache.
+                model.close()
                 if !wasBatteryMonitoringEnabled {
                     UIDevice.current.isBatteryMonitoringEnabled = false
                 }
@@ -327,8 +326,11 @@ struct EPUBReaderView: View {
                                 }
                             }
                             let tocEntries = model.source?.toc ?? []
-                            ForEach(Array(tocEntries.enumerated()), id: \.offset) { index, entry in
-                                let isCurrent = model.currentTOCIndex == index
+                            // Computed once per render: rows are lazy, but each used to rescan the whole TOC.
+                            let currentIndex = model.currentTOCIndex
+                            ForEach(tocEntries.indices, id: \.self) { index in
+                                let entry = tocEntries[index]
+                                let isCurrent = currentIndex == index
                                 Button {
                                     isShowingTOC = false
                                     model.jump(to: entry)

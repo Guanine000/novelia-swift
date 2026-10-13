@@ -24,6 +24,9 @@ let package = Package(
         .target(
             name: "NoveliaEPUB",
             dependencies: [
+                // Shared diagnostics and LRU; the app compiles both directories into one module,
+                // so EPUB files import it only under `#if canImport(NoveliaIOSCore)`.
+                "NoveliaIOSCore",
                 .product(name: "YueduCoreText", package: "YueduCoreText"),
                 .product(name: "ReadiumZIPFoundation", package: "ZIPFoundation"),
             ],
@@ -35,7 +38,7 @@ let package = Package(
                 "EPUBReaderView.swift",
                 "EPUBSampleBook.swift",
             ],
-            sources: ["EPUBChapterSource.swift", "EPUBContainer.swift", "EPUBPageBook.swift"]
+            sources: ["EPUBChapterSource.swift", "EPUBContainer.swift", "EPUBLayoutCoordinator.swift", "EPUBPageBook.swift"]
         ),
         .testTarget(name: "NoveliaIOSCoreTests", dependencies: ["NoveliaIOSCore"], path: "Tests/NoveliaIOSCoreTests"),
         .testTarget(

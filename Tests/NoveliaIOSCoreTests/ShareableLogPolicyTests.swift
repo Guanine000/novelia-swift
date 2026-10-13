@@ -102,3 +102,43 @@ final class EPUBLogExportTests: XCTestCase {
         XCTAssertEqual(ShareableLogAggregator.collapse([]), [])
     }
 }
+
+/// Structured cache/layout lines (trace, book tag, source, reason, cacheHit, thread, mono).
+final class StructuredDiagnosticsExportTests: XCTestCase {
+    private func exported(_ category: String, _ text: String) -> String? {
+        ShareableLogPolicy.message(subsystem: ShareableLogPolicy.subsystem, category: category, text: text)
+    }
+
+    func testStructuredLinesPass() {
+        let lines = [
+            ("txt", "TXT open requested; trace=1a2b3c4d, source=open, mode=paged, mono=81234567"),
+            ("txt", "TXT decode succeeded; trace=1a2b3c4d, book=0f0e0d0c, source=import, reason=first, cacheHit=false, bytes=8969801, elapsedMs=63, thread=background, mono=81234567"),
+            ("txt", "TXT chapters parsed; trace=1a2b3c4d, book=0f0e0d0c, source=open, reason=first, cacheHit=false, lines=237923, chapters=1675, elapsedMs=611, thread=background, mono=81235178"),
+            ("txt", "TXT cache hit; trace=99aa88bb, book=0f0e0d0c, source=open, reason=reopen, level=parsed, cacheHit=true, chapters=1675, elapsedMs=0, thread=background, mono=81239000"),
+            ("txt", "TXT cache hit; trace=99aa88bb, book=0f0e0d0c, source=import, reason=reopen, level=decoded, cacheHit=true, bytes=8969801, elapsedMs=0, thread=background, mono=81239000"),
+            ("txt", "TXT import skipped duplicate; trace=99aa88bb, book=0f0e0d0c, elapsedMs=91, mono=81239000"),
+            ("epub", "EPUB open started; kind=txt, trace=1a2b3c4d, source=open, mono=81240000"),
+            ("epub", "EPUB open succeeded; kind=epub, trace=1a2b3c4d, book=0f0e0d0c, totalSpine=48, toc=45, currentSpine=3, currentChapterPages=27, restored=true, elapsedMs=812, mono=81240000"),
+            ("epub", "EPUB chapter laid out; book=0f0e0d0c, trace=1a2b3c4d, gen=2, spine=3, totalSpine=48, currentSpine=3, reason=restore, pages=27, cacheHit=false, elapsedMs=383, thread=main, mono=81240000"),
+            ("epub", "EPUB chapter layout reused; book=0f0e0d0c, trace=1a2b3c4d, gen=3, spine=4, totalSpine=48, currentSpine=3, reason=prefetch, pages=9, cacheHit=true, level=inflight, elapsedMs=40, thread=main, mono=81240000"),
+            ("epub", "EPUB chapter layout cancelled; book=0f0e0d0c, trace=1a2b3c4d, gen=2, spine=2, totalSpine=48, currentSpine=3, reason=prefetch, elapsedMs=8, thread=main, mono=81240000"),
+            ("epub", "EPUB relayout scheduled; trace=1a2b3c4d, gen=2, reason=rotate, cancelledTasks=3, mono=81240000"),
+            ("epub", "EPUB reader closed; trace=1a2b3c4d, gen=3, cancelledTasks=2, mono=81240000"),
+        ]
+        for (category, line) in lines {
+            XCTAssertEqual(exported(category, line), line, line)
+        }
+    }
+
+    func testStructuredFieldsRejectFreeText() {
+        for line in [
+            "TXT decode succeeded; trace=1a2b3c4d, book=/Users/a/b.txt, source=import, reason=first, cacheHit=false, bytes=1, elapsedMs=1, thread=background, mono=1",
+            "TXT cache hit; trace=1a2b3c4d, book=0f0e0d0c, source=小说, reason=reopen, level=parsed, cacheHit=true, chapters=1, elapsedMs=0, thread=background, mono=1",
+            "TXT chapters parsed; trace=1A2B3C4D, book=0f0e0d0c, source=open, reason=first, cacheHit=false, lines=1, chapters=1, elapsedMs=1, thread=background, mono=1",
+            "TXT chapters parsed; trace=1a2b3c4d, book=0f0e0d0c, source=open, reason=first, cacheHit=false, lines=1, chapters=1, elapsedMs=1, thread=worker, mono=1",
+        ] {
+            XCTAssertNil(exported("txt", line), line)
+        }
+        XCTAssertNil(exported("epub", "EPUB chapter laid out; book=0f0e0d0c, trace=1a2b3c4d, gen=2, spine=3, totalSpine=48, currentSpine=3, reason=第一章, pages=27, cacheHit=false, elapsedMs=383, thread=main, mono=1"))
+    }
+}

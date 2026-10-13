@@ -2,6 +2,9 @@ import Foundation
 import OSLog
 import UIKit
 import YueduCoreText
+#if canImport(NoveliaIOSCore)
+import NoveliaIOSCore
+#endif
 
 // MARK: - 页面标识与排版缓存（核心不变量）
 //
@@ -34,29 +37,34 @@ enum EPUBLayoutFailure: LocalizedError {
     }
 }
 
+/// Correlation details for one chapter layout request (diagnostics only, except `bookID`,
+/// which also scopes the shared layout cache).
+struct EPUBLayoutContext {
+    /// Stable identity of the book content (EPUB file hash, TXT hash + rules). `nil` keeps the
+    /// layout private to this page book: it is still de-duplicated but never cached.
+    var bookID: String?
+    var trace = "00000000"
+    var reason: EPUBLayoutReason = .first
+    var totalSpine = 0
+    var currentSpine = 0
+}
+
 @MainActor
 final class EPUBPageBook {
     let generation: Int
+    private let coordinator: EPUBLayoutCoordinator
+    /// Scopes uncached layouts (no book identity) to this page book.
+    private let privateBookID = "private-" + UUID().uuidString
 
-    private struct ChapterLayout {
-        var pages: [PageFragments]
-        var sourceText: String
-        /// 每页的 DisplayList（渲染与链接命中共用，避免重复构建）。
-        var displayLists: [DisplayList]
-        /// 每页可点击链接区域（含 noteref 语义），页序号 → 区域集合。
-        var linkRegions: [LinkInteractionRegionSet]
-        /// 本章注脚文本：noteID（不含 #）→ 文本。
-        var footnotes: [String: String]
-    }
-
-    private var chapters: [Int: ChapterLayout] = [:]
+    private var chapters: [Int: EPUBChapterLayout] = [:]
     private var completedChapters = Set<Int>()
     private var renderedImages: [EPUBPageID: CGImage] = [:]
     /// 每排出一页回调一次（主线程）；宿主借此刷新"下一页已就绪"的可用性。
     var onPagesChanged: (() -> Void)?
 
-    init(generation: Int) {
+    init(generation: Int, coordinator: EPUBLayoutCoordinator = .shared) {
         self.generation = generation
+        self.coordinator = coordinator
     }
 
     /// YueduCoreText 0.8.0 justifies a line by kerning only some of its characters.
@@ -67,13 +75,19 @@ final class EPUBPageBook {
         config.letterSpacing = 0.001
     }
 
-    /// 把一章交给 YueduCoreText 逐页排版。
+    /// 把一章交给 YueduCoreText 逐页排版（经 EPUBLayoutCoordinator 去重与缓存）。
     /// 每页之间让路主线程（yield）并立即发布已完成的页——真实书籍整章一次排完
     /// 会冻结 UI 数秒（卡顿），逐页增量让第一页立即可用、翻页预览尽早就绪。
     func layoutChapter(_ spineIndex: Int, container: any EPUBChapterSource,
                        config: BrowserLayoutConfig, aspectRatio: CGFloat = 0.5,
-                       readerCSS: String? = nil) async throws {
+                       readerCSS: String? = nil, context: EPUBLayoutContext = EPUBLayoutContext()) async throws {
         let start = ContinuousClock.now
+        let book = DiagnosticContext.bookTag(context.bookID ?? privateBookID)
+        let fields = "book=\(book), trace=\(context.trace), gen=\(generation), spine=\(spineIndex), totalSpine=\(context.totalSpine), currentSpine=\(context.currentSpine), reason=\(context.reason.rawValue)"
+        if completedChapters.contains(spineIndex) {
+            EPUBLayoutLog.logger.info("EPUB chapter layout reused; \(fields, privacy: .public), pages=\(self.pageCount(spineIndex: spineIndex), privacy: .public), cacheHit=true, level=book, elapsedMs=0, thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+            return
+        }
         var config = config
         let tally = EPUBLayoutLog.traceEnabled ? EPUBLayoutTraceTally() : nil
         if let tally {
@@ -84,16 +98,43 @@ final class EPUBPageBook {
                 forward?(diagnostic)
             }
         }
+        let key = EPUBLayoutCoordinator.Key(
+            bookID: context.bookID ?? privateBookID, spine: spineIndex,
+            parameters: EPUBLayoutParameters(config: config, aspectRatio: aspectRatio, readerCSS: readerCSS))
+        let runConfig = config
         do {
-            try await performLayout(spineIndex, container: container, config: config,
-                                    aspectRatio: aspectRatio, readerCSS: readerCSS)
-            EPUBLayoutLog.logger.info("EPUB chapter laid out; spine=\(spineIndex, privacy: .public), pages=\(self.pageCount(spineIndex: spineIndex), privacy: .public), elapsedMs=\(EPUBLayoutLog.milliseconds(since: start), privacy: .public)")
+            let (layout, outcome) = try await coordinator.layout(
+                key: key, cacheable: context.bookID != nil,
+                priority: context.reason == .prefetch ? .prefetch : .current,
+                observer: { [weak self] partial in
+                    // 渐进发布：即使本章尚未排完，已完成的页即可用于显示与预览。
+                    guard let self, !self.completedChapters.contains(spineIndex) else { return }
+                    self.chapters[spineIndex] = partial
+                    self.onPagesChanged?()
+                },
+                work: { publish in
+                    try await Self.performLayout(spineIndex, container: container, config: runConfig,
+                                                 aspectRatio: aspectRatio, readerCSS: readerCSS, publish: publish)
+                })
+            chapters[spineIndex] = layout
+            completedChapters.insert(spineIndex)
+            onPagesChanged?()
+            let elapsed = EPUBLayoutLog.milliseconds(since: start)
+            switch outcome {
+            case .executed:
+                EPUBLayoutLog.logger.info("EPUB chapter laid out; \(fields, privacy: .public), pages=\(layout.pages.count, privacy: .public), cacheHit=false, elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+            case .inflight, .memory:
+                EPUBLayoutLog.logger.info("EPUB chapter layout reused; \(fields, privacy: .public), pages=\(layout.pages.count, privacy: .public), cacheHit=true, level=\(outcome.rawValue, privacy: .public), elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+            }
         } catch {
             let failure = EPUBLayoutLog.failure(error)
+            let elapsed = EPUBLayoutLog.milliseconds(since: start)
             if failure.kind == "cancelled" {
-                EPUBLayoutLog.logger.info("EPUB chapter layout cancelled; spine=\(spineIndex, privacy: .public), elapsedMs=\(EPUBLayoutLog.milliseconds(since: start), privacy: .public)")
+                // A cancelled request keeps no partial pages: they may belong to a layout that stopped early.
+                if !completedChapters.contains(spineIndex) { chapters[spineIndex] = nil }
+                EPUBLayoutLog.logger.info("EPUB chapter layout cancelled; \(fields, privacy: .public), elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
             } else {
-                EPUBLayoutLog.logger.error("EPUB chapter layout failed; spine=\(spineIndex, privacy: .public), error=\(failure.kind, privacy: .public), code=\(failure.code, privacy: .public), elapsedMs=\(EPUBLayoutLog.milliseconds(since: start), privacy: .public)")
+                EPUBLayoutLog.logger.error("EPUB chapter layout failed; \(fields, privacy: .public), error=\(failure.kind, privacy: .public), code=\(failure.code, privacy: .public), elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
             }
             tally?.logSummary(spineIndex: spineIndex)
             throw error
@@ -101,15 +142,18 @@ final class EPUBPageBook {
         tally?.logSummary(spineIndex: spineIndex)
     }
 
-    private func performLayout(_ spineIndex: Int, container: any EPUBChapterSource,
-                               config: BrowserLayoutConfig, aspectRatio: CGFloat,
-                               readerCSS: String?) async throws {
+    private static func performLayout(_ spineIndex: Int, container: any EPUBChapterSource,
+                                      config: BrowserLayoutConfig, aspectRatio: CGFloat,
+                                      readerCSS: String?,
+                                      publish: (EPUBChapterLayout) -> Void) async throws -> EPUBChapterLayout {
         let html = try await container.chapterHTML(at: spineIndex)
+        try Task.checkCancellation()
         let chapterHref = container.chapterHref(at: spineIndex)
         var css = await container.cssTexts(forChapterHTML: html, chapterHref: chapterHref,
                                            aspectRatio: aspectRatio)
         if let readerCSS { css.append(readerCSS) }
         let images = await container.images(forChapterHTML: html, chapterHref: chapterHref)
+        try Task.checkCancellation()
 
         let document = HTMLLayoutDocument(
             html: html,
@@ -119,8 +163,8 @@ final class EPUBPageBook {
         )
         let session = try document.makePageSession()
         // 先构建流水线（不排版页面），使 sourceText 就绪——DisplayList 文本切片依赖它。
-        _ = try await session.prepare()
-        var layout = ChapterLayout(
+        _ = try session.prepare()
+        var layout = EPUBChapterLayout(
             pages: [], sourceText: session.sourceText, displayLists: [], linkRegions: [], footnotes: [:]
         )
         while let page = try await session.layoutNextPage() {
@@ -130,16 +174,12 @@ final class EPUBPageBook {
             layout.linkRegions.append(LinkInteractionRegionSet.build(
                 from: list, spineIndex: spineIndex, anchors: session.pipelineLinkAnchors
             ))
-            // 渐进发布：即使本章尚未排完，已完成的页即可用于显示与预览。
-            chapters[spineIndex] = layout
-            onPagesChanged?()
+            publish(layout)
             await Task.yield()
             try Task.checkCancellation()
         }
         layout.footnotes = session.pipelineFootnotes
-        chapters[spineIndex] = layout
-        completedChapters.insert(spineIndex)
-        onPagesChanged?()
+        return layout
     }
 
     func isChapterComplete(_ spineIndex: Int) -> Bool {
@@ -315,8 +355,7 @@ enum EPUBLayoutLog {
     }()
 
     static func milliseconds(since start: ContinuousClock.Instant) -> Int {
-        let elapsed = ContinuousClock.now - start
-        return Int(elapsed.components.seconds * 1_000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
+        DiagnosticContext.milliseconds(since: start)
     }
 
     /// A fixed kind name and numeric code; error descriptions may hold file paths or book text.

@@ -150,11 +150,15 @@ struct DownloadedWebNovelTXTReader: View {
         }
         .task(id: url) {
             do {
-                chapters = try await Task.detached(priority: .userInitiated) {
-                    let text = try TXTTextDecoder.decode(contentsOf: url)
-                    return TXTChapterParser.parse(text, rules: rules)
-                }.value
+                // Decoding and chapter splitting run once per file content (TXTBookCache);
+                // reopening, switching modes or re-creating this view reuses the result.
+                let trace = DiagnosticContext.newTraceID()
+                TXTDiagnosticLog.logger.info("TXT open requested; trace=\(trace, privacy: .public), source=open, mode=scroll, mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+                let book = try await TXTBookCache.shared.book(at: url, rules: rules, source: .open, trace: trace)
+                guard !Task.isCancelled else { return }
+                chapters = book.chapters
             } catch {
+                guard !Task.isCancelled else { return }
                 let nsError = error as NSError
                 TXTDiagnosticLog.logger.error("TXT reader load failed; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public)")
                 errorMessage = error.localizedDescription
@@ -236,28 +240,44 @@ private struct TXTPagedReader: View {
 
     private func load() async {
         do {
-            let (hash, contents) = try await Task.detached(priority: .userInitiated) { [url, rules] in
-                let text = try TXTTextDecoder.decode(contentsOf: url)
-                let chapters = TXTChapterParser.parse(text, rules: rules)
-                let contents = chapters.map {
-                    TextChapterContent(title: $0.title, subtitle: $0.volumeTitle,
-                                       paragraphs: TextChapterXHTML.paragraphs(fromLines: $0.body))
-                }
-                return (try WebDAVFileHash.sha256(url), contents)
-            }.value
-            let units = TextChapterSource.units(splitting: contents)
-            let key = TXTPagedPosition.key(hash: hash)
+            let trace = DiagnosticContext.newTraceID()
+            TXTDiagnosticLog.logger.info("TXT open requested; trace=\(trace, privacy: .public), source=open, mode=paged, mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+            let parsed = try await TXTBookCache.shared.book(at: url, rules: rules, source: .open, trace: trace)
+            let identity = "txt|\(parsed.contentHash)|\(parsed.rulesFingerprint)"
+            let units = await TXTPagedUnits.shared.units(for: parsed, identity: identity)
+            guard !Task.isCancelled else { return }
+            let key = TXTPagedPosition.key(hash: parsed.contentHash)
             let saved = TXTPagedPosition.load(key: key, unitCount: units.count)
             book = PagedTextBook(
-                source: TextChapterSource(bookTitle: title, units: units),
+                source: TextChapterSource(bookTitle: title, units: units, layoutIdentity: identity),
                 startUnit: saved?.unit ?? 0, startOffset: saved?.offset,
                 onPosition: { unit, offset in
                     TXTPagedPosition.save(TXTPagedPosition(unit: unit, offset: offset, unitCount: units.count), key: key)
                 })
         } catch {
+            guard !Task.isCancelled else { return }
             let nsError = error as NSError
             TXTDiagnosticLog.logger.error("TXT reader load failed; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public)")
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+/// Paged units of the most recent TXT book, built off the main thread. Splitting 1,000+
+/// chapters into paragraphs is the remaining per-open cost after the parse cache; keeping
+/// the last book makes a reopen or a scroll→paged switch immediate.
+private actor TXTPagedUnits {
+    static let shared = TXTPagedUnits()
+    private var last: (identity: String, units: [TextChapterSource.Unit])?
+
+    func units(for book: TXTParsedBook, identity: String) -> [TextChapterSource.Unit] {
+        if let last, last.identity == identity { return last.units }
+        let contents = book.chapters.map {
+            TextChapterContent(title: $0.title, subtitle: $0.volumeTitle,
+                               paragraphs: TextChapterXHTML.paragraphs(fromLines: $0.body))
+        }
+        let units = TextChapterSource.units(splitting: contents)
+        last = (identity, units)
+        return units
     }
 }

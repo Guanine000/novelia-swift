@@ -11,6 +11,16 @@ public enum ShareableLogPolicy {
             #"TXT decode succeeded; bytes=[0-9]{1,12}, elapsedMs=[0-9]{1,12}"#,
             #"TXT chapter detection fell back to full text; lines=[0-9]{1,12}, headings=[0-9]{1,12}, elapsedMs=[0-9]{1,12}"#,
             #"TXT chapters parsed; lines=[0-9]{1,12}, chapters=[0-9]{1,12}, elapsedMs=[0-9]{1,12}"#,
+            // Structured events from TXTBookCache (0.12.1+).
+            #"TXT decode succeeded; trace=\#(hex8), book=\#(hex8), source=\#(txtSource), reason=\#(txtReason), cacheHit=false, bytes=[0-9]{1,12}, elapsedMs=[0-9]{1,12}\#(tail)"#,
+            #"TXT decode failed; trace=\#(hex8), book=\#(hex8), source=\#(txtSource), bytes=[0-9]{1,12}, elapsedMs=[0-9]{1,12}, attempted=UTF-8/BOM-Unicode/GB18030/GBK/Big5/Shift_JIS\#(tail)"#,
+            #"TXT chapters parsed; trace=\#(hex8), book=\#(hex8), source=\#(txtSource), reason=\#(txtReason), cacheHit=false, lines=[0-9]{1,12}, chapters=[0-9]{1,12}, elapsedMs=[0-9]{1,12}\#(tail)"#,
+            #"TXT chapter detection fell back to full text; trace=\#(hex8), book=\#(hex8), source=\#(txtSource), reason=\#(txtReason), cacheHit=false, lines=[0-9]{1,12}, headings=[0-9]{1,12}, elapsedMs=[0-9]{1,12}\#(tail)"#,
+            #"TXT cache hit; trace=\#(hex8), book=\#(hex8), source=\#(txtSource), reason=\#(txtReason), level=(?:parsed|decoded|inflight), cacheHit=true, (?:chapters|bytes)=[0-9]{1,12}, elapsedMs=[0-9]{1,12}\#(tail)"#,
+            #"TXT open requested; trace=\#(hex8), source=\#(txtSource), mode=(?:scroll|paged), mono=[0-9]{1,12}"#,
+            #"TXT import started; trace=\#(hex8), mono=[0-9]{1,12}"#,
+            #"TXT import completed; trace=\#(hex8), book=\#(hex8), elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"TXT import skipped duplicate; trace=\#(hex8), book=\#(hex8), elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
         ],
         "novel-download": [
             #"Novel EPUB request failed before receiving an HTTP response; domain=(?:NSURLErrorDomain|NSCocoaErrorDomain|NSPOSIXErrorDomain), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
@@ -33,11 +43,34 @@ public enum ShareableLogPolicy {
             #"EPUB chapter laid out; spine=[0-9]{1,8}, pages=[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
             #"EPUB chapter layout failed; spine=[0-9]{1,8}, error=\#(errorKindPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
             #"EPUB chapter layout cancelled; spine=[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
+            // Structured events from EPUBReaderModel / EPUBLayoutCoordinator (0.12.1+).
+            #"EPUB open started; kind=\#(bookKind), trace=\#(hex8), source=(?:open|restore), mono=[0-9]{1,12}"#,
+            #"EPUB open succeeded; kind=\#(bookKind), trace=\#(hex8), book=\#(hex8), totalSpine=[0-9]{1,8}, toc=[0-9]{1,8}, currentSpine=[0-9]{1,8}, currentChapterPages=[0-9]{1,8}, restored=(?:true|false), elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"EPUB open failed; kind=\#(bookKind), trace=\#(hex8), stage=(?:hash|container|layout), error=\#(errorKindPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"EPUB open cancelled; kind=\#(bookKind), trace=\#(hex8), elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"EPUB reader closed; trace=\#(hex8), gen=[0-9]{1,8}, cancelledTasks=[0-9]{1,6}, mono=[0-9]{1,12}"#,
+            #"EPUB relayout scheduled; trace=\#(hex8), gen=[0-9]{1,8}, reason=\#(layoutReason), cancelledTasks=[0-9]{1,6}, mono=[0-9]{1,12}"#,
+            #"EPUB chapter laid out; \#(layoutFields), pages=[0-9]{1,8}, cacheHit=false, elapsedMs=[0-9]{1,12}\#(tail)"#,
+            #"EPUB chapter layout reused; \#(layoutFields), pages=[0-9]{1,8}, cacheHit=true, level=(?:memory|inflight|book), elapsedMs=[0-9]{1,12}\#(tail)"#,
+            #"EPUB chapter layout cancelled; \#(layoutFields), elapsedMs=[0-9]{1,12}\#(tail)"#,
+            #"EPUB chapter layout failed; \#(layoutFields), error=\#(errorKindPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}\#(tail)"#,
         ],
         "enginediag": [
             #"EPUB layout trace summary; spine=[0-9]{1,8}, events=[0-9]{1,12}, html=[0-9]{1,12}, css=[0-9]{1,12}, selector=[0-9]{1,12}, style=[0-9]{1,12}, ingestion=[0-9]{1,12}, adapter=[0-9]{1,12}, allocation=[0-9]{1,12}"#,
         ],
     ]
+    private static let hex8 = "[0-9a-f]{8}"
+    private static let tail = ", thread=(?:main|background), mono=[0-9]{1,12}"
+    public static let txtSources = ["import", "download", "open", "restore"]
+    public static let txtReasons = ["first", "reopen", "concurrent", "duplicate", "evicted", "rulesChange"]
+    /// Why a chapter layout ran; EPUBLayoutReason raw values.
+    public static let layoutReasons = ["first", "restore", "prefetch", "navigate", "seek", "retry", "resize", "rotate", "fontChange", "styleChange", "themeChange", "backgroundChange"]
+    private static let txtSource = "(?:" + txtSources.joined(separator: "|") + ")"
+    private static let txtReason = "(?:" + txtReasons.joined(separator: "|") + ")"
+    private static let layoutReason = "(?:" + layoutReasons.joined(separator: "|") + ")"
+    private static let bookKind = "(?:epub|txt|online)"
+    private static let layoutFields = "book=\(hex8), trace=\(hex8), gen=[0-9]{1,8}, spine=[0-9]{1,8}, totalSpine=[0-9]{1,8}, currentSpine=[0-9]{1,8}, reason=\(layoutReason)"
+
     /// Error kinds the EPUB reader logs: fixed names, never error descriptions.
     public static let errorKinds = ["unsupported", "resource", "layout", "cancelled", "archive", "container", "opf", "spine", "cocoa", "posix", "url", "other"]
     private static let errorKindPattern = "(?:" + errorKinds.joined(separator: "|") + ")"
