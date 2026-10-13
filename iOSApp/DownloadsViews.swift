@@ -369,17 +369,13 @@ struct MyDownloadsView: View {
                                 }
                             } label: {
                                 HStack(spacing: 12) {
-                                    if let coverURL = wenkuDownloads.coverURL(for: book),
-                                       let image = UIImage(contentsOfFile: coverURL.path) {
-                                        Image(uiImage: image).resizable().scaledToFill()
-                                            .frame(width: 52, height: 72)
-                                            .clipShape(RoundedRectangle(cornerRadius: 7))
-                                    } else {
+                                    CoverImage(url: wenkuDownloads.coverFileURL(for: book)) {
                                         Image(systemName: "book.closed.fill")
                                             .font(.title2).foregroundStyle(NoveliaStyle.brandGreen)
-                                            .frame(width: 52, height: 72)
                                             .background(NoveliaStyle.brandGreen.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
                                     }
+                                    .frame(width: 52, height: 72)
+                                    .clipShape(RoundedRectangle(cornerRadius: 7))
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(book.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
                                         Text(book.resolvedFileFormat.title)
