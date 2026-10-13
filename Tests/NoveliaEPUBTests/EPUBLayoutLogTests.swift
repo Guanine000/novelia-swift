@@ -2,10 +2,10 @@ import XCTest
 import YueduCoreText
 @testable import NoveliaEPUB
 
-/// The reader no longer installs the engine trace hook; these tests measure what that hook
-/// produced and check the per-chapter summary that replaces it.
+/// 阅读器不再安装引擎跟踪钩子；这些测试测量该钩子原先产生的记录，
+/// 并检查用于替代它的章节摘要。
 final class EPUBLayoutLogTests: XCTestCase {
-    /// Before: one OSLog fault per trace event. After: one info line per chapter.
+    /// 之前每个跟踪事件记录一条 OSLog fault；现在每章记录一条 info。
     @MainActor
     func testEngineTraceVolumeVersusChapterSummaries() async throws {
         for name in ["justified_cjk", "epub3_refines"] {
@@ -31,7 +31,7 @@ final class EPUBLayoutLogTests: XCTestCase {
             }
             let events = tally.snapshot.values.reduce(0, +)
             print("LOGVOLUME \(name): chapters=\(container.spine.count) traceEvents(before)=\(events) chapterSummaries(after)=\(container.spine.count) traced=\(tracedTime) plain=\(plainTime) \(tally.summary(spineIndex: 0))")
-            // The CJK fixture has real paragraphs: the trace emits hundreds of events per chapter.
+            // 中日韩样例包含真实段落：跟踪每章会产生数百个事件。
             if name == "justified_cjk" { XCTAssertGreaterThan(events, 100) }
         }
     }

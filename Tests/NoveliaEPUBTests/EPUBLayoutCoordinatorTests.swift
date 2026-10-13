@@ -5,12 +5,12 @@ import YueduCoreText
 import NoveliaIOSCore
 @testable import NoveliaEPUB
 
-/// Same book + chapter + layout parameters lay out once; cancelled requests stop the work.
+/// 相同书籍、章节和排版参数只排版一次；取消请求会停止对应工作。
 @MainActor
 final class EPUBLayoutCoordinatorTests: XCTestCase {
     private static let paragraph = "　　月光透过窗棂洒在书桌上，她轻轻合上那本旧书，指尖还残留着纸页的温度。「明天，」她低声说，「我们再去一次那座桥吧。」"
 
-    /// Generated chapters long enough to span many pages.
+    /// 足够长、可以跨越多页的生成章节。
     private func source(chapters: Int = 3, paragraphs: Int = 120) -> TextChapterSource {
         let contents = (0..<chapters).map { index in
             TextChapterContent(title: "第\(index + 1)章", subtitle: nil,
@@ -41,7 +41,7 @@ final class EPUBLayoutCoordinatorTests: XCTestCase {
         XCTAssertTrue(second.isChapterComplete(0))
     }
 
-    /// Reopening the book (a new page book) reuses the completed layout from the LRU.
+    /// 重新打开书籍（新建分页书籍对象）时复用 LRU 中已完成的排版。
     func testCompletedLayoutIsReusedByNextOpen() async throws {
         let coordinator = EPUBLayoutCoordinator()
         let container = source()
@@ -52,7 +52,7 @@ final class EPUBLayoutCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.statistics.executed, 1)
         XCTAssertEqual(coordinator.statistics.memoryHits, 1)
         XCTAssertEqual(reopened.displayLists(spineIndex: 1).count, opened.displayLists(spineIndex: 1).count)
-        // A repeated request on the same book is answered by the book itself.
+        // 对同一书籍的重复请求由书籍对象自身响应。
         try await reopened.layoutChapter(1, container: container, config: config, aspectRatio: 440 / 956, context: context())
         XCTAssertEqual(coordinator.statistics.memoryHits, 1)
     }
@@ -72,7 +72,7 @@ final class EPUBLayoutCoordinatorTests: XCTestCase {
         var otherContext = context()
         otherContext.bookID = "txt|other"
         try await otherBook.layoutChapter(0, container: container, config: config, aspectRatio: 440 / 956, context: otherContext)
-        // Without a book identity nothing is cached across page books.
+        // 没有书籍身份时，不在分页书籍对象之间缓存结果。
         for generation in 10...11 {
             let book = EPUBPageBook(generation: generation, coordinator: coordinator)
             try await book.layoutChapter(0, container: container, config: config, aspectRatio: 440 / 956)
@@ -81,7 +81,7 @@ final class EPUBLayoutCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.statistics.memoryHits, 0)
     }
 
-    /// The only waiter cancels mid-chapter: the shared layout stops, and the page book keeps no partial pages.
+    /// 唯一等待者在章节排版中途取消：共享排版停止，分页书籍对象不保留部分页面。
     func testCancellingOnlyRequestCancelsLayout() async throws {
         let coordinator = EPUBLayoutCoordinator()
         let book = EPUBPageBook(generation: 1, coordinator: coordinator)
@@ -103,7 +103,7 @@ final class EPUBLayoutCoordinatorTests: XCTestCase {
         XCTAssertFalse(book.hasChapter(0))
     }
 
-    /// One of two waiters leaves (e.g. an old generation); the other still gets the full layout.
+    /// 两个等待者之一离开（例如旧代次）；另一个仍获得完整排版。
     func testCancellingOneWaiterKeepsSharedLayout() async throws {
         let coordinator = EPUBLayoutCoordinator()
         let container = source(chapters: 1, paragraphs: 300)
@@ -122,7 +122,7 @@ final class EPUBLayoutCoordinatorTests: XCTestCase {
         XCTAssertGreaterThan(current.pageCount(spineIndex: 0), 5)
     }
 
-    /// A prefetch requested while the current chapter is laid out starts only after it.
+    /// 当前章节排版期间请求的预取，仅在当前章节完成后开始。
     func testPrefetchWaitsForCurrentChapter() async throws {
         let coordinator = EPUBLayoutCoordinator()
         let container = source(chapters: 2, paragraphs: 200)
@@ -141,7 +141,7 @@ final class EPUBLayoutCoordinatorTests: XCTestCase {
         XCTAssertFalse(events[firstPrefetch...].contains(0), "prefetch pages appeared before the current chapter finished: \(events)")
     }
 
-    /// Layout lines carry book, trace, generation, reason and cache outcome, and pass the export allowlist.
+    /// 排版日志包含书籍、跟踪标记、代次、原因和缓存结果，并通过导出白名单。
     func testLayoutLogsExplainEachRequest() async throws {
         let coordinator = EPUBLayoutCoordinator()
         let container = source()

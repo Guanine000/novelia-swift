@@ -29,7 +29,7 @@ private final class RenewalMock: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Token renewal coordinator (formerly scripts/test_session_renewal.py).
+/// 令牌续期协调器（原 scripts/test_session_renewal.py）。
 final class SessionRenewalTests: XCTestCase {
     func testTokenRenewal() async {
         let expired = jwt("alice", 1), fresh = jwt("alice", Date().timeIntervalSince1970 + 3600)

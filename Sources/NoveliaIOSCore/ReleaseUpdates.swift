@@ -3,7 +3,7 @@ import Foundation
 
 // GitHub release check offered at launch (see "我的 → 版本").
 
-/// Stable release numbers only; prereleases are intentionally excluded.
+/// 仅接受正式版本号，排除预发布版本。
 struct NoveliaReleaseVersion: Comparable, Equatable {
     let parts: [Int]
     init?(_ text: String) {
@@ -73,7 +73,7 @@ final class NoveliaUpdateStore: ObservableObject {
                 release = candidate
             }
         } catch {
-            // An unavailable update service must not interrupt reading or login.
+            // 更新服务不可用时，不能中断阅读或登录。
         }
     }
 

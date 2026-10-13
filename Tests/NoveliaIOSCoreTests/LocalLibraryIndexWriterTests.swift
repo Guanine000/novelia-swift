@@ -6,7 +6,7 @@ final class LocalLibraryIndexWriterTests: XCTestCase {
     private struct ThreadCheckedSnapshot: Encodable, Sendable {
         let revision: Int
         func encode(to encoder: Encoder) throws {
-            // Encoding itself, not just the file write, must be off the main thread.
+            // 编码本身也必须在主线程之外执行，而不只是文件写入。
             if Thread.isMainThread { throw CocoaError(.coderInvalidValue) }
             var container = encoder.singleValueContainer()
             try container.encode(revision)

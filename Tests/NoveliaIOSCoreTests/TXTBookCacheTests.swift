@@ -15,7 +15,7 @@ final class TXTBookCacheTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
-    /// A GB18030 novel with `chapters` headed chapters, like the files users import.
+    /// 含 `chapters` 个带标题章节的 GB18030 小说，与用户导入的文件类似。
     private func writeNovel(_ name: String = "novel.txt", chapters: Int = 60, marker: String = "") throws -> URL {
         var text = "书名\n作者：测试\n\n"
         for index in 1...chapters {
@@ -57,8 +57,8 @@ final class TXTBookCacheTests: XCTestCase {
         XCTAssertEqual(stats.inFlightJoins + stats.parsedHits, 2)
     }
 
-    /// Import validates (decode only); the first open then only parses; re-importing a copy of
-    /// the same file is recognised by content and reuses everything.
+    /// 导入时校验（仅解码），首次打开时只需解析；再次导入
+    /// 相同文件的副本时，按内容识别并复用全部结果。
     func testImportThenOpenAndDuplicateImportReuse() async throws {
         let url = try writeNovel()
         let cache = TXTBookCache()
@@ -96,7 +96,7 @@ final class TXTBookCacheTests: XCTestCase {
         let cache = TXTBookCache()
         let before = try await cache.book(at: url, rules: .defaults, source: .open)
         _ = try writeNovel(marker: "（修订）")
-        // Same path; size changes with the marker, so the file identity changes.
+        // 路径相同；标记使文件大小变化，因此文件身份也变化。
         let after = try await cache.book(at: url, rules: .defaults, source: .open)
         XCTAssertNotEqual(before.contentHash, after.contentHash)
         XCTAssertTrue(after.chapters[1].title.contains("修订"))
@@ -104,7 +104,7 @@ final class TXTBookCacheTests: XCTestCase {
         XCTAssertEqual(decodes, 2)
     }
 
-    /// Paged reading positions are keyed by this hash; it must equal the streamed file hash.
+    /// 分页阅读位置以此哈希为键；它必须与流式文件哈希相同。
     func testContentHashIsFileSHA256() async throws {
         let url = try writeNovel()
         let expected = SHA256.hash(data: try Data(contentsOf: url)).map { String(format: "%02x", $0) }.joined()
@@ -134,8 +134,8 @@ final class TXTBookCacheTests: XCTestCase {
         XCTAssertFalse(stats.fellBackToFullText)
     }
 
-    /// Scale of the reported file (≈9 MB GB18030, 1,675 chapters): three opens before the cache
-    /// (decode + parse each time) versus with it. Prints both timings for the report.
+    /// 与报告文件相近的规模（约 9 MB GB18030、1,675 章）：比较没有缓存时
+    /// 三次打开（每次解码和解析）与启用缓存的情况。打印两种耗时供报告使用。
     func testLargeNovelThreeOpensBeforeAndAfter() async throws {
         var text = ""
         let line = "　　月光透过窗棂洒在书桌上，她轻轻合上那本旧书，指尖还残留着纸页的温度，窗外的风很轻。\n"
@@ -169,8 +169,8 @@ final class TXTBookCacheTests: XCTestCase {
         XCTAssertLessThan(after, before)
     }
 
-    /// Integration: three opens of one book log one decode and one parse; the other two opens
-    /// log cache hits. Every line carries the open's trace and passes the share-export allowlist.
+    /// 集成检查：同一本书打开三次，仅记录一次解码和一次解析；另两次
+    /// 记录缓存命中。每行包含本次打开的跟踪标记，并通过分享导出白名单。
     func testThreeOpensLogOneDecodeOneParse() async throws {
         let url = try writeNovel(chapters: 120)
         let cache = TXTBookCache()
@@ -228,7 +228,7 @@ final class LRUCacheTests: XCTestCase {
 }
 
 extension TXTBookCacheTests {
-    /// A new launch (a fresh cache over the same disk directory) opens without decoding or parsing.
+    /// 新一次启动（使用同一磁盘目录的新缓存实例）打开时无需解码或解析。
     func testDiskCacheSkipsDecodeAndParseOnNextLaunch() async throws {
         let url = try writeNovel(chapters: 80)
         let disk = TXTChapterDiskCache(directory: directory.appendingPathComponent("chapters"))
@@ -280,8 +280,8 @@ extension TXTBookCacheTests {
 }
 
 extension TXTBookCacheTests {
-    /// About the size of the 0.11.3 report (8.9 MB, 1,675 chapters): first launch versus a
-    /// later launch that reads the disk split. Timing is printed, not asserted tightly.
+    /// 接近 0.11.3 报告的规模（8.9 MB、1,675 章）：比较首次启动与
+    /// 后续启动读取磁盘章节划分的情况。仅打印耗时，不作严格时间断言。
     func testLargeBookSecondLaunchTiming() async throws {
         var text = "书名\n"
         let line = "　　月光透过窗棂洒在书桌上，她轻轻合上那本旧书，指尖还残留着纸页的温度。\n"

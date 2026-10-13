@@ -80,7 +80,7 @@ final class EPUBLogExportTests: XCTestCase {
         XCTAssertEqual(ShareableLogPolicy.domainLabel("NoveliaIOS.WenkuLocalLibraryError"), "app")
     }
 
-    /// The 0.11.3 (49) export: 3073 identical trace events in one second among a few real ones.
+    /// 0.11.3（49）的导出情况：一秒内有 3073 条相同跟踪事件，混杂少量实际事件。
     func testRepeatedEventsCollapseIntoOneCountedLine() {
         var lines = [ShareableLogLine(secondsAgo: 60, level: "info", category: "txt", message: "TXT decode succeeded; bytes=8969801, elapsedMs=64")]
         let storm = "EPUB layout trace event (Debug -EPUBEngineTrace only); details omitted for privacy"
@@ -103,7 +103,7 @@ final class EPUBLogExportTests: XCTestCase {
     }
 }
 
-/// Structured cache/layout lines (trace, book tag, source, reason, cacheHit, thread, mono).
+/// 结构化缓存与排版日志（trace、书籍标记、source、reason、cacheHit、thread、mono）。
 final class StructuredDiagnosticsExportTests: XCTestCase {
     private func exported(_ category: String, _ text: String) -> String? {
         ShareableLogPolicy.message(subsystem: ShareableLogPolicy.subsystem, category: category, text: text)

@@ -1,12 +1,12 @@
 import CryptoKit
 import Foundation
 
-/// Correlation fields shared by TXT and EPUB diagnostics. Every value is opaque: a book tag
-/// is a salted hash whose salt changes on each launch, so one exported log can relate the
-/// decode, parse and layout of a book without the tag identifying the file elsewhere.
+/// TXT 与 EPUB 诊断共用的关联字段。所有值都不包含原始身份信息：书籍标记
+/// 是加盐哈希，盐值每次启动都会改变，因此一份导出日志可关联同一本书的
+/// 解码、解析和排版过程，而标记不能用于在其他地方识别该文件。
 public enum DiagnosticContext {
-    /// Monotonic milliseconds (system uptime); differences between lines are exact even
-    /// when the export rounds timestamps to seconds.
+    /// 单调递增的毫秒时间（系统运行时间）；即使导出的时间戳取整到秒，
+    /// 不同行之间的时间差仍然准确。
     public static func monotonicMilliseconds() -> Int {
         Int(ProcessInfo.processInfo.systemUptime * 1_000)
     }
@@ -15,14 +15,14 @@ public enum DiagnosticContext {
         pthread_main_np() != 0 ? "main" : "background"
     }
 
-    /// Eight hex digits naming one open, import or reader session.
+    /// 用八位十六进制字符标识一次打开、导入或阅读器会话。
     public static func newTraceID() -> String {
         String(format: "%08x", UInt32.random(in: .min ... .max))
     }
 
     private static let launchSalt: [UInt8] = (0..<16).map { _ in UInt8.random(in: .min ... .max) }
 
-    /// Eight hex digits for a book identity (content hash, layout identity), stable within this launch only.
+    /// 用八位十六进制字符标识书籍身份（内容哈希、排版身份），仅在本次启动内保持稳定。
     public static func bookTag(_ identity: String) -> String {
         var digest = SHA256()
         digest.update(data: Data(launchSalt))
@@ -36,8 +36,8 @@ public enum DiagnosticContext {
     }
 }
 
-/// A least-recently-used map bounded by entry count and by a caller-defined total cost.
-/// Not thread-safe: confine an instance to one actor.
+/// 最近最少使用映射，同时限制条目数量和调用方定义的总成本。
+/// 不保证线程安全：每个实例应限制在单个 actor 内使用。
 public struct LRUCache<Key: Hashable, Value> {
     private struct Entry {
         var value: Value
@@ -68,8 +68,8 @@ public struct LRUCache<Key: Hashable, Value> {
         return entry.value
     }
 
-    /// Inserts and evicts the least recently used entries over either limit; the newest
-    /// entry is always kept, even when it alone exceeds the cost limit.
+    /// 插入条目，并在任一限制超出时淘汰最近最少使用的条目；
+    /// 最新条目始终保留，即使它单独就超过成本限制。
     public mutating func insert(_ value: Value, for key: Key, cost: Int = 1) {
         if let old = entries[key] { totalCost -= old.cost }
         clock += 1

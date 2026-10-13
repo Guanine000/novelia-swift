@@ -1,50 +1,28 @@
 import SwiftUI
 
 struct WenkuView: View {
-    @ObservedObject private var blocked = BlockedTagsStore.shared
-    @EnvironmentObject private var auth: AccountAuthStore
     @EnvironmentObject private var localLibrary: WenkuLocalLibraryStore
     @EnvironmentObject private var store: WenkuStore
-    @State private var section = WenkuSection.search
     @State private var query = ""
+    /// 嵌入“发现”页时不设置自己的导航标题。
+    private let embedded: Bool
 
-    init(initialQuery: String = "") {
+    init(initialQuery: String = "", embedded: Bool = false) {
         _query = State(initialValue: initialQuery)
+        self.embedded = embedded
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("文库", selection: $section) {
-                ForEach(WenkuSection.allCases) { item in
-                    Text(item.title).tag(item)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-
-            Group {
-                switch section {
-                case .search: searchContent
-                case .favorites: favoritesContent
-                case .downloaded: downloadedContent
-                }
-            }
-        }
-        .background(NoveliaStyle.paper.ignoresSafeArea())
-        .navigationTitle("文库")
-        .navigationBarTitleDisplayMode(.inline)
-        .environmentObject(store)
-        .task {
-            await localLibrary.refreshMissingMetadata()
-        }
-        .task(id: query) {
-            do { try await Task.sleep(nanoseconds: 350_000_000) } catch { return }
-            await store.search(query)
+        if embedded {
+            content
+        } else {
+            content
+                .navigationTitle("文库")
+                .navigationBarTitleDisplayMode(.inline)
         }
     }
 
-    private var searchContent: some View {
+    private var content: some View {
         VStack(spacing: 0) {
             HStack(spacing: 9) {
                 Image(systemName: "magnifyingglass").foregroundStyle(NoveliaStyle.muted)
@@ -58,12 +36,41 @@ struct WenkuView: View {
             .padding(12)
             .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
             .padding(.horizontal, 16)
-            .padding(.bottom, 8)
-            novelList(store.novels, loading: store.isLoading, error: store.errorMessage, loadMore: store.loadMore)
+            .padding(.top, 4)
+            HStack(spacing: 8) {
+                NavigationLink {
+                    WenkuFavoritesView()
+                        .environmentObject(store)
+                        .environmentObject(localLibrary)
+                } label: {
+                    DiscoverShortcutChip(title: "文库收藏", systemImage: "heart")
+                }
+                .buttonStyle(.plain)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            WenkuNovelList(novels: store.novels, loading: store.isLoading, error: store.errorMessage,
+                           filtersBlocked: true, loadMore: store.loadMore)
+        }
+        .background(NoveliaStyle.paper.ignoresSafeArea())
+        .environmentObject(store)
+        .task {
+            await localLibrary.refreshMissingMetadata()
+        }
+        .task(id: query) {
+            do { try await Task.sleep(nanoseconds: 350_000_000) } catch { return }
+            await store.search(query)
         }
     }
+}
 
-    private var favoritesContent: some View {
+/// 文库收藏（与网络小说收藏分开保存，并同步到 Novelia 网页端）。
+struct WenkuFavoritesView: View {
+    @EnvironmentObject private var auth: AccountAuthStore
+    @EnvironmentObject private var store: WenkuStore
+
+    var body: some View {
         Group {
             if auth.username == nil {
                 ContentUnavailableView {
@@ -79,22 +86,29 @@ struct WenkuView: View {
             } else if store.favorites.isEmpty {
                 ContentUnavailableView("文库收藏为空", systemImage: "books.vertical", description: Text("搜索文库作品后，在详情页添加收藏。"))
             } else {
-                novelList(store.favorites, loading: false, error: store.favoriteErrorMessage) { await store.refreshFavorites(account: auth.username) }
+                WenkuNovelList(novels: store.favorites, loading: false, error: store.favoriteErrorMessage,
+                               filtersBlocked: false) { await store.refreshFavorites(account: auth.username) }
             }
         }
+        .padding(.top, 8)
+        .background(NoveliaStyle.paper.ignoresSafeArea())
+        .navigationTitle("文库收藏")
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: auth.username) { await store.refreshFavorites(account: auth.username) }
     }
+}
 
-    private var downloadedContent: some View {
-        MyDownloadsView(initialTab: .wenku)
-    }
+private struct WenkuNovelList: View {
+    @ObservedObject private var blocked = BlockedTagsStore.shared
+    @EnvironmentObject private var localLibrary: WenkuLocalLibraryStore
+    let novels: [WenkuNovelOutline]
+    let loading: Bool
+    let error: String?
+    /// 搜索结果按标签屏蔽过滤；收藏保持原样。
+    let filtersBlocked: Bool
+    let loadMore: () async -> Void
 
-    @ViewBuilder
-    private func novelList(
-        _ novels: [WenkuNovelOutline],
-        loading: Bool,
-        error: String?,
-        loadMore: @escaping () async -> Void
-    ) -> some View {
+    var body: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 if loading && novels.isEmpty {
@@ -104,7 +118,7 @@ struct WenkuView: View {
                 } else if novels.isEmpty {
                     ContentUnavailableView("没有找到作品", systemImage: "books.vertical", description: Text("换个关键词试试。"))
                 }
-                ForEach(Array(novels.enumerated()).filter { section != .search || !blocked.hides(blocked.wenkuTags[$0.element.id] ?? []) }, id: \.element.id) { index, novel in
+                ForEach(Array(novels.enumerated()).filter { !filtersBlocked || !blocked.hides(blocked.wenkuTags[$0.element.id] ?? []) }, id: \.element.id) { index, novel in
                     NavigationLink {
                         WenkuDetailView(outline: novel)
                             .environmentObject(localLibrary)
@@ -116,7 +130,7 @@ struct WenkuView: View {
                         if index >= novels.count - 4 { await loadMore() }
                     }
                 }
-                if section == .search, !blocked.tags.isEmpty, !novels.isEmpty {
+                if filtersBlocked, !blocked.tags.isEmpty, !novels.isEmpty {
                     Button("加载更多作品") { Task { await loadMore() } }
                         .disabled(loading).padding()
                 }
@@ -130,18 +144,6 @@ struct WenkuView: View {
             .padding(.bottom, 20)
         }
         .refreshable { await loadMore() }
-    }
-}
-
-private enum WenkuSection: String, CaseIterable, Identifiable {
-    case search, favorites, downloaded
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .search: "搜索"
-        case .favorites: "收藏"
-        case .downloaded: "下载列表"
-        }
     }
 }
 
@@ -578,7 +580,7 @@ private struct WenkuDownloadSheet: View {
                     }
                 }
                 if let errorMessage { Section { Text(errorMessage).font(.footnote).foregroundStyle(.red) } }
-                if finished { Section { Label("下载完成，可在“我的 → 我的下载”中导出", systemImage: "checkmark.circle.fill").foregroundStyle(.green) } }
+                if finished { Section { Label("下载完成，可在“书库”中阅读或导出", systemImage: "checkmark.circle.fill").foregroundStyle(.green) } }
                 Section {
                     Button {
                         Task { await download() }

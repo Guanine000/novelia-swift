@@ -125,7 +125,7 @@ public enum NovelTranslationSource: String, CaseIterable, Identifiable, Hashable
     }
 }
 
-/// Language content included in a generated web-novel download.
+/// 生成的网络小说下载文件包含的语言内容。
 public enum WebNovelDownloadMode: String, CaseIterable, Identifiable, Hashable, Codable, Sendable {
     case original
     case translated
@@ -141,12 +141,12 @@ public enum WebNovelDownloadMode: String, CaseIterable, Identifiable, Hashable, 
         }
     }
 
-    /// Mode values understood by the Novelia generated-file endpoint.
+    /// Novelia 文件生成接口接受的模式值。
     public var apiValue: String {
         switch self {
         case .original: "jp"
         case .translated: "zh"
-        // The generated-file API spells the bilingual direction explicitly.
+        // 文件生成 API 显式区分双语排列顺序。
         case .bilingual: "jp-zh"
         }
     }

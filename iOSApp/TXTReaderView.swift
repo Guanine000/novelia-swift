@@ -12,7 +12,7 @@ struct DownloadedWebNovelTXTReader: View {
     let rules: TXTChapterRuleConfiguration
     @State private var chapters: [TXTChapter]?
     @State private var chapterIndex = 0
-    /// Content hash once loaded; the reading position (shared with paged mode) is keyed by it.
+    /// 加载后的内容哈希，用作阅读位置的键（与分页模式共享）。
     @State private var contentHash: String?
     @State private var bodyChunks: [String] = []
     @State private var bodyChunksChapterIndex: Int?
@@ -152,8 +152,8 @@ struct DownloadedWebNovelTXTReader: View {
         }
         .task(id: url) {
             do {
-                // Decoding and chapter splitting run once per file content (TXTBookCache);
-                // reopening, switching modes or re-creating this view reuses the result.
+                // 每份文件内容只解码和划分章节一次（TXTBookCache）；
+                // 重新打开、切换模式或重建此视图时复用结果。
                 let trace = DiagnosticContext.newTraceID()
                 TXTDiagnosticLog.logger.info("TXT open requested; trace=\(trace, privacy: .public), source=open, mode=scroll, mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
                 let book = try await TXTBookCache.shared.book(at: url, rules: rules, source: .open, trace: trace)
@@ -216,8 +216,8 @@ struct DownloadedWebNovelTXTReader: View {
     }
 }
 
-/// TXT laid out by YueduCoreText. Long chapters are split into units; the position is
-/// kept per file content (SHA-256) as unit index + text offset.
+/// 使用 YueduCoreText 排版的 TXT。长章节拆分为单元；阅读位置
+/// 按文件内容（SHA-256）保存为单元序号 + 文本偏移量。
 private struct TXTPagedReader: View {
     @ObservedObject private var settings = ReaderSettings.shared
     let url: URL
@@ -267,8 +267,8 @@ private struct TXTPagedReader: View {
                     guard let source else { return }
                     let position = TXTReadingPosition(chapter: source.tocEntry(containingUnit: unit) ?? 0, unit: unit,
                                                       offset: offset, unitCount: source.chapterCount)
-                    // Opening reports the restored page; re-stamping it would let this device
-                    // override a newer position from another device at the next sync.
+                    // 打开时会报告恢复的页面；若重新写入时间戳，下次同步时
+                    // 此设备可能覆盖另一台设备较新的阅读位置。
                     guard position != ReadingPositionSync.txtPosition(hash: hash) else { return }
                     ReadingPositionSync.recordTXT(hash: hash, position: position)
                 })
@@ -281,9 +281,9 @@ private struct TXTPagedReader: View {
     }
 }
 
-/// Paged units of the most recent TXT book, built off the main thread. Opening only scans
-/// for unit boundaries (paragraphs are split per unit at layout); keeping the last book
-/// makes a reopen or a scroll→paged switch immediate.
+/// 最近一本 TXT 的分页单元，在主线程之外构建。打开时仅扫描
+/// 单元边界（段落在单元排版时拆分）；保留最近一本书，
+/// 使重新打开或从滚动切换到分页时能够立即复用。
 private actor TXTPagedUnits {
     static let shared = TXTPagedUnits()
     private var last: (identity: String, units: [TextChapterSource.Unit])?

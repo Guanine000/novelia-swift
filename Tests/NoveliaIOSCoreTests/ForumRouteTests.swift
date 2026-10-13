@@ -2,8 +2,8 @@ import Foundation
 import XCTest
 @testable import NoveliaIOSCore
 
-/// In-app routing of forum, notice and novel links
-/// (formerly scripts/test_forum_notice_routes.py and the route checks in test_forum_markdown.py).
+/// 论坛、通知与小说链接的应用内路由
+/// （原 scripts/test_forum_notice_routes.py 及 test_forum_markdown.py 中的路由检查）。
 final class ForumRouteTests: XCTestCase {
     func testNovelRoutes() {
         XCTAssertEqual(ForumNovelRoute(url: URL(string: "https://n.novelia.cc/novel/syosetu/n123#chapter")!)?.provider, "syosetu", "web novel route")

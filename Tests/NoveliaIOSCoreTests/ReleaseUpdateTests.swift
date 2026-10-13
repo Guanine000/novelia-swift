@@ -20,7 +20,7 @@ private final class ReleaseMock: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Launch-time GitHub release check (formerly scripts/test_release_updates.py).
+/// 启动时检查 GitHub release（原 scripts/test_release_updates.py）。
 @MainActor
 final class ReleaseUpdateTests: XCTestCase {
     func testVersionParsing() {

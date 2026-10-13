@@ -16,8 +16,8 @@ final class AccountAuthStore: ObservableObject {
     private var sessionGeneration = 0
     private let cookieStore = WKWebsiteDataStore.default().httpCookieStore
     private let siteOrigin = URL(string: "https://n.novelia.cc")!
-    // The upstream client refreshes at auth.novelia.cc and reads that host's cookie.
-    // Its Origin header remains the app origin (n.novelia.cc).
+    // 上游客户端在 auth.novelia.cc 续期，并读取该主机的 Cookie。
+    // Origin 请求头仍使用应用来源（n.novelia.cc）。
     private let refreshURL = URL(string: "https://auth.novelia.cc/api/v1/auth/refresh?app=n")!
 
     init() {
@@ -56,8 +56,8 @@ final class AccountAuthStore: ObservableObject {
                 throw AccountAuthError.refreshRejected(http.statusCode)
             }
 
-            // URLSession and WKWebView have separate cookie stores. Persist rotated
-            // refresh cookies back to the authentication web view for the next renewal.
+            // URLSession 与 WKWebView 的 Cookie 存储相互独立。将轮换后的
+            // 刷新 Cookie 写回认证网页视图，供下次续期使用。
             let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, pair in
                 if let key = pair.key as? String { result[key] = String(describing: pair.value) }
             }
@@ -83,8 +83,8 @@ final class AccountAuthStore: ObservableObject {
         }
     }
 
-    /// Mirrors the upstream client's local logout: clear this app token but retain the
-    /// shared authentication website cookies, so another Novelia client session is unaffected.
+    /// 与上游客户端的本地退出行为一致：清除本应用令牌，但保留
+    /// 共用认证网站的 Cookie，避免影响其他 Novelia 客户端会话。
     func logout() {
         clearSession()
         forumAuth?.clearSession()
@@ -97,7 +97,7 @@ final class AccountAuthStore: ObservableObject {
         errorMessage = nil
     }
 
-    /// One website login establishes both API sessions for the same account.
+    /// 一次网站登录为同一账户建立两个 API 会话。
     func establishUnifiedSession() async -> Bool {
         while isRefreshing || forumAuth?.isRefreshing == true {
             do { try await Task.sleep(nanoseconds: 100_000_000) }
@@ -142,7 +142,7 @@ final class AccountAuthStore: ObservableObject {
               let subject = object["sub"] as? String,
               let expiration = object["exp"] as? NSNumber,
               expiration.doubleValue > Date().timeIntervalSince1970 else { return nil }
-        // JWT claims are used only for local display; authorization stays server-side.
+        // JWT 声明仅用于本地显示；授权判断仍由服务器负责。
         return subject
     }
 }
@@ -188,8 +188,8 @@ final class ForumAuthStore: ObservableObject {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else { throw AccountAuthError.invalidResponse }
             guard (200..<300).contains(http.statusCode) else { throw AccountAuthError.refreshRejected(http.statusCode) }
-            // URLSession and WKWebView have separate cookie stores. Persist rotated
-            // refresh cookies back to the authentication web view for the next renewal.
+            // URLSession 与 WKWebView 的 Cookie 存储相互独立。将轮换后的
+            // 刷新 Cookie 写回认证网页视图，供下次续期使用。
             let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, pair in
                 if let key = pair.key as? String { result[key] = String(describing: pair.value) }
             }
@@ -391,8 +391,8 @@ struct NoveliaLoginSheet: View {
         loginCompletionTask = Task { @MainActor in
             defer { loginCompletionTask = nil }
             do {
-                // Allow WebKit to publish response cookies, then wait for any
-                // in-flight renewal instead of losing this login-success signal.
+                // 等待 WebKit 更新响应 Cookie，再等待已有的
+                // 续期任务完成，避免丢失本次登录成功信号。
                 try await Task.sleep(nanoseconds: 150_000_000)
                 while auth.isRefreshing {
                     try await Task.sleep(nanoseconds: 100_000_000)
@@ -418,9 +418,9 @@ struct NoveliaAuthWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let controller = WKUserContentController()
         controller.add(context.coordinator, name: "noveliaAuth")
-        // The upstream Android app enables third-party cookies for an auth iframe.
-        // WKWebView has no equivalent switch, so load auth.novelia.cc as the top-level
-        // page instead. Its postMessage to window.parent is then delivered to itself.
+        // 上游 Android 应用为认证 iframe 启用第三方 Cookie。
+        // WKWebView 没有对应开关，因此将 auth.novelia.cc 作为顶层
+        // 页面加载。它发送给 window.parent 的 postMessage 此时会发送给自身。
         let script = """
         (() => {
           const notify = () => window.webkit.messageHandlers.noveliaAuth.postMessage('login_success');
@@ -429,9 +429,9 @@ struct NoveliaAuthWebView: UIViewRepresentable {
               notify();
             }
           });
-          // The official top-level page displays a toast instead of postMessage.
-          // Observe only successful identity-provider login/register POST responses;
-          // never read the request body, response body, credentials or cookie values.
+          // 官方顶层页面显示提示消息，而不发送 postMessage。
+          // 仅观察身份提供方登录或注册成功的 POST 响应；
+          // 不读取请求正文、响应正文、凭据或 Cookie 值。
           const originalFetch = window.fetch;
           window.fetch = async function(input, options) {
             const response = await originalFetch.apply(this, arguments);
@@ -521,8 +521,8 @@ struct NoveliaAuthWebView: UIViewRepresentable {
                 decisionHandler(.allow)
                 return
             }
-            // Keep secure identity-provider redirects inside this same WKWebView so
-            // they can complete the login flow and preserve its cookie session.
+            // 将安全的身份提供方重定向保留在同一个 WKWebView 中，
+            // 使其完成登录流程并保留 Cookie 会话。
             guard url.scheme == "https" else {
                 decisionHandler(.cancel)
                 return
@@ -577,8 +577,8 @@ struct ForumLoginSheet: View {
         loginCompletionTask = Task { @MainActor in
             defer { loginCompletionTask = nil }
             do {
-                // Allow WebKit to publish response cookies, then wait for any
-                // in-flight renewal instead of losing this login-success signal.
+                // 等待 WebKit 更新响应 Cookie，再等待已有的
+                // 续期任务完成，避免丢失本次登录成功信号。
                 try await Task.sleep(nanoseconds: 150_000_000)
                 while auth.isRefreshing {
                     try await Task.sleep(nanoseconds: 100_000_000)

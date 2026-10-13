@@ -1,21 +1,21 @@
 import Foundation
 
-/// UserDefaults keys read or written from more than one screen. The strings are already
-/// stored on users' devices, so they must never change; `SettingsKeysTests` pins them.
-/// Keys private to a single store (reading backgrounds, tag blocking, favourites and history
-/// caches, TXT rules, EPUB reader style) stay inside that store.
+/// 多个页面读写的 UserDefaults 键。这些字符串已经存储在用户设备上，
+/// 因此不能更改；`SettingsKeysTests` 会验证它们保持不变。
+/// 仅供单个存储使用的键（阅读背景、标签屏蔽、收藏与历史缓存、
+/// TXT 规则、EPUB 阅读器样式）仍由对应存储内部管理。
 enum SettingsKey {
     static let readerFontSize = "readerFontSize"
     static let readerAppearance = "readerAppearance"
     static let readerMode = "readerMode"
     static let readerTranslationSource = "readerTranslationSource"
-    /// Online novels and TXT use YueduCoreText pages instead of scrolling (default off).
+    /// 在线小说与 TXT 使用 YueduCoreText 分页代替滚动（默认关闭）。
     static let readerPagedText = "readerPagedText"
-    /// EPUB uses the experimental Readium (WKWebView) reader instead of YueduCoreText.
+    /// EPUB 使用实验性的 Readium（WKWebView）阅读器代替 YueduCoreText。
     static let readerEPUBReadium = "readerEPUBReadium"
     static let appThemeColor = "appThemeColor"
     static let appThemeCustomHex = "appThemeCustomHex"
-    /// Imported EPUB reader fonts as `[hash: SyncedImportedFont]` for WebDAV sync.
+    /// 导入的 EPUB 阅读器字体，以 `[hash: SyncedImportedFont]` 形式参与 WebDAV 同步。
     static let importedFontSync = "readerFonts.sync.v1"
 
     static func bookmarks(novelID: String) -> String { "bookmarks.\(novelID)" }
@@ -31,8 +31,8 @@ enum SettingsKey {
     }
 }
 
-/// Last chapter read in an online or downloaded web novel, stored per novel as
-/// `progress.<id>` (chapter index) and `progressTime.<id>` (time of the last sync merge).
+/// 在线或已下载网络小说最近阅读的章节，按小说分别保存为
+/// `progress.<id>`（章节序号）和 `progressTime.<id>`（最近一次同步合并时间）。
 struct ReadingProgressStore {
     let defaults: UserDefaults
 
@@ -43,7 +43,7 @@ struct ReadingProgressStore {
     static func chapterKey(novelID: String) -> String { "progress.\(novelID)" }
     static func timeKey(novelID: String) -> String { "progressTime.\(novelID)" }
 
-    /// `nil` when the novel has never been opened.
+    /// 小说从未打开时为 `nil`。
     func chapterIndex(novelID: String) -> Int? {
         defaults.object(forKey: Self.chapterKey(novelID: novelID)) == nil
             ? nil : defaults.integer(forKey: Self.chapterKey(novelID: novelID))

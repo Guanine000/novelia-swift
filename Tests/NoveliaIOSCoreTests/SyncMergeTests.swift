@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import NoveliaIOSCore
 
-/// Tag blocking and the WebDAV merge rules (formerly scripts/test_blocked_tags.py).
+/// 标签屏蔽与 WebDAV 合并规则（原 scripts/test_blocked_tags.py）。
 @MainActor
 final class SyncMergeTests: XCTestCase {
     private var suiteName = ""
@@ -94,9 +94,9 @@ final class SyncMergeTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(SyncedReadingPosition.self, from: JSONEncoder().encode(current)), current)
     }
 
-    /// TXT positions (`txt:<hash>`) add `unit` and `unitCount`. Positions written before them
-    /// still decode, the new fields round-trip, and a decoder that predates them (shape of
-    /// 0.12.0 (52) and older) reads the same JSON without failing.
+    /// TXT 阅读位置（`txt:<hash>`）新增 `unit` 和 `unitCount`。之前保存的位置
+    /// 仍可解码，新字段可完成编解码往返；旧解码器（0.12.0（52）及更早版本
+    /// 的数据结构）也能读取相同 JSON，不会失败。
     func testTXTPositionFieldsAreBackwardCompatible() throws {
         let earlier = try JSONDecoder().decode(SyncedReadingPosition.self,
                                                from: Data(#"{"chapterIndex":7,"updatedAt":100,"chapterOffset":40}"#.utf8))
@@ -117,7 +117,7 @@ final class SyncMergeTests: XCTestCase {
         XCTAssertEqual(older["txt:abc"]?.chapterIndex, 7, "older versions ignore unit fields")
         XCTAssertEqual(older["web:n"]?.chapterIndex, 2)
 
-        // A newer TXT position from another device wins; a local one is never removed.
+        // 另一台设备较新的 TXT 阅读位置优先；本地记录不会被删除。
         let merged = SyncedReadingPosition.merged(
             ["txt:abc": SyncedReadingPosition(chapterIndex: 3, fraction: nil, updatedAt: Date(timeIntervalSince1970: 200)),
              "txt:local": SyncedReadingPosition(chapterIndex: 1, fraction: nil, updatedAt: Date(timeIntervalSince1970: 200))],
@@ -138,7 +138,7 @@ final class SyncMergeTests: XCTestCase {
     }
 }
 
-/// Positions written by one EPUB engine restore inside the same chapter in the other.
+/// 一个 EPUB 引擎写入的位置，能在另一引擎中恢复到相同章节内部。
 final class EPUBChapterProgressTests: XCTestCase {
     func testProgressionFieldIsOptionalAndIgnoredByOlderDecoders() throws {
         let readium = SyncedReadingPosition(chapterIndex: 4, fraction: 0.31, updatedAt: Date(timeIntervalSince1970: 50), chapterProgression: 0.62)
@@ -167,8 +167,8 @@ final class EPUBChapterProgressTests: XCTestCase {
         XCTAssertEqual(EPUBChapterProgress.offset(progression: 2, length: 10), 10)
     }
 
-    /// Legacy YueduCoreText offsets count laid-out text, not markup: dividing by the raw XHTML
-    /// length (as 0.12.0 (54) did) pulls the position towards the chapter start.
+    /// 旧版 YueduCoreText 偏移量计数的是排版文本，而非标记：除以原始 XHTML
+    /// 长度（0.12.0（54）的做法）会使恢复位置偏向章节开头。
     func testTextLengthIgnoresMarkup() {
         let body = String(repeating: "她轻轻合上旧书。", count: 50)
         let html = """

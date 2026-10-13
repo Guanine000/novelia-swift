@@ -107,8 +107,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         }
     }
 
-    /// Read every local manifest resource, including unread chapters and independent assets.
-    /// Only actual failures are published. No external URL is fetched by this scan.
+    /// 读取清单中的所有本地资源，包括未读章节和独立资源文件。
+    /// 仅展示实际失败；此扫描不请求外部 URL。
     func scanBookDiagnostics() async {
         guard !diagnosticsComplete, !isScanningDiagnostics, let publication else { return }
         isScanningDiagnostics = true
@@ -130,8 +130,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
                 continue
             }
             let error: ReadError?
-            // Read every resource as a stream, without retaining full images/fonts or forcing
-            // valid non-UTF8 documents through the diagnostic scanner's text decoder.
+            // 以流方式读取每个资源，避免保留完整图片或字体，也不强制
+            // 将有效的非 UTF-8 文档交给诊断扫描器的文本解码器。
             switch await resource.stream(consume: { _ in }) {
             case .success: error = nil
             case .failure(let failure): error = failure
@@ -451,7 +451,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             if let progression, let base = await publication.locate(link) {
                 return base.copy(locations: { $0.progression = progression })
             }
-            // Neither: e.g. written by 0.12.0 (54); the whole-book fraction below is closer than the chapter start.
+            // 两者都没有时（例如 0.12.0（54）保存的位置），下方全书比例比章节开头更接近原位置。
             if (synced.fraction ?? 0) <= 0, let base = await publication.locate(link) {
                 return base
             }

@@ -178,7 +178,7 @@ final class EPUBReaderModel: ObservableObject {
 
     @Published private(set) var status: Status = .idle
     @Published private(set) var source: (any EPUBChapterSource)?
-    /// The EPUB package when the source is one; TOC diagnostics and file-hash positions are EPUB only.
+    /// 来源为 EPUB 时保存其容器；目录诊断与文件哈希阅读位置仅适用于 EPUB。
     var container: EPUBContainer? { source as? EPUBContainer }
     private(set) var pageBook: EPUBPageBook?
     @Published private(set) var location = EPUBReadingLocation(spineIndex: 0, pageIndex: 0) {
@@ -244,17 +244,17 @@ final class EPUBReaderModel: ObservableObject {
         leafWidth / max(viewportSize.height, 1)
     }
 
-    /// The pending generation relayout; a newer one cancels it.
+    /// 当前等待中的代次重排任务；新任务会取消旧任务。
     private var relayoutTask: Task<Void, Never>?
     private var openTask: Task<Void, Never>?
-    /// Neighbour prefetches by spine; cancelled when the reader moves away or the generation changes.
+    /// 按 spine 预取相邻章节；阅读器移开或代次变化时取消。
     private var prefetchTasks: [Int: Task<Void, Never>] = [:]
-    /// TOC / link / seek / debug-jump layouts of the current generation.
+    /// 当前代次的目录、链接、定位和调试跳转排版任务。
     private var layoutTasks: [UUID: Task<Void, Never>] = [:]
     private var navigateTaskID: UUID?
-    /// Correlates this reader session's open, layout and close lines.
+    /// 关联本次阅读器会话的打开、排版和关闭日志。
     private(set) var traceID = DiagnosticContext.newTraceID()
-    /// Content identity that scopes shared layout results; `nil` for online chapters.
+    /// 限定共享排版结果范围的内容身份；在线章节为 `nil`。
     private var layoutBookID: String?
     private var bookKind = "epub"
     private let layoutCoordinator: EPUBLayoutCoordinator
@@ -281,9 +281,9 @@ final class EPUBReaderModel: ObservableObject {
 
     private var memoryWarningObserver: NSObjectProtocol?
 
-    /// Page bitmaps are about 14 MB each at 3× scale. Keep the visible leaves and `radius`
-    /// pages on either side (crossing into neighbouring chapters); anything else is
-    /// re-rendered from the cached layout when it comes back into view.
+    /// 在 3× 分辨率下，每页位图约占 14 MB。保留可见页面和两侧各 `radius`
+    /// 页（可跨越相邻章节）；其他页面再次进入可视范围时，
+    /// 从缓存的排版结果重新渲染。
     private func trimPageCaches(radius: Int = 3) {
         guard let pageBook else { return }
         var keep = Set<EPUBPageID>()
@@ -373,7 +373,7 @@ final class EPUBReaderModel: ObservableObject {
 
     // MARK: 打开
 
-    /// Starts opening once; the reader view calls this from `onAppear` and `close()` on disappear.
+    /// 仅启动一次打开流程；阅读器视图在 `onAppear` 时调用此方法，离开时调用 `close()`。
     func start(url: URL) {
         guard status == .idle, openTask == nil else { return }
         openTask = Task { [weak self] in
@@ -391,8 +391,8 @@ final class EPUBReaderModel: ObservableObject {
         }
     }
 
-    /// The reader left the screen: stop every layout it started. Completed chapter layouts stay
-    /// in the shared coordinator cache for the next open of the same book.
+    /// 阅读器离开屏幕时，停止其启动的所有排版任务。已完成的章节排版
+    /// 保留在共享协调器缓存中，供下次打开同一本书复用。
     func close() {
         var cancelled = cancelLayoutTasks()
         if let openTask {
@@ -404,7 +404,7 @@ final class EPUBReaderModel: ObservableObject {
         EPUBLayoutLog.logger.info("EPUB reader closed; trace=\(self.traceID, privacy: .public), gen=\(self.generation, privacy: .public), cancelledTasks=\(cancelled, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
     }
 
-    /// Cancels the pending relayout, prefetches and navigation layouts; returns how many ran.
+    /// 取消等待中的重排、预取和导航排版任务；返回已运行的任务数。
     @discardableResult
     private func cancelLayoutTasks() -> Int {
         var count = 0
@@ -418,7 +418,7 @@ final class EPUBReaderModel: ObservableObject {
         return count
     }
 
-    /// Runs a layout operation of the current generation so a relayout or close can cancel it.
+    /// 运行当前代次的排版操作，使重排或关闭时可以取消它。
     @discardableResult
     private func track(_ operation: @escaping @MainActor () async -> Void) -> UUID {
         let id = UUID()
@@ -429,14 +429,14 @@ final class EPUBReaderModel: ObservableObject {
         return id
     }
 
-    /// Replaces any pending relayout: the old generation's layouts are cancelled, not left to finish.
+    /// 替换等待中的重排任务：取消旧代次排版，不让它们继续运行到结束。
     private func scheduleRelayout(_ reason: EPUBLayoutReason) {
         guard source != nil, status != .idle, status != .opening else { return }
         let cancelled = cancelLayoutTasks()
         EPUBLayoutLog.logger.info("EPUB relayout scheduled; trace=\(self.traceID, privacy: .public), gen=\(self.generation, privacy: .public), reason=\(reason.rawValue, privacy: .public), cancelledTasks=\(cancelled, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
         relayoutTask = Task { [weak self] in
             await self?.relayout(keepingCurrentSpine: true, reason: reason)
-            // A replacement always cancels this task first, so an uncancelled finish is still current.
+            // 替换操作总会先取消此任务，因此未被取消的完成结果仍属于当前任务。
             if !Task.isCancelled { self?.relayoutTask = nil }
         }
     }
@@ -468,13 +468,13 @@ final class EPUBReaderModel: ObservableObject {
             layoutBookID = "epub|" + bookHash
             stage = "layout"
             lastLayoutFailure = nil
-            // Lay out the saved chapter directly instead of chapter 0 followed by a restore.
+            // 直接排版保存位置的章节，避免先排版第 0 章再恢复位置。
             let saved = ReaderSettings.shared.epubPosition(hash: bookHash)
             if let spine = saved?.chapterIndex, let offset = saved?.chapterOffset, container.spine.indices.contains(spine) {
                 restored = true
                 await relayout(keepingCurrentSpine: false, reason: .restore, target: (spine, offset))
             } else if let spine = saved?.chapterIndex, let progression = saved?.chapterProgression, container.spine.indices.contains(spine) {
-                // Saved by the Readium reader: same chapter, position by the chapter's text length.
+                // Readium 阅读器保存的位置：保留同一章节，按章节文本长度定位。
                 restored = true
                 await relayout(keepingCurrentSpine: false, reason: .restore, target: (spine, nil), targetProgression: progression)
             } else {
@@ -496,11 +496,11 @@ final class EPUBReaderModel: ObservableObject {
         }
     }
 
-    /// Position callback for generated sources: (unit index, UTF-16 offset in the unit's text).
+    /// 生成内容的阅读位置回调：（单元序号，单元文本中的 UTF-16 偏移量）。
     private var positionHandler: ((Int, Int?) -> Void)?
 
-    /// Opens generated chapters (TXT / online novel) at a unit and optional text offset.
-    /// Positions are reported through `onPosition` instead of the EPUB file-hash store.
+    /// 在指定单元和可选文本偏移量处打开生成的章节（TXT / 在线小说）。
+    /// 阅读位置通过 `onPosition` 报告，不使用 EPUB 文件哈希存储。
     func open(source: any EPUBChapterSource, unit: Int, offset: Int?,
               onPosition: @escaping (Int, Int?) -> Void) async {
         status = .opening
@@ -525,7 +525,7 @@ final class EPUBReaderModel: ObservableObject {
         }
     }
 
-    /// Re-lays out the current chapter after a failure (e.g. a network chapter that did not load).
+    /// 失败后重新排版当前章节（例如网络章节未加载成功）。
     func retry() {
         guard case .failed = status, source != nil, !isLayingOut else { return }
         cancelLayoutTasks()
@@ -536,7 +536,7 @@ final class EPUBReaderModel: ObservableObject {
         }
     }
 
-    /// Neighbouring chapters whose prefetch failed for a reason other than cancellation.
+    /// 因取消以外的原因导致预取失败的相邻章节。
     @Published private(set) var failedChapters = Set<Int>()
 
     var neighborLoadFailed: Bool {
@@ -548,10 +548,10 @@ final class EPUBReaderModel: ObservableObject {
         prefetchNeighbors(of: location.spineIndex)
     }
 
-    /// Kind of the most recent layout/open error, for the open summary log.
+    /// 最近一次排版或打开错误的类型，供打开结果摘要日志使用。
     private var lastLayoutFailure: (kind: String, code: Int)?
 
-    /// One outcome line per book open; chapter lines carry the per-chapter details.
+    /// 每次打开书籍记录一行结果；章节日志记录各章节详情。
     private func logOpenOutcome(stage: String, start: ContinuousClock.Instant, restored: Bool) {
         let elapsed = EPUBLayoutLog.milliseconds(since: start)
         let failure = lastLayoutFailure
@@ -608,7 +608,7 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     private var backgroundRefreshTask: Task<Void, Never>?
-    /// Coalesces bursts of background / font notifications (a debounce, not a race fix).
+    /// 合并短时间内密集出现的背景或字体通知（用于防抖，不用于解决竞态）。
     func refreshBackground() {
         backgroundRefreshTask?.cancel()
         backgroundRefreshTask = Task { [weak self] in
@@ -624,7 +624,7 @@ final class EPUBReaderModel: ObservableObject {
         scheduleRelayout(.themeChange)
     }
 
-    /// Apply shared font/theme changes in one reflow after an active turn/layout finishes.
+    /// 等待当前翻页或排版完成后，通过一次重排应用共享字体和主题变化。
     func synchronizeSharedSettings(systemIsDark: Bool) {
         guard !isAnimating, !isLayingOut else { return }
         let settings = ReaderSettings.shared
@@ -658,7 +658,7 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     /// 重排当前章（以及前后相邻章的预取）。generation 递增使旧页面全部失效。
-    /// `target` opens a chapter at a source offset (book open / saved-position restore).
+    /// `target` 用于在源文本偏移量处打开章节（打开书籍或恢复保存位置）。
     private func relayout(keepingCurrentSpine: Bool, reason: EPUBLayoutReason,
                           target: (spine: Int, offset: Int?)? = nil, targetProgression: Double? = nil) async {
         guard let container = source else { return }
@@ -666,7 +666,7 @@ final class EPUBReaderModel: ObservableObject {
         isRestoringPosition = true
         defer { isRestoringPosition = wasRestoringPosition }
         container.themeTextColor = pageTextColor
-        // Prefetches and jumps belong to the generation being replaced.
+        // 预取和跳转任务属于即将被替换的代次。
         for task in prefetchTasks.values { task.cancel() }
         prefetchTasks.removeAll()
         for task in layoutTasks.values { task.cancel() }
@@ -676,8 +676,8 @@ final class EPUBReaderModel: ObservableObject {
         let previousFraction = keepingCurrentSpine && target == nil
             ? CGFloat(location.pageIndex) / CGFloat(previousCount)
             : 0
-        // Re-pagination keeps the same text on screen; the fraction is only a fallback
-        // for pages without text.
+        // 重新分页时保持屏幕上显示同一段文本；比例仅用于
+        // 没有文本的页面作为回退。
         let previousOffset = target != nil ? target?.offset
             : (keepingCurrentSpine ? pageBook?.sourceOffset(spineIndex: spineIndex, pageIndex: location.pageIndex) : nil)
         spreadCache.removeAll()
@@ -716,7 +716,7 @@ final class EPUBReaderModel: ObservableObject {
         } catch {
             if book.generation == generation {
                 lastLayoutFailure = EPUBLayoutLog.failure(error)
-                // A cancelled relayout was replaced by a newer one (or the reader closed).
+                // 已取消的重排任务被新任务替代，或阅读器已关闭。
                 if EPUBLayoutLog.failure(error).kind != "cancelled" {
                     status = .failed(describeLayoutError(error))
                 }
@@ -751,8 +751,8 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     /// 空闲时预排前后相邻章，让跨章拖动时目标页位图已经就位。
-    /// Only the two neighbours are prefetched; prefetches of chapters the reader moved away
-    /// from are cancelled, and a running one for the same chapter is not started twice.
+    /// 仅预取前后两个相邻章节；取消已移开章节的预取，
+    /// 同一章节已有预取任务运行时不重复启动。
     private func prefetchNeighbors(of spineIndex: Int) {
         guard let container = source, let book = pageBook else { return }
         let neighbors = [spineIndex + 1, spineIndex - 1].filter { (0..<container.chapterCount).contains($0) }
@@ -957,7 +957,7 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     func selectionRange(at point: CGPoint) -> NSRange? {
-        // Both leaves share chapter UTF-16 offsets, so selection can cross the gutter.
+        // 两个页面共用章节 UTF-16 偏移量，因此选择范围可以跨越中缝。
         let leaf = usesDoublePage && point.x >= leafWidth ? 1 : 0
         selectionLeaf = leaf
         return pageBook?.selectionRange(at: CGPoint(x: point.x - CGFloat(leaf) * leafWidth, y: point.y),
@@ -981,7 +981,7 @@ final class EPUBReaderModel: ObservableObject {
             if location.pageIndex + pageStride < count {
                 return .init(spineIndex: location.spineIndex, pageIndex: location.pageIndex + pageStride)
             }
-            // Do not leave a chapter until its last leaf has finished pagination.
+            // 章节最后一页完成分页之前，不离开该章节。
             guard pageBook?.isChapterComplete(location.spineIndex) == true,
                   pageCount(spineIndex: location.spineIndex + 1) > 0 else { return nil }
             return .init(spineIndex: location.spineIndex + 1, pageIndex: 0)
@@ -1037,7 +1037,7 @@ final class EPUBReaderModel: ObservableObject {
     private func navigateToSpine(_ spineIndex: Int) {
         location.spineIndex = spineIndex
         location.pageIndex = 0
-        // A newer jump supersedes an unfinished one.
+        // 新跳转替代尚未完成的旧跳转。
         if let navigateTaskID, let previous = layoutTasks.removeValue(forKey: navigateTaskID) { previous.cancel() }
         navigateTaskID = track { [weak self] in
             guard let self else { return }
@@ -1057,7 +1057,7 @@ final class EPUBReaderModel: ObservableObject {
         }
     }
 
-    /// Jumps to the first page of a unit (TOC of generated sources, chapter lists).
+    /// 跳到单元首页（用于生成内容的目录和章节列表）。
     func jump(toUnit unit: Int) {
         guard !isAnimating, !isLayingOut, let source, (0..<source.chapterCount).contains(unit) else { return }
         navigateToSpine(unit)

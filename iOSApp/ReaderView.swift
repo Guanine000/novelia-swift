@@ -340,8 +340,8 @@ struct ReaderView: View {
 }
 
 extension NovelChapter {
-    /// Paragraphs of the chosen translation source when the chapter lists sources;
-    /// nil for chapters that only carry a single translated text.
+    /// 章节列出翻译来源时，返回所选来源的段落；
+    /// 仅包含单一译文的章节返回 nil。
     func selectedTranslation(source: NovelTranslationSource) -> [String]? {
         guard let translationsBySource else { return nil }
         return translationsBySource[source] ?? []
@@ -359,7 +359,7 @@ extension NovelChapter {
         return Self.pair(originalText.components(separatedBy: "\n\n"), translatedText.components(separatedBy: "\n\n"))
     }
 
-    /// Whether the reader shows the "no translation from this source" message.
+    /// 阅读器是否显示“此来源没有译文”的提示。
     func lacksTranslation(mode: ReaderMode, source: NovelTranslationSource) -> Bool {
         switch mode {
         case .original: false
@@ -379,7 +379,7 @@ extension NovelChapter {
         }
     }
 
-    /// Chapter text for the paged reader in the selected display mode.
+    /// 所选显示模式下供分页阅读器使用的章节文本。
     func pagedContent(novelTitle: String, mode: ReaderMode, source: NovelTranslationSource) -> TextChapterContent {
         var paragraphs: [TextChapterParagraph] = []
         switch mode {
@@ -441,7 +441,7 @@ private struct ChapterDirectoryView: View {
             .task(id: selectedIndex) {
                 guard novel.chapters.indices.contains(selectedIndex) else { return }
                 let chapterID = novel.chapters[selectedIndex].id
-                // Wait for the pushed List's first layout before positioning a lazy row.
+                // 等待新打开的 List 完成首次布局，再定位惰性加载的行。
                 do { try await Task.sleep(nanoseconds: 100_000_000) }
                 catch { return }
                 guard !Task.isCancelled else { return }
@@ -497,7 +497,7 @@ private struct ReaderTextBlock: View {
     }
 }
 
-/// Makes URLs embedded in chapter prose visibly interactive while retaining the reader font.
+/// 让章节正文中的 URL 显示为可交互链接，同时保留阅读器字体。
 private struct LinkedReaderText: View {
     let text: String
     let color: Color
@@ -526,7 +526,7 @@ private struct LinkedReaderText: View {
     }
 }
 
-/// Limits the amount of text each SwiftUI Text view has to measure during scrolling.
+/// 限制滚动时每个 SwiftUI Text 视图需要测量的文本量。
 enum ReaderTextChunker {
     static func chunks(_ text: String, maximumCharacters: Int = 2_400) -> [String] {
         guard !text.isEmpty else { return [" "] }
@@ -556,8 +556,8 @@ enum ReaderTextChunker {
     }
 }
 
-/// Online chapters laid out by YueduCoreText. The unit index is the novel's chapter index;
-/// progress, server reading history and bookmarks stay chapter-level as in scroll mode.
+/// 使用 YueduCoreText 排版的在线章节。单元序号就是小说章节序号；
+/// 阅读进度、服务器阅读历史和书签与滚动模式一样，仍按章节记录。
 private struct OnlinePagedReader: View {
     @ObservedObject private var settings = ReaderSettings.shared
     @EnvironmentObject private var auth: AccountAuthStore
@@ -587,7 +587,7 @@ private struct OnlinePagedReader: View {
     }
 
     var body: some View {
-        // A display-mode or source change regenerates every chapter: reopen at the chapter start.
+        // 显示模式或来源变化会重新生成所有章节：从章节开头重新打开。
         EPUBReaderView(bookURL: nil, textBook: makeBook(), accessory: AnyView(HStack(spacing: 12) { scrollButton; menu }))
             .id("\(modeRaw)|\(translationSourceRaw)")
     }
@@ -607,7 +607,7 @@ private struct OnlinePagedReader: View {
     }
 
     private func chapterChanged(to unit: Int) {
-        // Called after every page turn; only a chapter change is recorded.
+        // 每次翻页后调用；仅在章节变化时记录。
         guard novel.chapters.indices.contains(unit), unit != cache.lastRecordedChapter else { return }
         chapterIndex = unit
         savedChapterIndex = unit
@@ -618,7 +618,7 @@ private struct OnlinePagedReader: View {
         Task { await readingHistory.recordRead(novel: novel, chapterId: chapterID, account: auth.username) }
     }
 
-    /// Same control and place as the TXT paged reader.
+    /// 与 TXT 分页阅读器使用相同的控件和位置。
     private var scrollButton: some View {
         Button { settings.pagedTextReading = false } label: {
             Image(systemName: "scroll")
@@ -656,12 +656,12 @@ private struct OnlinePagedReader: View {
     }
 }
 
-/// Chapters fetched in paged mode, shared across display-mode changes of one reader.
+/// 分页模式获取的章节，在同一阅读器切换显示模式时共享。
 @MainActor
 private final class OnlineChapterCache {
     private var chapters: [String: NovelChapter] = [:]
     private var inFlight: [String: Task<NovelChapter, Error>] = [:]
-    /// Chapter last saved as progress; page turns inside it are not re-recorded.
+    /// 最近保存进度的章节；章内翻页不重复记录。
     var lastRecordedChapter: Int?
 
     func chapter(_ listed: NovelChapter, in novel: Novel) async throws -> NovelChapter {

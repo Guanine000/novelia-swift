@@ -247,7 +247,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
         return fileManager.fileExists(atPath: url.path) ? url : nil
     }
 
-    /// A cheap URL for row rendering; existence and image decoding are checked by the loader off-main.
+    /// 供列表行使用的低成本 URL；加载器在主线程之外检查文件是否存在并解码图片。
     func coverFileURL(for book: LocalWenkuEPUB) -> URL? {
         book.coverFilename.map { directory.appendingPathComponent($0) }
     }
@@ -256,7 +256,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
         uniqueDestination(for: Self.safeFilename(filename))
     }
 
-    /// A library TXT with the same content, compared by SHA-256 (memoised per file).
+    /// 内容相同的文库 TXT，通过 SHA-256 比较（按文件缓存哈希）。
     private func existingTXT(withContentHash hash: String, excluding newFile: URL) async -> LocalWenkuEPUB? {
         for book in books where book.resolvedFileFormat == .txt {
             let url = directory.appendingPathComponent(book.filename)
@@ -283,7 +283,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
         }
 
         if format == .txt {
-            // Decoded once here; the cached text makes the first open parse-only.
+            // 此处只解码一次；缓存的文本使首次打开只需解析。
             let newHash: String
             do {
                 newHash = try await TXTBookCache.shared.validateDecodable(at: fileURL, source: source, trace: trace)
@@ -352,8 +352,9 @@ final class WenkuLocalLibraryStore: ObservableObject {
         let metadata = format == .epub ? await Self.metadata(for: destination) : (title: nil, description: nil, author: nil, cover: nil)
         let id = UUID()
         let coverFilename = try? saveCover(metadata.cover, id: id)
+        // 沿用原下载时间，使书库“导入时间”排序不因移动而改变。
         let book = LocalWenkuEPUB(id: id, title: metadata.title ?? sourceBook.novel.title,
-            filename: destination.lastPathComponent, addedAt: Date(),
+            filename: destination.lastPathComponent, addedAt: sourceBook.downloadedAt,
             bookDescription: metadata.description, author: metadata.author ?? sourceBook.novel.author,
             coverFilename: coverFilename, metadataLoaded: true, fileFormat: format,
             sourceWebNovel: sourceBook)
@@ -412,7 +413,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
     func refreshMissingMetadata() async {
         guard !isRefreshingMetadata else { return }
         let pending = books.filter { $0.metadataLoaded != true }
-        // Opening a fully populated library must not encode or rewrite its entire index.
+        // 打开元数据完整的书库时，不应编码或重写整个索引。
         guard !pending.isEmpty else { return }
         isRefreshingMetadata = true
         defer { isRefreshingMetadata = false }
@@ -497,7 +498,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
     }
 }
 
-/// The imported TXT has the same content as a book already in the library; the new copy is removed.
+/// 导入的 TXT 与书库中已有书籍内容相同，因此移除新副本。
 struct LocalLibraryDuplicateError: LocalizedError {
     let existingTitle: String
     let contentHash: String
@@ -541,9 +542,9 @@ struct DownloadedWebNovel: Codable, Identifiable, Hashable, Sendable {
     let fileFilename: String
     let downloadedAt: Date
     let translationSource: NovelTranslationSource?
-    /// Optional so indexes created before language-mode selection remain readable.
+    /// 使用可选字段，使选择语言模式之前创建的索引仍可读取。
     let downloadMode: WebNovelDownloadMode?
-    /// Optional so the library index created by earlier app versions remains readable.
+    /// 使用可选字段，使旧版应用创建的书库索引仍可读取。
     let fileFormat: WebNovelFileFormat?
 
     var id: String { novel.id }
@@ -648,7 +649,7 @@ final class WebNovelDownloadStore: ObservableObject {
             author: book.author ?? "", summary: book.bookDescription ?? "",
             genres: [], chapters: [], accent: .plum)
         let record = DownloadedWebNovel(novel: novel,
-            fileFilename: destination.lastPathComponent, downloadedAt: book.sourceWebNovel?.downloadedAt ?? Date(),
+            fileFilename: destination.lastPathComponent, downloadedAt: book.sourceWebNovel?.downloadedAt ?? book.addedAt,
             translationSource: book.sourceWebNovel?.translationSource,
             downloadMode: book.sourceWebNovel?.downloadMode, fileFormat: format)
         books.insert(record, at: 0)

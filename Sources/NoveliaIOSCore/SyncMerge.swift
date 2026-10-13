@@ -1,28 +1,28 @@
 import Combine
 import Foundation
 
-// Records shared through manual WebDAV sync and the rules that merge local and remote copies.
+// 手动 WebDAV 同步共享的记录，以及合并本地和远端副本的规则。
 
 struct SyncedReadingPosition: Codable, Equatable {
-    /// Web novels: chapter index. EPUBs: spine index (absent before offsets were stored).
-    /// TXT (`txt:<hash>`): chapter index under the reader's chapter rules.
+    /// 网络小说：章节序号。EPUB：spine 序号（保存偏移量之前的版本没有该字段）。
+    /// TXT（`txt:<hash>`）：按阅读器章节规则得到的章节序号。
     var chapterIndex: Int?
-    /// EPUBs: progress through the whole book, kept for older app versions.
+    /// EPUB：全书进度，为旧版应用保留。
     var fraction: Double?
     var updatedAt: Date
-    /// EPUBs: UTF-16 offset of the page's first text in the chapter source, which
-    /// survives re-pagination after font or layout changes.
+    /// EPUB：页面首段文字在章节源文本中的 UTF-16 偏移量，
+    /// 字体或布局变化后重新分页时仍可用于恢复位置。
     var chapterOffset: Int? = nil
-    /// TXT only: paged unit and unit count; `chapterOffset` is then the offset in that unit.
-    /// Older app versions ignore both when decoding.
+    /// 仅 TXT：分页单元及单元总数；此时 `chapterOffset` 表示该单元内的偏移量。
+    /// 旧版应用解码时忽略这两个字段。
     var unit: Int? = nil
     var unitCount: Int? = nil
-    /// EPUBs: fraction (0...1) of the chapter's text before the position. Written by both
-    /// EPUB engines so either can restore the other's position inside the chapter; older
-    /// app versions ignore it and fall back to `fraction`.
+    /// EPUB：当前位置之前的章节文本比例（0...1）。两个 EPUB 引擎都会写入，
+    /// 以便互相恢复章内位置；旧版应用忽略此字段，
+    /// 回退到 `fraction`。
     var chapterProgression: Double? = nil
 
-    /// A remote position replaces the local one when it is at least as recent.
+    /// 远端位置的时间不早于本地位置时，替换本地位置。
     static func merged(_ local: [String: Self], _ remote: [String: Self]) -> [String: Self] {
         var result = local
         for (key, value) in remote where value.updatedAt >= (result[key]?.updatedAt ?? .distantPast) {
@@ -32,8 +32,8 @@ struct SyncedReadingPosition: Codable, Equatable {
     }
 }
 
-/// Converts in-chapter EPUB positions between the YueduCoreText reader (UTF-16 offsets in
-/// the chapter's text) and Readium (progression through the chapter).
+/// 在 YueduCoreText 阅读器（章节文本的 UTF-16 偏移量）与 Readium
+/// （章内进度比例）之间转换 EPUB 章内位置。
 enum EPUBChapterProgress {
     static func progression(offset: Int, length: Int) -> Double {
         guard length > 0 else { return 0 }
@@ -45,12 +45,12 @@ enum EPUBChapterProgress {
         return min(length, max(0, Int((Double(length) * progression).rounded(.down))))
     }
 
-    /// Approximate UTF-16 length of the text YueduCoreText lays out for a chapter's XHTML:
-    /// whitespace between tags, head, script and style content and all tags removed, each
-    /// character entity counted once. Only used to convert offsets saved before `chapterProgression` existed.
+    /// YueduCoreText 对章节 XHTML 排版时使用的文本 UTF-16 长度近似值：
+    /// 去除标签间空白、head/script/style 内容及所有标签，每个字符实体计数一次。
+    /// 仅用于转换引入 `chapterProgression` 之前保存的偏移量。
     static func textLength(html: String) -> Int {
         var text = html
-        // Whitespace between tags is layout-only; whitespace inside text is kept.
+        // 标签间空白仅服务于布局；文本内部的空白保留。
         for pattern in [#">\s+<"#] {
             text = text.replacingOccurrences(of: pattern, with: "><", options: .regularExpression)
         }

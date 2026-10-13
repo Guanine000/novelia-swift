@@ -1,6 +1,6 @@
 import Foundation
 
-/// Serializes index snapshots in submission order. Background refreshes cannot overwrite later edits.
+/// 按提交顺序串行写入索引快照，防止后台刷新覆盖随后发生的编辑。
 final class LocalLibraryIndexWriter: @unchecked Sendable {
     private let queue = DispatchQueue(label: "Novelia.local-library.index", qos: .utility)
 
@@ -15,7 +15,7 @@ final class LocalLibraryIndexWriter: @unchecked Sendable {
         }
     }
 
-    /// Existing synchronous mutations retain their error/rollback contract and share write ordering.
+    /// 现有同步修改保留错误处理与回滚约定，并遵循相同的写入顺序。
     func writeSync<Value: Encodable & Sendable>(_ snapshot: Value, to url: URL) throws {
         try queue.sync { try Self.persist(snapshot, to: url) }
     }

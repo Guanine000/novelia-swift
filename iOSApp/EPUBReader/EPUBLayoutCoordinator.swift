@@ -13,15 +13,15 @@ import NoveliaIOSCore
 // YueduCoreText 0.8.0 的 BrowserLayoutSession 是 @MainActor，排版本身只能在主线程
 // 逐页执行（每页之间让路）；这里减少的是重复与过期的主线程工作量。
 
-/// Why a chapter layout was requested (diagnostics; raw values are exported).
+/// 请求章节排版的原因（用于诊断；原始值会被导出）。
 enum EPUBLayoutReason: String {
     case first, restore, prefetch, navigate, seek, retry
     case resize, rotate, fontChange, styleChange, themeChange, backgroundChange
 }
 
-/// Everything in a `BrowserLayoutConfig` and the chapter request that changes pagination.
+/// `BrowserLayoutConfig` 与章节请求中所有会影响分页的内容。
 struct EPUBLayoutParameters: Hashable {
-    /// Bump when the reader's layout output changes for the same inputs (CSS, workarounds).
+    /// 相同输入对应的阅读器排版结果发生变化时递增（例如 CSS 或兼容处理变化）。
     static let layoutVersion = 1
 
     let renderWidth: CGFloat
@@ -66,7 +66,7 @@ struct EPUBLayoutParameters: Hashable {
     }
 }
 
-/// One chapter's pages and the data derived from them, shared between page books.
+/// 一个章节的页面及其派生数据，由多个分页书籍对象共享。
 struct EPUBChapterLayout {
     var pages: [PageFragments]
     var sourceText: String
@@ -91,11 +91,11 @@ final class EPUBLayoutCoordinator {
     enum Priority { case current, prefetch }
 
     enum Outcome: String {
-        /// Laid out by this request.
+        /// 由当前请求完成排版。
         case executed
-        /// Joined a layout already running for the same key.
+        /// 加入同一键已有的排版任务。
         case inflight
-        /// Completed layout taken from the LRU.
+        /// 从 LRU 缓存获取已完成的排版。
         case memory
     }
 
@@ -131,7 +131,7 @@ final class EPUBLayoutCoordinator {
     private var runningPrefetch = 0
     private var memoryWarningObserver: NSObjectProtocol?
 
-    /// The cost is the chapter's UTF-16 length, a proxy for its fragments and display lists.
+    /// 成本按章节的 UTF-16 长度计算，近似反映其文本片段与显示列表的大小。
     init(countLimit: Int = 24, costLimit: Int = 3_000_000) {
         cache = LRUCache(countLimit: countLimit, costLimit: costLimit)
         memoryWarningObserver = NotificationCenter.default.addObserver(
@@ -144,10 +144,10 @@ final class EPUBLayoutCoordinator {
     var cachedLayoutCount: Int { cache.count }
     var runningJobCount: Int { jobs.count }
 
-    /// Lays out `key` once. `observer` receives each partial layout while this request waits;
-    /// `work` runs only when no completed or running layout exists for the key.
-    /// Cancelling the calling task stops waiting at once; the shared layout is cancelled when
-    /// no request is left waiting for it.
+    /// 每个 `key` 只排版一次。当前请求等待期间，`observer` 接收各次部分排版结果；
+    /// 仅在该键没有已完成或运行中的排版时才运行 `work`。
+    /// 取消调用方任务会立即停止等待；
+    /// 当没有请求继续等待时，取消共享排版任务。
     func layout(key: Key, cacheable: Bool, priority: Priority,
                 observer: @escaping (EPUBChapterLayout) -> Void,
                 work: @escaping (_ publish: @escaping (EPUBChapterLayout) -> Void) async throws -> EPUBChapterLayout
@@ -196,7 +196,7 @@ final class EPUBLayoutCoordinator {
         cache.removeAll()
     }
 
-    // MARK: Jobs
+    // MARK: 任务
 
     private func run(_ job: Job, key: Key, cacheable: Bool,
                      work: (_ publish: @escaping (EPUBChapterLayout) -> Void) async throws -> EPUBChapterLayout) async {
@@ -222,12 +222,12 @@ final class EPUBLayoutCoordinator {
         let waiters = job.waiters.values
         job.waiters.removeAll()
         for waiter in waiters { waiter.continuation.resume(with: result) }
-        // Hand the slot to a queued prefetch only after the waiters have their result.
+        // 等待者获得结果之后，再将执行槽位交给排队中的预取任务。
         releaseSlot(for: job)
     }
 
-    /// A waiter's task was cancelled: release it now; cancel the shared layout on the next
-    /// turn if nobody else is waiting (a replacement request in the same turn can still join).
+    /// 等待者的任务被取消时立即释放它；若没有其他等待者，在下一轮
+    /// 取消共享排版（同一轮中的替代请求仍可加入）。
     private func leave(_ job: Job, key: Key, waiterID: UUID) {
         guard let waiter = job.waiters.removeValue(forKey: waiterID) else { return }
         waiter.continuation.resume(throwing: CancellationError())
@@ -245,7 +245,7 @@ final class EPUBLayoutCoordinator {
         }
     }
 
-    // MARK: Slots: current chapters start at once; one prefetch at a time, only when idle.
+    // MARK: 执行槽位：当前章节立即开始；仅空闲时预取，一次一个。
 
     private func acquireSlot(for job: Job) async {
         if job.priority == .current {

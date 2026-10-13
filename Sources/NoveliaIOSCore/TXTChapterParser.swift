@@ -7,8 +7,8 @@ enum TXTDiagnosticLog {
     static let logger = Logger(subsystem: "cc.novelia.ios.port", category: "txt")
 }
 
-/// Reads common plain-text encodings used by downloaded and user-supplied novels.
-/// File reads, caching and diagnostics live in `TXTBookCache`; this type only converts bytes.
+/// 读取下载或用户导入小说常用的纯文本编码。
+/// 文件读取、缓存和诊断由 `TXTBookCache` 负责；此类型仅转换字节。
 enum TXTTextDecoder {
     static let attemptedEncodings = "UTF-8/BOM-Unicode/GB18030/GBK/Big5/Shift_JIS"
 
@@ -48,10 +48,10 @@ enum TXTTextDecodingError: LocalizedError {
     }
 }
 
-/// Detects common TXT chapter headings with an independent, conservative Swift implementation.
-/// The multi-pass design was informed by the public documentation of Qingdu Reader
-/// (Apache-2.0): https://github.com/zengchen666/qingdu-reader
-/// No Qingdu source code is incorporated here.
+/// 使用独立实现、偏保守的 Swift 逻辑识别常见 TXT 章节标题。
+/// 多轮识别设计参考了 Qingdu Reader 的公开文档
+/// （Apache-2.0）：https://github.com/zengchen666/qingdu-reader
+/// 此处未引入 Qingdu 的源代码。
 struct TXTChapter: Identifiable, Hashable, Sendable {
     let index: Int
     let title: String
@@ -82,7 +82,7 @@ struct TXTChapterRuleConfiguration: Sendable {
     let enabledBuiltInIDs: Set<String>
     let enabledCustomRules: [TXTChapterRule]
 
-    /// Identifies the rules that shape a parse; part of the TXT cache key.
+    /// 标识影响解析结果的规则，作为 TXT 缓存键的一部分。
     var fingerprint: String {
         let builtIn = enabledBuiltInIDs.sorted().joined(separator: ",")
         let custom = enabledCustomRules.map { "\($0.id)=\($0.pattern)" }.joined(separator: "\u{1F}")
@@ -190,7 +190,7 @@ enum TXTChapterParser {
         pattern: #"^(序|序章|序言|楔子|前言|引子|正文|后记|後記|尾声|尾聲|终章|終章|番外|番外篇)(?:[：:、.．\s—-]*(.{0,20}))?$"#
     )
 
-    /// Counts the cache logs next to each parse.
+    /// 统计每次解析对应的缓存日志。
     struct Statistics: Equatable, Sendable {
         let lines: Int
         let headings: Int
