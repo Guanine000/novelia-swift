@@ -125,7 +125,7 @@ final class WebDAVSyncEngine {
                     for landscape in [false, true] {
                         let file = local.backgroundImageURL(dark: dark, landscape: landscape)
                         if FileManager.default.fileExists(atPath: file.path) {
-                            try await remote.uploadBlob(file, hash: WebDAVFileHash.sha256(file))
+                            try await remote.uploadBlob(file, hash: contentHash(of: file))
                         }
                     }
                 }
@@ -197,14 +197,19 @@ final class WebDAVSyncEngine {
         for (filename, url) in files.sorted(by: { $0.key < $1.key }) {
             try Task.checkCancellation()
             progress.detail = "正在上传：\(record.syncTitle) · \(filename)"
-            let hash = try await Task.detached(priority: .utility) {
-                try WebDAVFileHash.sha256(url)
-            }.value
+            let hash = try await contentHash(of: url)
             try await remote.uploadBlob(url, hash: hash)
             assets.append(WebDAVAsset(filename: filename, hash: hash))
             progress.completedUnits += 1
         }
         return WebDAVBook(record: record, assets: assets)
+    }
+
+    /// 在后台读取文件计算哈希，书籍与背景图片可能很大，不能占用主线程。
+    private func contentHash(of url: URL) async throws -> String {
+        try await Task.detached(priority: .utility) {
+            try WebDAVFileHash.sha256(url)
+        }.value
     }
 
     /// 下载一本书的全部文件到临时位置；任何一个失败都删除已下载的文件。
