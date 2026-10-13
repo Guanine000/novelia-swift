@@ -137,3 +137,52 @@ final class SyncMergeTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode([String: SyncedBlockedTag].self, from: JSONEncoder().encode(tags)), tags)
     }
 }
+
+/// Positions written by one EPUB engine restore inside the same chapter in the other.
+final class EPUBChapterProgressTests: XCTestCase {
+    func testProgressionFieldIsOptionalAndIgnoredByOlderDecoders() throws {
+        let readium = SyncedReadingPosition(chapterIndex: 4, fraction: 0.31, updatedAt: Date(timeIntervalSince1970: 50), chapterProgression: 0.62)
+        let data = try JSONEncoder().encode(["epub:h": readium])
+        XCTAssertEqual(try JSONDecoder().decode([String: SyncedReadingPosition].self, from: data)["epub:h"], readium)
+        let before = try JSONDecoder().decode(SyncedReadingPosition.self, from: Data(#"{"chapterIndex":4,"fraction":0.3,"updatedAt":1,"chapterOffset":900}"#.utf8))
+        XCTAssertNil(before.chapterProgression)
+
+        struct OlderPosition: Codable {
+            var chapterIndex: Int?
+            var fraction: Double?
+            var updatedAt: Date
+            var chapterOffset: Int?
+        }
+        let older = try JSONDecoder().decode([String: OlderPosition].self, from: data)["epub:h"]
+        XCTAssertEqual(older?.fraction, 0.31, "0.11.x restores by the whole-book fraction")
+        XCTAssertNil(older?.chapterOffset)
+    }
+
+    func testOffsetProgressionRoundTrip() {
+        XCTAssertEqual(EPUBChapterProgress.progression(offset: 250, length: 1_000), 0.25)
+        XCTAssertEqual(EPUBChapterProgress.offset(progression: 0.25, length: 1_000), 250)
+        XCTAssertEqual(EPUBChapterProgress.progression(offset: 5_000, length: 1_000), 1)
+        XCTAssertEqual(EPUBChapterProgress.progression(offset: 10, length: 0), 0)
+        XCTAssertEqual(EPUBChapterProgress.offset(progression: .nan, length: 10), 0)
+        XCTAssertEqual(EPUBChapterProgress.offset(progression: 2, length: 10), 10)
+    }
+
+    /// Legacy YueduCoreText offsets count laid-out text, not markup: dividing by the raw XHTML
+    /// length (as 0.12.0 (54) did) pulls the position towards the chapter start.
+    func testTextLengthIgnoresMarkup() {
+        let body = String(repeating: "她轻轻合上旧书。", count: 50)
+        let html = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title>
+        <link rel="stylesheet" href="style.css"/><style>p { text-indent: 2em; }</style></head>
+        <body><!-- note --><h1 class="title">第一章</h1><p class="a">\(body)</p><p>&amp;&#x3000;<span>尾</span></p>
+        <script>var x = "<p>not text</p>";</script></body></html>
+        """
+        let expected = ("第一章" + body + "&\u{3000}尾").utf16.count
+        XCTAssertEqual(EPUBChapterProgress.textLength(html: html), expected)
+        let offset = ("第一章" + body).utf16.count
+        let progression = EPUBChapterProgress.progression(offset: offset, length: EPUBChapterProgress.textLength(html: html))
+        XCTAssertGreaterThan(progression, 0.95)
+        XCTAssertLessThan(EPUBChapterProgress.progression(offset: offset, length: html.utf16.count), 0.75, "raw markup length underestimates")
+    }
+}

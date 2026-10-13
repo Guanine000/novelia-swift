@@ -17,6 +17,10 @@ struct SyncedReadingPosition: Codable, Equatable {
     /// Older app versions ignore both when decoding.
     var unit: Int? = nil
     var unitCount: Int? = nil
+    /// EPUBs: fraction (0...1) of the chapter's text before the position. Written by both
+    /// EPUB engines so either can restore the other's position inside the chapter; older
+    /// app versions ignore it and fall back to `fraction`.
+    var chapterProgression: Double? = nil
 
     /// A remote position replaces the local one when it is at least as recent.
     static func merged(_ local: [String: Self], _ remote: [String: Self]) -> [String: Self] {
@@ -25,6 +29,36 @@ struct SyncedReadingPosition: Codable, Equatable {
             result[key] = value
         }
         return result
+    }
+}
+
+/// Converts in-chapter EPUB positions between the YueduCoreText reader (UTF-16 offsets in
+/// the chapter's text) and Readium (progression through the chapter).
+enum EPUBChapterProgress {
+    static func progression(offset: Int, length: Int) -> Double {
+        guard length > 0 else { return 0 }
+        return min(1, max(0, Double(offset) / Double(length)))
+    }
+
+    static func offset(progression: Double, length: Int) -> Int {
+        guard length > 0, progression.isFinite else { return 0 }
+        return min(length, max(0, Int((Double(length) * progression).rounded(.down))))
+    }
+
+    /// Approximate UTF-16 length of the text YueduCoreText lays out for a chapter's XHTML:
+    /// whitespace between tags, head, script and style content and all tags removed, each
+    /// character entity counted once. Only used to convert offsets saved before `chapterProgression` existed.
+    static func textLength(html: String) -> Int {
+        var text = html
+        // Whitespace between tags is layout-only; whitespace inside text is kept.
+        for pattern in [#">\s+<"#] {
+            text = text.replacingOccurrences(of: pattern, with: "><", options: .regularExpression)
+        }
+        for pattern in [#"(?is)<head\b.*?</head\s*>"#, #"(?is)<(script|style)\b.*?</\1\s*>"#, #"(?s)<!--.*?-->"#, #"<[^>]*>"#] {
+            text = text.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        }
+        text = text.replacingOccurrences(of: #"&(#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);"#, with: "_", options: .regularExpression)
+        return text.utf16.count
     }
 }
 

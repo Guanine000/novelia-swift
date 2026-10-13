@@ -188,9 +188,12 @@ final class EPUBReaderModel: ObservableObject {
             if let positionHandler {
                 positionHandler(location.spineIndex, pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex))
             } else if let openedBookHash {
+                let offset = pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex)
+                let length = pageBook?.sourceLength(spineIndex: location.spineIndex)
                 ReaderSettings.shared.recordEPUBPosition(
                     hash: openedBookHash, fraction: overallProgress, spineIndex: location.spineIndex,
-                    chapterOffset: pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex))
+                    chapterOffset: offset,
+                    chapterProgression: offset.flatMap { offset in length.map { EPUBChapterProgress.progression(offset: offset, length: $0) } })
             }
         }
     }
@@ -470,6 +473,10 @@ final class EPUBReaderModel: ObservableObject {
             if let spine = saved?.chapterIndex, let offset = saved?.chapterOffset, container.spine.indices.contains(spine) {
                 restored = true
                 await relayout(keepingCurrentSpine: false, reason: .restore, target: (spine, offset))
+            } else if let spine = saved?.chapterIndex, let progression = saved?.chapterProgression, container.spine.indices.contains(spine) {
+                // Saved by the Readium reader: same chapter, position by the chapter's text length.
+                restored = true
+                await relayout(keepingCurrentSpine: false, reason: .restore, target: (spine, nil), targetProgression: progression)
             } else {
                 await relayout(keepingCurrentSpine: false, reason: .first, target: (0, nil))
             }
@@ -653,7 +660,7 @@ final class EPUBReaderModel: ObservableObject {
     /// 重排当前章（以及前后相邻章的预取）。generation 递增使旧页面全部失效。
     /// `target` opens a chapter at a source offset (book open / saved-position restore).
     private func relayout(keepingCurrentSpine: Bool, reason: EPUBLayoutReason,
-                          target: (spine: Int, offset: Int?)? = nil) async {
+                          target: (spine: Int, offset: Int?)? = nil, targetProgression: Double? = nil) async {
         guard let container = source else { return }
         let wasRestoringPosition = isRestoringPosition
         isRestoringPosition = true
@@ -693,7 +700,10 @@ final class EPUBReaderModel: ObservableObject {
             if book.generation == generation {
                 status = .ready
                 location.spineIndex = spineIndex
-                if let previousOffset, let page = book.pageIndex(spineIndex: spineIndex, containingSourceOffset: previousOffset) {
+                let restoreOffset = previousOffset ?? targetProgression.flatMap { progression in
+                    book.sourceLength(spineIndex: spineIndex).map { EPUBChapterProgress.offset(progression: progression, length: $0) }
+                }
+                if let restoreOffset, let page = book.pageIndex(spineIndex: spineIndex, containingSourceOffset: restoreOffset) {
                     location.pageIndex = page
                 } else {
                     location.pageIndex = min(Int(previousFraction * CGFloat(max(pageCount(spineIndex: spineIndex), 1))),
