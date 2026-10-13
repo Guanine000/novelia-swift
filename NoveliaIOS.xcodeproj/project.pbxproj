@@ -70,6 +70,7 @@
 		E60000000000000000000001 /* LocalBookRecords.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000001 /* LocalBookRecords.swift */; };
 		E60000000000000000000002 /* WebDAVManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000002 /* WebDAVManifest.swift */; };
 		E60000000000000000000003 /* WebDAVSyncPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000003 /* WebDAVSyncPlanner.swift */; };
+		E60000000000000000000004 /* WebDAVRemote.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000004 /* WebDAVRemote.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -132,6 +133,7 @@
 		E61000000000000000000001 /* LocalBookRecords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBookRecords.swift; sourceTree = "<group>"; };
 		E61000000000000000000002 /* WebDAVManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVManifest.swift; sourceTree = "<group>"; };
 		E61000000000000000000003 /* WebDAVSyncPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVSyncPlanner.swift; sourceTree = "<group>"; };
+		E61000000000000000000004 /* WebDAVRemote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVRemote.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -235,6 +237,7 @@
 				E61000000000000000000001 /* LocalBookRecords.swift */,
 				E61000000000000000000002 /* WebDAVManifest.swift */,
 				E61000000000000000000003 /* WebDAVSyncPlanner.swift */,
+				E61000000000000000000004 /* WebDAVRemote.swift */,
 			);
 			path = Sources/NoveliaIOSCore;
 			sourceTree = "<group>";
@@ -425,6 +428,7 @@
 				E60000000000000000000001 /* LocalBookRecords.swift in Sources */,
 				E60000000000000000000002 /* WebDAVManifest.swift in Sources */,
 				E60000000000000000000003 /* WebDAVSyncPlanner.swift in Sources */,
+				E60000000000000000000004 /* WebDAVRemote.swift in Sources */,
 				A10000000000000000000044 /* SettingsKeys.swift in Sources */,
 				D30000000000000000000003 /* ReaderSettingsAdapters.swift in Sources */,
 				D30000000000000000000001 /* ReaderSettings.swift in Sources */,
