@@ -263,6 +263,13 @@ final class WebDAVSyncEngineTests: XCTestCase {
         }
     }
 
+    /// 进度总数包含每个传输的文件加上写清单这一步，结束时全部完成。
+    private func assertProgressCompleted(totalUnits: Int, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(progress.last?.totalUnits, totalUnits, file: file, line: line)
+        XCTAssertEqual(progress.last?.completedUnits, totalUnits, file: file, line: line)
+        XCTAssertFalse(progress.contains { $0.completedUnits > $0.totalUnits }, "never over 100%", file: file, line: line)
+    }
+
     private func assertDownloadsDeleted(file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertFalse(remote.handedOut.isEmpty, "the scenario downloaded something", file: file, line: line)
         for url in remote.handedOut {
@@ -290,10 +297,8 @@ final class WebDAVSyncEngineTests: XCTestCase {
         XCTAssertEqual(remote.blobs.count, 3)
         XCTAssertEqual(remote.puts.map(\.existed), [false])
         XCTAssertEqual(remote.puts.map(\.etag), [nil])
-        let last = try XCTUnwrap(progress.last)
-        XCTAssertEqual(last.totalUnits, 4, "three files plus writing the manifest")
-        XCTAssertEqual(last.completedUnits, last.totalUnits)
-        XCTAssertEqual(last.detail, "同步完成")
+        assertProgressCompleted(totalUnits: 4)
+        XCTAssertEqual(progress.last?.detail, "同步完成")
     }
 
     func testTwoWaySyncRestoresReplacesAndUploads() async throws {
@@ -534,6 +539,7 @@ final class WebDAVSyncEngineTests: XCTestCase {
         XCTAssertEqual(remote.manifest?.backgrounds?["dark"]?.updatedAt, date(8))
         XCTAssertEqual(local.appliedBackgrounds[true]?.files, [darkAsset.hash: Data("dark image".utf8)])
         XCTAssertEqual(local.appliedBackgrounds[false]?.value.updatedAt, date(10))
+        assertProgressCompleted(totalUnits: 3)
         assertDownloadsDeleted()
     }
 
@@ -560,6 +566,7 @@ final class WebDAVSyncEngineTests: XCTestCase {
         XCTAssertEqual(Set(remote.manifest?.fonts.map { Array($0.keys) } ?? []), [localHash, remoteHash])
         XCTAssertEqual(local.appliedFonts.map { Set($0.records.keys) }, [localHash, remoteHash])
         XCTAssertEqual(local.appliedFonts?.files, [remoteHash: remoteFont])
+        assertProgressCompleted(totalUnits: 3)
         assertDownloadsDeleted()
     }
 }
