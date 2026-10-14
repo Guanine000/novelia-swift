@@ -94,7 +94,7 @@ python3 -I scripts/build_local_release.py --allow-dirty --simulator '<模拟器�
 
 Release 分发时一并提供 IPA、source.tar.gz、dependencies.tar.gz、BUILD.json 与 SHA256SUMS；未签名 IPA 需接收者自行重签。公开正式版构建另加 `--public-release`，生成指向本版本固定公开 Release 页的 `novelia-<版本>-build<构建号>-source-info.txt`，并纳入 SHA256SUMS；发布公开 Release 时一并上传该 TXT。私密测试版默认不生成此文件。公开版通过网盘分享时，可仅上传配套 IPA 和 TXT，并在分享说明中提示源码取得方式；须保证对应 Release 的源码、依赖及许可材料完整、免费且持续可访问。不要给尚未公开对应源码的私密测试版套用公开版说明。目录中的构建／测试日志仅供本机排障，可能含开发环境路径，不是应用的隐私过滤日志，不作为发布附件。
 
-字号、主题与背景设置在阅读器间共用；在线／TXT 分页模式的实现与限制见 [READER_PAGINATION.md](READER_PAGINATION.md)。
+字号、主题与背景设置在阅读器间共用；在线／TXT 分页、引擎与进度兼容的实现约定见 [开发文档的阅读器章节](DEVELOPMENT.md#阅读器实现)。
 
 Readium 目录页提供可折叠的全书内容诊断：后台读取全书本地清单资源（包括未阅读章节、样式表、图片及字体），仅显示实际目录或资源读取／解码失败，以及目录补全成功的提示；没有这些提示时不显示诊断区。支持选择复制，每次打开目录页时默认折叠。扫描不访问外部地址，资源读取成功不代表 WebKit 排版、脚本或图片／字体解码已经通过验证。
 
