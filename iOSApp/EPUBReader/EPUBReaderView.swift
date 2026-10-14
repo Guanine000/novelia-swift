@@ -18,6 +18,9 @@ struct PagedTextBook {
     let startOffset: Int?
     /// （单元序号，单元文本中的 UTF-16 偏移量），每次翻页后报告。
     let onPosition: (Int, Int?) -> Void
+    /// TXT 的 Readium Locator 独立保存，身份包含内容哈希及分章规则。
+    var readiumIdentity: String? = nil
+    var positionUpdatedAt: Date? = nil
 }
 
 struct EPUBReaderView: View {

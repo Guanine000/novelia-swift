@@ -1,4 +1,22 @@
-# 在线小说与 TXT 共用 YueduCoreText 分页的评估
+# TXT 与在线小说分页阅读
+
+## Readium 实验性替代（2026-10-14）
+
+YueduCoreText 继续保留为默认分页引擎。现有 `readerEPUBReadium` 设置键及已保存值保持兼容，设置入口改名为“分页使用 Readium 引擎（实验）”，统一控制 EPUB、TXT 与在线小说分页。滚动模式保持 SwiftUI 原实现。
+
+`ReadiumTextPublication` 将 `TextChapterSource` 的惰性单元作为 Readium Publication 的 readingOrder，只有章节起始单元进入目录。Resource 按需生成经过转义的 XHTML；在线小说不预先下载全部正文，失败后通过重建导航器重新请求。生成书籍不执行 EPUB 全书资源诊断扫描，避免触发全书下载。
+
+TXT 沿用 `txt:<SHA-256>` 同步位置；Yuedu 的单元／偏移映射为 Readium 初始章内比例。本机精确 Locator 以内容哈希和分章规则为身份保存，只有其时间不早于共享进度、且属于当前单元时才优先恢复；打开恢复不刷新同步时间。Readium 翻页时将比例近似换回文本偏移供原引擎及其他设备使用，因此跨引擎恢复可能有少量落页差异。在线继续保存章节级位置与阅读历史，译源／显示模式切换回到该章开头。
+
+生成书籍的位置列表每单元一个位置，进度条按单元加章内比例计算；界面显示百分比，不将位置数显示成实际页数。两个上游库及其原始许可均保留，未新增或修改上游依赖。
+
+待验收：真机横向滑动／跨章、长按选字、长 TXT 首次打开、字号及旋转后的定位、WebDAV 另一设备进度恢复、在线网络失败重试与登录续期。
+
+---
+
+以下为此前 YueduCoreText 分页方案的评估与实施记录。
+
+## 在线小说与 TXT 共用 YueduCoreText 分页的评估
 
 评估日期：2026-10-12。基于当前工作区的 EPUBReader、ReaderView、TXTReaderView；本轮完成 ReaderSettings 与本地构建流程，尚未切换在线／TXT 阅读模式。
 

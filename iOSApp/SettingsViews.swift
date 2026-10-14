@@ -62,8 +62,8 @@ struct SettingsView: View {
                 NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
                 Toggle(isOn: $epubUsesReadium) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("EPUB 使用 Readium 引擎（实验）")
-                        Text("支持表格、Flex/Grid、定位与透明度等 CSS 样式；水平滑动翻页。下次打开书籍时生效。")
+                        Text("分页使用 Readium 引擎（实验）")
+                        Text("适用于 EPUB、TXT 和在线小说的分页阅读；关闭后使用原生分页引擎。下次打开阅读器时生效。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }

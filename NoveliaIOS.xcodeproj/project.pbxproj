@@ -10,6 +10,7 @@
 		E40000000000000000000003 /* LocalLibraryIndexWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000000000000000000004 /* LocalLibraryIndexWriter.swift */; };
 		E40000000000000000000001 /* EPUBContentDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000000000000000000002 /* EPUBContentDiagnostics.swift */; };
 		A10000000000000000000300 /* ReadiumEPUBReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000300 /* ReadiumEPUBReaderModel.swift */; };
+		A10000000000000000000310 /* ReadiumTextPublication.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000310 /* ReadiumTextPublication.swift */; };
 		A10000000000000000000301 /* ReadiumEPUBReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000301 /* ReadiumEPUBReaderView.swift */; };
 		A10000000000000000000302 /* ReadiumShared in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000302 /* ReadiumShared */; };
 		A10000000000000000000303 /* ReadiumStreamer in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000303 /* ReadiumStreamer */; };
@@ -80,6 +81,7 @@
 		E40000000000000000000004 /* LocalLibraryIndexWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLibraryIndexWriter.swift; sourceTree = "<group>"; };
 		E40000000000000000000002 /* EPUBContentDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBContentDiagnostics.swift; sourceTree = "<group>"; };
 		B10000000000000000000300 /* ReadiumEPUBReaderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumEPUBReaderModel.swift; sourceTree = "<group>"; };
+		B10000000000000000000310 /* ReadiumTextPublication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumTextPublication.swift; sourceTree = "<group>"; };
 		B10000000000000000000301 /* ReadiumEPUBReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumEPUBReaderView.swift; sourceTree = "<group>"; };
 		B10000000000000000000001 /* NoveliaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoveliaApp.swift; sourceTree = "<group>"; };
 		B10000000000000000000002 /* ShelfViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShelfViews.swift; sourceTree = "<group>"; };
@@ -182,6 +184,7 @@
 				B10000000000000000000020 /* EPUBReaderView.swift */,
 				B10000000000000000000021 /* EPUBSampleBook.swift */,
 				B10000000000000000000300 /* ReadiumEPUBReaderModel.swift */,
+				B10000000000000000000310 /* ReadiumTextPublication.swift */,
 				B10000000000000000000301 /* ReadiumEPUBReaderView.swift */,
 			);
 			path = iOSApp/EPUBReader;
@@ -457,6 +460,7 @@
 				A10000000000000000000023 /* EPUBReaderView.swift in Sources */,
 				A10000000000000000000024 /* EPUBSampleBook.swift in Sources */,
 				A10000000000000000000300 /* ReadiumEPUBReaderModel.swift in Sources */,
+				A10000000000000000000310 /* ReadiumTextPublication.swift in Sources */,
 				A10000000000000000000301 /* ReadiumEPUBReaderView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -573,8 +577,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.18.0;
-				CURRENT_PROJECT_VERSION = 67;
+				MARKETING_VERSION = 0.19.0;
+				CURRENT_PROJECT_VERSION = 68;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -597,8 +601,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 0.18.0;
-				CURRENT_PROJECT_VERSION = 67;
+				MARKETING_VERSION = 0.19.0;
+				CURRENT_PROJECT_VERSION = 68;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;

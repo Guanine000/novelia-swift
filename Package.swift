@@ -11,6 +11,7 @@ let package = Package(
         // Same pins as the Xcode project (NoveliaIOS.xcodeproj Package.resolved).
         .package(url: "https://github.com/CHANG-JUI-LIN/YueduCoreText.git", exact: "0.8.0"),
         .package(url: "https://github.com/readium/ZIPFoundation.git", exact: "3.0.1"),
+        .package(url: "https://github.com/readium/swift-toolkit.git", exact: "3.11.0"),
     ],
     targets: [
         .target(
@@ -29,6 +30,7 @@ let package = Package(
                 "NoveliaIOSCore",
                 .product(name: "YueduCoreText", package: "YueduCoreText"),
                 .product(name: "ReadiumZIPFoundation", package: "ZIPFoundation"),
+                .product(name: "ReadiumShared", package: "swift-toolkit"),
             ],
             path: "iOSApp/EPUBReader",
             exclude: [
@@ -38,7 +40,7 @@ let package = Package(
                 "EPUBReaderView.swift",
                 "EPUBSampleBook.swift",
             ],
-            sources: ["EPUBChapterSource.swift", "EPUBContainer.swift", "EPUBLayoutCoordinator.swift", "EPUBPageBook.swift"]
+            sources: ["ReadiumTextPublication.swift", "EPUBChapterSource.swift", "EPUBContainer.swift", "EPUBLayoutCoordinator.swift", "EPUBPageBook.swift"]
         ),
         .testTarget(name: "NoveliaIOSCoreTests", dependencies: ["NoveliaIOSCore"], path: "Tests/NoveliaIOSCoreTests"),
         .testTarget(

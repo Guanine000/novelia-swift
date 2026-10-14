@@ -34,13 +34,13 @@ struct SyncedReadingPosition: Codable, Equatable {
 
 /// 在 YueduCoreText 阅读器（章节文本的 UTF-16 偏移量）与 Readium
 /// （章内进度比例）之间转换 EPUB 章内位置。
-enum EPUBChapterProgress {
-    static func progression(offset: Int, length: Int) -> Double {
+public enum EPUBChapterProgress {
+    public static func progression(offset: Int, length: Int) -> Double {
         guard length > 0 else { return 0 }
         return min(1, max(0, Double(offset) / Double(length)))
     }
 
-    static func offset(progression: Double, length: Int) -> Int {
+    public static func offset(progression: Double, length: Int) -> Int {
         guard length > 0, progression.isFinite else { return 0 }
         return min(length, max(0, Int((Double(length) * progression).rounded(.down))))
     }
@@ -48,7 +48,7 @@ enum EPUBChapterProgress {
     /// YueduCoreText 对章节 XHTML 排版时使用的文本 UTF-16 长度近似值：
     /// 去除标签间空白、head/script/style 内容及所有标签，每个字符实体计数一次。
     /// 仅用于转换引入 `chapterProgression` 之前保存的偏移量。
-    static func textLength(html: String) -> Int {
+    public static func textLength(html: String) -> Int {
         var text = html
         // 标签间空白仅服务于布局；文本内部的空白保留。
         for pattern in [#">\s+<"#] {

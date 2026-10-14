@@ -9,7 +9,7 @@
 | YueduCoreText | **0.8.0（exact，Xcode 工程内固定）** | MPL-2.0 | https://github.com/CHANG-JUI-LIN/YueduCoreText | HTML/CSS 排版、分页（`BrowserLayoutSession`）、页面绘制（`DisplayListBuilder`）、CJK 排版 |
 | ReadiumZIPFoundation | 3.0.1（upToNextMajor） | MIT | https://github.com/readium/ZIPFoundation | 自写 EPUB 容器解析所用的 ZIP 读取（该 fork 由 readium/ZIPFoundation 仓库发布，模块名 `ReadiumZIPFoundation`） |
 | SwiftSoup | 2.13.7（由 YueduCoreText 精确依赖，未直接使用） | MIT | https://github.com/scinfu/SwiftSoup | YueduCoreText 的 HTML 解析后端（传递依赖） |
-| Readium swift-toolkit | 3.11.0 | BSD-3-Clause | https://github.com/readium/swift-toolkit | 实验性 EPUB 阅读器（`ReadiumEPUBReaderModel/View.swift`，WKWebView + ReadiumCSS）；传递依赖 CryptoSwift、DifferenceKit、Fuzi、GCDWebServer、SQLite.swift、Zip，许可见 `iOSApp/Resources/ThirdPartyLicenses/INDEX.md` |
+| Readium swift-toolkit | 3.11.0 | BSD-3-Clause | https://github.com/readium/swift-toolkit | 实验性 EPUB／TXT／在线分页阅读器（`ReadiumEPUBReaderModel/View.swift`、`ReadiumTextPublication.swift`，WKWebView + ReadiumCSS）；传递依赖 CryptoSwift、DifferenceKit、Fuzi、GCDWebServer、SQLite.swift、Zip，许可见 `iOSApp/Resources/ThirdPartyLicenses/INDEX.md` |
 
 ## 代码分类（新写 / 上游 / 修改）
 
@@ -31,7 +31,7 @@
    - 分发可执行文件时，须让接收者以合理方式取得对应 MPL 覆盖源码；本次锁定的准确提交和取得方式见应用随附的 `ThirdPartyLicenses/INDEX.md`。
 2. **MIT（ReadiumZIPFoundation、SwiftSoup）**：保留版权与许可声明即可。
 3. 许可不授予 Yuedu / Yuedu-reader 的商标、Logo 或其他品牌素材使用权；清单中为说明软件来源而列出项目名称。本阅读器未使用其图标或 Logo。
-4. 书库导入时的 EPUB 元数据与封面提取由 `EPUBContainer` 完成；Readium swift-toolkit 3.11.0 用于实验性 EPUB 阅读器。Zip 内嵌 MiniZip / Info-ZIP 的独立许可与来源声明一并随包提供。
+4. 书库导入时的 EPUB 元数据与封面提取由 `EPUBContainer` 完成；Readium swift-toolkit 3.11.0 用于实验性 EPUB、TXT 与在线小说分页阅读器。TXT／在线适配器为本项目原创，通过公开 Publication／Container API 接入，没有复制或修改上游文件。Zip 内嵌 MiniZip / Info-ZIP 的独立许可与来源声明一并随包提供。
 
 ## 验证记录
 
