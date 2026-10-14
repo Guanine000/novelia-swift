@@ -27,7 +27,7 @@ code += '\n' + reader[reader.index('@MainActor\nprivate final class OnlineChapte
 
 # Generate the unexercised protocol methods as explicit failures, not production
 # fallbacks. The exercised methods below implement synthetic backend behavior.
-protocols = (root / layout['APIServices.swift']).read_text().split('/// Observable stores')[0]
+protocols = (root / layout['APIServices.swift']).read_text().split('@MainActor\nprotocol AccountSessionProviding')[0]
 methods = re.findall(r'    func [\s\S]*?(?:async throws(?: -> [^\n]+)?)\n', protocols)
 custom = {'searchNovels', 'siteRankedNovels', 'chapter', 'searchWenku',
           'cloudFavoriteFolders', 'cloudWenkuFavoriteFolders', 'cloudFavorites',
