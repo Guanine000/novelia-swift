@@ -12,6 +12,8 @@ protocol SyncBookLibrary<Record>: AnyObject {
     func syncFiles(for book: Record) -> [String: URL]
     func restoreFromSync(_ book: Record, files: [String: URL]) throws
     func replaceFromSync(_ book: Record, files: [String: URL]) throws
+    /// 其他设备已从云端删除这本书：删除本机文件与记录。
+    func removeFromSync(_ book: Record)
 }
 
 /// 书籍以外随同步合并的本机状态：阅读位置、书库系列、屏蔽标签、阅读背景与导入字体。
@@ -56,6 +58,9 @@ final class WebDAVSyncEngine {
     private let web: any SyncBookLibrary<DownloadedWebNovel>
     private let wenku: any SyncBookLibrary<LocalWenkuEPUB>
     private let options: WebDAVSyncOptions
+    /// 有值时不下载书籍文件：本机没有的书只记为云端书籍（含 EPUB 封面），打开时再下载；
+    /// 本机已有的书也不被远端较新的版本替换。为 nil 时下载全部书籍文件（旧行为）。
+    private let cloud: (any SyncCloudCatalog)?
     private let onProgress: (WebDAVSyncProgress) -> Void
     private(set) var progress = WebDAVSyncProgress() { didSet { onProgress(progress) } }
     private let defaults: UserDefaults
@@ -65,12 +70,22 @@ final class WebDAVSyncEngine {
     private var usedHashes: [String: String] = [:]
     /// 远端已有的 blob：清单引用的文件都在写清单之前上传过，不必再询问服务器。
     private var knownBlobs: Set<String> = []
+    /// 清单写入成功后才更新的云端书籍及本次下载的封面。
+    private var pendingCloud: (web: [WebDAVBook<DownloadedWebNovel>], wenku: [WebDAVBook<LocalWenkuEPUB>], covers: [String: URL])?
+    private var temporaryCovers: [URL] = []
+    /// 被其他设备从云端删除、清单写入成功后要从本机删除的书。
+    private var deletedLocalWeb: [DownloadedWebNovel] = []
+    private var deletedLocalWenku: [LocalWenkuEPUB] = []
+    /// 本次按云端删除记录从本机删除的书数。
+    private(set) var removedLocalCount = 0
 
     init(remote: any WebDAVRemote, local: any WebDAVSyncLocalState,
          web: any SyncBookLibrary<DownloadedWebNovel>, wenku: any SyncBookLibrary<LocalWenkuEPUB>,
          options: WebDAVSyncOptions, defaults: UserDefaults = .standard,
+         cloud: (any SyncCloudCatalog)? = nil,
          onProgress: @escaping (WebDAVSyncProgress) -> Void) {
         self.remote = remote
+        self.cloud = cloud
         self.local = local
         self.web = web
         self.wenku = wenku
@@ -80,11 +95,14 @@ final class WebDAVSyncEngine {
         self.onProgress = onProgress
     }
 
-    /// 返回从远端新恢复的书籍数。取消或失败时已传输的文件不会回滚；清单只在最后写入，
+    /// 返回从远端新恢复的书籍数；记录云端书籍时为本次新出现的云端书籍数。取消或失败时已传输的文件不会回滚；清单只在最后写入，
     /// 标签、系列、背景与字体在清单写入成功后才套用到本机。
     func run() async throws -> Int {
         var finished = false
-        defer { saveHashes(pruning: finished && options.books) }
+        defer {
+            saveHashes(pruning: finished && options.books)
+            temporaryCovers.forEach { try? FileManager.default.removeItem(at: $0) }
+        }
         try await remote.verifyConnection()
         progress.stage = "创建同步目录"
         progress.detail = "正在检查同步目录…"
@@ -98,18 +116,53 @@ final class WebDAVSyncEngine {
         if options.books {
             manifest.webBooks = WebDAVSyncPlanner.uniqueBooks(manifest.webBooks)
             manifest.wenkuBooks = WebDAVSyncPlanner.uniqueBooks(manifest.wenkuBooks)
-            let webPlan = WebDAVSyncPlanner.planBooks(local: web.books, remote: manifest.webBooks)
-            let wenkuPlan = WebDAVSyncPlanner.planBooks(local: wenku.books, remote: manifest.wenkuBooks)
-            progress.totalUnits = webPlan.unitCount { web.syncFiles(for: $0).count }
-                + wenkuPlan.unitCount { wenku.syncFiles(for: $0).count }
-                + 1
-            progress.stage = "恢复远端下载"
-            imported += try await download(webPlan, into: web)
-            imported += try await download(wenkuPlan, into: wenku)
+            // 云端已删除的书不恢复也不上传；重新下载或导入的更新版本照常同步。
+            var deleted = manifest.deletedBooks ?? [:]
+            let webBooks = WebDAVDeletedBooks.apply(local: web.books, remote: manifest.webBooks, deleted: &deleted)
+            let wenkuBooks = WebDAVDeletedBooks.apply(local: wenku.books, remote: manifest.wenkuBooks, deleted: &deleted)
+            manifest.webBooks = webBooks.remote
+            manifest.wenkuBooks = wenkuBooks.remote
+            // 删除时间及之前的本机副本随云端删除一起移除；之后重新下载或导入的版本不受影响。
+            deletedLocalWeb = web.books.filter { book in !webBooks.local.contains { $0.id == book.id } }
+            deletedLocalWenku = wenku.books.filter { book in !wenkuBooks.local.contains { $0.id == book.id } }
+            if manifest.deletedBooks != nil || !deleted.isEmpty { manifest.deletedBooks = deleted }
+            let webPlan = WebDAVSyncPlanner.planBooks(local: webBooks.local, remote: manifest.webBooks)
+            let wenkuPlan = WebDAVSyncPlanner.planBooks(local: wenkuBooks.local, remote: manifest.wenkuBooks)
+            if let cloud {
+                let webCloud = webPlan.downloads.filter { !$0.replacesLocal }.map(\.book)
+                let wenkuCloud = wenkuPlan.downloads.filter { !$0.replacesLocal }.map(\.book)
+                let coverAssets = wenkuCloud.compactMap(CloudBookStore.coverAsset(of:))
+                    .filter { cloud.cachedCover(hash: $0.hash) == nil }
+                progress.totalUnits = webPlan.uploads.reduce(0) { $0 + web.syncFiles(for: $1).count }
+                    + wenkuPlan.uploads.reduce(0) { $0 + wenku.syncFiles(for: $1).count }
+                    + coverAssets.count + 1
+                progress.stage = "取回云端书目"
+                var covers: [String: URL] = [:]
+                for asset in coverAssets where covers[asset.hash] == nil {
+                    try Task.checkCancellation()
+                    progress.detail = "正在取回封面…"
+                    let file = try await remote.downloadBlob(asset.hash)
+                    temporaryCovers.append(file)
+                    covers[asset.hash] = file
+                    progress.completedUnits += 1
+                }
+                pendingCloud = (webCloud, wenkuCloud, covers)
+                imported = Self.newCount(webCloud, wenkuCloud, known: cloud)
+            } else {
+                progress.totalUnits = webPlan.unitCount { web.syncFiles(for: $0).count }
+                    + wenkuPlan.unitCount { wenku.syncFiles(for: $0).count }
+                    + 1
+                progress.stage = "恢复远端下载"
+                imported += try await download(webPlan, into: web)
+                imported += try await download(wenkuPlan, into: wenku)
+            }
             local.mergeReadingPositions(manifest.positions, webBooks: web.books)
             progress.stage = "上传本地下载"
             try await upload(webPlan, from: web, into: &manifest.webBooks)
             try await upload(wenkuPlan, from: wenku, into: &manifest.wenkuBooks)
+            progress.detail = "正在整理书目…"
+            try await fillMissingSizes(&manifest.webBooks, from: web)
+            try await fillMissingSizes(&manifest.wenkuBooks, from: wenku)
             manifest.positions = WebDAVSyncPlanner.positionsToSync(local.readingPositions, in: manifest)
             manifest.librarySeries = LibrarySeriesState.merged(local.librarySeries, manifest.librarySeries ?? LibrarySeriesState())
         }
@@ -166,7 +219,16 @@ final class WebDAVSyncEngine {
         }
         progress.stage = "保存远端书目"
         progress.detail = "正在保存同步清单…"
-        try await remote.putManifest(manifest, etag: etag, existed: existed)
+        // 清单与读取时完全相同就不再写入：没有改动的同步只需读取一次清单。
+        if !existed || !Self.sameContent(manifest, fetchedManifest) {
+            try await remote.putManifest(manifest, etag: etag, existed: existed)
+        }
+        deletedLocalWeb.forEach(web.removeFromSync)
+        deletedLocalWenku.forEach(wenku.removeFromSync)
+        removedLocalCount = deletedLocalWeb.count + deletedLocalWenku.count
+        if let cloud, let pendingCloud {
+            try cloud.replaceCloudBooks(web: pendingCloud.web, wenku: pendingCloud.wenku, covers: pendingCloud.covers)
+        }
         if options.tags { local.applyBlockedTags(manifest.blockedTags ?? [:]) }
         if options.books, let series = manifest.librarySeries { local.applyLibrarySeries(series) }
         if options.backgrounds {
@@ -181,6 +243,45 @@ final class WebDAVSyncEngine {
         progress.detail = "同步完成"
         finished = true
         return imported
+    }
+
+    /// 旧清单的文件没有大小：本机有同一版本（记录时间相同）且内容哈希一致时补上，之后写回清单。
+    /// 只读本机文件属性与已缓存的哈希，不产生网络请求。
+    private func fillMissingSizes<Record: SyncableBook>(_ books: inout [WebDAVBook<Record>],
+                                          from library: any SyncBookLibrary<Record>) async throws {
+        for index in books.indices where books[index].assets.contains(where: { $0.size == nil }) {
+            try Task.checkCancellation()
+            let book = books[index]
+            guard let localBook = library.books.first(where: { $0.id == book.record.id }),
+                  localBook.syncTimestamp == book.record.syncTimestamp else { continue }
+            let files = library.syncFiles(for: localBook)
+            var assets = book.assets
+            for assetIndex in assets.indices where assets[assetIndex].size == nil {
+                guard let file = files[assets[assetIndex].filename],
+                      try await contentHash(of: file) == assets[assetIndex].hash else { continue }
+                assets[assetIndex].size = Self.fileSize(file)
+            }
+            if assets != book.assets { books[index] = WebDAVBook(record: book.record, assets: assets) }
+        }
+    }
+
+    private static func fileSize(_ url: URL) -> Int64? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
+    }
+
+    /// 本次新出现（之前不在云端书籍中）的书数，用于完成提示。
+    private static func newCount(_ web: [WebDAVBook<DownloadedWebNovel>], _ wenku: [WebDAVBook<LocalWenkuEPUB>],
+                                 known cloud: any SyncCloudCatalog) -> Int {
+        let known = cloud.cloudBookKeys
+        return web.filter { !known.contains("web:\($0.record.id)") }.count
+            + wenku.filter { !known.contains("wenku:\($0.record.id.uuidString)") }.count
+    }
+
+    private static func sameContent(_ lhs: WebDAVManifest, _ rhs: WebDAVManifest) -> Bool {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        guard let left = try? encoder.encode(lhs), let right = try? encoder.encode(rhs) else { return false }
+        return left == right
     }
 
     /// 下载远端较新的书并写入本机书库，返回新恢复（而非替换）的书数。
@@ -219,7 +320,7 @@ final class WebDAVSyncEngine {
             progress.detail = "正在上传：\(record.syncTitle) · \(filename)"
             let hash = try await contentHash(of: url)
             try await uploadIfNeeded(url, hash: hash)
-            assets.append(WebDAVAsset(filename: filename, hash: hash))
+            assets.append(WebDAVAsset(filename: filename, hash: hash, size: Self.fileSize(url)))
             progress.completedUnits += 1
         }
         return WebDAVBook(record: record, assets: assets)

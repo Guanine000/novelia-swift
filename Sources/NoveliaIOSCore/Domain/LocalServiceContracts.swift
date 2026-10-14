@@ -40,6 +40,8 @@ protocol ReadingTimeRecording: AnyObject {
 /// 统计同步边界；快照与合并由统计实现负责，同步层不操作内部计时器或偏好键。
 @MainActor
 protocol ReadingStatisticsSyncing: AnyObject {
+    /// 本机在远端的设备 ID，对应 `statistics/<ID>.json`；只写这一个文件。
+    var syncDeviceID: String { get }
     func syncSnapshot() -> ReadingStatisticsSync
     func applySynced(_ snapshot: ReadingStatisticsSync)
 }

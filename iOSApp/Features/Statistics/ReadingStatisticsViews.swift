@@ -8,6 +8,13 @@ private enum ReadingDuration {
         if value < 3600 { return "\(value / 60) 分钟" }
         return "\(value / 3600) 小时 \((value % 3600) / 60) 分钟"
     }
+
+    static func weekSeconds(_ statistics: ReadingStatistics, at date: Date, calendar: Calendar = .current) -> TimeInterval {
+        guard let week = calendar.dateInterval(of: .weekOfYear, for: date) else { return 0 }
+        let days = Set((0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: week.start) }
+            .map { ReadingStatistics.dayKey($0, calendar: calendar) })
+        return statistics.seconds(days: days)
+    }
 }
 
 struct ReadingStatisticsView: View {
@@ -44,9 +51,36 @@ struct ReadingStatisticsView: View {
                 }
                 Section("阅读概览") {
                     LabeledContent("今日", value: ReadingDuration.text(store.statistics.seconds(days: [today])))
-                    LabeledContent("本周", value: ReadingDuration.text(weekSeconds(at: context.date)))
+                    LabeledContent("本周", value: ReadingDuration.text(ReadingDuration.weekSeconds(store.statistics, at: context.date)))
                     LabeledContent("累计", value: ReadingDuration.text(store.statistics.seconds()))
                     LabeledContent("阅读天数", value: "\(store.statistics.readingDays) 天")
+                }
+                Section {
+                    ForEach(store.devices) { device in
+                        NavigationLink {
+                            ReadingDeviceStatisticsView(deviceID: device.id)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: device.model == "iPad" ? "ipad" : "iphone")
+                                        .foregroundStyle(.secondary)
+                                    Text(device.name).lineLimit(1)
+                                    if device.isCurrent {
+                                        Text("本机").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
+                                            .background(.quaternary, in: Capsule())
+                                    }
+                                }
+                                Text("今日 \(ReadingDuration.text(device.statistics.seconds(days: [today]))) · 累计 \(ReadingDuration.text(device.statistics.seconds()))")
+                                    .font(.subheadline).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("设备")
+                } footer: {
+                    Text(store.devices.count > 1
+                         ? "上方概览为所有设备合计。其他设备的时长在同步后更新。"
+                         : "开启 WebDAV 阅读时长同步后，这里会显示其他设备的阅读时长。")
                 }
                 Section("累计类型分布") {
                     ForEach(ReadingKind.allCases) { kind in
@@ -115,7 +149,7 @@ struct ReadingStatisticsView: View {
                     }
                 }
                 Section {
-                    Text("从启用此功能后开始记录。正文加载成功且阅读器处于前台时计时，无操作时继续累计；锁屏、后台或退出后暂停。当天累计达到 1 分钟计为一个阅读日。本周按系统日历计算，跨午夜按当天分配。删除书籍保留历史。开启阅读时长同步后，可在 WebDAV 页手动合并多设备统计；记录开关仅控制本机新增计时。")
+                    Text("从启用此功能后开始记录。正文加载成功且阅读器处于前台时计时，无操作时继续累计；锁屏、后台或退出后暂停。当天累计达到 1 分钟计为一个阅读日。本周按系统日历计算，跨午夜按当天分配。删除书籍保留历史。开启阅读时长同步后，多设备统计随 WebDAV 同步合并，可在“设备”中分别查看；记录开关仅控制本机新增计时。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
@@ -124,17 +158,10 @@ struct ReadingStatisticsView: View {
             Button("开启同步") { syncStore.syncStatistics = true }
             Button("暂不开启", role: .cancel) {}
         } message: {
-            Text("你已开启 WebDAV 同步。是否同时开启阅读时长同步？之后可在 WebDAV 页点击按钮合并各设备的阅读统计。")
+            Text("你已开启 WebDAV 同步。是否同时开启阅读时长同步？之后各设备的阅读统计会随 WebDAV 同步合并。")
         }
         .navigationTitle("阅读统计")
         .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private func weekSeconds(at date: Date) -> TimeInterval {
-        guard let week = calendar.dateInterval(of: .weekOfYear, for: date) else { return 0 }
-        let days = Set((0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: week.start) }
-            .map { ReadingStatistics.dayKey($0, calendar: calendar) })
-        return store.statistics.seconds(days: days)
     }
 
     private func color(_ kind: ReadingKind) -> Color {
@@ -193,6 +220,66 @@ private struct ReadingBookStatisticsView: View {
             }
         }
         .navigationTitle("书籍阅读记录")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// 单台设备的阅读时长；本机可在这里修改显示名称。
+private struct ReadingDeviceStatisticsView: View {
+    @EnvironmentObject private var store: ReadingStatisticsStore
+    let deviceID: String
+    @State private var name = ""
+
+    var body: some View {
+        List {
+            if let device = store.devices.first(where: { $0.id == deviceID }) {
+                let now = Date()
+                let stats = device.statistics
+                Section {
+                    if device.isCurrent {
+                        TextField("设备名称", text: $name)
+                            .submitLabel(.done)
+                            .onSubmit { store.renameDevice(name) }
+                    } else {
+                        Text(device.name)
+                    }
+                    if let model = device.model { LabeledContent("类型", value: model) }
+                } header: {
+                    Text("设备")
+                } footer: {
+                    if device.isCurrent { Text("名称会在下次同步后显示在其他设备上。留空恢复为设备类型。") }
+                }
+                Section("阅读概览") {
+                    LabeledContent("今日", value: ReadingDuration.text(stats.seconds(days: [ReadingStatistics.dayKey(now)])))
+                    LabeledContent("本周", value: ReadingDuration.text(ReadingDuration.weekSeconds(stats, at: now)))
+                    LabeledContent("累计", value: ReadingDuration.text(stats.seconds()))
+                    LabeledContent("阅读天数", value: "\(stats.readingDays) 天")
+                    ForEach(ReadingKind.allCases) { kind in
+                        LabeledContent(kind.title, value: ReadingDuration.text(stats.seconds(kind: kind)))
+                    }
+                }
+                Section("书籍") {
+                    let books = stats.books.values.sorted { $0.seconds > $1.seconds }
+                    if books.isEmpty {
+                        Text("这台设备还没有阅读记录。").foregroundStyle(.secondary)
+                    }
+                    ForEach(books) { entry in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(entry.book.title).lineLimit(2)
+                            Text("\(entry.book.kind.title) · \(ReadingDuration.text(entry.seconds)) · 最后阅读 \(entry.lastReadAt.formatted(date: .abbreviated, time: .omitted))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            } else {
+                Text("找不到这台设备的记录。").foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { name = store.devices.first(where: { $0.id == deviceID })?.name ?? "" }
+        .onDisappear {
+            if store.devices.first(where: { $0.id == deviceID })?.isCurrent == true { store.renameDevice(name) }
+        }
+        .navigationTitle("设备阅读记录")
         .navigationBarTitleDisplayMode(.inline)
     }
 }

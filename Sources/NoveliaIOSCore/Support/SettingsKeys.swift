@@ -35,6 +35,14 @@ enum SettingsKey {
         static let syncBackgrounds = "webdav.syncBackgrounds"
         static let syncFonts = "webdav.syncFonts"
         static let syncStatistics = "webdav.syncStatistics"
+        /// 自动同步开关，默认关闭；已有用户保持手动同步。
+        static let autoSync = "webdav.autoSync"
+        /// 自动同步的 `WebDAVAutoSyncState`（JSON）。
+        static let autoSyncState = "webdav.autoSync.state.v1"
+        /// 已确认存在的同步目录 `["用户名@地址"]`，见 `WebDAVFolderCache`。
+        static let preparedFolders = "webdav.preparedFolders.v1"
+        /// 阅读统计同步缓存 `ReadingStatisticsSyncCache`（JSON）。
+        static let statisticsCache = "webdav.statistics.cache.v1"
         /// 本机文件的内容哈希缓存 `[文件身份: SHA-256]`，见 `WebDAVFileHash.identity`。
         static let fileHashes = "webdav.fileHashes.v1"
     }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
+import UIKit
 import Combine
 
 /// 由 NoveliaApp 持有的组装入口：统一创建配置、账号、API 和本地服务并供 Root 注入。
@@ -48,16 +49,20 @@ final class LocalAppServices {
     let statistics: ReadingStatisticsStore
     let library: LibraryStateStore
     let sync: WebDAVSyncStore
+    /// 只在云端有文件的书；书库显示，同步更新。
+    let cloudBooks: CloudBookStore
 
     init(defaults: UserDefaults = .standard, recorder: (any ReadingTimeRecording)? = nil) {
         let positions = ReadingPositionStore(defaults: defaults)
         self.positions = positions
         readerSettings = ReaderSettings(defaults: defaults, positions: positions)
-        statistics = ReadingStatisticsStore(defaults: defaults)
+        statistics = ReadingStatisticsStore(defaults: defaults, deviceModel: UIDevice.current.model)
         recording = ReadingActivityController(recorder: recorder ?? statistics)
         library = LibraryStateStore(positions: positions, defaults: defaults)
+        let cloudBooks = CloudBookStore()
+        self.cloudBooks = cloudBooks
         sync = WebDAVSyncStore(local: AppWebDAVSyncLocalState(blocked: .shared, backgrounds: .shared,
                                                            positions: positions, library: library),
-                               statistics: statistics)
+                               statistics: statistics, cloudBooks: cloudBooks)
     }
 }

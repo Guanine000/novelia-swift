@@ -68,4 +68,11 @@ final class WebDAVManifestTests: XCTestCase {
         XCTAssertFalse(WebDAVAsset.isValidHash(String(repeating: "g", count: 64)), "not hex")
         XCTAssertFalse(WebDAVAsset.isValidHash(String(repeating: "a", count: 62) + "/."), "path characters")
     }
+
+    func testAssetSizeIsOptionalAndRoundTrips() throws {
+        let old = try JSONDecoder().decode(WebDAVAsset.self, from: Data(#"{"filename":"a.epub","hash":"h"}"#.utf8))
+        XCTAssertNil(old.size, "manifests written before sizes still decode")
+        let sized = WebDAVAsset(filename: "a.epub", hash: "h", size: 1_234)
+        XCTAssertEqual(try JSONDecoder().decode(WebDAVAsset.self, from: JSONEncoder().encode(sized)), sized)
+    }
 }

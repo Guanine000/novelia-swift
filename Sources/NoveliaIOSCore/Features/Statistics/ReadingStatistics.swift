@@ -134,19 +134,73 @@ struct ReadingTimeTracker {
     }
 }
 
+/// 设备的显示信息，随阅读统计同步，用于按设备查看时长；旧版应用解码时忽略。
+struct ReadingDeviceInfo: Codable, Equatable, Sendable {
+    static let maxNameLength = 40
+
+    var name: String
+    /// 系统设备类型，如 iPhone、iPad。
+    var model: String
+    /// 名称或类型最后修改时间；不同来源的同一设备信息按此取较新者。
+    var updatedAt: Date
+
+    var isValid: Bool {
+        !name.isEmpty && name.count <= Self.maxNameLength && model.count <= Self.maxNameLength
+            && updatedAt.timeIntervalSince1970.isFinite
+    }
+}
+
 /// 独立于书目清单，旧版书籍同步不会覆盖统计。每个安装实例保留自己的累计快照。
+/// 本机缓存与旧版远端文件 `reading-statistics.json` 使用此格式；新版远端按设备分文件，见 `ReadingDeviceStatisticsFile`。
 struct ReadingStatisticsSync: Codable, Equatable, Sendable {
     var version = 1
     var devices: [String: ReadingStatistics] = [:]
+    /// 各设备名称与类型；可选字段，旧缓存与旧远端文件没有。
+    var deviceInfo: [String: ReadingDeviceInfo]? = nil
 
     static func merged(_ lhs: Self, _ rhs: Self) -> Self {
         var result = lhs
         for (id, snapshot) in rhs.devices {
             result.devices[id] = .mergedMaximum(result.devices[id] ?? ReadingStatistics(), snapshot)
         }
+        if let incoming = rhs.deviceInfo {
+            var info = result.deviceInfo ?? [:]
+            for (id, value) in incoming where value.updatedAt > (info[id]?.updatedAt ?? .distantPast) {
+                info[id] = value
+            }
+            result.deviceInfo = info
+        }
         return result
     }
 
     var statistics: ReadingStatistics { .combined(devices) }
-    var isValid: Bool { version == 1 && devices.allSatisfy { !$0.key.isEmpty && $0.value.isValidForSync } }
+    var isValid: Bool {
+        version == 1 && devices.allSatisfy { !$0.key.isEmpty && $0.value.isValidForSync }
+            && (deviceInfo ?? [:]).allSatisfy { !$0.key.isEmpty && $0.value.isValid }
+    }
+}
+
+/// 远端 `statistics/<设备 ID>.json`：每台设备只写自己的文件，读取时合并全部设备。
+/// 多台设备不会写同一个文件，因此不需要条件写入，服务器也不必支持 ETag。
+struct ReadingDeviceStatisticsFile: Codable, Equatable, Sendable {
+    var version = 1
+    var deviceID: String
+    var device: ReadingDeviceInfo?
+    var statistics: ReadingStatistics
+
+    /// 设备 ID 用作远端文件名，只接受字母、数字与连字符（本机生成的是 UUID）。
+    static func isValidDeviceID(_ id: String) -> Bool {
+        (1...64).contains(id.count) && id.unicodeScalars.allSatisfy {
+            CharacterSet.alphanumerics.contains($0) && $0.isASCII || $0 == "-"
+        }
+    }
+
+    var isValid: Bool {
+        version == 1 && Self.isValidDeviceID(deviceID) && statistics.isValidForSync && (device?.isValid ?? true)
+    }
+
+    /// 转为可与本机缓存合并的快照。
+    var snapshot: ReadingStatisticsSync {
+        ReadingStatisticsSync(devices: [deviceID: statistics], deviceInfo: device.map { [deviceID: $0] })
+    }
 }

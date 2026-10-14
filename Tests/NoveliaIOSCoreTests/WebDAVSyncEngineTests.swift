@@ -36,6 +36,8 @@ private final class FakeRemote: WebDAVRemote {
     var blobs: [String: Data] = [:]
     var puts: [Put] = []
     var putError: WebDAVSyncError?
+    /// 依次只失败一次的写入错误。
+    var putErrors: [WebDAVSyncError] = []
     var onDownload: (() -> Void)?
     /// 交给引擎的临时文件；引擎负责删除。
     var handedOut: [URL] = []
@@ -64,6 +66,7 @@ private final class FakeRemote: WebDAVRemote {
         log.events.append("remote.put")
         puts.append(Put(etag: etag, existed: existed))
         if let putError { throw putError }
+        if !putErrors.isEmpty { throw putErrors.removeFirst() }
         self.manifest = try roundTrip(manifest)
     }
 
@@ -72,6 +75,11 @@ private final class FakeRemote: WebDAVRemote {
         let data = try Data(contentsOf: file)
         XCTAssertEqual(sha256(data), hash, "blobs are stored under their content hash")
         blobs[hash] = data
+    }
+
+    func deleteBlob(_ hash: String) async throws {
+        log.events.append("remote.deleteBlob")
+        blobs[hash] = nil
     }
 
     func downloadBlob(_ hash: String) async throws -> URL {
@@ -105,6 +113,11 @@ private final class FakeLibrary<Record: SyncableBook>: SyncBookLibrary {
         log.events.append("\(name).restore")
         books.append(book)
         received[book.id] = contents(files)
+    }
+
+    func removeFromSync(_ book: Record) {
+        log.events.append("\(name).remove")
+        books.removeAll { $0.id == book.id }
     }
 
     func replaceFromSync(_ book: Record, files: [String: URL]) throws {
@@ -174,6 +187,24 @@ private final class FakeLocalState: WebDAVSyncLocalState {
     func applyFonts(_ records: [String: SyncedImportedFont], files: [String: URL]) throws {
         log.events.append("local.applyFonts")
         appliedFonts = (records, contents(files))
+    }
+}
+
+/// 记录云端书籍的替身。
+@MainActor
+private final class FakeCloud: SyncCloudCatalog {
+    var web: [WebDAVBook<DownloadedWebNovel>] = []
+    var wenku: [WebDAVBook<LocalWenkuEPUB>] = []
+    var covers: [String: Data] = [:]
+    var cloudBookKeys: Set<String> {
+        Set(web.map { "web:\($0.record.id)" } + wenku.map { "wenku:\($0.record.id.uuidString)" })
+    }
+    func cachedCover(hash: String) -> URL? { covers[hash] == nil ? nil : URL(fileURLWithPath: "/cached/\(hash)") }
+    func replaceCloudBooks(web: [WebDAVBook<DownloadedWebNovel>], wenku: [WebDAVBook<LocalWenkuEPUB>],
+                           covers: [String: URL]) throws {
+        self.web = web
+        self.wenku = wenku
+        for (hash, file) in covers { self.covers[hash] = try Data(contentsOf: file) }
     }
 }
 
@@ -253,6 +284,12 @@ final class WebDAVSyncEngineTests: XCTestCase {
         return try await engine.run()
     }
 
+    private func runCloud(_ cloud: FakeCloud, _ options: WebDAVSyncOptions = booksAndTags) async throws -> Int {
+        let engine = WebDAVSyncEngine(remote: remote, local: local, web: web, wenku: wenku, options: options,
+                                      defaults: defaults, cloud: cloud) { [weak self] in self?.progress.append($0) }
+        return try await engine.run()
+    }
+
     private func assertFails(with expected: WebDAVSyncError, _ options: WebDAVSyncOptions = booksAndTags,
                              file: StaticString = #filePath, line: UInt = #line) async {
         do {
@@ -291,7 +328,7 @@ final class WebDAVSyncEngineTests: XCTestCase {
         let manifest = try XCTUnwrap(remote.manifest)
         XCTAssertEqual(manifest.webBooks.map(\.record), [novel])
         XCTAssertEqual(manifest.webBooks.first?.assets,
-                       [WebDAVAsset(filename: "a.epub", hash: sha256(Data("web a".utf8)))])
+                       [WebDAVAsset(filename: "a.epub", hash: sha256(Data("web a".utf8)), size: 5)])
         XCTAssertEqual(manifest.wenkuBooks.map(\.record), [book])
         XCTAssertEqual(manifest.wenkuBooks.first?.assets.map(\.filename), ["cover.jpg", book.filename].sorted())
         XCTAssertEqual(remote.blobs.count, 3)
@@ -299,6 +336,169 @@ final class WebDAVSyncEngineTests: XCTestCase {
         XCTAssertEqual(remote.puts.map(\.etag), [nil])
         assertProgressCompleted(totalUnits: 4)
         XCTAssertEqual(progress.last?.detail, "同步完成")
+    }
+
+    /// 没有任何改动的再次同步只读取清单，不写入，以减少对有频率限制的服务器的请求。
+    func testUnchangedSyncDoesNotRewriteManifest() async throws {
+        addLocal(webBook("a", at: 10), text: "web a")
+        local.blockedTags["标签"] = SyncedBlockedTag(blocked: true, updatedAt: date(5))
+        _ = try await run()
+        XCTAssertEqual(remote.puts.count, 1)
+        log.events = []
+        _ = try await run()
+        XCTAssertEqual(remote.puts.count, 1, "nothing changed, nothing written")
+        XCTAssertEqual(log.events.filter { $0.hasPrefix("remote.") && $0 != "remote.verify" && $0 != "remote.prepare" },
+                       ["remote.fetch"])
+        local.blockedTags["标签"] = SyncedBlockedTag(blocked: false, updatedAt: date(6))
+        _ = try await run()
+        XCTAssertEqual(remote.puts.count, 2, "a real change is still written")
+    }
+
+    // MARK: 云端书籍
+
+    /// 本机没有的书只记为云端书籍：不下载书籍文件，EPUB 封面只下载一次；TXT 与无封面的书不下载任何文件。
+    func testCloudCatalogRecordsRemoteBooksWithCoversOnly() async throws {
+        let novel = webBook("z", at: 10)
+        let withCover = wenkuBook(at: 20, cover: "cover.jpg")
+        let plain = LocalWenkuEPUB(id: UUID(), title: "TXT", filename: "plain.txt", addedAt: date(30), fileFormat: .txt)
+        let cover = remote.seed("cover bytes", as: "cover.jpg")
+        remoteManifest {
+            $0.webBooks = [WebDAVBook(record: novel, assets: [remote.seed("web z", as: "z.epub")])]
+            $0.wenkuBooks = [WebDAVBook(record: withCover, assets: [remote.seed("wenku", as: withCover.filename), cover]),
+                             WebDAVBook(record: plain, assets: [remote.seed("txt", as: "plain.txt")])]
+        }
+        let cloud = FakeCloud()
+        let added = try await runCloud(cloud)
+        XCTAssertEqual(added, 3)
+        XCTAssertEqual(log.count("remote.download"), 1, "only the cover is downloaded")
+        XCTAssertEqual(cloud.covers[cover.hash], Data("cover bytes".utf8))
+        XCTAssertEqual(cloud.web.map(\.record), [novel])
+        XCTAssertEqual(cloud.wenku.map(\.record.id), [withCover.id, plain.id])
+        XCTAssertTrue(web.books.isEmpty && wenku.books.isEmpty, "nothing is imported into the library")
+        assertDownloadsDeleted()
+
+        log.events = []
+        let again = try await runCloud(cloud)
+        XCTAssertEqual(again, 0, "already known cloud books are not counted again")
+        XCTAssertEqual(log.count("remote.download"), 0, "cached covers are not downloaded again")
+    }
+
+    /// 旧清单的文件没有大小：本机有同一版本且内容一致时补上大小并写回；内容不同时不猜测。
+    func testMissingSizesAreFilledFromMatchingLocalFiles() async throws {
+        let same = webBook("a", at: 10)
+        addLocal(same, text: "web a")
+        let changed = webBook("b", at: 10)
+        addLocal(changed, text: "local b")
+        remoteManifest {
+            $0.webBooks = [WebDAVBook(record: same, assets: [WebDAVAsset(filename: "a.epub", hash: sha256(Data("web a".utf8)))]),
+                           WebDAVBook(record: webBook("b", at: 20), assets: [remote.seed("remote b", as: "b.epub")])]
+        }
+        _ = try await runCloud(FakeCloud())
+        let books = try XCTUnwrap(remote.manifest?.webBooks)
+        XCTAssertEqual(books.first { $0.record.id == "a" }?.assets.first?.size, 5)
+        XCTAssertNil(books.first { $0.record.id == "b" }?.assets.first?.size, "a different version is not measured")
+        XCTAssertEqual(log.count("remote.download") + log.count("remote.upload"), 0, "no network transfer for sizes")
+    }
+
+    // MARK: 云端删除
+
+    /// 从云端删除：移除书目与不再引用的文件、记下删除时间；共用文件保留。
+    func testDeleterRemovesBooksAndUnusedBlobsAndRecordsDeletion() async throws {
+        let shared = remote.seed("shared", as: "a.epub")
+        let only = remote.seed("only", as: "b.epub")
+        remoteManifest {
+            $0.webBooks = [WebDAVBook(record: webBook("a", at: 10), assets: [shared]),
+                           WebDAVBook(record: webBook("b", at: 10), assets: [only]),
+                           WebDAVBook(record: webBook("c", at: 10), assets: [WebDAVAsset(filename: "c.epub", hash: shared.hash)])]
+            $0.positions = ["web:a": SyncedReadingPosition(chapterIndex: 1, fraction: nil, updatedAt: date(1)),
+                            "web:c": SyncedReadingPosition(chapterIndex: 2, fraction: nil, updatedAt: date(1))]
+        }
+        let removed = try await WebDAVCloudBookDeleter.delete(["web:a", "web:b"], from: remote, at: date(100))
+        XCTAssertEqual(removed, 2)
+        let manifest = try XCTUnwrap(remote.manifest)
+        XCTAssertEqual(manifest.webBooks.map(\.record.id), ["c"])
+        XCTAssertEqual(manifest.deletedBooks, ["web:a": date(100), "web:b": date(100)])
+        XCTAssertEqual(Set(manifest.positions.keys), ["web:c"])
+        XCTAssertNil(remote.blobs[only.hash], "unreferenced file is deleted")
+        XCTAssertNotNil(remote.blobs[shared.hash], "file still used by another book is kept")
+        XCTAssertEqual(remote.puts.last?.etag, "\"v0\"", "manifest write is conditional")
+    }
+
+    func testDeleterRetriesAfterConcurrentChange() async throws {
+        remoteManifest { $0.webBooks = [WebDAVBook(record: webBook("a", at: 10), assets: [remote.seed("a", as: "a.epub")])] }
+        remote.putErrors = [.concurrentChange]
+        let removed = try await WebDAVCloudBookDeleter.delete(["web:a"], from: remote, at: date(100))
+        XCTAssertEqual(removed, 1)
+        XCTAssertEqual(remote.puts.count, 2)
+        XCTAssertTrue(remote.manifest?.webBooks.isEmpty ?? false)
+    }
+
+    /// 云端删除后：其他设备的本机副本被删除且不再上传，云端旧条目不再恢复；之后重新下载的新版本照常同步并清除删除记录。
+    func testDeletedBooksAreRemovedLocallyAndNotRestoredUntilReAdded() async throws {
+        addLocal(webBook("a", at: 10), text: "a")
+        addLocal(webBook("kept", at: 10), text: "kept")
+        remoteManifest {
+            $0.deletedBooks = ["web:a": date(50), "web:z": date(50)]
+            $0.webBooks = [WebDAVBook(record: webBook("z", at: 20), assets: [remote.seed("z", as: "z.epub")])]
+        }
+        let cloud = FakeCloud()
+        let engine = WebDAVSyncEngine(remote: remote, local: local, web: web, wenku: wenku, options: booksAndTags,
+                                      defaults: defaults, cloud: cloud) { _ in }
+        _ = try await engine.run()
+        XCTAssertEqual(remote.manifest?.webBooks.map(\.record.id), ["kept"], "deleted book is not uploaded, old entry dropped")
+        XCTAssertTrue(cloud.web.isEmpty, "deleted book is not shown as a cloud book")
+        XCTAssertEqual(web.books.map(\.id), ["kept"], "local copy of the deleted version is removed")
+        XCTAssertEqual(engine.removedLocalCount, 1)
+        XCTAssertLessThan(log.events.firstIndex(of: "remote.put") ?? .max, log.events.firstIndex(of: "web.remove") ?? -1,
+                          "local copies are removed only after the manifest is written")
+
+        addLocal(webBook("a", at: 60), text: "a again")
+        _ = try await runCloud(cloud)
+        XCTAssertEqual(Set(remote.manifest?.webBooks.map(\.record.id) ?? []), ["a", "kept"])
+        XCTAssertEqual(web.books.map(\.id).sorted(), ["a", "kept"], "a newer copy is kept")
+        XCTAssertEqual(remote.manifest?.deletedBooks, ["web:z": date(50)], "re-added book clears its deletion")
+    }
+
+    /// 本机已有的书不被远端较新版本替换，也不再下载；本机较新的书照常上传。
+    func testCloudCatalogKeepsLocalCopiesAndStillUploads() async throws {
+        let old = webBook("a", at: 10)
+        addLocal(old, text: "local a")
+        let newer = wenkuBook(at: 50)
+        addLocal(newer, text: "local wenku")
+        remoteManifest {
+            $0.webBooks = [WebDAVBook(record: webBook("a", at: 20), assets: [remote.seed("remote a", as: "a.epub")])]
+            $0.wenkuBooks = [WebDAVBook(record: wenkuBook(newer.id, at: 5), assets: [remote.seed("old", as: newer.filename)])]
+        }
+        let cloud = FakeCloud()
+        _ = try await runCloud(cloud)
+        XCTAssertEqual(log.count("remote.download"), 0)
+        XCTAssertEqual(log.count("web.replace"), 0)
+        XCTAssertEqual(web.books, [old])
+        XCTAssertTrue(cloud.web.isEmpty, "a book that exists locally is not a cloud book")
+        XCTAssertEqual(remote.manifest?.wenkuBooks.first?.record, newer, "newer local book is uploaded")
+    }
+
+    func testLocalCopiesAreKeptWhenManifestWriteFails() async {
+        addLocal(webBook("a", at: 10), text: "a")
+        remoteManifest { $0.deletedBooks = ["web:a": date(50)] }
+        remote.putError = .concurrentChange
+        do {
+            _ = try await runCloud(FakeCloud())
+            XCTFail("expected failure")
+        } catch {}
+        XCTAssertEqual(web.books.map(\.id), ["a"])
+    }
+
+    func testCloudBooksAreNotUpdatedWhenManifestWriteFails() async {
+        remoteManifest { $0.webBooks = [WebDAVBook(record: webBook("z", at: 10), assets: [remote.seed("z", as: "z.epub")])] }
+        addLocal(webBook("a", at: 10), text: "a")
+        remote.putError = .concurrentChange
+        let cloud = FakeCloud()
+        do {
+            _ = try await runCloud(cloud)
+            XCTFail("expected failure")
+        } catch {}
+        XCTAssertTrue(cloud.web.isEmpty)
     }
 
     func testTwoWaySyncRestoresReplacesAndUploads() async throws {

@@ -13,6 +13,10 @@ enum FileContentHash {
         return digest.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
+    static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
     /// 哈希缓存的键：路径、大小与修改时间，任一变化都重新计算。读取失败时返回 nil，不使用缓存。
     /// 直接读取文件属性；`URL.resourceValues` 会在同一个 URL 实例上缓存旧值。
     static func identity(of url: URL) -> String? {

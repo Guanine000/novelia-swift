@@ -20,11 +20,18 @@ struct LibraryBook: Identifiable, Hashable {
     let format: WebNovelFileFormat
     /// 排序用的导入时间：导入的书为导入时间，下载的书为下载完成时间。
     let importedAt: Date
+    /// 云端书籍：文件只在 WebDAV 上，打开前需下载。值为主文件的内容哈希（与阅读位置键一致）。
+    let cloudFileHash: String?
+    var isCloudOnly: Bool { cloudFileHash != nil }
+    /// 云端书籍全部文件的大小；清单中有文件缺少大小时为 nil。
+    let cloudDownloadSize: Int64?
 
-    init(origin: Origin, fileURL: URL, coverURL: URL?) {
+    init(origin: Origin, fileURL: URL, coverURL: URL?, cloudFileHash: String? = nil, cloudDownloadSize: Int64? = nil) {
         self.origin = origin
         self.fileURL = fileURL
         self.coverURL = coverURL
+        self.cloudFileHash = cloudFileHash
+        self.cloudDownloadSize = cloudDownloadSize
         switch origin {
         case .webNovel(let book):
             key = "web:\(book.id)"
@@ -62,6 +69,20 @@ struct LibraryBook: Identifiable, Hashable {
         lhs.key == rhs.key && lhs.title == rhs.title && lhs.author == rhs.author
             && lhs.format == rhs.format && lhs.importedAt == rhs.importedAt
             && lhs.fileURL == rhs.fileURL && lhs.coverURL == rhs.coverURL
+            && lhs.cloudFileHash == rhs.cloudFileHash && lhs.cloudDownloadSize == rhs.cloudDownloadSize
+    }
+
+    /// 例如“2.3 MB”；大小未知时为 nil。
+    var cloudDownloadSizeText: String? {
+        cloudDownloadSize.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) }
+    }
+
+    /// 全部文件都有大小时返回总和。
+    static func totalSize(_ assets: [WebDAVAsset]) -> Int64? {
+        assets.reduce(Int64(0) as Int64?) { total, asset in
+            guard let total, let size = asset.size else { return nil }
+            return total + size
+        }
     }
 
     func hash(into hasher: inout Hasher) {
@@ -118,21 +139,43 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
 
     // MARK: 书籍
 
-    func books(web: WebNovelDownloadStore, wenku: WenkuLocalLibraryStore) -> [LibraryBook] {
-        web.books.map { LibraryBook(origin: .webNovel($0), fileURL: web.fileURL(for: $0), coverURL: nil) }
+    /// 本机书籍加上本机还没有的云端书籍（同一本书本机已有时只显示本机那条）。
+    func books(web: WebNovelDownloadStore, wenku: WenkuLocalLibraryStore, cloud: CloudBookStore) -> [LibraryBook] {
+        let local = web.books.map { LibraryBook(origin: .webNovel($0), fileURL: web.fileURL(for: $0), coverURL: nil) }
             + wenku.books.map { LibraryBook(origin: .wenku($0), fileURL: wenku.fileURL(for: $0), coverURL: wenku.coverFileURL(for: $0)) }
+        let localKeys = Set(local.map(\.key))
+        // 云端书籍没有本机文件；占位路径不存在，不会被当作书籍文件读取。
+        let placeholder = FileManager.default.temporaryDirectory.appendingPathComponent("novelia-cloud-book", isDirectory: true)
+        let cloudWeb = cloud.webBooks.compactMap { book -> LibraryBook? in
+            guard let hash = book.assets.first(where: { $0.filename == book.record.fileFilename })?.hash else { return nil }
+            return LibraryBook(origin: .webNovel(book.record), fileURL: placeholder.appendingPathComponent(book.record.fileFilename),
+                               coverURL: nil, cloudFileHash: hash, cloudDownloadSize: LibraryBook.totalSize(book.assets))
+        }
+        let cloudWenku = cloud.wenkuBooks.compactMap { book -> LibraryBook? in
+            guard let hash = book.assets.first(where: { $0.filename == book.record.filename })?.hash else { return nil }
+            return LibraryBook(origin: .wenku(book.record), fileURL: placeholder.appendingPathComponent(book.record.filename),
+                               coverURL: cloud.coverURL(for: book), cloudFileHash: hash,
+                               cloudDownloadSize: LibraryBook.totalSize(book.assets))
+        }
+        return local + (cloudWeb + cloudWenku).filter { !localKeys.contains($0.key) }
     }
 
     /// 相同来源、系列和文件内容只显示一条；保留所有文件和原始记录。
     /// 哈希未就绪时仍按持久标识显示，避免把同名但内容不同的书合并。
     func displayBooks(from books: [LibraryBook]) -> [LibraryBook] {
         LibraryOrganizer.uniqueRecords(books, id: { book in
-            guard let hash = hashByBook[book.key] else { return book.key }
+            guard let hash = hashByBook[book.key] ?? book.cloudFileHash else { return book.key }
             return "\(book.categoryTitle)|\(series.seriesID(forBook: book.key) ?? "")|\(book.positionPrefix)\(hash)"
         }, date: { $0.importedAt })
     }
 
     func status(for book: LibraryBook) -> LibraryReadingStatus {
+        let status = readingStatus(for: book)
+        guard book.isCloudOnly else { return status }
+        return LibraryReadingStatus(lastReadAt: status.lastReadAt, detail: "未下载 · \(status.detail)", fraction: status.fraction)
+    }
+
+    private func readingStatus(for book: LibraryBook) -> LibraryReadingStatus {
         let position = hash(for: book).flatMap { positions[book.positionPrefix + $0] }
         let opened = lastOpened[book.key]
         let lastReadAt = [position?.updatedAt, opened].compactMap { $0 }.filter { $0 > .distantPast }.max()
@@ -174,7 +217,7 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
     }
 
     private func hash(for book: LibraryBook) -> String? {
-        hashByBook[book.key]
+        hashByBook[book.key] ?? book.cloudFileHash
     }
 
     /// 文件身份、哈希及缓存清理都在后台完成；只在批次结束时发布一次。
@@ -182,7 +225,7 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
     func refreshHashes(for books: [LibraryBook]) async {
         hashRefreshGeneration += 1
         let generation = hashRefreshGeneration
-        let targets = books.map { (key: $0.key, url: $0.fileURL) }
+        let targets = books.filter { !$0.isCloudOnly }.map { (key: $0.key, url: $0.fileURL) }
         let cached = hashes
         let worker = Task.detached(priority: .utility) { () -> (cache: [String: String], byBook: [String: String])? in
             var cache: [String: String] = [:]

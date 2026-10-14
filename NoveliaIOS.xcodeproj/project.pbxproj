@@ -75,6 +75,8 @@
 		E60000000000000000000003 /* WebDAVSyncPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000003 /* WebDAVSyncPlanner.swift */; };
 		E60000000000000000000004 /* WebDAVRemote.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000004 /* WebDAVRemote.swift */; };
 		E60000000000000000000005 /* WebDAVSyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000005 /* WebDAVSyncEngine.swift */; };
+		E60000000000000000000006 /* WebDAVAutoSyncPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000006 /* WebDAVAutoSyncPolicy.swift */; };
+		E60000000000000000000007 /* WebDAVCloudBooks.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000007 /* WebDAVCloudBooks.swift */; };
 		F8A000000000000000000001 /* APIConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B000000000000000000001 /* APIConfiguration.swift */; };
 		F8A000000000000000000002 /* APIServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B000000000000000000002 /* APIServices.swift */; };
 		F8A000000000000000000003 /* AppServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B000000000000000000003 /* AppServices.swift */; };
@@ -162,6 +164,8 @@
 		E61000000000000000000003 /* WebDAVSyncPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Sync/WebDAVSyncPlanner.swift; sourceTree = "<group>"; };
 		E61000000000000000000004 /* WebDAVRemote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Sync/WebDAVRemote.swift; sourceTree = "<group>"; };
 		E61000000000000000000005 /* WebDAVSyncEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Sync/WebDAVSyncEngine.swift; sourceTree = "<group>"; };
+		E61000000000000000000006 /* WebDAVAutoSyncPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Sync/WebDAVAutoSyncPolicy.swift; sourceTree = "<group>"; };
+		E61000000000000000000007 /* WebDAVCloudBooks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Sync/WebDAVCloudBooks.swift; sourceTree = "<group>"; };
 		F8B000000000000000000001 /* APIConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Infrastructure/API/APIConfiguration.swift; sourceTree = "<group>"; };
 		F8B000000000000000000002 /* APIServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/APIServices.swift; sourceTree = "<group>"; };
 		F8B000000000000000000003 /* AppServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/AppServices.swift; sourceTree = "<group>"; };
@@ -310,6 +314,8 @@
 				E61000000000000000000003 /* WebDAVSyncPlanner.swift */,
 				E61000000000000000000004 /* WebDAVRemote.swift */,
 				E61000000000000000000005 /* WebDAVSyncEngine.swift */,
+				E61000000000000000000006 /* WebDAVAutoSyncPolicy.swift */,
+				E61000000000000000000007 /* WebDAVCloudBooks.swift */,
 			);
 			path = Sources/NoveliaIOSCore;
 			sourceTree = "<group>";
@@ -524,6 +530,8 @@
 				E60000000000000000000003 /* WebDAVSyncPlanner.swift in Sources */,
 				E60000000000000000000004 /* WebDAVRemote.swift in Sources */,
 				E60000000000000000000005 /* WebDAVSyncEngine.swift in Sources */,
+				E60000000000000000000006 /* WebDAVAutoSyncPolicy.swift in Sources */,
+				E60000000000000000000007 /* WebDAVCloudBooks.swift in Sources */,
 				A10000000000000000000044 /* SettingsKeys.swift in Sources */,
 				D30000000000000000000003 /* ReaderSettingsAdapters.swift in Sources */,
 				D30000000000000000000001 /* ReaderSettings.swift in Sources */,
