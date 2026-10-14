@@ -4,9 +4,12 @@ from pathlib import Path
 import subprocess
 import tempfile
 root = Path(__file__).resolve().parents[1]
-view = (root/'iOSApp/ForumListView.swift').read_text()
-code = 'import Combine\n' + (root/'Sources/NoveliaIOSCore/ForumAPIClient.swift').read_text()
-code += view[view.index('@MainActor\nfinal class ForumStore'):view.index('struct ForumView: View')]
+view = (root/'iOSApp/Features/Community/ForumStore.swift').read_text()
+code = 'import Combine\n' + (root/'Sources/NoveliaIOSCore/Infrastructure/API/APIConfiguration.swift').read_text() + (root/'Sources/NoveliaIOSCore/Infrastructure/API/ForumAPIClient.swift').read_text()
+services = (root/'Sources/NoveliaIOSCore/Domain/APIServices.swift').read_text()
+code += services[services.index('public protocol ForumService'):services.index('/// Observable stores')]
+code += '\nextension ForumAPIClient: ForumService {}\n'
+code += view[view.index('@MainActor\nfinal class ForumStore'):]
 code += r'''
 enum NoveliaForumSessionTokenVault { static func read() -> String? { nil } }
 enum NoveliaRequestTimeout { static let api: TimeInterval = 30 }

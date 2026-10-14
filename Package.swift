@@ -32,7 +32,7 @@ let package = Package(
                 .product(name: "ReadiumZIPFoundation", package: "ZIPFoundation"),
                 .product(name: "ReadiumShared", package: "swift-toolkit"),
             ],
-            path: "iOSApp/EPUBReader",
+            path: "iOSApp/Features/Reader/EPUBReader",
             exclude: [
                 "DEPENDENCIES.md",
                 "EPUBPagerView.swift",

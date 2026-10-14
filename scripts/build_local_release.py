@@ -196,7 +196,7 @@ def main():
     if status and not args.allow_dirty:
         parser.error("Worktree is dirty; commit first or explicitly use --allow-dirty")
     commit_date = git("log", "-1", "--format=%cd", "--date=format:%Y-%m-%d")
-    shown_date = modified_date((ROOT / "iOSApp/SettingsViews.swift").read_text())
+    shown_date = modified_date((ROOT / "iOSApp/Features/Settings/SettingsViews.swift").read_text())
     if not status and shown_date != commit_date:
         parser.error(f"GPL modification date {shown_date} in SettingsViews.swift must equal the commit date {commit_date}")
     out = (args.output or ROOT / f"build/local-releases/{version}-{build}").resolve()
@@ -220,11 +220,14 @@ def main():
         run(["git", "diff", "--cached", "--check"])
         run([str(ROOT / "scripts/run_package_tests.sh"), args.simulator,
              "-test-timeouts-enabled", "YES", "-default-test-execution-time-allowance", "120"], log=out / "package-tests.log")
-        for script in ["test_forum_filters.py", "test_unified_login.py", "test_auth_login_bridge.py", "test_library_store.py", "test_reading_statistics_store.py"]:
+        for script in ["test_forum_filters.py", "test_unified_login.py", "test_auth_login_bridge.py", "test_library_store.py", "test_reading_statistics_store.py", "test_service_consumers.py"]:
             run(["python3", "-I", str(ROOT / "scripts" / script)], log=out / f"{script}.log")
         run(["xcodebuild", "-project", "NoveliaIOS.xcodeproj", "-scheme", "Novelia", "-configuration", "Release",
              "-sdk", "iphoneos", "-destination", "generic/platform=iOS", "-derivedDataPath", str(derived),
              "CODE_SIGNING_ALLOWED=NO", "build"], log=out / "release-build.log")
+        run(["python3", "-I", "scripts/check_architecture_release.py",
+             str(derived / "Build/Products/Release-iphoneos/Novelia.app/Novelia")],
+            log=out / "architecture-release-check.log")
         checkouts = derived / "SourcePackages/checkouts"
         run(["python3", "-I", "scripts/verify_third_party_notices.py", "--source-packages", str(checkouts)], log=out / "licenses.log")
         if before != fingerprint(source_files()):

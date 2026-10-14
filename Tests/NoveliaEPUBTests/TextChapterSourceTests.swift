@@ -1,4 +1,5 @@
 import UIKit
+import NoveliaIOSCore
 import XCTest
 import YueduCoreText
 @testable import NoveliaEPUB
