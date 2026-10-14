@@ -54,6 +54,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     private(set) var navigator: EPUBNavigatorViewController?
     private var publication: Publication?
+    private var navigationIndex: ReadiumNavigationIndex?
+    @Published private(set) var currentTOCIndex: Int?
     private var textBook: PagedTextBook?
     private var textPositionTask: Task<Void, Never>?
     private var receivedTextLocation = false
@@ -103,6 +105,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             }
             embeddedTOCCount = embedded.count
             toc = await preferGeneratedTOCIfSparse(embedded, publication: publication)
+            navigationIndex = ReadiumNavigationIndex(readingOrder: publication.readingOrder,
+                                                     tableOfContents: toc.map(\.link))
             let initial = await savedLocator(publication: publication, hash: hash)
             try makeNavigator(initialLocation: initial)
             status = .ready
@@ -126,6 +130,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             toc = Self.flatten(publication.manifest.tableOfContents)
             embeddedTOCCount = toc.count
             positionCount = source.chapterCount
+            navigationIndex = ReadiumNavigationIndex(readingOrder: publication.readingOrder,
+                                                     tableOfContents: toc.map(\.link))
             guard !publication.readingOrder.isEmpty else { throw ReadiumOpenError.parse("没有可阅读的章节。") }
             let unit = min(max(0, textBook.startUnit), source.chapterCount - 1)
             let initial = try await ReadiumTextPublication.initialLocation(
@@ -159,7 +165,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     /// 取消过期页面回调，避免慢章节的换算覆盖已经翻到的新位置。
     private func saveTextPosition(_ location: Locator) {
         guard let book = textBook, let source = book.source as? TextChapterSource,
-              let unit = publication?.readingOrder.firstIndexWithHREF(location.href) else { return }
+              let unit = navigationIndex?.resourceIndex(for: location.href) else { return }
         // 打开或恢复页面时不刷新同步时间戳。
         if !receivedTextLocation {
             receivedTextLocation = true
@@ -462,22 +468,6 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         return "\(position) / \(positionCount)"
     }
 
-    /// 当前所在目录项：同一资源内取最后一个不晚于当前位置的条目。
-    var currentTOCIndex: Int? {
-        guard let locator, let publication else { return nil }
-        let href = locator.href.string
-        guard let currentResource = publication.readingOrder.firstIndexWithHREF(locator.href) else {
-            return toc.lastIndex { $0.link.url().removingFragment().string == href }
-        }
-        var best: Int?
-        for item in toc {
-            guard let index = publication.readingOrder.firstIndexWithHREF(item.link.url().removingFragment()),
-                  index <= currentResource else { continue }
-            best = item.id
-        }
-        return best
-    }
-
     var currentChapterTitle: String {
         if let index = currentTOCIndex, toc.indices.contains(index) { return toc[index].title }
         return locator?.title ?? bookTitle
@@ -489,12 +479,12 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     private var locatorTimeKey: String? { bookHash.map { "readium.locatorTime.v1.\($0)" } }
 
     private func save(_ locator: Locator) {
-        guard let hash = bookHash, let publication,
+        guard let hash = bookHash,
               let key = locatorKey, let timeKey = locatorTimeKey,
               let json = try? locator.jsonString() else { return }
         UserDefaults.standard.set(json, forKey: key)
         UserDefaults.standard.set(Date(), forKey: timeKey)
-        let spine = publication.readingOrder.firstIndexWithHREF(locator.href) ?? 0
+        let spine = navigationIndex?.resourceIndex(for: locator.href) ?? 0
         ReaderSettings.shared.recordEPUBPosition(
             hash: hash, fraction: locator.locations.totalProgression ?? 0,
             spineIndex: spine, chapterOffset: nil, chapterProgression: locator.locations.progression)
@@ -563,6 +553,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
         let previous = self.locator
+        let current = navigationIndex?.tocIndex(for: locator.href)
+        if currentTOCIndex != current { currentTOCIndex = current }
         self.locator = locator
         if textBook != nil {
             if previous != locator { saveTextPosition(locator) }

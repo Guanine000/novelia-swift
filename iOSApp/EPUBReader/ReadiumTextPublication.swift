@@ -97,3 +97,53 @@ private final class TextContainer: Container {
         }
     }
 }
+
+/// 首屏、翻页与目录高亮共用的静态导航索引。
+/// 不在每次视图刷新时对每条目录再次线性扫描 readingOrder。
+struct ReadiumNavigationIndex {
+    private let resources: [String: Int]
+    private let tocByResource: [Int?]
+    private let tocByHref: [String: Int]
+
+    init(readingOrder: [Link], tableOfContents: [Link]) {
+        var resources: [String: Int] = [:]
+        resources.reserveCapacity(readingOrder.count)
+        for (index, link) in readingOrder.enumerated() {
+            let href = link.url().normalized.string
+            // 与 Readium firstIndexWithHREF 相同：重复 href 取首次出现。
+            if resources[href] == nil { resources[href] = index }
+        }
+        var starts = [Int?](repeating: nil, count: readingOrder.count)
+        var byHref: [String: Int] = [:]
+        for (id, link) in tableOfContents.enumerated() {
+            let href = link.url().removingFragment()
+            byHref[href.normalized.string] = id
+            if let resource = Self.resourceIndex(for: href, resources: resources) {
+                starts[resource] = id
+            }
+        }
+        // 目录不一定按资源排序；保留旧行为，取最后一个不晚于当前位置的条目。
+        var best: Int?
+        for resource in starts.indices {
+            if let id = starts[resource] { best = max(best ?? id, id) }
+            starts[resource] = best
+        }
+        self.resources = resources
+        tocByResource = starts
+        tocByHref = byHref
+    }
+
+    func resourceIndex(for href: AnyURL) -> Int? {
+        Self.resourceIndex(for: href, resources: resources)
+    }
+
+    func tocIndex(for href: AnyURL) -> Int? {
+        if let resource = resourceIndex(for: href) { return tocByResource[resource] }
+        return tocByHref[href.normalized.string]
+    }
+
+    private static func resourceIndex(for href: AnyURL, resources: [String: Int]) -> Int? {
+        let href = href.normalized
+        return resources[href.string] ?? resources[href.removingQuery().removingFragment().string]
+    }
+}
