@@ -658,7 +658,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 0.19.2;
-				CURRENT_PROJECT_VERSION = 70;
+				CURRENT_PROJECT_VERSION = 71;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -682,7 +682,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 0.19.2;
-				CURRENT_PROJECT_VERSION = 70;
+				CURRENT_PROJECT_VERSION = 71;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
