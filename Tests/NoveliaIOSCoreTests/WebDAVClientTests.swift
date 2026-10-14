@@ -466,7 +466,9 @@ extension WebDAVClientTests {
     }
 
     func testStatisticsCacheDecodesMissingFields() throws {
-        let cache = try JSONDecoder().decode(ReadingStatisticsSyncCache.self, from: Data("{}".utf8))
+        var cache = try JSONDecoder().decode(ReadingStatisticsSyncCache.self, from: Data("{}".utf8))
+        XCTAssertNil(cache.format, "caches without a format are refreshed once")
+        cache.format = ReadingStatisticsSyncCache.currentFormat
         XCTAssertEqual(cache, ReadingStatisticsSyncCache())
     }
 
@@ -503,6 +505,33 @@ extension WebDAVClientTests {
         _ = try await synchronizer.sync(ReadingStatisticsSync(devices: ["b": seconds(30)]), deviceID: "b")
         let (later, _) = try await synchronizer.sync(ReadingStatisticsSync(devices: ["a": seconds(20)]), deviceID: "a")
         XCTAssertEqual(later.statistics.seconds(), 50)
+    }
+
+    /// 从未改名的设备（名称时间为 distantPast）也要在其他设备上显示名称；旧缓存缺名称时重新读取。
+    func testDefaultDeviceNamesReachOtherDevicesEvenWithCache() async throws {
+        let remote = StatisticsMemoryRemote()
+        remote.store(ReadingDeviceStatisticsFile(
+            deviceID: "b", device: ReadingDeviceInfo(name: "iPad", model: "iPad", updatedAt: .distantPast),
+            statistics: seconds(30)))
+        let synchronizer = ReadingStatisticsSynchronizer(remote: remote)
+        let local = ReadingStatisticsSync(devices: ["a": seconds(20)],
+                                          deviceInfo: ["a": ReadingDeviceInfo(name: "iPhone", model: "iPhone", updatedAt: .distantPast)])
+        let (merged, _) = try await synchronizer.sync(local, deviceID: "a")
+        XCTAssertEqual(merged.deviceInfo?["b"]?.name, "iPad")
+        XCTAssertEqual(merged.deviceInfo?["a"]?.name, "iPhone")
+
+        // 0.20.0(72) 留下的缓存没有格式字段：版本已记录但名称未合并，应丢弃版本重新读取一次。
+        let staleJSON = try JSONSerialization.data(withJSONObject: ["deviceVersions": remote.versions])
+        let staleCache = try JSONDecoder().decode(ReadingStatisticsSyncCache.self, from: staleJSON)
+        remote.fetches = []
+        let (healed, healedCache) = try await synchronizer.sync(local, deviceID: "a", cache: staleCache)
+        XCTAssertEqual(remote.fetches, ["a", "b"])
+        XCTAssertEqual(healed.deviceInfo?["b"]?.name, "iPad")
+        XCTAssertEqual(healedCache.format, ReadingStatisticsSyncCache.currentFormat)
+
+        remote.fetches = []
+        _ = try await synchronizer.sync(healed, deviceID: "a", cache: healedCache)
+        XCTAssertEqual(remote.fetches, [], "unchanged files are skipped again after the refresh")
     }
 
     func testSynchronizerRejectsUnsafeDeviceID() async {

@@ -3,18 +3,81 @@ import Foundation
 
 // GitHub release check offered at launch (see "我的 → 版本").
 
-/// 仅接受正式版本号，排除预发布版本。
+/// 发布标签与本机版本号。兼容常见写法：
+/// - 前缀：`v`、`V`，以及由字母、`-`、`_` 组成的前缀（如 `release-`、`Novelia-v`）；
+/// - 1–4 段数字，缺少的段按 0 比较（`0.20` 与 `0.20.0` 相同）；
+/// - SemVer 预发布后缀 `-test.2`：低于同号正式版，按 SemVer 规则比较；
+/// - 构建元数据 `+34`：不参与比较。
+/// 数字段含非数字（如 `0.x.0`）或出现其他字符时无效。
 struct NoveliaReleaseVersion: Comparable, Equatable {
     let parts: [Int]
+    /// 预发布标识，按 `.` 分段；正式版为空。
+    let prerelease: [String]
+
     init?(_ text: String) {
-        let value = text.hasPrefix("v") ? String(text.dropFirst()) : text
+        var value = Substring(text.trimmingCharacters(in: .whitespaces))
+        guard let firstDigit = value.firstIndex(where: { $0.isASCII && $0.isNumber }) else { return nil }
+        let prefix = value[..<firstDigit]
+        guard prefix.count <= 24, prefix.allSatisfy({ ($0.isASCII && $0.isLetter) || $0 == "-" || $0 == "_" }) else { return nil }
+        value = value[firstDigit...]
+        if let plus = value.firstIndex(of: "+") {
+            let build = value[value.index(after: plus)...]
+            guard Self.isValidIdentifierList(build) else { return nil }
+            value = value[..<plus]
+        }
+        var pre: [String] = []
+        if let dash = value.firstIndex(of: "-") {
+            let tail = value[value.index(after: dash)...]
+            guard Self.isValidIdentifierList(tail) else { return nil }
+            pre = tail.split(separator: ".").map(String.init)
+            value = value[..<dash]
+        }
         let fields = value.split(separator: ".", omittingEmptySubsequences: false)
-        guard fields.count == 3, fields.allSatisfy({ !$0.isEmpty && $0.allSatisfy({ $0.isASCII && $0.isNumber }) }),
-              fields.allSatisfy({ Int($0) != nil }) else { return nil }
+        guard (1...4).contains(fields.count),
+              fields.allSatisfy({ !$0.isEmpty && $0.count <= 9 && $0.allSatisfy { $0.isASCII && $0.isNumber } }) else { return nil }
         parts = fields.map { Int($0)! }
+        prerelease = pre
     }
-    static func < (lhs: Self, rhs: Self) -> Bool { lhs.parts.lexicographicallyPrecedes(rhs.parts) }
-    var display: String { parts.map(String.init).joined(separator: ".") }
+
+    private static func isValidIdentifierList(_ text: Substring) -> Bool {
+        let ids = text.split(separator: ".", omittingEmptySubsequences: false)
+        return !ids.isEmpty && ids.allSatisfy { id in
+            !id.isEmpty && id.allSatisfy { ($0.isASCII && ($0.isLetter || $0.isNumber)) || $0 == "-" }
+        }
+    }
+
+    var isPrerelease: Bool { !prerelease.isEmpty }
+
+    /// 至少显示三段，如 `0.20.0`、`0.20.0-test.2`。可再次解析为相等的版本，用于保存“忽略此版本”。
+    var display: String {
+        let numbers = (parts + Array(repeating: 0, count: max(0, 3 - parts.count))).map(String.init).joined(separator: ".")
+        return isPrerelease ? numbers + "-" + prerelease.joined(separator: ".") : numbers
+    }
+
+    private var paddedParts: [Int] { parts + Array(repeating: 0, count: 4 - parts.count) }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.paddedParts == rhs.paddedParts && lhs.prerelease == rhs.prerelease
+    }
+
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        if lhs.paddedParts != rhs.paddedParts { return lhs.paddedParts.lexicographicallyPrecedes(rhs.paddedParts) }
+        // 同号时：有预发布标识的版本较低；都有时逐段比较（数字段按数值、数字段低于字母段，前缀相同时段少者较低）。
+        switch (lhs.isPrerelease, rhs.isPrerelease) {
+        case (false, _): return false
+        case (true, false): return true
+        case (true, true):
+            for (a, b) in zip(lhs.prerelease, rhs.prerelease) where a != b {
+                switch (Int(a), Int(b)) {
+                case let (x?, y?): return x < y
+                case (.some, nil): return true
+                case (nil, .some): return false
+                case (nil, nil): return a < b
+                }
+            }
+            return lhs.prerelease.count < rhs.prerelease.count
+        }
+    }
 }
 
 struct NoveliaGitHubRelease: Decodable {
@@ -36,11 +99,19 @@ struct NoveliaGitHubRelease: Decodable {
     }
 }
 
+/// 手动检查 App 更新的结果；有新版本时同时设置 `NoveliaUpdateStore.release`，由根视图弹出下载提示。
+enum NoveliaManualUpdateResult: Equatable {
+    case available
+    case upToDate(current: String)
+    case failed
+}
+
 @MainActor
 final class NoveliaUpdateStore: ObservableObject {
     static let enabledKey = "automaticallyCheckGitHubUpdates"
     static let ignoredKey = "ignoredGitHubReleaseVersion"
     @Published var release: NoveliaGitHubRelease?
+    @Published private(set) var isCheckingManually = false
     private var checkedThisLaunch = false
     private var isChecking = false
     private let defaults: UserDefaults
@@ -60,21 +131,32 @@ final class NoveliaUpdateStore: ObservableObject {
         checkedThisLaunch = true
         isChecking = true
         defer { isChecking = false }
+        // 更新服务不可用时，不能中断阅读或登录。
+        guard let candidate = try? await fetchLatest(), defaults.bool(forKey: Self.enabledKey) else { return }
+        if candidate.shouldOffer(current: currentVersion, ignored: defaults.string(forKey: Self.ignoredKey) ?? "") {
+            release = candidate
+        }
+    }
+
+    /// “我的 → 版本 → 检查更新”：不受启动检查开关限制，也会再次提示之前忽略的版本。
+    func checkManually() async -> NoveliaManualUpdateResult {
+        guard !isCheckingManually else { return .failed }
+        isCheckingManually = true
+        defer { isCheckingManually = false }
+        guard let candidate = try? await fetchLatest() else { return .failed }
+        guard candidate.shouldOffer(current: currentVersion, ignored: "") else { return .upToDate(current: currentVersion) }
+        release = candidate
+        return .available
+    }
+
+    private func fetchLatest() async throws -> NoveliaGitHubRelease {
         var request = URLRequest(url: URL(string: "https://api.github.com/repos/Guanine000/novelia-swift/releases/latest")!)
         request.timeoutInterval = 15
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("Novelia-iOS", forHTTPHeaderField: "User-Agent")
-        do {
-            let (data, response) = try await session.data(for: request)
-            guard defaults.bool(forKey: Self.enabledKey), let response = response as? HTTPURLResponse,
-                  response.statusCode == 200 else { return }
-            let candidate = try JSONDecoder().decode(NoveliaGitHubRelease.self, from: data)
-            if candidate.shouldOffer(current: currentVersion, ignored: defaults.string(forKey: Self.ignoredKey) ?? "") {
-                release = candidate
-            }
-        } catch {
-            // 更新服务不可用时，不能中断阅读或登录。
-        }
+        let (data, response) = try await session.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+        return try JSONDecoder().decode(NoveliaGitHubRelease.self, from: data)
     }
 
     func ignore(_ candidate: NoveliaGitHubRelease) {

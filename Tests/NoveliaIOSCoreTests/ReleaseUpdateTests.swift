@@ -24,8 +24,27 @@ private final class ReleaseMock: URLProtocol {
 @MainActor
 final class ReleaseUpdateTests: XCTestCase {
     func testVersionParsing() {
-        XCTAssertGreaterThan(NoveliaReleaseVersion("v0.10.0")!, NoveliaReleaseVersion("0.9.9")!, "numeric comparison")
-        for invalid in ["0.8.1-test.1", "v0.8", "0.x.0", "", "0.8.1+34"] {
+        func v(_ text: String) -> NoveliaReleaseVersion { NoveliaReleaseVersion(text)! }
+        XCTAssertGreaterThan(v("v0.10.0"), v("0.9.9"), "numeric comparison")
+        // 兼容的标签写法。
+        XCTAssertEqual(v("v0.8"), v("0.8.0"), "missing parts count as zero")
+        XCTAssertEqual(v("V1"), v("1.0.0"))
+        XCTAssertEqual(v("release-0.20.0"), v("0.20.0"))
+        XCTAssertEqual(v("Novelia-v0.20.0"), v("0.20.0"))
+        XCTAssertEqual(v("0.8.1+34"), v("0.8.1"), "build metadata is ignored")
+        XCTAssertEqual(v("1.2.3.4").parts, [1, 2, 3, 4])
+        XCTAssertGreaterThan(v("1.2.3.1"), v("1.2.3"))
+        XCTAssertEqual(v("v0.19.2-test.2").display, "0.19.2-test.2")
+        XCTAssertEqual(v("v0.8").display, "0.8.0")
+        // 预发布按 SemVer 排序。
+        XCTAssertLessThan(v("0.20.0-test.1"), v("0.20.0"))
+        XCTAssertGreaterThan(v("0.20.0-test.1"), v("0.19.9"))
+        XCTAssertLessThan(v("0.20.0-test.2"), v("0.20.0-test.10"), "numeric identifiers compare numerically")
+        XCTAssertLessThan(v("1.0.0-alpha"), v("1.0.0-alpha.1"))
+        XCTAssertLessThan(v("1.0.0-1"), v("1.0.0-alpha"), "numeric identifiers sort before letters")
+        XCTAssertLessThan(v("1.0.0-alpha"), v("1.0.0-beta"))
+        XCTAssertNotEqual(v("0.20.0-test.1"), v("0.20.0"))
+        for invalid in ["0.x.0", "", "v", "1.2.3.4.5", "1..2", "0.8.1-", "0.8.1-te st", "0.8.1+", "1.0/2", "测试0.8.1", "1.2.3_4"] {
             XCTAssertNil(NoveliaReleaseVersion(invalid), "invalid version \(invalid)")
         }
     }
@@ -82,5 +101,41 @@ final class ReleaseUpdateTests: XCTestCase {
             .shouldOffer(current: "0.8.0", ignored: ""), "untrusted URL suppressed")
         XCTAssertFalse(NoveliaGitHubRelease(tag_name: "v0.8.2", html_url: release.html_url, draft: false, prerelease: true)
             .shouldOffer(current: "0.8.0", ignored: ""), "prerelease suppressed")
+        let shortTag = NoveliaGitHubRelease(tag_name: "v0.9", html_url: "https://github.com/Guanine000/novelia-swift/releases/tag/v0.9",
+                                            draft: false, prerelease: false)
+        XCTAssertTrue(shortTag.shouldOffer(current: "0.8.2", ignored: ""), "two-part tag is understood")
+        XCTAssertFalse(shortTag.shouldOffer(current: "0.9.0", ignored: ""), "0.9 equals 0.9.0")
+        XCTAssertFalse(shortTag.shouldOffer(current: "0.8.2", ignored: shortTag.version!.display), "ignored by display string")
+        XCTAssertTrue(release.shouldOffer(current: "0.8.2-test.3", ignored: ""), "stable beats a test build of the same number")
+    }
+
+    /// 手动检查：启动检查关闭、版本被忽略时仍会提示；同版本报告已是最新；请求失败报告失败。
+    func testManualCheck() async {
+        let name = "NoveliaManualUpdateTest-\(UUID())"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ReleaseMock.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        ReleaseMock.status = 200
+        ReleaseMock.payload = #"{"tag_name":"v0.9.0","html_url":"https://github.com/Guanine000/novelia-swift/releases/tag/v0.9.0","draft":false,"prerelease":false}"#
+        defaults.set(false, forKey: NoveliaUpdateStore.enabledKey)
+        defaults.set("0.9.0", forKey: NoveliaUpdateStore.ignoredKey)
+
+        let older = NoveliaUpdateStore(defaults: defaults, session: session, currentVersion: "0.8.0")
+        let available = await older.checkManually()
+        XCTAssertEqual(available, .available)
+        XCTAssertEqual(older.release?.tag_name, "v0.9.0")
+
+        let current = NoveliaUpdateStore(defaults: defaults, session: session, currentVersion: "0.9.0")
+        let upToDate = await current.checkManually()
+        XCTAssertEqual(upToDate, .upToDate(current: "0.9.0"))
+        XCTAssertNil(current.release)
+
+        ReleaseMock.status = 500
+        let failed = await current.checkManually()
+        XCTAssertEqual(failed, .failed)
+        ReleaseMock.status = 200
     }
 }

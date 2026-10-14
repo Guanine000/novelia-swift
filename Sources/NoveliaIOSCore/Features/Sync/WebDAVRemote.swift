@@ -291,6 +291,10 @@ struct ReadingStatisticsRemoteEntry: Equatable {
 /// 旧版合并文件每天最多检查一次。缓存只在同步成功并套用到本机后保存；丢失只会多发请求，不影响结果。
 struct ReadingStatisticsSyncCache: Codable, Equatable {
     static let legacyCheckInterval: TimeInterval = 24 * 60 * 60
+    /// 缓存格式。0.20.0(72) 合并设备名称有误，其缓存记下的版本对应的名称未保存；
+    /// 格式不符时丢弃设备版本，重新读取一次全部设备文件。
+    static let currentFormat = 2
+    var format: Int? = currentFormat
 
     /// 缓存所属的服务器（用户名@地址）；与当前设置不同时整份作废。
     var server: String?
@@ -305,6 +309,7 @@ struct ReadingStatisticsSyncCache: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         server = try container.decodeIfPresent(String.self, forKey: .server)
+        format = try container.decodeIfPresent(Int.self, forKey: .format)
         deviceVersions = try container.decodeIfPresent([String: String].self, forKey: .deviceVersions) ?? [:]
         uploadedHash = try container.decodeIfPresent(String.self, forKey: .uploadedHash)
         legacyCheckedAt = try container.decodeIfPresent(Date.self, forKey: .legacyCheckedAt)
@@ -337,6 +342,10 @@ struct ReadingStatisticsSynchronizer {
         }
         var merged = local
         var cache = cache
+        if cache.format != ReadingStatisticsSyncCache.currentFormat {
+            cache.deviceVersions = [:]
+            cache.format = ReadingStatisticsSyncCache.currentFormat
+        }
         if cache.legacyCheckedAt.map({ now.timeIntervalSince($0) >= ReadingStatisticsSyncCache.legacyCheckInterval }) ?? true {
             if let legacy = try await remote.fetchLegacyReadingStatistics() { merged = .merged(merged, legacy) }
             cache.legacyCheckedAt = now

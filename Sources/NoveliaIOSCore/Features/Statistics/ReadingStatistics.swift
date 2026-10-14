@@ -165,8 +165,10 @@ struct ReadingStatisticsSync: Codable, Equatable, Sendable {
         }
         if let incoming = rhs.deviceInfo {
             var info = result.deviceInfo ?? [:]
-            for (id, value) in incoming where value.updatedAt > (info[id]?.updatedAt ?? .distantPast) {
-                info[id] = value
+            // 没有记录时直接采用：从未改名的设备名称时间为 distantPast，按“严格较新”比较会永远被丢弃。
+            for (id, value) in incoming {
+                guard let existing = info[id] else { info[id] = value; continue }
+                if value.updatedAt > existing.updatedAt { info[id] = value }
             }
             result.deviceInfo = info
         }

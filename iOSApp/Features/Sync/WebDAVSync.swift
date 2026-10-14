@@ -455,6 +455,16 @@ struct WebDAVSyncView: View {
             Section {
                 Toggle("自动同步", isOn: $syncStore.autoSyncEnabled)
                     .disabled(!syncStore.isEnabled)
+                // 自动同步依赖 iOS 给的前后台时间，不保证每次都完成，提醒用户以手动同步为主。
+                Label {
+                    Text("此功能不够可靠，建议多手动同步")
+                        .font(.subheadline.weight(.semibold))
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .foregroundStyle(.orange)
+                .listRowBackground(Color.orange.opacity(0.12))
+                .accessibilityLabel("提醒：自动同步不够可靠，建议多手动同步")
             } footer: {
                 Text("默认关闭。开启后，回到前台时如距上次同步超过 10 分钟会自动同步；书籍、进度、系列或标签有改动时，在离开 App 或改动停止约 1 分钟后推送。断网时等待网络恢复，低数据模式下暂停，失败后逐步延长重试间隔。阅读背景和字体随回到前台的同步带上；开启阅读时长同步时，离开 App 会推送新的阅读时长，回到前台时取回其他设备的时长。")
             }

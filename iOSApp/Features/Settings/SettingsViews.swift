@@ -6,6 +6,9 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @AppStorage(NoveliaUpdateStore.enabledKey) private var checksUpdates = true
     @EnvironmentObject private var auth: AccountAuthStore
+    @EnvironmentObject private var updates: NoveliaUpdateStore
+    @EnvironmentObject private var services: AppServices
+    @State private var updateCheckMessage: String?
     @AppStorage(SettingsKey.appThemeColor) private var themeColorRaw = AppThemeColor.novelia.rawValue
     @AppStorage(SettingsKey.appThemeCustomHex) private var themeCustomHex = "559775"
     @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = false
@@ -120,6 +123,18 @@ struct SettingsView: View {
             }
             Section("版本") {
                 Toggle("启动时检查更新", isOn: $checksUpdates)
+                if services.performsUpdateChecks {
+                    Button {
+                        Task { await checkForUpdates() }
+                    } label: {
+                        if updates.isCheckingManually {
+                            Label("正在检查更新…", systemImage: "hourglass")
+                        } else {
+                            Label("检查更新", systemImage: "arrow.down.circle")
+                        }
+                    }
+                    .disabled(updates.isCheckingManually)
+                }
                 LabeledContent("当前版本", value: appVersion)
                 LabeledContent("平台", value: "iOS 17+")
                 NavigationLink("开源许可") {
@@ -145,6 +160,11 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(NoveliaStyle.paper)
         .navigationTitle("我的")
+        .alert("检查更新", isPresented: .init(get: { updateCheckMessage != nil }, set: { if !$0 { updateCheckMessage = nil } })) {
+            Button("好", role: .cancel) { updateCheckMessage = nil }
+        } message: {
+            Text(updateCheckMessage ?? "")
+        }
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $isShowingLogShare) {
             if let logFileURL {
@@ -158,6 +178,15 @@ struct SettingsView: View {
             Button("好", role: .cancel) { logExportError = nil }
         } message: {
             Text(logExportError ?? "")
+        }
+    }
+
+    /// 有新版本时由根视图弹出“发现新版本”；这里只提示已是最新或检查失败。
+    private func checkForUpdates() async {
+        switch await updates.checkManually() {
+        case .available: break
+        case .upToDate(let current): updateCheckMessage = "当前已是最新版本（\(current)）。"
+        case .failed: updateCheckMessage = "暂时无法检查更新，请检查网络后重试。"
         }
     }
 
