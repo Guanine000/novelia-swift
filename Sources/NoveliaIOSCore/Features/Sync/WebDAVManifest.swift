@@ -6,6 +6,8 @@ import Foundation
 struct WebDAVAsset: Codable, Equatable {
     let filename: String
     let hash: String
+    /// 文件字节数，用于下载云端书籍前提示大小。可选：旧清单没有，旧版应用写回清单时也会丢掉。
+    var size: Int64? = nil
 
     /// 只接受单级文件名，防止远端清单把文件写到书库目录之外。
     static func isSafeFilename(_ filename: String) -> Bool {
@@ -36,6 +38,8 @@ struct WebDAVManifest: Codable {
     var fonts: [String: SyncedImportedFont]? = nil
     /// 书库系列与书籍归属；随书籍同步，旧版应用解码时忽略。
     var librarySeries: LibrarySeriesState? = nil
+    /// 已从云端删除的书 `[书库键: 删除时间]`，见 `WebDAVDeletedBooks`。旧版应用不识别，可能再次上传这些书。
+    var deletedBooks: [String: Date]? = nil
 }
 
 enum WebDAVSyncError: LocalizedError, Equatable {
@@ -45,7 +49,6 @@ enum WebDAVSyncError: LocalizedError, Equatable {
     case unsupportedManifest
     case invalidAsset
     case invalidStatistics
-    case missingStatisticsETag
     case concurrentChange
 
     var errorDescription: String? {
@@ -62,7 +65,6 @@ enum WebDAVSyncError: LocalizedError, Equatable {
         case .unsupportedManifest: "远端同步数据版本不受支持，未修改本地书籍。"
         case .invalidAsset: "远端书籍文件校验失败，未导入该文件。"
         case .invalidStatistics: "阅读统计数据格式无效或版本不受支持，未覆盖本机或云端统计。"
-        case .missingStatisticsETag: "服务器未提供 ETag，无法安全合并阅读统计。请使用支持 ETag 的 WebDAV 服务。"
         case .concurrentChange: "另一台设备刚更新了同步数据，请重新同步。"
         }
     }

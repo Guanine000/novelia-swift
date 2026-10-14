@@ -6,6 +6,8 @@ import Foundation
 /// 可参与 WebDAV 书籍同步的本地记录；按 `syncTimestamp` 判断哪一端较新。
 protocol SyncableBook: Codable, Identifiable {
     var syncTimestamp: Date { get }
+    /// 跨设备的书籍标识，与书库键相同（`web:<id>`、`wenku:<UUID>`），用于云端删除记录。
+    var syncKey: String { get }
     /// 进度提示中显示的书名。
     var syncTitle: String { get }
     /// 上传前确认本机文件齐全。
@@ -14,6 +16,7 @@ protocol SyncableBook: Codable, Identifiable {
 
 extension DownloadedWebNovel: SyncableBook {
     var syncTimestamp: Date { downloadedAt }
+    var syncKey: String { "web:\(id)" }
     var syncTitle: String { novel.title }
     /// 网络小说只有一个正文文件；文件缺失时书库返回空表。
     func hasRequiredSyncFiles(_ files: [String: URL]) -> Bool { files.count == 1 }
@@ -21,6 +24,7 @@ extension DownloadedWebNovel: SyncableBook {
 
 extension LocalWenkuEPUB: SyncableBook {
     var syncTimestamp: Date { addedAt }
+    var syncKey: String { "wenku:\(id.uuidString)" }
     var syncTitle: String { title }
     /// 文库与导入书籍必须包含正文，封面等附属文件可选。
     func hasRequiredSyncFiles(_ files: [String: URL]) -> Bool { files[filename] != nil }
@@ -116,6 +120,35 @@ enum WebDAVSyncPlanner {
             if localHashes.contains(hash) { plan.uploads.append(hash) } else { plan.downloads.append(hash) }
         }
         return plan
+    }
+}
+
+/// 云端删除记录：书籍从云端删除时记下时间，晚于该时间下载或导入的同一本书才会再次同步。
+enum WebDAVDeletedBooks {
+    /// 去掉已删除的书：远端条目不再恢复，本机副本不再上传。比删除时间更新的书视为重新添加，同时清除删除记录。
+    static func apply<Record: SyncableBook>(local: [Record], remote: [WebDAVBook<Record>], deleted: inout [String: Date])
+        -> (local: [Record], remote: [WebDAVBook<Record>]) {
+        func isDeleted(_ book: Record) -> Bool {
+            guard let date = deleted[book.syncKey] else { return false }
+            return book.syncTimestamp <= date
+        }
+        for book in local + remote.map(\.record) where deleted[book.syncKey] != nil && !isDeleted(book) {
+            deleted[book.syncKey] = nil
+        }
+        return (local.filter { !isDeleted($0) }, remote.filter { !isDeleted($0.record) })
+    }
+
+    /// 从清单中删除指定书籍并记下删除时间，返回被删除书籍引用、且清单中已不再引用的 blob。
+    static func remove(_ keys: Set<String>, from manifest: inout WebDAVManifest, at date: Date) -> Set<String> {
+        let removed = manifest.webBooks.filter { keys.contains($0.record.syncKey) }.flatMap(\.assets)
+            + manifest.wenkuBooks.filter { keys.contains($0.record.syncKey) }.flatMap(\.assets)
+        manifest.webBooks.removeAll { keys.contains($0.record.syncKey) }
+        manifest.wenkuBooks.removeAll { keys.contains($0.record.syncKey) }
+        var deleted = manifest.deletedBooks ?? [:]
+        for key in keys { deleted[key] = max(deleted[key] ?? .distantPast, date) }
+        manifest.deletedBooks = deleted
+        manifest.positions = WebDAVSyncPlanner.positionsToSync(manifest.positions, in: manifest)
+        return Set(removed.map(\.hash)).subtracting(WebDAVSyncPlanner.referencedBlobs(in: manifest))
     }
 }
 

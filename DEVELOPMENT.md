@@ -26,7 +26,7 @@
 
 ## 项目概览
 
-Novelia 是面向 iOS 17 及以上系统的第三方小说客户端，使用 Swift、SwiftUI 和 UIKit。主要能力包括网络小说和文库发现、收藏与历史、论坛、本地 TXT/EPUB 书库、在线阅读、EPUB 下载、阅读统计和手动 WebDAV 同步。
+Novelia 是面向 iOS 17 及以上系统的第三方小说客户端，使用 Swift、SwiftUI 和 UIKit。主要能力包括网络小说和文库发现、收藏与历史、论坛、本地 TXT/EPUB 书库、在线阅读、EPUB 下载、阅读统计和 WebDAV 同步（手动或自动）。
 
 界面使用 SwiftUI，阅读器按引擎需要结合原生视图和 WebKit。可观察状态通常由 `@MainActor` Store 管理；远端操作使用异步服务接口；Core 保存业务模型、算法和存储逻辑。项目没有统一采用单一大型 ViewModel，每个功能应沿用适合其职责的现有实现。
 
@@ -117,7 +117,7 @@ Root 还连接账号恢复、续期注册、账号变化后的收藏刷新、前
 在线阅读 → 章节缓存 → NovelContentService → 章节内容 → 滚动或分页引擎
 阅读操作 → ReaderSettings / ReadingPositionProviding → 本地进度
 阅读计时事件 → App 适配 → ReadingActivityController → ReadingTimeRecording
-手动同步 → WebDAVSyncStore → 计划与引擎 → 远端接口 + 本地状态接口
+手动同步 / 自动同步触发 → WebDAVSyncStore → 计划与引擎 → 远端接口 + 本地状态接口
 ```
 
 社区使用 `ForumStore` 持有列表/分类/查询状态，帖子、评论和编辑页面消费 `ForumService`。Core 的 `ForumMarkdown.swift` 提供 Markdown 相关处理与链接路由，界面层负责渲染、展开剧透等交互。修改富文本或链接时保留配置来源检查、相对链接处理与内部导航，不在渲染组件中建立另一套 API 请求。
@@ -276,13 +276,21 @@ WebDAV 是独立传输能力，不使用小说 API 服务集合。`WebDAVSyncSto
 | `WebDAVSyncEngine.swift` | 按计划传输文件、更新书库并写清单 |
 | `WebDAVRemote.swift` | `WebDAVRemote`、HTTP 客户端、重定向约束与统计远端接口 |
 | `SyncMerge.swift` | 同步数据合并规则 |
-| `App/Integrations/SyncLocalStateAdapter.swift` | 连接实际进度、系列、背景、标签与字体状态 |
+| `WebDAVCloudBooks.swift` | 云端书籍记录与封面缓存（`CloudBookStore`）、按需下载 |
+| `WebDAVAutoSyncPolicy.swift` | 自动同步的触发判断、失败退避与本机状态指纹（纯计算） |
+| `App/Integrations/SyncLocalStateAdapter.swift` | 连接实际进度、系列、背景、标签与字体状态；`WebDAVAutoSyncTriggers` 转交前后台与书库/系列/标签变化 |
 
-同步通过 `SyncBookLibrary` 读写两类书籍，通过 `WebDAVSyncLocalState` 访问其他本地状态。远端资源使用内容哈希引用，验证资源名和哈希后才导入。清单写入使用对应并发条件；阅读统计独立同步并要求服务器提供 ETag，遇到并发更新应报告或按既有逻辑重试，不能无条件覆盖。
+同步通过 `SyncBookLibrary` 读写两类书籍，通过 `WebDAVSyncLocalState` 访问其他本地状态。远端资源使用内容哈希引用，验证资源名和哈希后才导入。清单写入使用对应并发条件。阅读统计独立同步：每台设备只写 `statistics/<设备 ID>.json`（`ReadingDeviceStatisticsFile`），读取全部设备文件与旧版 `reading-statistics.json` 后按设备取最大值合并，因此不需要条件写入；不得把其他设备的时长写进本机文件，也不得再写旧版文件。设备 ID 用作文件名，须通过 `isValidDeviceID` 校验。设备名称（`ReadingDeviceInfo`）随统计同步，本机名称只由本机修改。
+
+为适应有请求频率限制的服务器，同步尽量少发请求：`WebDAVFolderCache` 记录已确认的目录，自动同步跳过 `verifyConnection`/`prepareFolders` 的请求，手动同步先清空再完整检查，任何同步失败都清空；引擎在清单与读取时内容相同时不写入；`ReadingStatisticsSyncCache` 记录已合并的设备文件版本（ETag，或修改时间与大小）、本机文件上传哈希和旧文件检查时间，只在统计套用到本机后保存，手动同步不使用。缓存丢失只会多发请求，不能影响合并结果。
 
 用户可见的同步行为与合并规则见 [WebDAV 同步](docs/WEBDAV.md)。实现上必须保持以下行为，修改同步时针对相关失败点验证：
 
-- 同步只由用户手动触发；本地删除不传播到云端。
+- 清单文件条目带可选 `size`；上传时写入，`fillMissingSizes` 只在本机同一版本且哈希一致时补齐旧条目，不产生网络请求。
+- 云端删除写入 `deletedBooks`（`WebDAVDeletedBooks`）：同步时不恢复、不上传删除时间及之前的版本，本机的这类副本在清单写入成功后经 `SyncBookLibrary.removeFromSync` 删除；更新版本清除记录。`WebDAVCloudBookDeleter` 以条件写入清单（并发冲突重试三次），成功后才 `deleteBlob` 删除不再被引用的文件。
+- 书籍同步不自动下载书籍文件：App 给引擎传入 `CloudBookStore`（`SyncCloudCatalog`），本机没有的书只记为云端书籍并下载 EPUB 封面，本机已有的书不被远端较新版本替换；上传不变。云端书籍在清单写入成功后才更新，记录与封面保存在 Application Support/WebDAVCloudBooks，属于可重建缓存。书库把它们并入 `LibraryBook`（`cloudFileHash` 为主文件哈希，用于阅读位置与去重），打开前经 `WebDAVSyncStore.downloadCloudBook` 用 `WebDAVCloudBookDownloader` 下载并 `restoreFromSync`。引擎不传 `cloud` 时保持下载全部文件的旧行为（测试使用）。
+- 同步由用户手动触发，或在开启自动同步后由前台、背景、本机改动和网络恢复触发；两者走同一执行路径，同一时间只跑一个。是否自动执行只由 `WebDAVAutoSyncPolicy` 判断，指纹只读已有本地接口，不读文件内容。本地删除不传播到云端。
+- 自动同步状态（`webdav.autoSync.state.v1`）分清单内容与阅读时长两部分，各自记录指纹、成功时间与失败退避，成功后更新；内容失败时不再同步统计，统计失败不影响已完成的内容同步；进入背景时用后台时间完成，到期取消，依赖“清单最后写入”保证中断安全。
 - 执行失败或取消时，已传输文件不自动回滚。
 - 清单在流程末尾写入；标签、系列、背景和字体在清单写成功后才应用。
 - 远端清单引用的 blob 视为已存在，不逐个询问服务器；因此服务器上被手动删除的 blob 不会自动补传。

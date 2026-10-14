@@ -13,6 +13,7 @@ struct LibraryView: View {
     @EnvironmentObject private var webDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
     @EnvironmentObject private var webDAVSync: WebDAVSyncStore
+    @EnvironmentObject private var cloudBooks: CloudBookStore
     @EnvironmentObject private var state: LibraryStateStore
     @StateObject private var importer = LibraryImportModel()
     @StateObject private var bookActions = LibraryBookActions()
@@ -27,15 +28,19 @@ struct LibraryView: View {
     @State private var hasTriggeredSync = false
     @State private var isShowingSyncProgress = false
 
-    private var allBooks: [LibraryBook] { state.books(web: webDownloads, wenku: wenkuDownloads) }
+    private var allBooks: [LibraryBook] { state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks) }
     private var sortOptions: LibrarySortOptions { state.sortOptions(scope: nil) }
 
     var body: some View {
         let sourceBooks = allBooks
         let books = state.displayBooks(from: sourceBooks).filter { sourceFilter.includes(isWenku: $0.isWenku) }
+        // 多选的范围是当前列出的书：搜索结果，或“全部书籍”中未归入系列的书。
+        let selectable: [LibraryBook] = isSearching && !LibraryOrganizer.normalized(query).isEmpty
+            ? books.filter { LibraryOrganizer.matches(title: $0.title, author: $0.author, query: query) }
+            : segment == .books ? books.filter { state.series.seriesID(forBook: $0.key) == nil } : []
         List {
             if sourceBooks.isEmpty {
-                emptyLibrary.libraryListRow()
+                // 空状态放在 overlay 中显示；ContentUnavailableView 作为 List 行时操作按钮会被压成细长色条。
             } else if isSearching && !LibraryOrganizer.normalized(query).isEmpty {
                 searchResults(books)
             } else {
@@ -70,7 +75,9 @@ struct LibraryView: View {
                         }
                         .libraryListRow()
                         ForEach(sorted(ungrouped, options: sortOptions)) { book in
-                            LibraryBookRow(book: book, actions: bookActions, open: open)
+                            LibraryBookRow(book: book, actions: bookActions, open: open,
+                                           isSelecting: bookActions.isSelecting,
+                                           isSelected: bookActions.selectedKeys.contains(book.key))
                                 .libraryListRow()
                         }
                     }
@@ -80,13 +87,24 @@ struct LibraryView: View {
             }
         }
         .libraryListStyle()
+        .overlay { if sourceBooks.isEmpty { emptyLibrary } }
+        .safeAreaInset(edge: .bottom) {
+            if bookActions.isSelecting { LibrarySelectionBar(books: selectable, actions: bookActions) }
+        }
+        .onChange(of: segment) { _, _ in bookActions.endSelection() }
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .top) { searchBar }
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle("书库")
         // 搜索时改为行内标题，避免大标题区域在搜索栏上方留下空白。
         .navigationBarTitleDisplayMode(isSearching ? .inline : .large)
-        .toolbar { toolbarContent }
+        .toolbar {
+            if bookActions.isSelecting {
+                LibrarySelectionToolbar(books: selectable, actions: bookActions)
+            } else {
+                toolbarContent
+            }
+        }
         .navigationDestination(item: $readerTarget) { book in
             LibraryReaderDestination(book: book)
         }
@@ -113,7 +131,10 @@ struct LibraryView: View {
             .ignoresSafeArea()
         }
         .sheet(isPresented: $isShowingSyncProgress) {
-            WebDAVSyncProgressPanel(onCancel: { syncTask?.cancel() }) {
+            WebDAVSyncProgressPanel(onCancel: {
+                syncTask?.cancel()
+                webDAVSync.cancelAutomaticSync()
+            }) {
                 syncTask = Task { await webDAVSync.sync(web: webDownloads, wenku: wenkuDownloads) }
             }
             .presentationDetents([.height(280)])
@@ -136,6 +157,13 @@ struct LibraryView: View {
         }
         .overlay { LibraryImportProgressOverlay(model: importer) }
         .modifier(LibraryBookActionDialogs(actions: bookActions))
+        .onChange(of: bookActions.downloadedBookKey) { _, key in
+            guard let key else { return }
+            bookActions.downloadedBookKey = nil
+            if let book = state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks).first(where: { $0.key == key }) {
+                open(book)
+            }
+        }
     }
 
     private var sourceFilterMenu: some View {
@@ -223,7 +251,6 @@ struct LibraryView: View {
             .buttonStyle(.borderedProminent)
             .tint(NoveliaStyle.brandGreen)
         }
-        .padding(.top, 60)
     }
 
     @ViewBuilder
@@ -238,7 +265,9 @@ struct LibraryView: View {
             ContentUnavailableView.search(text: query).libraryListRow()
         } else {
             ForEach(sorted(matches, options: sortOptions)) { book in
-                LibraryBookRow(book: book, actions: bookActions, open: open)
+                LibraryBookRow(book: book, actions: bookActions, open: open,
+                               isSelecting: bookActions.isSelecting,
+                               isSelected: bookActions.selectedKeys.contains(book.key))
                     .libraryListRow()
             }
         }
@@ -301,7 +330,12 @@ struct LibraryView: View {
         LibraryOrganizer.sorted(books, options: options) { state.sortItem(for: $0) }
     }
 
+    /// 云端书籍先询问是否下载，下载完成后由 `downloadedBookKey` 回到这里打开。
     private func open(_ book: LibraryBook) {
+        guard !book.isCloudOnly else {
+            bookActions.pendingCloudDownload = book
+            return
+        }
         state.markOpened(book)
         readerTarget = book
     }
@@ -315,6 +349,7 @@ struct LibrarySeriesDetailView: View {
 
     @EnvironmentObject private var webDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
+    @EnvironmentObject private var cloudBooks: CloudBookStore
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var state: LibraryStateStore
     @State private var query = ""
@@ -328,7 +363,7 @@ struct LibrarySeriesDetailView: View {
     }
 
     var body: some View {
-        let all = state.displayBooks(from: state.books(web: webDownloads, wenku: wenkuDownloads))
+        let all = state.displayBooks(from: state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks))
         let keys = state.series.bookKeys(inSeries: seriesID)
         let members = all.filter { keys.contains($0.key) && sourceFilter.includes(isWenku: $0.isWenku) }
         let options = state.sortOptions(scope: seriesID)
@@ -357,7 +392,9 @@ struct LibrarySeriesDetailView: View {
                     ContentUnavailableView.search(text: query).libraryListRow()
                 } else {
                     ForEach(visible) { book in
-                        LibraryBookRow(book: book, showsSeries: false, actions: bookActions, open: open)
+                        LibraryBookRow(book: book, showsSeries: false, actions: bookActions, open: open,
+                                       isSelecting: bookActions.isSelecting,
+                                       isSelected: bookActions.selectedKeys.contains(book.key))
                             .libraryListRow()
                     }
                 }
@@ -366,10 +403,16 @@ struct LibrarySeriesDetailView: View {
         .libraryListStyle()
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .top) { searchBar }
+        .safeAreaInset(edge: .bottom) {
+            if bookActions.isSelecting { LibrarySelectionBar(books: visible, actions: bookActions) }
+        }
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle(series?.name ?? "系列")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if bookActions.isSelecting {
+                LibrarySelectionToolbar(books: visible, actions: bookActions)
+            } else {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
                     withAnimation { isSearching.toggle() }
@@ -387,6 +430,7 @@ struct LibrarySeriesDetailView: View {
                 }
                 .accessibilityLabel("系列操作")
             }
+            }
         }
         .navigationDestination(item: $readerTarget) { book in
             LibraryReaderDestination(book: book)
@@ -401,6 +445,13 @@ struct LibrarySeriesDetailView: View {
             LibraryAddToSeriesSheet(seriesID: seriesID, books: all)
         }
         .modifier(LibraryBookActionDialogs(actions: bookActions))
+        .onChange(of: bookActions.downloadedBookKey) { _, key in
+            guard let key else { return }
+            bookActions.downloadedBookKey = nil
+            if let book = state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks).first(where: { $0.key == key }) {
+                open(book)
+            }
+        }
     }
 
     @ViewBuilder
@@ -416,7 +467,12 @@ struct LibrarySeriesDetailView: View {
         }
     }
 
+    /// 云端书籍先询问是否下载，下载完成后由 `downloadedBookKey` 回到这里打开。
     private func open(_ book: LibraryBook) {
+        guard !book.isCloudOnly else {
+            bookActions.pendingCloudDownload = book
+            return
+        }
         state.markOpened(book)
         readerTarget = book
     }
@@ -510,13 +566,124 @@ private struct LibrarySeriesMenuItems: View {
 /// 书籍操作触发的确认框与提示。由页面持有并只挂载一次，避免每一行各自附带弹窗修饰符而拖慢滚动。
 @MainActor
 final class LibraryBookActions: ObservableObject {
-    @Published var pendingDelete: LibraryBook?
-    @Published var newSeriesBook: LibraryBook?
+    /// 等待确认删除的书；单本删除与多选批量删除共用。
+    @Published var pendingDelete: [LibraryBook] = []
+    /// 新建系列后要移入的书。
+    @Published var newSeriesBooks: [LibraryBook] = []
     @Published var newSeriesName = ""
     @Published var actionError: String?
     @Published var renamingSeries: LibrarySeriesTarget?
     @Published var renameName = ""
     @Published var dissolvingSeries: LibrarySeriesTarget?
+    /// 打开云端书籍时等待确认下载。
+    @Published var pendingCloudDownload: LibraryBook?
+    /// 下载完成的书，页面据此打开阅读。
+    @Published var downloadedBookKey: String?
+    /// 多选：长按书籍进入，点击切换选择。
+    @Published private(set) var isSelecting = false
+    @Published private(set) var selectedKeys: Set<String> = []
+
+    func beginSelection(with book: LibraryBook) {
+        isSelecting = true
+        selectedKeys = [book.key]
+    }
+
+    func toggleSelection(_ book: LibraryBook) {
+        if selectedKeys.contains(book.key) { selectedKeys.remove(book.key) } else { selectedKeys.insert(book.key) }
+    }
+
+    func selectAll(_ books: [LibraryBook]) { selectedKeys = Set(books.map(\.key)) }
+
+    func endSelection() {
+        isSelecting = false
+        selectedKeys = []
+    }
+}
+
+/// 多选时替换页面的工具栏：全选／取消全选与完成。
+struct LibrarySelectionToolbar: ToolbarContent {
+    let books: [LibraryBook]
+    let actions: LibraryBookActions
+    /// 由页面按当前选择计算后传入；工具栏内容不观察 actions，传值才能随选择刷新标题。
+    let allSelected: Bool
+
+    init(books: [LibraryBook], actions: LibraryBookActions) {
+        self.books = books
+        self.actions = actions
+        allSelected = !books.isEmpty && books.allSatisfy { actions.selectedKeys.contains($0.key) }
+    }
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button(allSelected ? "取消全选" : "全选") {
+                if allSelected { actions.selectAll([]) } else { actions.selectAll(books) }
+            }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button("完成") { actions.endSelection() }
+                .fontWeight(.semibold)
+        }
+    }
+}
+
+/// 多选时显示在底部的批量操作：移入系列、移出系列、删除。只作用于当前列出且已选中的书。
+struct LibrarySelectionBar: View {
+    let books: [LibraryBook]
+    @ObservedObject var actions: LibraryBookActions
+    @EnvironmentObject private var state: LibraryStateStore
+
+    private var selected: [LibraryBook] { books.filter { actions.selectedKeys.contains($0.key) } }
+
+    var body: some View {
+        let selected = selected
+        let inSeries = selected.filter { state.series.seriesID(forBook: $0.key) != nil }
+        HStack(spacing: 8) {
+            Text("已选 \(selected.count) 本")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(NoveliaStyle.ink)
+            Spacer(minLength: 4)
+            Menu {
+                ForEach(state.series.activeSeries) { series in
+                    Button(series.name) {
+                        selected.forEach { state.assign($0, to: series.id) }
+                        actions.endSelection()
+                    }
+                }
+                Divider()
+                Button {
+                    actions.newSeriesName = ""
+                    actions.newSeriesBooks = selected
+                } label: {
+                    Label("新建系列…", systemImage: "plus")
+                }
+            } label: {
+                barLabel("移入系列", systemImage: "rectangle.stack.badge.plus")
+            }
+            .disabled(selected.isEmpty)
+            Button {
+                inSeries.forEach { state.assign($0, to: nil) }
+                actions.endSelection()
+            } label: {
+                barLabel("移出系列", systemImage: "rectangle.stack.badge.minus")
+            }
+            .disabled(inSeries.isEmpty)
+            Button(role: .destructive) { actions.pendingDelete = selected } label: {
+                barLabel("删除", systemImage: "trash")
+            }
+            .disabled(selected.isEmpty)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    private func barLabel(_ title: String, systemImage: String) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: systemImage).font(.system(size: 17))
+            Text(title).font(.caption2)
+        }
+        .frame(minWidth: 56)
+    }
 }
 
 struct LibrarySeriesTarget: Identifiable, Equatable {
@@ -530,28 +697,72 @@ struct LibraryBookActionDialogs: ViewModifier {
     @ObservedObject var actions: LibraryBookActions
     @EnvironmentObject private var webDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
+    @EnvironmentObject private var syncStore: WebDAVSyncStore
 
     func body(content: Content) -> some View {
         content
+            .alert("下载《\(actions.pendingCloudDownload?.title ?? "")》？",
+                   isPresented: .init(get: { actions.pendingCloudDownload != nil },
+                                      set: { if !$0 { actions.pendingCloudDownload = nil } }),
+                   presenting: actions.pendingCloudDownload) { book in
+                Button("取消", role: .cancel) { actions.pendingCloudDownload = nil }
+                Button("下载") { download(book) }
+            } message: { book in
+                let size = book.cloudDownloadSizeText.map { "大小约 \($0)。" } ?? "大小未知。"
+                Text("这本书只保存在 WebDAV 中，需要先下载到本机才能阅读。\(size)下载会消耗 WebDAV 流量。")
+            }
+            .overlay {
+                if let key = syncStore.downloadingCloudBook {
+                    let title = state.books(web: webDownloads, wenku: wenkuDownloads, cloud: syncStore.cloudBooks)
+                        .first { $0.key == key }?.title ?? ""
+                    VStack(spacing: 12) {
+                        ProgressView(value: syncStore.cloudDownloadProgress)
+                            .tint(NoveliaStyle.brandGreen)
+                        Text("正在下载《\(title)》…").font(.subheadline)
+                    }
+                    .padding(20)
+                    .frame(maxWidth: 280)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                }
+            }
             .confirmationDialog(
-                "删除《\(actions.pendingDelete?.title ?? "")》？",
-                isPresented: .init(get: { actions.pendingDelete != nil }, set: { if !$0 { actions.pendingDelete = nil } }),
+                deleteTitle,
+                isPresented: .init(get: { !actions.pendingDelete.isEmpty }, set: { if !$0 { actions.pendingDelete = [] } }),
                 titleVisibility: .visible,
                 presenting: actions.pendingDelete
-            ) { book in
-                Button("删除", role: .destructive) { delete(book) }
-            } message: { _ in
-                Text("将从本机删除书籍文件。WebDAV 中的副本不会删除，之后同步时可能恢复。")
-            }
-            .alert("新建系列", isPresented: .init(get: { actions.newSeriesBook != nil }, set: { if !$0 { actions.newSeriesBook = nil } })) {
-                TextField("系列名称", text: $actions.newSeriesName)
-                Button("取消", role: .cancel) { actions.newSeriesBook = nil }
-                Button("创建并移入") {
-                    if let book = actions.newSeriesBook {
-                        let id = state.createSeries(named: actions.newSeriesName.isEmpty ? book.title : actions.newSeriesName)
-                        state.assign(book, to: id)
+            ) { books in
+                let localCount = books.filter { !$0.isCloudOnly }.count
+                if localCount > 0 {
+                    Button(localCount == books.count ? "仅删除本机" : "仅删除本机的 \(localCount) 本", role: .destructive) {
+                        delete(books, fromCloud: false)
                     }
-                    actions.newSeriesBook = nil
+                }
+                if syncStore.isEnabled {
+                    Button(localCount == 0 ? "从云端删除" : "删除本机和云端副本", role: .destructive) {
+                        delete(books, fromCloud: true)
+                    }
+                }
+                Button("取消", role: .cancel) { actions.pendingDelete = [] }
+            } message: { books in
+                if syncStore.isEnabled {
+                    Text(books.allSatisfy(\.isCloudOnly)
+                         ? "将删除 WebDAV 中的副本。其他设备同步后也会删除各自已下载的这些书。"
+                         : "仅删除本机时，WebDAV 中的副本会保留，之后显示为未下载。同时删除云端副本后，其他设备同步时也会删除各自已下载的这些书。")
+                } else {
+                    Text("将从本机删除书籍文件。")
+                }
+            }
+            .alert("新建系列", isPresented: .init(get: { !actions.newSeriesBooks.isEmpty }, set: { if !$0 { actions.newSeriesBooks = [] } })) {
+                TextField("系列名称", text: $actions.newSeriesName)
+                Button("取消", role: .cancel) { actions.newSeriesBooks = [] }
+                Button("创建并移入") {
+                    let books = actions.newSeriesBooks
+                    if let first = books.first {
+                        let id = state.createSeries(named: actions.newSeriesName.isEmpty ? first.title : actions.newSeriesName)
+                        books.forEach { state.assign($0, to: id) }
+                    }
+                    actions.newSeriesBooks = []
+                    actions.endSelection()
                 }
             }
             .alert("重命名系列", isPresented: .init(get: { actions.renamingSeries != nil }, set: { if !$0 { actions.renamingSeries = nil } })) {
@@ -581,10 +792,40 @@ struct LibraryBookActionDialogs: ViewModifier {
             }
     }
 
-    private func delete(_ book: LibraryBook) {
-        switch book.origin {
-        case .webNovel(let record): webDownloads.remove(record)
-        case .wenku(let record): wenkuDownloads.remove(record)
+    private func download(_ book: LibraryBook) {
+        actions.pendingCloudDownload = nil
+        Task {
+            do {
+                try await syncStore.downloadCloudBook(key: book.key, web: webDownloads, wenku: wenkuDownloads)
+                actions.downloadedBookKey = book.key
+            } catch {
+                actions.actionError = "下载失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    private var deleteTitle: String {
+        let books = actions.pendingDelete
+        return books.count == 1 ? "删除《\(books[0].title)》？" : "删除 \(books.count) 本书？"
+    }
+
+    /// 先删除本机文件，再按需删除云端副本；云端失败时本机删除不回滚，书会显示为云端书籍，可在其菜单中重试。
+    private func delete(_ books: [LibraryBook], fromCloud: Bool) {
+        actions.pendingDelete = []
+        actions.endSelection()
+        for book in books where !book.isCloudOnly {
+            switch book.origin {
+            case .webNovel(let record): webDownloads.remove(record)
+            case .wenku(let record): wenkuDownloads.remove(record)
+            }
+        }
+        guard fromCloud else { return }
+        Task {
+            do {
+                try await syncStore.deleteFromCloud(keys: Set(books.map(\.key)))
+            } catch {
+                actions.actionError = "云端删除失败：\(error.localizedDescription)。这些书会显示为未下载的云端书籍，可在其菜单中再次“从云端删除”。"
+            }
         }
     }
 }
@@ -598,6 +839,9 @@ struct LibraryBookRow: View {
     /// 只用于触发弹窗，不观察其变化，弹窗状态改变时列表行不必重算。
     let actions: LibraryBookActions
     let open: (LibraryBook) -> Void
+    /// 多选状态由页面传入：多选时点击切换选择，长按进入多选。
+    var isSelecting = false
+    var isSelected = false
 
     @EnvironmentObject private var webDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
@@ -605,23 +849,43 @@ struct LibraryBookRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 4) {
-            Button { open(book) } label: {
-                LibraryBookRowContent(book: book, status: state.status(for: book), seriesName: showsSeries ? state.seriesName(for: book) : nil)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("打开阅读")
-            .accessibilityIdentifier("library-book-\(book.key)")
-            Menu {
-                menuItems(for: book)
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(NoveliaStyle.muted)
+            LibraryBookRowContent(book: book, status: state.status(for: book), seriesName: showsSeries ? state.seriesName(for: book) : nil)
+                .contentShape(Rectangle())
+                // 长按优先于点击：普通状态点击打开、长按进入多选；多选时点击或长按都切换选择。
+                // 在 List 行中分别挂 onTapGesture/onLongPressGesture 时点击会抢先触发，故显式组合。
+                .gesture(LongPressGesture(minimumDuration: 0.45).exclusively(before: TapGesture()).onEnded { value in
+                    switch value {
+                    case .first:
+                        if isSelecting { actions.toggleSelection(book) } else { actions.beginSelection(with: book) }
+                    case .second:
+                        if isSelecting { actions.toggleSelection(book) } else { open(book) }
+                    }
+                })
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint(isSelecting ? "切换选择" : "打开阅读")
+                .accessibilityAction(named: "多选") { actions.beginSelection(with: book) }
+                .accessibilityIdentifier("library-book-\(book.key)")
+            if isSelecting {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(isSelected ? NoveliaStyle.brandGreen : NoveliaStyle.muted)
                     .frame(width: 36, height: 44)
                     .contentShape(Rectangle())
+                    .onTapGesture { actions.toggleSelection(book) }
+                    .accessibilityLabel(isSelected ? "已选择：\(book.title)" : "未选择：\(book.title)")
+                    .accessibilityAddTraits(.isButton)
+            } else {
+                Menu {
+                    menuItems(for: book)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .frame(width: 36, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("更多操作：\(book.title)")
             }
-            .accessibilityLabel("更多操作：\(book.title)")
         }
         .padding(.leading, 10)
         .padding(.vertical, 8)
@@ -631,7 +895,13 @@ struct LibraryBookRow: View {
     @ViewBuilder
     private func menuItems(for book: LibraryBook) -> some View {
         let currentSeries = state.series.seriesID(forBook: book.key)
-        Button { open(book) } label: { Label("阅读", systemImage: "book") }
+        if book.isCloudOnly {
+            Button { open(book) } label: {
+                Label(book.cloudDownloadSizeText.map { "下载（\($0)）" } ?? "下载", systemImage: "icloud.and.arrow.down")
+            }
+        } else {
+            Button { open(book) } label: { Label("阅读", systemImage: "book") }
+        }
         Menu {
             ForEach(state.series.activeSeries.filter { $0.id != currentSeries }) { series in
                 Button(series.name) { state.assign(book, to: series.id) }
@@ -639,7 +909,7 @@ struct LibraryBookRow: View {
             Divider()
             Button {
                 actions.newSeriesName = ""
-                actions.newSeriesBook = book
+                actions.newSeriesBooks = [book]
             } label: {
                 Label("新建系列…", systemImage: "plus")
             }
@@ -651,6 +921,19 @@ struct LibraryBookRow: View {
                 Label("移出系列", systemImage: "rectangle.stack.badge.minus")
             }
         }
+        // 云端书籍没有本机文件，只能下载、调整系列或从云端删除。
+        if book.isCloudOnly {
+            Divider()
+            Button(role: .destructive) { actions.pendingDelete = [book] } label: {
+                Label("从云端删除", systemImage: "icloud.slash")
+            }
+        } else {
+            localFileItems(for: book)
+        }
+    }
+
+    @ViewBuilder
+    private func localFileItems(for book: LibraryBook) -> some View {
         ShareLink(item: book.fileURL) {
             Label("导出", systemImage: "square.and.arrow.up")
         }
@@ -673,7 +956,7 @@ struct LibraryBookRow: View {
             }
         }
         Divider()
-        Button(role: .destructive) { actions.pendingDelete = book } label: {
+        Button(role: .destructive) { actions.pendingDelete = [book] } label: {
             Label("删除", systemImage: "trash")
         }
     }
@@ -698,6 +981,11 @@ private struct LibraryBookRowContent: View {
                     .foregroundStyle(NoveliaStyle.muted)
                     .lineLimit(1)
                 HStack(spacing: 6) {
+                    if book.isCloudOnly {
+                        Image(systemName: "icloud")
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .accessibilityLabel("未下载")
+                    }
                     Text(book.format.title)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(NoveliaStyle.brandGreen)

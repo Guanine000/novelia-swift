@@ -75,7 +75,23 @@ struct StatisticsStoreCheck {
         let restored = ReadingStatisticsStore(defaults: legacy)
         precondition(restored.statistics.seconds() == 70)
         precondition(restored.syncSnapshot().devices["device-a"]!.seconds() == 30)
-        print("Statistics store: default off, first-enable offer, pause, legacy migration, sync idempotence and persistence passed")
+        let named = ReadingStatisticsStore(defaults: legacy, deviceModel: "iPad")
+        precondition(named.devices.count == 2 && named.devices[0].isCurrent && named.devices[0].name == "iPad")
+        named.renameDevice("  书房 iPad  ")
+        precondition(named.deviceInfo.name == "书房 iPad")
+        precondition(named.syncSnapshot().deviceInfo?["device-a"]?.name == "书房 iPad")
+        named.renameDevice("")
+        precondition(named.deviceInfo.name == "iPad", "blank name falls back to the model")
+        var renamedRemote = ReadingStatisticsSync(devices: ["device-b": snapshot(40)],
+                                                  deviceInfo: ["device-b": ReadingDeviceInfo(name: "手机", model: "iPhone", updatedAt: Date())])
+        named.applySynced(renamedRemote)
+        precondition(named.devices.contains { $0.id == "device-b" && $0.name == "手机" && !$0.isCurrent })
+        precondition(named.statistics.seconds() == 70, "renaming does not change totals")
+        renamedRemote.deviceInfo = ["device-a": ReadingDeviceInfo(name: "别人", model: "iPhone", updatedAt: .distantFuture)]
+        named.applySynced(renamedRemote)
+        precondition(named.deviceInfo.name == "iPad" && named.devices[0].name == "iPad", "remote records never rename this device")
+        precondition(ReadingStatisticsStore(defaults: legacy, deviceModel: "iPad").devices.contains { $0.name == "手机" })
+        print("Statistics store: default off, first-enable offer, pause, legacy migration, sync idempotence, persistence and device names passed")
     }
 }
 '''

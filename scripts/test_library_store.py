@@ -55,7 +55,7 @@ struct RegistrationBook {
 fixture += existing.replace('LocalWenkuEPUB', 'RegistrationBook') + registration.replace('LocalWenkuEPUB', 'RegistrationBook') + '\n}\n' + local_error
 
 fixture += r'''
-struct LibraryBook { let key: String; let fileURL: URL; var categoryTitle = "文库"; let positionPrefix = "epub:"; var importedAt = Date.distantPast }
+struct LibraryBook { let key: String; let fileURL: URL; var categoryTitle = "文库"; let positionPrefix = "epub:"; var importedAt = Date.distantPast; var cloudFileHash: String? = nil; var isCloudOnly: Bool { cloudFileHash != nil } }
 enum FileContentHash {
  static let lock = NSLock(); static var count = 0
  static func sha256(_ url: URL) throws -> String {
