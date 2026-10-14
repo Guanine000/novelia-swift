@@ -2,8 +2,8 @@
 import Foundation
 import Combine
 
-/// App-owned composition root shared by feature views and stores.
-/// Production construction is explicit; previews/tests can supply every API.
+/// 由 NoveliaApp 持有的组装入口：统一创建配置、账号、API 和本地服务并供 Root 注入。
+/// 开发替换必须显式提供完整服务集合，页面与 Store 不自行选择生产客户端。
 @MainActor
 final class AppServices: ObservableObject {
     let performsUpdateChecks: Bool
@@ -25,6 +25,7 @@ final class AppServices: ObservableObject {
         forumAccount.accountAuth = account
     }
 
+    /// 生产组装保留小说/论坛独立会话；API 每次读取账号使用的同一凭据存储，避免令牌快照过期。
     static func novelia(configuration: APIConfiguration = .production,
                         session: URLSession = .shared) -> AppServices {
         let account = AccountAuthStore(configuration: configuration, session: session)
@@ -37,8 +38,8 @@ final class AppServices: ObservableObject {
     }
 }
 
-/// One owner for local feature state. Sync receives narrow interfaces to the
-/// same instances used by readers, library and statistics screens.
+/// 由 AppServices 持有的本地状态所有者；阅读器、书库、统计与同步使用同一套实例。
+/// 进度与阅读设置共用注入的偏好存储，同步通过 App 适配访问接口，不新建第二套状态。
 @MainActor
 final class LocalAppServices {
     let positions: ReadingPositionStore

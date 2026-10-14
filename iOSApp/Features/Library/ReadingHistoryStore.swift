@@ -1,6 +1,8 @@
 import Combine
 import Foundation
 
+/// Root 持有的云端历史/续读状态，依赖历史服务与账号接口；本地阅读位置另行保存。
+/// 分页与续读结果必须匹配当前账号和请求代次，保留退出后的清理行为。
 @MainActor
 final class ReadingHistoryStore: ObservableObject {
     @Published private(set) var items: [NoveliaCloudReadingHistoryItem] = []

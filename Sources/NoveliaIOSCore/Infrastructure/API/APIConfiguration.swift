@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 
-/// Development configuration, chosen at composition time, never from user preferences.
+/// App 组装时选择的 API、网页与认证地址；不从用户偏好中切换后台。
+/// 链接识别与登录校验共用这些来源，替换时需保持地址、端口和认证配置一致。
 public struct APIConfiguration: Sendable {
     public let novelAPI: URL
     public let forumAPI: URL
@@ -63,6 +64,7 @@ public struct APIConfiguration: Sendable {
     }
 }
 
+/// 登录桥接的可信来源与入口配置；构造时校验 HTTPS origin，网页与原生校验使用同一来源。
 public struct AuthenticationConfiguration: Sendable {
     public let origin: URL
     public let refreshPath: String
@@ -109,13 +111,13 @@ public struct AuthenticationConfiguration: Sendable {
         return parts.url!
     }
 
-    /// WebKit may report zero for the default HTTPS port.
+    /// WebKit 可能用 0 表示默认 HTTPS 端口；比较来源时统一按 443 处理。
     public func trusts(scheme: String, host: String, port: Int) -> Bool {
         scheme == "https" && host.lowercased() == origin.host?.lowercased()
             && (port == 0 ? 443 : port) == (origin.port ?? 443)
     }
 
-    /// Values are JSON encoded, so configuration never becomes executable JavaScript.
+    /// 配置值先编码为 JSON 再传入桥接脚本，避免把地址字符串当成可执行 JavaScript。
     public var loginSuccessScript: String {
         func literal(_ value: String) -> String {
             let data = try! JSONEncoder().encode(value)

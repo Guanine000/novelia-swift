@@ -4,7 +4,8 @@ import UIKit
 extension WebNovelDownloadStore: SyncBookLibrary {}
 extension WenkuLocalLibraryStore: SyncBookLibrary {}
 
-/// Composition bridge between local features and the protocol-based sync engine.
+/// App 组装给 WebDAVSyncStore 的本地状态适配，连接实际背景、标签、进度和书库系列。
+/// 同步引擎只看接口；此处引用 App 正在使用的实例，不另建存储或改变其数据格式。
 @MainActor
 struct AppWebDAVSyncLocalState: WebDAVSyncLocalState {
     let blocked: BlockedTagsStore

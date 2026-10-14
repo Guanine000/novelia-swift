@@ -1,6 +1,8 @@
 import Combine
 import Foundation
 
+/// Root 持有的远端文库查询与收藏状态，依赖文库和收藏服务，不管理本地文件。
+/// 保留界面从 1 开始、API 从 0 开始的页码转换，以及过期搜索结果丢弃规则。
 @MainActor
 final class WenkuStore: ObservableObject {
     @Published private(set) var novels: [WenkuNovelOutline] = []

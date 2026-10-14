@@ -3,6 +3,8 @@ import Foundation
 import UIKit
 import UniformTypeIdentifiers
 
+/// Root 持有的文库/导入文件 Store，负责 WenkuEPUB 目录、索引、封面和元数据。
+/// 远端文库查询由 WenkuStore 负责；保留 LocalWenkuEPUB 记录与文件恢复/同步约定。
 @MainActor
 final class WenkuLocalLibraryStore: ObservableObject {
     @Published private(set) var books: [LocalWenkuEPUB] = []

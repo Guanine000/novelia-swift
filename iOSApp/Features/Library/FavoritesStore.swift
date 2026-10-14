@@ -1,6 +1,8 @@
 import Combine
 import Foundation
 
+/// Root 持有的云端收藏状态，依赖收藏服务、账号接口和偏好存储。
+/// 保留账号隔离与请求代次检查，不能让退出或切换账号后的旧请求覆盖当前列表。
 @MainActor
 final class FavoritesStore: ObservableObject {
     @Published private(set) var novels: [Novel] = []

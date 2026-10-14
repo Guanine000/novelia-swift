@@ -7,6 +7,8 @@ struct WebNovelDownloadProgress: Equatable {
     var fraction: Double { total == 0 ? 0 : Double(completed) / Double(total) }
 }
 
+/// Root 持有的网络小说下载与本地记录 Store，通过 NovelDownloadService 获取 EPUB。
+/// 管理 WebNovelDownloads 文件、library.json 和进度/错误；保留记录身份及同步兼容。
 @MainActor
 final class WebNovelDownloadStore: ObservableObject {
     @Published private(set) var books: [DownloadedWebNovel] = []
