@@ -104,7 +104,10 @@ enum NoveliaManualUpdateResult: Equatable {
     case available
     case upToDate(current: String)
     case failed
+    case rateLimited
 }
+
+private enum NoveliaUpdateError: Error { case rateLimited }
 
 @MainActor
 final class NoveliaUpdateStore: ObservableObject {
@@ -143,20 +146,58 @@ final class NoveliaUpdateStore: ObservableObject {
         guard !isCheckingManually else { return .failed }
         isCheckingManually = true
         defer { isCheckingManually = false }
-        guard let candidate = try? await fetchLatest() else { return .failed }
+        let candidate: NoveliaGitHubRelease
+        do { candidate = try await fetchLatest() }
+        catch NoveliaUpdateError.rateLimited { return .rateLimited }
+        catch { return .failed }
         guard candidate.shouldOffer(current: currentVersion, ignored: "") else { return .upToDate(current: currentVersion) }
         release = candidate
         return .available
     }
 
     private func fetchLatest() async throws -> NoveliaGitHubRelease {
+        do { return try await fetchAPIRelease() }
+        catch {
+            let primaryError = error
+            // 匿名 API 按出口 IP 限流；正式版网页使用独立入口，跟随 latest 重定向取得同一发布标签。
+            // 不解析网页正文，不使用镜像或携带账号令牌；备用入口失败时保留原错误以准确提示限流。
+            do { return try await fetchReleasePage() }
+            catch { throw primaryError }
+        }
+    }
+
+    private func fetchAPIRelease() async throws -> NoveliaGitHubRelease {
         var request = URLRequest(url: URL(string: "https://api.github.com/repos/Guanine000/novelia-swift/releases/latest")!)
         request.timeoutInterval = 15
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("Novelia-iOS", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
-        return try JSONDecoder().decode(NoveliaGitHubRelease.self, from: data)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        if (http.statusCode == 403 || http.statusCode == 429),
+           http.statusCode == 429 || http.value(forHTTPHeaderField: "X-RateLimit-Remaining") == "0" {
+            throw NoveliaUpdateError.rateLimited
+        }
+        guard http.statusCode == 200 else { throw URLError(.badServerResponse) }
+        let candidate = try JSONDecoder().decode(NoveliaGitHubRelease.self, from: data)
+        guard !candidate.draft, !candidate.prerelease, candidate.downloadPage != nil,
+              candidate.version != nil else { throw URLError(.cannotParseResponse) }
+        return candidate
+    }
+
+    private func fetchReleasePage() async throws -> NoveliaGitHubRelease {
+        var request = URLRequest(url: URL(string: "https://github.com/Guanine000/novelia-swift/releases/latest")!)
+        request.timeoutInterval = 15
+        request.setValue("Novelia-iOS", forHTTPHeaderField: "User-Agent")
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200, let url = http.url else {
+            throw URLError(.badServerResponse)
+        }
+        let candidate = NoveliaGitHubRelease(tag_name: url.lastPathComponent, html_url: url.absoluteString,
+                                            draft: false, prerelease: false)
+        guard candidate.downloadPage != nil, let version = candidate.version, !version.isPrerelease else {
+            throw URLError(.cannotParseResponse)
+        }
+        return candidate
     }
 
     func ignore(_ candidate: NoveliaGitHubRelease) {
