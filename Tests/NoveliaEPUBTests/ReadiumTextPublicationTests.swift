@@ -118,3 +118,67 @@ extension ReadiumTextPublicationTests {
                        "Opening must not refresh timestamps")
     }
 }
+
+extension ReadiumTextPublicationTests {
+    func testNavigationIndexPreservesReadiumHrefMatchingAndTOCOrder() {
+        let readingOrder = ["chapter-0.xhtml", "chapter-1.xhtml", "chapter-1.xhtml", "part/../chapter-2.xhtml"].map {
+            Link(href: $0, mediaType: .xhtml)
+        }
+        // 特意使用非资源顺序的目录，包含同章多个锚点、重复资源与 query。
+        let toc = ["chapter-1.xhtml#first", "chapter-0.xhtml", "chapter-1.xhtml#second", "chapter-2.xhtml"].map {
+            Link(href: $0, mediaType: .xhtml)
+        }
+        let index = ReadiumNavigationIndex(readingOrder: readingOrder, tableOfContents: toc)
+        for value in ["chapter-0.xhtml", "chapter-0.xhtml#p1", "chapter-1.xhtml?view=1#note",
+                      "chapter-2.xhtml", "part/../chapter-2.xhtml", "missing.xhtml"] {
+            let href = Link(href: value).url()
+            let resource = readingOrder.firstIndexWithHREF(href)
+            XCTAssertEqual(index.resourceIndex(for: href), resource, value)
+            let expected = resource.flatMap { resource in
+                toc.indices.last { item in
+                    readingOrder.firstIndexWithHREF(toc[item].url().removingFragment()).map { $0 <= resource } ?? false
+                }
+            }
+            XCTAssertEqual(index.tocIndex(for: href), expected, value)
+        }
+    }
+
+    func testNavigationIndexHandlesEmptyAndNonReadingOrderTOC() {
+        let empty = ReadiumNavigationIndex(readingOrder: [], tableOfContents: [])
+        XCTAssertNil(empty.tocIndex(for: Link(href: "missing.xhtml").url()))
+        let index = ReadiumNavigationIndex(readingOrder: [Link(href: "text.xhtml")],
+                                           tableOfContents: [Link(href: "extra.xhtml#note")])
+        XCTAssertNil(index.tocIndex(for: Link(href: "text.xhtml").url()))
+        XCTAssertEqual(index.tocIndex(for: Link(href: "extra.xhtml").url()), 0)
+    }
+
+    /// 约 9 MB、1675 章：首屏后的标题和目录刷新不得再次进行平方次数的 URL 解析。
+    /// 单独测量导航工作，不把构造样本的时间算进读取器刷新。
+    func testNineMegabyteTXTNavigationRemainsResponsive() {
+        let count = 1_675
+        let line = "　　月光照着书页，下一段文字保留完整的标点与空格。\n"
+        let body = String(repeating: line, count: 9 * 1_024 * 1_024 / count / line.utf8.count)
+        let byteCount = body.utf8.count * count
+        XCTAssertGreaterThan(byteCount, 8 * 1_024 * 1_024)
+        let units = TextChapterSource.units(lazilySplitting: (0..<count).map {
+            TextChapterBody(title: "第\($0)章", body: body)
+        })
+        let source = TextChapterSource(bookTitle: "大 TXT", units: units)
+        let publication = ReadiumTextPublication.make(source: source)
+        var index: ReadiumNavigationIndex!
+        let setup = ContinuousClock().measure {
+            index = ReadiumNavigationIndex(readingOrder: publication.readingOrder,
+                                           tableOfContents: publication.manifest.tableOfContents)
+        }
+        let hrefs = publication.readingOrder.map { $0.url() }
+        let refresh = ContinuousClock().measure {
+            for unit in 0..<count {
+                XCTAssertEqual(index.tocIndex(for: hrefs[unit]), unit)
+                XCTAssertEqual(index.resourceIndex(for: hrefs[unit]), unit)
+            }
+        }
+        print("READIUM_INDEX bytes=\(byteCount) chapters=\(count) setup=\(setup) refreshAll=\(refresh)")
+        XCTAssertLessThan(setup, .seconds(2))
+        XCTAssertLessThan(refresh, .seconds(2))
+    }
+}
