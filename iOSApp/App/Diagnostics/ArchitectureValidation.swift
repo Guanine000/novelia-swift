@@ -3,7 +3,8 @@
 import Foundation
 
 extension AppServices {
-    /// Launch only in a separate validation bundle; real credentials and files are untouched.
+    /// 只允许独立 Debug App 使用的替代组装，创建合成后台和内存会话。
+    /// 重置仅影响该应用容器；保留独立 bundle 校验，不能接入生产凭据或用户书库。
     static func architectureValidation() -> AppServices {
         precondition(Bundle.main.bundleIdentifier == "cc.novelia.ios.architecture-validation",
                      "Architecture validation requires its dedicated application bundle.")
@@ -51,7 +52,8 @@ extension AppServices {
 #if DEBUG
 import SwiftUI
 
-/// Blocks external URLSession requests in the dedicated validation process.
+/// 独立验证进程的 URLSession 外网拦截与计数；允许 Readium 本地服务。
+/// 不覆盖任意 WebKit 网页请求，不能将计数为零解释为所有网络均已审计。
 final class ArchitectureNetworkTrap: URLProtocol {
     private static let lock = NSLock()
     private static var attempts = 0
@@ -68,6 +70,7 @@ final class ArchitectureNetworkTrap: URLProtocol {
     override func stopLoading() {}
 }
 
+/// 显示验证进程的外部请求计数，供自动化读取；不参与业务交互且不进入 Release。
 struct ArchitectureValidationIndicator: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in

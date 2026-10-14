@@ -1,7 +1,8 @@
 import Combine
 import Foundation
 
-/// 共用阅读偏好，同时保持设备上已有的存储键不变。
+/// LocalAppServices 持有并注入各阅读器的共用偏好，使用同一进度接口与偏好存储。
+/// 保持设备上已有的存储键、默认开关和已保存的引擎选择不变。
 /// EPUB 专属排版选项仍保存在原有样式对象中。
 @MainActor
 final class ReaderSettings: ObservableObject {

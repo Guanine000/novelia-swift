@@ -2,6 +2,8 @@
 import Combine
 import Foundation
 
+/// LocalAppServices 持有的统计存储，实现计时事件和同步快照接口；界面观察同一实例。
+/// 保留统计偏好键、设备身份及既有合并规则，关闭记录时结束计时但不删除历史。
 @MainActor
 final class ReadingStatisticsStore: ObservableObject, ReadingTimeRecording, ReadingStatisticsSyncing {
     private static let key = "reading.statistics.v1"

@@ -11,7 +11,7 @@ struct NoveliaApp: App {
     private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "cc.novelia.ios.port", category: "lifecycle")
 
     init() {
-        // Development API selection belongs here, rather than in feature views.
+        // 开发 API 选择集中在启动组装，功能页面只消费已注入的服务。
         #if DEBUG
         let chosen = ProcessInfo.processInfo.arguments.contains("-architectureValidation")
             ? AppServices.architectureValidation() : AppServices.novelia(configuration: .production)

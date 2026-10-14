@@ -1,6 +1,8 @@
 import Combine
 import Foundation
 
+/// 社区页面持有的查询状态，依赖注入的 ForumService 管理分类、筛选与分页。
+/// 请求代次阻止旧结果覆盖新查询；分类、筛选和页码更新保留现有重载行为。
 @MainActor
 final class ForumStore: ObservableObject {
     @Published private(set) var categories: [ForumCategory] = []

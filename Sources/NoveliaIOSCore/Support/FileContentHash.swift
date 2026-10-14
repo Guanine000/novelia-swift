@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 
+/// 书库、阅读与同步共用的文件哈希工具；不依赖同步 UI，分块读取避免一次加载整本书。
 enum FileContentHash {
     static func sha256(_ url: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: url)

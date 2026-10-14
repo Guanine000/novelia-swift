@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 
+/// LocalAppServices 持有的本地进度存储，阅读与同步通过同一实例访问。
+/// 保留 readingPositions.v1、web/epub/txt 身份和旧位置读取；位置转换由阅读引擎负责。
 @MainActor
 final class ReadingPositionStore: ReadingPositionSynchronizing {
     private let defaults: UserDefaults

@@ -79,6 +79,8 @@ struct LibraryReadingStatus: Equatable {
 
 /// 书库的系列归属、排序设置、最近打开时间与文件哈希缓存。
 /// 书籍文件和阅读进度仍由原有下载库与阅读器保存，这里只保存附加信息。
+/// LocalAppServices 持有的书库组织与展示状态，通过进度接口关联最近阅读。
+/// 文件记录由下载/导入 Store 管理；保留系列、书籍归属和已保存设置的兼容。
 @MainActor
 final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
 

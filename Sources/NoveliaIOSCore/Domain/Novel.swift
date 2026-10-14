@@ -184,7 +184,7 @@ public enum ReaderMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// Display metadata shared by API adapters and views.
+/// API 适配与界面共用的来源显示信息；展示名称不依赖具体客户端。
 public enum NovelProviderMetadata {
     public static func name(_ id: String) -> String {
         switch id {

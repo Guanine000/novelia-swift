@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Shared by Core tests and the Debug-only App validation composition.
+// Core 测试与独立 Debug App 共用的合成实现；整个文件受 DEBUG 条件保护。
 #if DEBUG
 import Foundation
 #if canImport(NoveliaIOSCore)
 @testable import NoveliaIOSCore
 #endif
 
+/// 测试认证组装持有的内存凭据；仅生成合成声明，不访问 Keychain。
+/// 锁保护全部读写以满足跨任务使用，不能用此实现保存生产凭据。
 final class FixtureTokenStore: SessionTokenStore, @unchecked Sendable {
     private let lock = NSLock()
     private var token: String?
@@ -19,6 +21,8 @@ final class FixtureTokenStore: SessionTokenStore, @unchecked Sendable {
     func clear() { lock.lock(); defer { lock.unlock() }; token = nil }
 }
 
+/// 测试/Debug 组装持有的完整替代后台，actor 隔离收藏、评论、帖子及调用计数。
+/// 下载文件由注入闭包提供；保留状态变化和失败注入，不能作为生产回退。
 actor ArchitectureFixtureBackend: NovelCatalogService, NovelContentService, WenkuCatalogService,
     FavoritesService, ReadingHistoryService, NovelDownloadService, BookCommentsService, ForumService {
     static let username = "architecture-user"
@@ -58,7 +62,7 @@ actor ArchitectureFixtureBackend: NovelCatalogService, NovelContentService, Wenk
                     "authorUsername": Self.username, "favorited": postFavorite,
                     "commentsCount": forumComments.count], as: ForumPost.self)
     }
-    // The collection is immutable, so composition can construct it synchronously.
+    // 服务集合只保存当前 actor 的引用、不读取可变状态，因此可在组装时同步创建。
     nonisolated func services() -> APIServiceCollection {
         APIServiceCollection(catalog: self, content: self, wenku: self, favorites: self,
                              history: self, downloads: self, bookComments: self, forum: self)

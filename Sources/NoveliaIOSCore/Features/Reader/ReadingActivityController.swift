@@ -2,7 +2,8 @@
 import Combine
 import Foundation
 
-/// The reading UI observes recording state without depending on a statistics store.
+/// LocalAppServices 持有的计时事件桥接；只依赖 ReadingTimeRecording，供 UI 观察开关并发送事件。
+/// 记录开关与会话累计由注入实现负责，阅读器不直接依赖统计存储。
 @MainActor
 final class ReadingActivityController: ObservableObject {
     @Published private(set) var isRecordingEnabled: Bool
@@ -12,7 +13,7 @@ final class ReadingActivityController: ObservableObject {
     init(recorder: any ReadingTimeRecording) {
         self.recorder = recorder
         isRecordingEnabled = recorder.isRecordingEnabled
-        // Recording providers publish on the main actor, as required by their interface.
+        // 协议要求记录实现在主执行域发布开关，保持 UI 状态更新与事件处理顺序一致。
         subscription = recorder.recordingEnabledChanges.sink { [weak self] enabled in
             self?.isRecordingEnabled = enabled
         }
@@ -23,7 +24,7 @@ final class ReadingActivityController: ObservableObject {
     func end(id: UUID) { recorder.end(id: id) }
 }
 
-/// Composition can disable the statistics integration without changing a reader.
+/// App 组装可注入此实现关闭计时；保留相同事件接口，无需修改阅读器或清理历史统计。
 @MainActor
 final class DisabledReadingTimeRecorder: ReadingTimeRecording {
     var isRecordingEnabled: Bool { false }

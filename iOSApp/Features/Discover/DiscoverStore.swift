@@ -1,6 +1,8 @@
 import Combine
 import Foundation
 
+/// 发现页面持有的查询状态，依赖目录/文库服务；请求编码由具体 API 适配负责。
+/// 保留页码转换、过期结果丢弃及成功查询复用，避免详情返回时清空列表和位置。
 @MainActor
 final class DiscoverStore: ObservableObject {
     @Published private(set) var novels: [Novel] = []
