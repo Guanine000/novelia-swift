@@ -558,9 +558,10 @@ enum ReaderTextChunker {
     }
 }
 
-/// 使用 YueduCoreText 排版的在线章节。单元序号就是小说章节序号；
+/// 支持 YueduCoreText 和实验性 Readium 的在线章节。单元序号就是小说章节序号；
 /// 阅读进度、服务器阅读历史和书签与滚动模式一样，仍按章节记录。
 private struct OnlinePagedReader: View {
+    @AppStorage(SettingsKey.readerEPUBReadium) private var usesReadium = false
     @ObservedObject private var settings = ReaderSettings.shared
     @EnvironmentObject private var auth: AccountAuthStore
     @EnvironmentObject private var readingHistory: ReadingHistoryStore
@@ -590,9 +591,16 @@ private struct OnlinePagedReader: View {
 
     var body: some View {
         // 显示模式或来源变化会重新生成所有章节：从章节开头重新打开。
-        EPUBReaderView(bookURL: nil, textBook: makeBook(), accessory: AnyView(HStack(spacing: 12) { scrollButton; menu }),
-                       statisticsBook: ReadingBook(id: "online:\(novel.id)", title: novel.title, kind: .online))
-            .id("\(modeRaw)|\(translationSourceRaw)")
+        Group {
+            if usesReadium {
+                ReadiumEPUBReaderView(bookURL: nil, textBook: makeBook(), accessory: AnyView(HStack(spacing: 12) { scrollButton; menu }),
+                                      statisticsBook: ReadingBook(id: "online:\(novel.id)", title: novel.title, kind: .online))
+            } else {
+                EPUBReaderView(bookURL: nil, textBook: makeBook(), accessory: AnyView(HStack(spacing: 12) { scrollButton; menu }),
+                               statisticsBook: ReadingBook(id: "online:\(novel.id)", title: novel.title, kind: .online))
+            }
+        }
+        .id("\(modeRaw)|\(translationSourceRaw)")
     }
 
     private func makeBook() -> PagedTextBook {

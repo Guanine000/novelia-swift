@@ -20,7 +20,9 @@ struct ReadiumEPUBReaderView: View {
     @State private var draftStyle = EPUBReaderStyle()
     @State private var batteryLevel: Float = -1
     @State private var wasBatteryMonitoringEnabled = false
-    let bookURL: URL
+    let bookURL: URL?
+    var textBook: PagedTextBook? = nil
+    var accessory: AnyView? = nil
     var statisticsBook: ReadingBook? = nil
 
     private var pageBackground: Color {
@@ -33,12 +35,14 @@ struct ReadiumEPUBReaderView: View {
                 ReaderBackgroundView(dark: model.isDarkMode, fallback: pageBackground).ignoresSafeArea()
                 switch model.status {
                 case .idle, .opening:
-                    ProgressView("正在解析 EPUB…")
+                    ProgressView(textBook == nil ? "正在解析 EPUB…" : "正在打开章节…")
                 case .failed(let message):
                     ContentUnavailableView {
                         Label("无法打开", systemImage: "exclamationmark.triangle")
                     } description: {
                         Text(message)
+                    } actions: {
+                        if textBook != nil { Button("重试") { model.retryTextLoad() } }
                     }
                 case .ready:
                     ReadiumNavigatorHost(model: model)
@@ -53,7 +57,18 @@ struct ReadiumEPUBReaderView: View {
                     chapterHeader
                 }
             }
-            .overlay(alignment: .bottom) { bottomBar }
+            .overlay(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    if let failure = model.textLoadFailure {
+                        Button { model.retryTextLoad() } label: {
+                            Label("\(failure) · 点击重试", systemImage: "arrow.clockwise")
+                                .font(.footnote).lineLimit(2).padding(8)
+                        }
+                        .background(.regularMaterial)
+                    }
+                    bottomBar
+                }
+            }
             .overlay(alignment: .bottom) {
                 Rectangle()
                     .fill(NoveliaStyle.brandGreen.opacity(0.8))
@@ -67,17 +82,18 @@ struct ReadiumEPUBReaderView: View {
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .statusBarHidden(true)
-        .trackReadingTime(statisticsBook ?? ReadingBook(id: "epub:\(bookURL.lastPathComponent)",
-                                                       title: bookURL.deletingPathExtension().lastPathComponent, kind: .epub),
+        .trackReadingTime(statisticsBook ?? ReadingBook(id: "epub:\(bookURL?.lastPathComponent ?? "text")",
+                                                       title: bookURL?.deletingPathExtension().lastPathComponent ?? "阅读", kind: .epub),
                           ready: model.status == .ready)
         .onAppear {
             wasBatteryMonitoringEnabled = UIDevice.current.isBatteryMonitoringEnabled
             UIDevice.current.isBatteryMonitoringEnabled = true
             batteryLevel = UIDevice.current.batteryLevel
             model.onCenterTap = { withAnimation(.easeInOut(duration: 0.15)) { showChrome.toggle() } }
-            if model.status == .idle {
-                Task { await model.open(url: bookURL, systemIsDark: colorScheme == .dark) }
-            }
+        }
+        .task {
+            if let textBook { await model.open(textBook: textBook, systemIsDark: colorScheme == .dark) }
+            else if let bookURL { await model.open(url: bookURL, systemIsDark: colorScheme == .dark) }
         }
         .onDisappear {
             if !wasBatteryMonitoringEnabled {
@@ -116,12 +132,8 @@ struct ReadiumEPUBReaderView: View {
                 .font(.system(size: 14, weight: .medium))
                 .lineLimit(1)
                 .frame(maxWidth: .infinity)
-            Text("Readium")
-                .font(.caption2.weight(.semibold))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(NoveliaStyle.brandGreen.opacity(0.18), in: Capsule())
-                .accessibilityLabel("Readium 实验引擎")
+            if textBook == nil { engineBadge }
+            if let accessory { accessory }
             Button {
                 model.isTOCDiagnosticsExpanded = false
                 isShowingTOC = true
@@ -145,16 +157,29 @@ struct ReadiumEPUBReaderView: View {
         .background(.thinMaterial)
     }
 
+    private var engineBadge: some View {
+        Text("Readium")
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(NoveliaStyle.brandGreen.opacity(0.18), in: Capsule())
+            .accessibilityLabel("Readium 实验引擎")
+    }
+
     private var chapterHeader: some View {
-        Text(model.currentChapterTitle)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 18)
-            .padding(.top, 6)
-            .padding(.bottom, 4)
-            .allowsHitTesting(false)
+        HStack {
+            Text(model.currentChapterTitle)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            // 在线分页还需容纳滚动切换及译源菜单，标识放到章节栏以免挤出控件。
+            if textBook != nil { engineBadge }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 6)
+        .padding(.bottom, 4)
+        .allowsHitTesting(false)
     }
 
     // MARK: 底栏

@@ -219,7 +219,7 @@ struct DownloadedWebNovelTXTReader: View {
     }
 }
 
-/// 使用 YueduCoreText 排版的 TXT。长章节拆分为单元；阅读位置
+/// 支持 YueduCoreText 和实验性 Readium 排版的 TXT。长章节拆分为单元；阅读位置
 /// 按文件内容（SHA-256）保存为单元序号 + 文本偏移量。
 private struct TXTPagedReader: View {
     @ObservedObject private var settings = ReaderSettings.shared
@@ -227,14 +227,20 @@ private struct TXTPagedReader: View {
     let title: String
     let rules: TXTChapterRuleConfiguration
     var statisticsID: String? = nil
+    @AppStorage(SettingsKey.readerEPUBReadium) private var usesReadium = false
     @State private var book: PagedTextBook?
     @State private var errorMessage: String?
 
     var body: some View {
         Group {
             if let book {
-                EPUBReaderView(bookURL: nil, textBook: book, accessory: AnyView(scrollButton),
-                               statisticsBook: ReadingBook(id: statisticsID ?? "txt:\(url.lastPathComponent)", title: title, kind: .txt))
+                if usesReadium {
+                    ReadiumEPUBReaderView(bookURL: nil, textBook: book, accessory: AnyView(scrollButton),
+                                          statisticsBook: ReadingBook(id: statisticsID ?? "txt:\(url.lastPathComponent)", title: title, kind: .txt))
+                } else {
+                    EPUBReaderView(bookURL: nil, textBook: book, accessory: AnyView(scrollButton),
+                                   statisticsBook: ReadingBook(id: statisticsID ?? "txt:\(url.lastPathComponent)", title: title, kind: .txt))
+                }
             } else if let errorMessage {
                 ContentUnavailableView("无法读取 TXT", systemImage: "doc.text.magnifyingglass", description: Text(errorMessage))
             } else {
@@ -276,7 +282,8 @@ private struct TXTPagedReader: View {
                     // 此设备可能覆盖另一台设备较新的阅读位置。
                     guard position != ReadingPositionSync.txtPosition(hash: hash) else { return }
                     ReadingPositionSync.recordTXT(hash: hash, position: position)
-                })
+                }, readiumIdentity: identity,
+                positionUpdatedAt: ReadingPositionSync.all()["txt:\(hash)"]?.updatedAt)
         } catch {
             guard !Task.isCancelled else { return }
             let nsError = error as NSError

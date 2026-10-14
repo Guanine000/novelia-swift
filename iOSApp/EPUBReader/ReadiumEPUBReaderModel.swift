@@ -9,7 +9,7 @@ import WebKit
 // MARK: - Readium EPUB 阅读器（实验）
 //
 // EPUB 由 Readium 解析，并在 WKWebView 中用 ReadiumCSS 分页；翻页为 Readium 自带的
-// 水平滑动。TXT 与在线章节仍走 YueduCoreText（EPUBReaderModel）。
+// 水平滑动。实验开关也可将 TXT 与在线章节接入同一导航器。
 //
 // 进度：本机保存 Readium Locator（JSON）；同时记录整书比例、章节序号与章内比例
 // （chapterOffset 置空）。另一引擎或其他设备按章节 + 章内比例恢复，旧版本按整书比例。
@@ -54,6 +54,12 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     private(set) var navigator: EPUBNavigatorViewController?
     private var publication: Publication?
+    private var textBook: PagedTextBook?
+    private var textPositionTask: Task<Void, Never>?
+    private var receivedTextLocation = false
+    @Published private(set) var textLoadFailure: String?
+    private var failedTextHref: RelativeURL?
+
     private var bookHash: String?
     private var positionCount = 0
     private var navigationAdapter: DirectionalNavigationAdapter?
@@ -107,10 +113,77 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         }
     }
 
+    /// 惰性 Publication 不走 EPUB 文件解析，也不写入 EPUB 的进度命名空间。
+    func open(textBook: PagedTextBook, systemIsDark: Bool) async {
+        guard status == .idle, let source = textBook.source as? TextChapterSource else { return }
+        status = .opening
+        self.textBook = textBook
+        isDarkMode = ReaderSettings.shared.isDark(systemIsDark: systemIsDark)
+        do {
+            let publication = ReadiumTextPublication.make(source: source)
+            self.publication = publication
+            bookTitle = source.bookTitle
+            toc = Self.flatten(publication.manifest.tableOfContents)
+            embeddedTOCCount = toc.count
+            positionCount = source.chapterCount
+            guard !publication.readingOrder.isEmpty else { throw ReadiumOpenError.parse("没有可阅读的章节。") }
+            let unit = min(max(0, textBook.startUnit), source.chapterCount - 1)
+            let initial = try await ReadiumTextPublication.initialLocation(
+                publication: publication, source: source, unit: unit, offset: textBook.startOffset,
+                identity: textBook.readiumIdentity, updatedAt: textBook.positionUpdatedAt)
+            try Task.checkCancellation()
+            try makeNavigator(initialLocation: initial)
+            status = .ready
+        } catch is CancellationError {
+            status = .idle
+        } catch {
+            status = .failed(Self.describe(error))
+        }
+    }
+
+    func retryTextLoad() {
+        guard textBook != nil else { return }
+        textLoadFailure = nil
+        if status != .ready, let book = textBook {
+            status = .idle
+            Task { await open(textBook: book, systemIsDark: isDarkMode) }
+            return
+        }
+        let target = failedTextHref.map { Locator(href: $0, mediaType: .xhtml) }
+            ?? navigator?.currentLocation ?? locator
+        failedTextHref = nil
+        do { try makeNavigator(initialLocation: target) }
+        catch { textLoadFailure = Self.describe(error) }
+    }
+
+    /// 取消过期页面回调，避免慢章节的换算覆盖已经翻到的新位置。
+    private func saveTextPosition(_ location: Locator) {
+        guard let book = textBook, let source = book.source as? TextChapterSource,
+              let unit = publication?.readingOrder.firstIndexWithHREF(location.href) else { return }
+        // 打开或恢复页面时不刷新同步时间戳。
+        if !receivedTextLocation {
+            receivedTextLocation = true
+            if book.readiumIdentity != nil { return }
+        }
+        textPositionTask?.cancel()
+        textPositionTask = Task { [weak self] in
+            guard let html = try? await source.chapterHTML(at: unit), !Task.isCancelled,
+                  let self, self.locator == location else { return }
+            let length = EPUBChapterProgress.textLength(html: html)
+            let progression = min(1, max(0, location.locations.progression ?? 0))
+            book.onPosition(unit, EPUBChapterProgress.offset(progression: progression, length: length))
+            if let identity = book.readiumIdentity, let json = try? location.jsonString() {
+                UserDefaults.standard.set(json, forKey: "readium.text.locator.v1.\(identity)")
+                // 回调可能更新同步位置，精确 Locator 的时间在它之后记录。
+                UserDefaults.standard.set(Date(), forKey: "readium.text.time.v1.\(identity)")
+            }
+        }
+    }
+
     /// 读取清单中的所有本地资源，包括未读章节和独立资源文件。
     /// 仅展示实际失败；此扫描不请求外部 URL。
     func scanBookDiagnostics() async {
-        guard !diagnosticsComplete, !isScanningDiagnostics, let publication else { return }
+        guard textBook == nil, !diagnosticsComplete, !isScanningDiagnostics, let publication else { return }
         isScanningDiagnostics = true
         defer { isScanningDiagnostics = false }
         var seen = Set<String>()
@@ -381,6 +454,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     var overallProgress: Double { locator?.locations.totalProgression ?? 0 }
 
     var locationDescription: String {
+        // 生成书籍的位置列表按单元提供，不把它冒充为实际分页数。
+        if textBook != nil { return "\(Int((overallProgress * 100).rounded()))%" }
         guard let position = locator?.locations.position, positionCount > 0 else {
             return "\(Int((overallProgress * 100).rounded()))%"
         }
@@ -487,8 +562,13 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
 extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
+        let previous = self.locator
         self.locator = locator
-        save(locator)
+        if textBook != nil {
+            if previous != locator { saveTextPosition(locator) }
+        } else {
+            save(locator)
+        }
         makeWebViewsTransparent()
     }
 
@@ -510,6 +590,10 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     }
 
     func navigator(_ navigator: Navigator, didFailToLoadResourceAt href: RelativeURL, withError error: ReadError) {
+        if textBook != nil {
+            failedTextHref = href
+            textLoadFailure = "章节加载失败：\(String(describing: error))"
+        }
         Self.logger.error("Readium failed to load \(href.string, privacy: .private): \(String(describing: error), privacy: .public)")
     }
 
