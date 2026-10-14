@@ -47,4 +47,4 @@
 
 整个 App 的锁定 Swift Package、版本、许可证、源码地址及完整原始许可文件见[第三方许可索引](../../../Resources/ThirdPartyLicenses/INDEX.md)。这些文本作为 Xcode 文件夹资源打入 IPA，并在“我的 → 开源许可”中展示。YueduCoreText 的 NOTICE（含 Unicode License v3）、Readium 随附字体/脚本，以及 Zip 内嵌 MiniZip / Info-ZIP 的声明一并保留。
 
-项目代码与文档采用 GPL-3.0-only，第三方组件各自适用其许可证。IPA 分发提供对应项目源码、锁定依赖源码及许可材料；Readium 脚本的 npm 源码与补充构建材料由本地发布流程配套提供。发布流程见[项目 README](../../../../README.md#本机构建与分发)，实现与维护边界见[开发文档](../../../../DEVELOPMENT.md#阅读器实现)。
+项目代码与文档采用 GPL-3.0-only，第三方组件各自适用其许可证。IPA 分发提供对应项目源码、锁定依赖源码及许可材料；Readium 脚本的 npm 源码与补充构建材料由本地发布流程配套提供。发布流程见[本机构建与分发](../../../../docs/BUILD.md)，实现与维护边界见[开发文档](../../../../DEVELOPMENT.md#阅读器实现)。
