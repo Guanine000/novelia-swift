@@ -4,13 +4,13 @@ from pathlib import Path
 import subprocess
 import tempfile
 root = Path(__file__).resolve().parents[1]
-source = (root / 'iOSApp/WenkuStore.swift').read_text()
+source = (root / 'iOSApp/Features/Library/WenkuLocalLibraryStore.swift').read_text() + (root / 'iOSApp/Features/Downloads/WebNovelDownloadStore.swift').read_text()
 move = source[source.index('    func importForMove(from source: URL, book: LocalWenkuEPUB)'):source.index('    func removeForMove', source.index('    func importForMove(from source: URL, book: LocalWenkuEPUB)'))]
 error = source[source.index('private enum WebNovelMoveError:'):]
 registration = source[source.index('    func registerDownloadedFile('):source.index('    func importForMove(from source: URL, sourceBook:')]
 existing = source[source.index('    private func existingBook('):source.index('    func registerDownloadedFile(')]
 local_error = source[source.index('struct LocalLibraryDuplicateError:'):source.index('struct WebNovelDownloadProgress:')]
-source = (root / 'iOSApp/LibraryStore.swift').read_text()
+source = (root / 'iOSApp/Features/Library/LibraryStore.swift').read_text()
 display = source[source.index('    func displayBooks'):source.index('    func status(for')]
 identity = source[source.index('    nonisolated private static func identity'):source.index('    private func hash(for')]
 refresh = source[source.index('    func refreshHashes'):source.index('    // MARK: 排序设置')]
@@ -56,7 +56,7 @@ fixture += existing.replace('LocalWenkuEPUB', 'RegistrationBook') + registration
 
 fixture += r'''
 struct LibraryBook { let key: String; let fileURL: URL; var categoryTitle = "文库"; let positionPrefix = "epub:"; var importedAt = Date.distantPast }
-enum WebDAVFileHash {
+enum FileContentHash {
  static let lock = NSLock(); static var count = 0
  static func sha256(_ url: URL) throws -> String {
   precondition(!Thread.isMainThread, "hash must run off main thread")
@@ -76,7 +76,7 @@ enum WebDAVFileHash {
  enum Key { static let hashes = "hashes" }
 '''
 fixture += display + identity + refresh + '\n}\n'
-fixture += (root / 'Sources/NoveliaIOSCore/LibraryOrganizer.swift').read_text()
+fixture += (root / 'Sources/NoveliaIOSCore/Features/Library/LibraryOrganizer.swift').read_text()
 fixture += r'''
 @main struct Checks {
  @MainActor static func main() async throws {
@@ -130,9 +130,9 @@ fixture += r'''
   let hashes = HashStore()
   await hashes.refreshHashes(for: targets)
   precondition(hashes.hashByBook.count == 30 && hashes.publications == 1, "one batch publication")
-  let calls = WebDAVFileHash.calls
+  let calls = FileContentHash.calls
   await hashes.refreshHashes(for: targets)
-  precondition(WebDAVFileHash.calls == calls && hashes.publications == 1, "cached batch does no hash or publish")
+  precondition(FileContentHash.calls == calls && hashes.publications == 1, "cached batch does no hash or publish")
   let displayStore = HashStore()
   let duplicate = LibraryBook(key: "different-id", fileURL: targets[0].fileURL)
   await displayStore.refreshHashes(for: targets + [duplicate])
@@ -143,9 +143,9 @@ fixture += r'''
   displayStore.series.assign(book: duplicate.key, to: series.id)
   precondition(displayStore.displayBooks(from: targets + [duplicate]).count == 31, "different series remain distinct")
   let cancelledStore = HashStore()
-  let cancellationCalls = WebDAVFileHash.calls
+  let cancellationCalls = FileContentHash.calls
   let old = Task { await cancelledStore.refreshHashes(for: targets) }
-  while WebDAVFileHash.calls == cancellationCalls { await Task.yield() }
+  while FileContentHash.calls == cancellationCalls { await Task.yield() }
   old.cancel()
   await cancelledStore.refreshHashes(for: [targets[29]])
   await old.value

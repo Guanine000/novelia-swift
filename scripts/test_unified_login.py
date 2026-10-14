@@ -3,7 +3,7 @@
 from pathlib import Path
 import subprocess
 import tempfile
-s = Path('iOSApp/AccountAuth.swift').read_text()
+s = Path('iOSApp/Features/Account/AccountAuth.swift').read_text()
 def method(part, signature):
     start = part.index(signature)
     brace = part.index('{', start)

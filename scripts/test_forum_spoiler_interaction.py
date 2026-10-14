@@ -9,11 +9,11 @@ parser = argparse.ArgumentParser(description="Run production forum table layout 
 parser.add_argument("--device", required=True, help="Booted iOS simulator UDID")
 args = parser.parse_args()
 r = Path(tempfile.mkdtemp(prefix="NoveliaSpoilerTapRegression-"))
-source = Path(__file__).resolve().parents[1] / "iOSApp/ForumListView.swift"
+source = Path(__file__).resolve().parents[1] / "iOSApp/Features/Community/ForumListView.swift"
 markdown = (source.parent / "ForumMarkdownViews.swift").read_text()
 s = source.read_text()
-core = (source.parents[1] / "Sources/NoveliaIOSCore/ForumMarkdown.swift").read_text()
-wenku = (source.parents[1] / "Sources/NoveliaIOSCore/WenkuNovel.swift").read_text()
+core = (Path(__file__).resolve().parents[1] / "Sources/NoveliaIOSCore/Features/Community/ForumMarkdown.swift").read_text()
+wenku = (Path(__file__).resolve().parents[1] / "Sources/NoveliaIOSCore/Domain/WenkuNovel.swift").read_text()
 tail = r"""@main struct TapRegressionApp: App {
  var body: some Scene { WindowGroup { TestScreen() } }
 }
@@ -39,6 +39,7 @@ struct TestScreen: View {
 }
 """
 code='import SwiftUI\nimport UIKit\nimport Foundation\nprivate enum NoveliaStyle { static let ink = Color.primary; static let brandGreen = Color.green; static let paper = Color.white; static let card = Color.white; static let muted = Color.gray }\nprivate struct ForumCategory: Identifiable { let id: Int; let title: String; let slug: String }\n'+s[s.index('private struct ForumCategoryBar'):s.index('struct ForumErrorOverlay')]+markdown[markdown.index('private struct ForumMarkdownTable'):markdown.index('private struct ForumStarRating')]+core[core.index('// Forum Markdown parsing'):]+wenku[:wenku.index('public struct WenkuNovelDetail')]+tail
+code = code.replace('import SwiftUI\n', 'import SwiftUI\n' + (Path(__file__).resolve().parents[1]/'Sources/NoveliaIOSCore/Infrastructure/API/APIConfiguration.swift').read_text(), 1)
 (r/'TapRegression.swift').write_text(code)
 (r/'TapTests.swift').write_text('''import XCTest
 final class TapTests: XCTestCase {

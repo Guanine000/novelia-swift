@@ -8,15 +8,15 @@
 
 | 項目 | 結果 | 涉及文件 |
 |---|---|---|
-| 移除 Readium swift-toolkit | EPUB 導入元數據（標題、作者、簡介、封面）改由 `EPUBContainer.metadata(fileURL:coverMaxSize:)` 讀取；依賴 10 → 3；IPA 8.40 MB → 6.47 MB；合成 EPUB 與真實書籍對照與 Readium 結果一致 | `iOSApp/EPUBReader/EPUBContainer.swift`、`iOSApp/WenkuStore.swift`、`NoveliaIOS.xcodeproj/project.pbxproj`、`Package.resolved`、許可清單與檢查腳本 |
-| EPUB 兩端對齊行出現大空隙、標點變半形 | 在閱讀器配置加 `config.letterSpacing = 0.001`；整本測試書大空隙行 5131 → 0 | `iOSApp/EPUBReader/EPUBReaderModel.swift` |
-| 閱讀器與書庫標題不一致 | 閱讀器 `open()` 與書庫元數據共用 `mainTitle(inMetadata:)`：優先 `title-type=main` 的 `dc:title`，否則第一個；EPUB3 多標題夾具由「Subtitle Here」改為與書庫一致的「Main Title」 | `iOSApp/EPUBReader/EPUBContainer.swift` |
+| 移除 Readium swift-toolkit | EPUB 導入元數據（標題、作者、簡介、封面）改由 `EPUBContainer.metadata(fileURL:coverMaxSize:)` 讀取；依賴 10 → 3；IPA 8.40 MB → 6.47 MB；合成 EPUB 與真實書籍對照與 Readium 結果一致 | `iOSApp/Features/Reader/EPUBReader/EPUBContainer.swift`、`iOSApp/Features/Wenku/WenkuStore.swift`、`NoveliaIOS.xcodeproj/project.pbxproj`、`Package.resolved`、許可清單與檢查腳本 |
+| EPUB 兩端對齊行出現大空隙、標點變半形 | 在閱讀器配置加 `config.letterSpacing = 0.001`；整本測試書大空隙行 5131 → 0 | `iOSApp/Features/Reader/EPUBReader/EPUBReaderModel.swift` |
+| 閱讀器與書庫標題不一致 | 閱讀器 `open()` 與書庫元數據共用 `mainTitle(inMetadata:)`：優先 `title-type=main` 的 `dc:title`，否則第一個；EPUB3 多標題夾具由「Subtitle Here」改為與書庫一致的「Main Title」 | `iOSApp/Features/Reader/EPUBReader/EPUBContainer.swift` |
 | 邏輯測試遷入 Swift 包測試 | 論壇 Markdown／劇透／刪除線、論壇與小說鏈接路由、版本比較與啟動更新檢查、標籤屏蔽與 WebDAV 合併、TXT 編碼與分章移入 `Sources/NoveliaIOSCore/`；`Package.swift` 新增 `NoveliaIOSCoreTests`（37 項）。因用到 UIKit，在模擬器上由 `scripts/run_package_tests.sh` 運行，而非 macOS 上的 `swift test`。6 個舊 Python 腳本已由 XCTest 取代 | `Sources/NoveliaIOSCore/`、`Tests/NoveliaIOSCoreTests/`、`Package.swift`、`scripts/` |
 | 排版回歸工具化 | `NoveliaEPUB` 目標直接編譯 App 的 EPUB 容器與分頁源碼；`EPUBLayoutTests` 用合成兩端對齊 EPUB 檢查大空隙與寬度不符，並在上游修好引擎後提示移除權宜修法；`scripts/scan_epub_layout.sh` 可對任意本地 EPUB 做整書掃描 | `Tests/NoveliaEPUBTests/`、`scripts/scan_epub_layout.sh`、`EPUBPageBook.applyEngineWorkarounds` |
 | 元數據對照測試 | `scripts/make_epub_fixtures.py` 生成 6 本合成 EPUB；`EPUBMetadataTests` 檢查標題、作者、簡介、封面尺寸及閱讀器標題一致 | `Tests/NoveliaEPUBTests/` |
-| 命名與死代碼 | `iOSApp/EPUBPrototype/` → `iOSApp/EPUBReader/`，類型前綴 `Prototype` → `EPUB`（如 `EPUBContainer`、`EPUBReaderView`）；持久化鍵 `epubPrototype.*` 與調試啟動參數保持原名。刪除無引用的 `DemoLibrary.swift` 與 `ContinueReadingCard`；樣例書、`-openEPUBPrototype`、`-prototypeBookPath`、`-prototypeJumpSpine` 只在 Debug 構建中編譯（Release 二進制已確認不含） | `iOSApp/EPUBReader/`、`NoveliaApp.swift`、`DEPENDENCIES.md` |
+| 命名與死代碼 | `iOSApp/EPUBPrototype/` → `iOSApp/Features/Reader/EPUBReader/`，類型前綴 `Prototype` → `EPUB`（如 `EPUBContainer`、`EPUBReaderView`）；持久化鍵 `epubPrototype.*` 與調試啟動參數保持原名。刪除無引用的 `DemoLibrary.swift` 與 `ContinueReadingCard`；樣例書、`-openEPUBPrototype`、`-prototypeBookPath`、`-prototypeJumpSpine` 只在 Debug 構建中編譯（Release 二進制已確認不含） | `iOSApp/Features/Reader/EPUBReader/`、`NoveliaApp.swift`、`DEPENDENCIES.md` |
 | 拆分大文件 | `LibraryViews.swift`（2823 行）→ 書架、發現、作品詳情、共用組件、下載、TXT 閱讀器、設置 7 個文件；`ForumViews.swift` → 列表、帖子詳情、Markdown 渲染、編輯器 4 個文件；`NoveliaApp.swift` → 入口、標籤屏蔽、閱讀背景 3 個文件。逐行核對無增減，僅跨文件使用的類型去掉 `private` | `iOSApp/` |
-| 統一設置與進度存儲 | 新增 `SettingsKey`（閱讀器、主題、WebDAV、書籤鍵）與 `ReadingProgressStore`（`progress.<id>` / `progressTime.<id>`），替換各處字面量；鍵值不變，`SettingsKeysTests` 鎖定字符串防止誤改 | `Sources/NoveliaIOSCore/SettingsKeys.swift` |
+| 統一設置與進度存儲 | 新增 `SettingsKey`（閱讀器、主題、WebDAV、書籤鍵）與 `ReadingProgressStore`（`progress.<id>` / `progressTime.<id>`），替換各處字面量；鍵值不變，`SettingsKeysTests` 鎖定字符串防止誤改 | `Sources/NoveliaIOSCore/Support/SettingsKeys.swift` |
 | 移除舊版逐章緩存下載兼容 | 用戶確認不存在此類下載。`DownloadedWebNovel` 去掉 `chapterDataFilename`，`fileFilename` 改為必有；刪除 `chapters(for:)`、離線章節閱讀頁、`ReaderView` 離線模式、「移至文库」的舊版錯誤提示與 WebDAV 雙文件判斷。0.11.2 寫出的下載索引仍可解碼，舊鍵在下次保存時去掉 | `WenkuStore.swift`、`DownloadsViews.swift`、`ReaderView.swift`、`WebDAVSync.swift` |
 
 收尾待辦：

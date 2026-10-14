@@ -6,13 +6,13 @@ import tempfile
 from pathlib import Path
 parser = argparse.ArgumentParser(); parser.add_argument('--device', required=True); args = parser.parse_args()
 r = Path(tempfile.mkdtemp(prefix='NoveliaBackgroundChecks-'))
-source = (Path(__file__).resolve().parents[1]/'iOSApp/NoveliaApp.swift').read_text()
+source = (Path(__file__).resolve().parents[1]/'iOSApp/App/NoveliaApp.swift').read_text()
 code = 'import SwiftUI\nimport UIKit\nimport ImageIO\nimport CryptoKit\n'
-code += 'enum WebDAVFileHash { static func sha256(_ url: URL) throws -> String { SHA256.hash(data: try Data(contentsOf: url)).map { String(format: "%02x", $0) }.joined() } }\n'
+code += 'enum FileContentHash { static func sha256(_ url: URL) throws -> String { SHA256.hash(data: try Data(contentsOf: url)).map { String(format: "%02x", $0) }.joined() } }\n'
 code += source[source.index('enum AppThemeColor:'):source.index('enum NoveliaStyle')]
-background = (Path(__file__).resolve().parents[1]/'iOSApp/ReaderBackground.swift').read_text()
+background = (Path(__file__).resolve().parents[1]/'iOSApp/Features/Reader/ReaderBackground.swift').read_text()
 code += background[background.index('@MainActor\nfinal class ReaderBackgroundStore:'):background.index('struct ReaderBackgroundView:')]
-sync = (Path(__file__).resolve().parents[1]/'Sources/NoveliaIOSCore/SyncMerge.swift').read_text()
+sync = (Path(__file__).resolve().parents[1]/'Sources/NoveliaIOSCore/Features/Sync/SyncMerge.swift').read_text()
 code += sync[sync.index('struct SyncedReaderBackground:'):sync.index('struct SyncedImportedFont:')]
 code += background[background.index('@MainActor\nextension ReaderBackgroundStore'):]
 code += r'''

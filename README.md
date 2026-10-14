@@ -30,7 +30,7 @@ Novelia iOS 是使用 SwiftUI 编写的 iPhone 客户端，连接 Novelia 网站
 | 阅读时长统计 | “我的 → 阅读统计”查看 EPUB、TXT、在线阅读的今日／本周／累计时长、阅读天数、类型占比、7／30 天趋势和逐书每日记录。记录默认关闭，开启后仅累计正文已加载且阅读器处于前台的时间。首次开启记录时，若 WebDAV 总开关已开启，会提示是否开启阅读时长同步。WebDAV 页提供默认关闭的统计同步开关和手动同步按钮，多设备重复同步不会重复累计，删除书籍保留统计。 |
 | 诊断 | 从“我的”页面导出最近 7 天的应用日志；包含 EPUB 下载状态、TXT 导入阶段、解码字节数、分章数量与耗时、失败的系统错误域/代码。导出摘要会统计 TXT 导入、解码与分章诊断记录数。 |
 
-EPUB 阅读器的容器解析、页面缓存、翻页界面和字体管理代码位于 [`iOSApp/EPUBReader/`](iOSApp/EPUBReader/)。Readium 阅读器依赖 [swift-toolkit 3.11.0](https://github.com/readium/swift-toolkit)；原生分页依赖 [YueduCoreText 0.8.0](https://github.com/CHANG-JUI-LIN/YueduCoreText)。依赖说明见[阅读器依赖](iOSApp/EPUBReader/DEPENDENCIES.md)，当前限制见下文。
+EPUB 阅读器的容器解析、页面缓存、翻页界面和字体管理代码位于 [`iOSApp/Features/Reader/EPUBReader/`](iOSApp/Features/Reader/EPUBReader/)。Readium 阅读器依赖 [swift-toolkit 3.11.0](https://github.com/readium/swift-toolkit)；原生分页依赖 [YueduCoreText 0.8.0](https://github.com/CHANG-JUI-LIN/YueduCoreText)。依赖说明见[阅读器依赖](iOSApp/Features/Reader/EPUBReader/DEPENDENCIES.md)，当前限制见下文。
 
 WebDAV 使用方法：在“我的 → WebDAV 同步”打开同步开关，并填入可写的 HTTPS WebDAV 文件夹地址、用户名和密码（或应用密码）。之后在书库左上角点同步按钮开始；同步过程中再次点按钮可打开进度浮窗并取消任务。另一台设备配置相同地址并同步后，会恢复云端较新的书籍记录。网络小说按下载时间、文库书按导入时间逐本比较；阅读位置分别按更新时间合并，网络小说记录章节序号；EPUB 记录整书与章内比例，便于在两种引擎间近似恢复；TXT 记录章节与分页单位。书库系列按每个系列和每本书的归属分别按修改时间合并；旧版应用同步时不识别系列信息，写回清单会丢弃云端系列；新版设备本机仍保留系列，再次同步即可恢复云端记录。同步采用追加与恢复：本地删除不会删除云端副本，后续同步可能再次恢复该书。两端相同的书沿用清单中已上传的文件，不重复读取和上传；本机按文件路径、大小与修改时间缓存文件哈希。取消不会回滚已经传输或恢复的文件，远端目录清单在同步最后阶段写入。服务器会生成 `NoveliaSync/v1/`，其中的下载文件与书目未做端到端加密。
 
@@ -87,13 +87,19 @@ python3 -I scripts/build_local_release.py --simulator 'iPhone 18 Pro Max'
 未提交的开发测试使用 `--allow-dirty`，例如：
 
 ```sh
-python3 -I scripts/build_local_release.py --allow-dirty --simulator DFDA05C7-BA73-43B8-B711-511113CA3BCB
+python3 -I scripts/build_local_release.py --allow-dirty --simulator '<模拟器名称或 UDID>'
 ```
 
-脚本运行 Swift 包逻辑／排版测试（不运行模拟器 UI 测试）、五项离线回归、Release 真机构建、原始依赖许可与包内资源核对、IPA 隐私检查，生成未签名 IPA、完整对应源码、锁定依赖完整源码／许可（含 Readium 阅读器脚本所用 npm 包的原始发布包，按锁定文件 SHA-512 校验，并补充两项发布包缺失的 TypeScript 原始源码及构建配置）、BUILD.json 和 SHA256SUMS。开源许可页的 GPL 修改日期（`SettingsViews.swift` 的 `modifiedDate`）必须等于发布提交的日期，否则脚本拒绝构建。Xcode 派生数据默认放在系统临时目录下的新目录（成功后删除，失败时保留供排查）；Release 二进制会记录目标文件路径，`--derived-data` 不得位于用户主目录下，否则 IPA 隐私检查会失败。产物位于忽略的 `build/local-releases/<版本>-<构建号>/`；只有出现 SUCCESS 才可分发。输出目录已存在时拒绝覆盖，源码在构建期间变化也会失败。脚本不修改版本、不提交、不推送、不发布。
+脚本运行 Swift 包逻辑／排版测试（不运行模拟器 UI 测试）、六项离线回归、Release 真机构建、架构验证代码排除检查、原始依赖许可与包内资源核对、IPA 隐私检查，生成未签名 IPA、完整对应源码、锁定依赖完整源码／许可（含 Readium 阅读器脚本所用 npm 包的原始发布包，按锁定文件 SHA-512 校验，并补充两项发布包缺失的 TypeScript 原始源码及构建配置）、BUILD.json 和 SHA256SUMS。开源许可页的 GPL 修改日期（`SettingsViews.swift` 的 `modifiedDate`）必须等于发布提交的日期，否则脚本拒绝构建。Xcode 派生数据默认放在系统临时目录下的新目录（成功后删除，失败时保留供排查）；Release 二进制会记录目标文件路径，`--derived-data` 不得位于用户主目录下，否则 IPA 隐私检查会失败。产物位于忽略的 `build/local-releases/<版本>-<构建号>/`；只有出现 SUCCESS 才可分发。输出目录已存在时拒绝覆盖，源码在构建期间变化也会失败。脚本不修改版本、不提交、不推送、不发布。
 
 Release 分发时一并提供 IPA、source.tar.gz、dependencies.tar.gz、BUILD.json 与 SHA256SUMS；未签名 IPA 需接收者自行重签。公开正式版构建另加 `--public-release`，生成指向本版本固定公开 Release 页的 `novelia-<版本>-build<构建号>-source-info.txt`，并纳入 SHA256SUMS；发布公开 Release 时一并上传该 TXT。私密测试版默认不生成此文件。公开版通过网盘分享时，可仅上传配套 IPA 和 TXT，并在分享说明中提示源码取得方式；须保证对应 Release 的源码、依赖及许可材料完整、免费且持续可访问。不要给尚未公开对应源码的私密测试版套用公开版说明。目录中的构建／测试日志仅供本机排障，可能含开发环境路径，不是应用的隐私过滤日志，不作为发布附件。
 
 字号、主题与背景设置在阅读器间共用；在线／TXT 分页模式的实现与限制见 [READER_PAGINATION.md](READER_PAGINATION.md)。
 
 Readium 目录页提供可折叠的全书内容诊断：后台读取全书本地清单资源（包括未阅读章节、样式表、图片及字体），仅显示实际目录或资源读取／解码失败，以及目录补全成功的提示；没有这些提示时不显示诊断区。支持选择复制，每次打开目录页时默认折叠。扫描不访问外部地址，资源读取成功不代表 WebKit 排版、脚本或图片／字体解码已经通过验证。
+
+### API 架构与开发时替换
+
+Agent 与开发者修改项目前请先阅读 [开发架构约定](DEVELOPMENT.md)；仓库根目录 [AGENTS.md](AGENTS.md) 提供必须遵循的入口规则。开发约定说明功能落点、依赖注入、API/认证替换、本地状态与数据兼容，以及对应验证方式。
+
+开发时的 API 配置和实现由 `NoveliaApp` / `AppServices` 统一组装，页面与 Store 通过业务服务接口调用。接口、功能实现和维护方法见 [开发文档](DEVELOPMENT.md)。替换服务器格式需要实现对应服务；认证采用当前 Cookie/JWT 适配，其他认证协议需要相应适配。

@@ -8,7 +8,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--device", required=True)
 args = parser.parse_args()
 r = Path(tempfile.mkdtemp(prefix="NoveliaDirectoryRegression-"))
-s = (Path(__file__).resolve().parents[1] / "iOSApp/ReaderView.swift").read_text()
+s = (Path(__file__).resolve().parents[1] / "iOSApp/Features/Reader/ReaderView.swift").read_text()
 component = s[s.index("private struct ChapterDirectoryView"):s.index("private struct Paragraphs")]
 fixture = 'import SwiftUI\nprivate enum NoveliaStyle { static let brandGreen = Color.green }\nprivate enum ReaderAppearance {\n case system\n func secondaryText(system: ColorScheme) -> Color { .secondary }\n func primaryText(system: ColorScheme) -> Color { .primary }\n func card(system: ColorScheme) -> Color { Color(uiColor: .secondarySystemBackground) }\n func background(system: ColorScheme) -> Color { Color(uiColor: .systemBackground) }\n}\nprivate struct Chapter { let id: String; let title: String }\nprivate struct Novel { let chapters: [Chapter] }\n@main struct TapRegressionApp: App {\n var body: some Scene { WindowGroup { TestScreen() } }\n}\nprivate struct TestScreen: View {\n @State private var selected = 400\n let novel = Novel(chapters: (0..<600).map { Chapter(id: "chapter-\\($0)", title: "第\\($0 + 1)章") })\n var body: some View {\n  NavigationStack {\n   VStack {\n    Text("Current: \\(selected + 1)")\n    Button("First") { selected = 0 }\n    Button("Last") { selected = 599 }\n    NavigationLink("目录") { ChapterDirectoryView(novel: novel, selectedIndex: $selected, appearance: .system) }\n   }\n  }\n }\n}\n'
 (r / "TapRegression.swift").write_text(fixture + component)

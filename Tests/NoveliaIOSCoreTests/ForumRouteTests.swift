@@ -40,4 +40,37 @@ final class ForumRouteTests: XCTestCase {
         XCTAssertTrue(isLocalForumURL(URL(string: "https://forum.novelia.cc/p/42#top")!, postID: 42))
         XCTAssertFalse(isLocalForumURL(URL(string: "https://forum.novelia.cc/p/43")!, postID: 42))
     }
+
+    private func customConfiguration() throws -> APIConfiguration {
+        APIConfiguration(novelAPI: URL(string: "https://books.example.test/api/")!,
+            forumAPI: URL(string: "https://community.example.test:8443/api/v1/")!,
+            bookCommentsOrigin: URL(string: "https://community.example.test:8443/")!,
+            novelOrigin: URL(string: "https://books.example.test")!,
+            forumOrigin: URL(string: "https://community.example.test:8443")!,
+            authentication: try AuthenticationConfiguration(origin: URL(string: "https://auth.example.test")!))
+    }
+
+    func testCustomSiteRoutesAndGeneratedLinks() throws {
+        let configuration = try customConfiguration()
+        let post = configuration.forumURL(path: "p/42")
+        XCTAssertEqual(post.absoluteString, "https://community.example.test:8443/p/42")
+        XCTAssertEqual(forumPostDestination(from: post, configuration: configuration)?.postID, 42)
+        XCTAssertTrue(isLocalForumURL(post, postID: 42, configuration: configuration))
+        let notice = configuration.forumURL(path: "c/novel", query: [URLQueryItem(name: "q", value: "求书集中帖")])
+        XCTAssertEqual(ForumNoticeDestination(url: notice, configuration: configuration), .category("novel", "求书集中帖"))
+        XCTAssertEqual(ForumNoticeDestination(url: configuration.forumURL(path: "rules"), configuration: configuration), .rules)
+        XCTAssertEqual(ForumNovelRoute(url: URL(string: "https://books.example.test/novel/syosetu/book")!, configuration: configuration)?.novelID, "book")
+        XCTAssertEqual(ForumNovelRoute(url: URL(string: "/wenku/book")!, configuration: configuration)?.outline.id, "book")
+    }
+
+    func testCustomConfigurationDoesNotInterceptOtherSites() throws {
+        let configuration = try customConfiguration()
+        for raw in ["https://forum.novelia.cc/p/42", "https://community.example.test/p/42",
+                    "https://community.example.test.evil.test:8443/p/42",
+                    "https://user@community.example.test:8443/p/42", "http://community.example.test:8443/p/42"] {
+            XCTAssertNil(forumPostDestination(from: URL(string: raw)!, configuration: configuration))
+        }
+        XCTAssertNil(ForumNovelRoute(url: URL(string: "https://n.novelia.cc/novel/a/b")!, configuration: configuration))
+        XCTAssertNil(ForumNoticeDestination(url: URL(string: "https://community.example.test/rules")!, configuration: configuration))
+    }
 }

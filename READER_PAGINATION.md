@@ -38,7 +38,7 @@ TXT 沿用 `txt:<SHA-256>` 同步位置；Yuedu 的单元／偏移映射为 Read
 
 ## 实现状态（分支 feature/paged-text-reader，2026-10-12）
 
-- 已按上文第 1 步抽出 `EPUBChapterSource`（`iOSApp/EPUBReader/EPUBChapterSource.swift`）：EPUBContainer 原样接入，EPUBPageBook 与 EPUBReaderModel 只依赖该接口；EPUB 专有的目录诊断与文件哈希进度仍经 `model.container`。
+- 已按上文第 1 步抽出 `EPUBChapterSource`（`iOSApp/Features/Reader/EPUBReader/EPUBChapterSource.swift`）：EPUBContainer 原样接入，EPUBPageBook 与 EPUBReaderModel 只依赖该接口；EPUB 专有的目录诊断与文件哈希进度仍经 `model.container`。
 - `TextChapterSource` 把 TXT／在线章节生成经过转义的段落 XHTML 与随主题变色的 CSS，复用 EPUB 的分页、位图窗口、翻页手势、选字、双页、目录、进度条与样式面板。
 - 设置 `readerPagedText`（默认关闭）切换滚动／分页；两种模式都保留，滚动实现未删除。滚动阅读器工具栏与分页阅读器顶部均可切换。
 - TXT：长章（含无标题全文回退）按段落拆成约 12,000 UTF-16 单位，只有首个单位带标题和目录项；本地进度按文件 SHA-256 保存单位与源偏移（`txtPagedPosition.v1.<hash>`），单位数变化（分章规则改变）时作废偏移。未加入 WebDAV。

@@ -5,8 +5,10 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
-source = (root / 'iOSApp/ReadingStatisticsViews.swift').read_text()
-store = source[source.index('@MainActor\nfinal class ReadingStatisticsStore'):source.index('private struct ReadingTimeModifier')]
+source = (root / 'Sources/NoveliaIOSCore/Features/Statistics/ReadingStatisticsStore.swift').read_text()
+contracts = (root/'Sources/NoveliaIOSCore/Domain/LocalServiceContracts.swift').read_text()
+contracts = contracts[contracts.index('@MainActor\nprotocol ReadingTimeRecording'):]
+store = contracts + source[source.index('@MainActor\nfinal class ReadingStatisticsStore'):]
 harness = r'''
 import Foundation
 import Combine
@@ -83,5 +85,5 @@ with tempfile.TemporaryDirectory(prefix='novelia-statistics-store-') as folder:
     fixture.write_text(harness)
     binary = folder / 'store-check'
     subprocess.run(['swiftc', '-parse-as-library', '-module-cache-path', str(folder / 'ModuleCache'),
-                    str(root / 'Sources/NoveliaIOSCore/ReadingStatistics.swift'), str(fixture), '-o', str(binary)], check=True)
+                    str(root / 'Sources/NoveliaIOSCore/Domain/ReadingActivity.swift'), str(root / 'Sources/NoveliaIOSCore/Features/Statistics/ReadingStatistics.swift'), str(fixture), '-o', str(binary)], check=True)
     subprocess.run([str(binary)], check=True)
