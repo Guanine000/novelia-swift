@@ -89,6 +89,8 @@ Core 功能逻辑 → Domain 与通用 Support
 
 Root 还连接账号恢复、续期注册、账号变化后的收藏刷新、前台恢复与更新检查。把新的启动行为放在正确生命周期中，防止视图重建重复启动任务。页面内的查询状态由页面自己的状态对象持有；共享持久化状态不能随页面销毁而重新创建。
 
+更新检查由 Root 持有的 `NoveliaUpdateStore` 管理，设置页使用同一实例。`Support/ReleaseUpdates.swift` 请求公开仓库的最新正式 Release，以标签与本机 `CFBundleShortVersionString` 比较。版本解析支持字母、短横线或下划线前缀、1–4 段数字、预发布后缀和构建元数据：缺少的数字段按零比较，同号预发布低于正式版，`+` 后的构建元数据不参与比较。“忽略此版本”保存可重新解析的规范化版本号；自动检查遵守开关与忽略记录，手动检查绕过这两项限制。格式兼容由 `ReleaseUpdateTests` 验证。
+
 ## 功能实现地图
 
 下表路径除特别标明外均相对 `iOSApp/Features/`。
@@ -282,7 +284,7 @@ WebDAV 是独立传输能力，不使用小说 API 服务集合。`WebDAVSyncSto
 
 同步通过 `SyncBookLibrary` 读写两类书籍，通过 `WebDAVSyncLocalState` 访问其他本地状态。远端资源使用内容哈希引用，验证资源名和哈希后才导入。清单写入使用对应并发条件。阅读统计独立同步：每台设备只写 `statistics/<设备 ID>.json`（`ReadingDeviceStatisticsFile`），读取全部设备文件与旧版 `reading-statistics.json` 后按设备取最大值合并，因此不需要条件写入；不得把其他设备的时长写进本机文件，也不得再写旧版文件。设备 ID 用作文件名，须通过 `isValidDeviceID` 校验。设备名称（`ReadingDeviceInfo`）随统计同步，本机名称只由本机修改。
 
-为适应有请求频率限制的服务器，同步尽量少发请求：`WebDAVFolderCache` 记录已确认的目录，自动同步跳过 `verifyConnection`/`prepareFolders` 的请求，手动同步先清空再完整检查，任何同步失败都清空；引擎在清单与读取时内容相同时不写入；`ReadingStatisticsSyncCache` 记录已合并的设备文件版本（ETag，或修改时间与大小）、本机文件上传哈希和旧文件检查时间，只在统计套用到本机后保存，手动同步不使用。缓存丢失只会多发请求，不能影响合并结果。
+为适应有请求频率限制的服务器，同步尽量少发请求：`WebDAVFolderCache` 记录已确认的目录，自动同步跳过 `verifyConnection`/`prepareFolders` 的请求，手动同步先清空再完整检查，任何同步失败都清空；引擎在清单与读取时内容相同时不写入；`ReadingStatisticsSyncCache` 记录已合并的设备文件版本（ETag，或修改时间与大小）、本机文件上传哈希和旧文件检查时间，只在统计套用到本机后保存，手动同步不使用；`format` 与当前格式不符时丢弃设备版本，重新读取一次全部设备文件。缓存丢失只会多发请求，不能影响合并结果。
 
 用户可见的同步行为与合并规则见 [WebDAV 同步](docs/WEBDAV.md)。实现上必须保持以下行为，修改同步时针对相关失败点验证：
 

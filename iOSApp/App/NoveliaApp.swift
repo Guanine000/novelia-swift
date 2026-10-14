@@ -236,6 +236,7 @@ struct RootView: View {
         .environmentObject(wenkuStore)
         .environmentObject(webNovelDownloads)
         .environmentObject(webDAVSync)
+        .environmentObject(updates)
         .modifier(WebDAVAutoSyncTriggers(sync: webDAVSync, web: webNovelDownloads, wenku: wenkuDownloads,
                                          library: services.local.library, blockedTags: .shared))
         .task { if services.performsUpdateChecks { await updates.check() } }
