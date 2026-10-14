@@ -7,12 +7,20 @@ private final class ReleaseMock: URLProtocol {
     nonisolated(unsafe) static var status = 200
     nonisolated(unsafe) static var payload = ""
     nonisolated(unsafe) static var sawAuthorization = false
+    nonisolated(unsafe) static var rateLimited = false
+    nonisolated(unsafe) static var fallbackURL: String?
+    nonisolated(unsafe) static var requestedHosts: [String] = []
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         Self.hits += 1
+        Self.requestedHosts.append(request.url!.host!)
         if request.value(forHTTPHeaderField: "Authorization") != nil { Self.sawAuthorization = true }
-        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: Self.status, httpVersion: nil, headerFields: nil)!,
+        let isFallback = request.url?.host == "github.com"
+        let finalURL = isFallback ? Self.fallbackURL.flatMap(URL.init(string:)) : nil
+        let status = finalURL != nil ? 200 : Self.status
+        let headers = !isFallback && Self.rateLimited ? ["X-RateLimit-Remaining": "0"] : nil
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: finalURL ?? request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!,
                             cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(Self.payload.utf8))
         client?.urlProtocolDidFinishLoading(self)
@@ -137,5 +145,45 @@ final class ReleaseUpdateTests: XCTestCase {
         let failed = await current.checkManually()
         XCTAssertEqual(failed, .failed)
         ReleaseMock.status = 200
+    }
+
+    func testRateLimitUsesTrustedReleasePageAndReportsLimitIfBothFail() async {
+        let name = "NoveliaFallbackTest-\(UUID())"
+        let defaults = UserDefaults(suiteName: name)!
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ReleaseMock.self]
+        let session = URLSession(configuration: config)
+        defer {
+            defaults.removePersistentDomain(forName: name)
+            session.invalidateAndCancel()
+            ReleaseMock.status = 200
+            ReleaseMock.rateLimited = false
+            ReleaseMock.fallbackURL = nil
+        }
+        ReleaseMock.status = 403
+        ReleaseMock.rateLimited = true
+        ReleaseMock.sawAuthorization = false
+        ReleaseMock.requestedHosts = []
+        ReleaseMock.payload = #"{"message":"API rate limit exceeded"}"#
+        ReleaseMock.fallbackURL = "https://github.com/Guanine000/novelia-swift/releases/tag/v0.9.0"
+        let store = NoveliaUpdateStore(defaults: defaults, session: session, currentVersion: "0.8.0")
+        let available = await store.checkManually()
+        XCTAssertEqual(available, .available)
+        XCTAssertEqual(store.release?.tag_name, "v0.9.0")
+        XCTAssertEqual(ReleaseMock.requestedHosts, ["api.github.com", "github.com"])
+        XCTAssertFalse(ReleaseMock.sawAuthorization)
+
+        let current = NoveliaUpdateStore(defaults: defaults, session: session, currentVersion: "0.9.0")
+        let result = await current.checkManually()
+        XCTAssertEqual(result, .upToDate(current: "0.9.0"))
+        // 重定向必须仍属于指定仓库的正式发布页，不能把登录页、其他仓库或测试版当作最新正式版。
+        for invalid in [nil, "https://example.com/releases/tag/v1.0.0",
+                        "https://github.com/other/repo/releases/tag/v1.0.0",
+                        "https://github.com/login", "https://github.com/Guanine000/novelia-swift/releases/latest",
+                        "https://github.com/Guanine000/novelia-swift/releases/tag/v1.0.0-test.1"] as [String?] {
+            ReleaseMock.fallbackURL = invalid
+            let failed = await current.checkManually()
+            XCTAssertEqual(failed, .rateLimited)
+        }
     }
 }

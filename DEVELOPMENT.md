@@ -91,6 +91,8 @@ Root 还连接账号恢复、续期注册、账号变化后的收藏刷新、前
 
 更新检查由 Root 持有的 `NoveliaUpdateStore` 管理，设置页使用同一实例。`Support/ReleaseUpdates.swift` 请求公开仓库的最新正式 Release，以标签与本机 `CFBundleShortVersionString` 比较。版本解析支持字母、短横线或下划线前缀、1–4 段数字、预发布后缀和构建元数据：缺少的数字段按零比较，同号预发布低于正式版，`+` 后的构建元数据不参与比较。“忽略此版本”保存可重新解析的规范化版本号；自动检查遵守开关与忽略记录，手动检查绕过这两项限制。格式兼容由 `ReleaseUpdateTests` 验证。
 
+API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从最终 URL 读取标签；最终地址必须满足既有 HTTPS/仓库来源检查，标签必须可解析且没有预发布后缀。不解析 HTML、不使用第三方镜像、不内置 GitHub 令牌。API 和网页均失败时保留 API 原错误；403 且匿名剩余额度为零、或 429，会提示限流，其他失败提示暂时无法获取版本信息。回退与不可信重定向由 `ReleaseUpdateTests` 覆盖。
+
 ## 功能实现地图
 
 下表路径除特别标明外均相对 `iOSApp/Features/`。

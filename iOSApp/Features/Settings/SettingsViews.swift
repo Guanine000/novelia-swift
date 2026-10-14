@@ -185,8 +185,9 @@ struct SettingsView: View {
     private func checkForUpdates() async {
         switch await updates.checkManually() {
         case .available: break
-        case .upToDate(let current): updateCheckMessage = "当前已是最新版本（\(current)）。"
-        case .failed: updateCheckMessage = "暂时无法检查更新，请检查网络后重试。"
+        case .upToDate(let current): updateCheckMessage = "暂无更新的公开正式版（当前 \(current)）。"
+        case .failed: updateCheckMessage = "暂时无法获取 GitHub 版本信息，请稍后重试。"
+        case .rateLimited: updateCheckMessage = "GitHub 暂时限制了当前网络的更新查询，备用页面也未能连接。请稍后重试或切换网络。"
         }
     }
 
