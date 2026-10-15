@@ -3,16 +3,22 @@ import Foundation
 
 /// LocalAppServices 持有的本地进度存储，阅读与同步通过同一实例访问。
 /// 保留 readingPositions.v1、web/epub/txt 身份和旧位置读取；位置转换由阅读引擎负责。
+/// 首次读取后在内存保留全部位置，翻页记录不再重复解码；写入仍立即落盘，异常退出不丢进度。
+/// 缓存只对本实例有效，同一偏好存储不得再创建第二个实例写入进度。
 @MainActor
 final class ReadingPositionStore: ReadingPositionSynchronizing {
     private let defaults: UserDefaults
+    private var cache: [String: SyncedReadingPosition]?
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
     private static let key = "readingPositions.v1"
 
     func all() -> [String: SyncedReadingPosition] {
-        guard let data = defaults.data(forKey: Self.key) else { return [:] }
-        return (try? JSONDecoder().decode([String: SyncedReadingPosition].self, from: data)) ?? [:]
+        if let cache { return cache }
+        let loaded = defaults.data(forKey: Self.key)
+            .flatMap { try? JSONDecoder().decode([String: SyncedReadingPosition].self, from: $0) } ?? [:]
+        cache = loaded
+        return loaded
     }
 
     func recordWeb(id: String, chapterIndex: Int) {
@@ -68,8 +74,10 @@ final class ReadingPositionStore: ReadingPositionSynchronizing {
     }
 
     private func save(_ positions: [String: SyncedReadingPosition]) {
+        guard positions != cache else { return }
         if let data = try? JSONEncoder().encode(positions) {
             defaults.set(data, forKey: Self.key)
+            cache = positions
         }
     }
 }

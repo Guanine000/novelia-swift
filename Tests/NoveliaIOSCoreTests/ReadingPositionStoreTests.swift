@@ -69,6 +69,18 @@ final class ReadingPositionStoreTests: XCTestCase {
         XCTAssertEqual(progress.chapterIndex(novelID: "book"), 5)
     }
 
+    /// 内存缓存不改变落盘结果：每次记录立即写入，重新打开读到最新值；无变化的合并不改写已保存数据。
+    func testCachedPositionsAreWrittenImmediately() throws {
+        let defaults = preferences()
+        let store = ReadingPositionStore(defaults: defaults)
+        for chapter in 0..<5 { store.recordWeb(id: "novel", chapterIndex: chapter) }
+        XCTAssertEqual(store.all()["web:novel"]?.chapterIndex, 4)
+        XCTAssertEqual(ReadingPositionStore(defaults: defaults).all()["web:novel"]?.chapterIndex, 4)
+        let saved = defaults.data(forKey: "readingPositions.v1")
+        store.merge([:], webBooks: [])
+        XCTAssertEqual(defaults.data(forKey: "readingPositions.v1"), saved)
+    }
+
     func testEqualTimestampRetainsExistingMergeRule() {
         let store = ReadingPositionStore(defaults: preferences())
         let date = Date(timeIntervalSince1970: 20)

@@ -263,11 +263,19 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
         var all = allSortOptions()
         all[scope ?? "all"] = options
         if let data = try? JSONEncoder().encode(all) { defaults.set(data, forKey: Key.sort) }
+        sortOptionsCache = all
         objectWillChange.send()
     }
 
+    /// 排序在列表重算时频繁读取；只从偏好解码一次，之后由 `setSortOptions` 维护。
+    private var sortOptionsCache: [String: LibrarySortOptions]?
+
     private func allSortOptions() -> [String: LibrarySortOptions] {
-        defaults.data(forKey: Key.sort).flatMap { try? JSONDecoder().decode([String: LibrarySortOptions].self, from: $0) } ?? [:]
+        if let sortOptionsCache { return sortOptionsCache }
+        let loaded = defaults.data(forKey: Key.sort)
+            .flatMap { try? JSONDecoder().decode([String: LibrarySortOptions].self, from: $0) } ?? [:]
+        sortOptionsCache = loaded
+        return loaded
     }
 
     // MARK: 系列

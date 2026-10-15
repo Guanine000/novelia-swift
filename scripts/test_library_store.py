@@ -52,6 +52,7 @@ struct RegistrationBook {
  func persistIndex() throws {}
  static func metadata(for url: URL) async -> (title: String?, description: String?, author: String?, cover: Data?) { ("EPUB Title", nil, nil, nil) }
  func saveCover(_ cover: Data?, id: UUID) throws -> String? { nil }
+ nonisolated static func fileSize(_ url: URL) -> Int? { try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize }
 '''
 fixture += existing.replace('LocalWenkuEPUB', 'RegistrationBook') + registration.replace('LocalWenkuEPUB', 'RegistrationBook') + '\n}\n' + local_error
 

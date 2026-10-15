@@ -175,7 +175,7 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 
 `LocalAppServices` 创建并持有进度、阅读设置、阅读统计、计时控制器、书库状态和 WebDAV 同步实例。Root 注入观察对象，阅读器、书库和同步必须使用同一套实例。
 
-不得恢复 `ReaderSettings.shared`、`LibraryStateStore.shared`、`ReadingStatisticsStore.shared`，不得在子页面创建第二套生产状态。测试可使用隔离 `UserDefaults` 构造独立服务；阅读设置与进度应使用相同的注入存储。
+不得恢复 `ReaderSettings.shared`、`LibraryStateStore.shared`、`ReadingStatisticsStore.shared`，不得在子页面创建第二套生产状态。`ReadingPositionStore` 与书库排序设置在内存缓存已读取的数据（进度写入仍立即落盘），同一偏好存储出现第二个实例会读到过期进度。测试可使用隔离 `UserDefaults` 构造独立服务；阅读设置与进度应使用相同的注入存储。
 
 | 功能关系 | 应使用的边界 |
 |---|---|
