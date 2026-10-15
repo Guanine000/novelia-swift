@@ -75,18 +75,14 @@ final class LibraryImportModel: ObservableObject {
         let needsScope = pickedURL.startAccessingSecurityScopedResource()
         defer { if needsScope { pickedURL.stopAccessingSecurityScopedResource() } }
         let destination = library.downloadDestination(for: pickedURL.lastPathComponent)
-        var coordinatedError: NSError?
-        var copyError: Error?
-        NSFileCoordinator().coordinate(readingItemAt: pickedURL, options: .forUploading,
-                                       error: &coordinatedError) { sourceURL in
-            do {
-                if FileManager.default.fileExists(atPath: destination.path) {
-                    try FileManager.default.removeItem(at: destination)
-                }
-                try FileManager.default.copyItem(at: sourceURL, to: destination)
-            } catch { copyError = error }
-        }
-        if let error = coordinatedError ?? copyError {
+        // 先在主线程占住文件名：复制期间同目录的文库下载不会选到同一个目标。
+        FileManager.default.createFile(atPath: destination.path, contents: nil)
+        // 协调读取可能需要先从 iCloud 下载，大文件复制也很耗时，都放到主线程之外，进度浮窗保持更新。
+        let copyResult = await Task.detached(priority: .userInitiated) {
+            Result { try Self.coordinatedCopy(from: pickedURL, to: destination) }
+        }.value
+        if case .failure(let error) = copyResult {
+            try? FileManager.default.removeItem(at: destination)
             if extensionName == "epub" { logEPUBImportFailure(error, stage: "copy", start: start) }
             if extensionName == "txt" {
                 let nsError = error as NSError
@@ -117,6 +113,21 @@ final class LibraryImportModel: ObservableObject {
             let bytes = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             epubImportLog.info("EPUB import completed; bytes=\(bytes, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")
         }
+    }
+
+    nonisolated private static func coordinatedCopy(from source: URL, to destination: URL) throws {
+        var coordinatedError: NSError?
+        var copyError: Error?
+        NSFileCoordinator().coordinate(readingItemAt: source, options: .forUploading,
+                                       error: &coordinatedError) { sourceURL in
+            do {
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    try FileManager.default.removeItem(at: destination)
+                }
+                try FileManager.default.copyItem(at: sourceURL, to: destination)
+            } catch { copyError = error }
+        }
+        if let error = coordinatedError ?? copyError { throw error }
     }
 
     private func logEPUBImportFailure(_ error: Error, stage: String, start: ContinuousClock.Instant) {

@@ -153,22 +153,32 @@ public struct NoveliaAPIClient: Sendable {
             Self.downloadLogger.error("Novel EPUB request failed before receiving an HTTP response; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
             throw error
         }
+        let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - downloadStartedAt) * 1_000)
+        do {
+            let size = try acceptEPUBDownload(at: temporaryURL, response: response, to: destinationURL)
+            Self.downloadLogger.info("Novel EPUB download completed; bytes=\(size, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
+        } catch {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            Self.downloadLogger.error("Novel EPUB download rejected; status=\(status, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
+            throw error
+        }
+    }
+
+    /// 检查下载响应并把文件移到目标位置，返回字节数。非 2xx、空文件或不是 ZIP（EPUB）时删除临时文件并抛错，
+    /// 避免代理或服务器返回的网页、错误信息被当作书籍保存，在书库留下打不开的记录。
+    @discardableResult
+    func acceptEPUBDownload(at temporaryURL: URL, response: URLResponse, to destinationURL: URL) throws -> Int {
+        defer { try? FileManager.default.removeItem(at: temporaryURL) }
         guard let http = response as? HTTPURLResponse else { throw NoveliaAPIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
-            let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - downloadStartedAt) * 1_000)
-            Self.downloadLogger.error("Novel EPUB request returned HTTP \(http.statusCode, privacy: .public); elapsedMs=\(elapsedMS, privacy: .public)")
             throw NoveliaAPIError.httpStatus(http.statusCode, serverMessage(in: Self.responseData(from: temporaryURL)))
         }
-        let attributes = try? FileManager.default.attributesOfItem(atPath: temporaryURL.path)
-        let size = (attributes?[.size] as? NSNumber)?.intValue ?? 0
-        guard size > 0 else {
-            Self.downloadLogger.error("Novel file response was empty")
-            try? FileManager.default.removeItem(at: temporaryURL)
-            throw NoveliaAPIError.invalidResponse
-        }
-        let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - downloadStartedAt) * 1_000)
-        Self.downloadLogger.info("Novel EPUB download completed; bytes=\(size, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
+        let head = Self.responseData(from: temporaryURL)
+        guard !head.isEmpty else { throw NoveliaAPIError.invalidResponse }
+        guard head.starts(with: [0x50, 0x4b]) else { throw NoveliaAPIError.notEPUB }
+        let size = (try? temporaryURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? head.count
         try FileManager.default.moveItem(at: temporaryURL, to: destinationURL)
+        return size
     }
 
     public func cloudFavoriteFolders() async throws -> [NoveliaCloudFolder] {
@@ -242,12 +252,7 @@ public struct NoveliaAPIClient: Sendable {
         request.timeoutInterval = NoveliaRequestTimeout.wenkuVolume
         let (temporaryURL, response) = try await NoveliaSessionRenewal.download(
             session: session, request: request, app: "n", tokenProvider: tokenProvider)
-        guard let http = response as? HTTPURLResponse else { throw NoveliaAPIError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else {
-            let responseData = Self.responseData(from: temporaryURL)
-            throw NoveliaAPIError.httpStatus(http.statusCode, serverMessage(in: responseData))
-        }
-        try FileManager.default.moveItem(at: temporaryURL, to: destinationURL)
+        try acceptEPUBDownload(at: temporaryURL, response: response, to: destinationURL)
     }
 
     public func cloudFavorites(folderId: String, page: Int = 0) async throws -> [Novel] {
@@ -604,6 +609,7 @@ public enum NoveliaAPIError: LocalizedError {
     case httpStatus(Int, String?)
     case decoding(String)
     case unsupportedWenkuOriginalDownload
+    case notEPUB
 
     public var errorDescription: String? {
         switch self {
@@ -611,6 +617,7 @@ public enum NoveliaAPIError: LocalizedError {
         case .invalidResponse: return "服务器返回了无法识别的响应。"
         case let .invalidInput(message): return message
         case .unsupportedWenkuOriginalDownload: return "Novelia 上游暂不支持单独下载文库原文 EPUB。"
+        case .notEPUB: return "服务器返回的不是有效的 EPUB 文件，请稍后重试。"
         case let .httpStatus(status, message):
             if let message, !message.isEmpty { return "Novelia API 错误（HTTP \(status)）：\(message)" }
             return "Novelia API 错误（HTTP \(status)）。"

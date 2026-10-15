@@ -114,6 +114,33 @@ final class TransportTests: XCTestCase {
                        ["Bearer \(current)", "Bearer \(renewed)"])
     }
 
+    /// 下载的 EPUB 只有在 2xx 且为 ZIP 时才移到目标位置；其他情况都删除临时文件，书库不会出现打不开的书。
+    func testEPUBDownloadAcceptsOnlyZipFilesAndAlwaysRemovesTemporaryFile() throws {
+        let client = NoveliaAPIClient(session: session, tokenProvider: { nil })
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("EPUBDownload-\(UUID())")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = URL(string: "https://example.invalid/file")!
+        func response(_ code: Int) -> URLResponse { HTTPURLResponse(url: url, statusCode: code, httpVersion: nil, headerFields: nil)! }
+        func attempt(_ body: String, status: Int) -> (error: Error?, temporaryLeft: Bool, saved: Bool) {
+            let temporary = folder.appendingPathComponent(UUID().uuidString)
+            let destination = folder.appendingPathComponent(UUID().uuidString + ".epub")
+            try? Data(body.utf8).write(to: temporary)
+            var thrown: Error?
+            do { try client.acceptEPUBDownload(at: temporary, response: response(status), to: destination) } catch { thrown = error }
+            return (thrown, FileManager.default.fileExists(atPath: temporary.path), FileManager.default.fileExists(atPath: destination.path))
+        }
+        let ok = attempt("PK\u{3}\u{4}epub", status: 200)
+        XCTAssertNil(ok.error); XCTAssertTrue(ok.saved); XCTAssertFalse(ok.temporaryLeft)
+        for (body, status) in [("<html>proxy login</html>", 200), ("", 200), ("{\"message\":\"busy\"}", 503)] {
+            let result = attempt(body, status: status)
+            XCTAssertNotNil(result.error, body)
+            XCTAssertFalse(result.saved, body)
+            XCTAssertFalse(result.temporaryLeft, "temporary file is removed for \(body)")
+        }
+        if case NoveliaAPIError.notEPUB = attempt("<html></html>", status: 200).error! {} else { XCTFail("HTML is reported as not an EPUB") }
+    }
+
     func testTimeoutsAreShared() {
         XCTAssertEqual(NoveliaRequestTimeout.api, 30)
         XCTAssertEqual(NoveliaRequestTimeout.wenkuVolume, 120)
