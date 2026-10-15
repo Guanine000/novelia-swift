@@ -78,6 +78,13 @@ final class ReaderSettings: ObservableObject {
         positions.recordWeb(id: id, chapterIndex: chapterIndex)
     }
 
+    /// 打开在线小说时所在章节只是恢复：与已保存的章节相同，或从未保存且从第一章开始。
+    /// 恢复不写入，避免在同步前打开书时用当前时间盖过其他设备较新的进度；明确选择其他章节才记录。
+    func isRestoringWebPosition(id: String, chapterIndex: Int) -> Bool {
+        if let saved = positions.all()["web:\(id)"]?.chapterIndex { return saved == chapterIndex }
+        return chapterIndex == 0
+    }
+
     /// `chapterOffset` 仅由 YueduCoreText 使用；`chapterProgression` 由两个引擎写入。
     func recordEPUBPosition(hash: String, fraction: Double, spineIndex: Int, chapterOffset: Int?, chapterProgression: Double?) {
         positions.recordEPUB(hash: hash, fraction: fraction, spineIndex: spineIndex,

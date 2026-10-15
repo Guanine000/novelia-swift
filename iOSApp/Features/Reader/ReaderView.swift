@@ -244,7 +244,9 @@ struct ReaderView: View {
             }
             .onAppear {
                 savedChapterIndex = chapterIndex
-                settings.recordWebPosition(id: novel.id, chapterIndex: chapterIndex)
+                if !settings.isRestoringWebPosition(id: novel.id, chapterIndex: chapterIndex) {
+                    settings.recordWebPosition(id: novel.id, chapterIndex: chapterIndex)
+                }
             }
             .task(id: "\(chapter.id)-\(loadAttempt)-\(auth.username ?? "")") {
                 let chapterID = chapter.id
@@ -620,11 +622,14 @@ private struct OnlinePagedReader: View {
     }
 
     private func chapterChanged(to unit: Int) {
-        // 每次翻页后调用；仅在章节变化时记录。
+        // 每次翻页后调用；仅在章节变化时记录。打开后的第一次报告若只是恢复，不写入同步位置。
         guard novel.chapters.indices.contains(unit), unit != cache.lastRecordedChapter else { return }
+        let isOpening = cache.lastRecordedChapter == nil
         chapterIndex = unit
         savedChapterIndex = unit
-        settings.recordWebPosition(id: novel.id, chapterIndex: unit)
+        if !(isOpening && settings.isRestoringWebPosition(id: novel.id, chapterIndex: unit)) {
+            settings.recordWebPosition(id: novel.id, chapterIndex: unit)
+        }
         cache.lastRecordedChapter = unit
         guard novel.isRemote else { return }
         let chapterID = novel.chapters[unit].id

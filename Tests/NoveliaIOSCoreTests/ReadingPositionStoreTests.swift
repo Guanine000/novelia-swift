@@ -81,6 +81,20 @@ final class ReadingPositionStoreTests: XCTestCase {
         XCTAssertEqual(defaults.data(forKey: "readingPositions.v1"), saved)
     }
 
+    /// 打开在线小说只是恢复时不写入，保留原时间戳，同步时不会盖过其他设备较新的进度。
+    func testOpeningWebNovelAtRestoredChapterIsNotARecord() {
+        let defaults = preferences()
+        let positions = ReadingPositionStore(defaults: defaults)
+        let settings = ReaderSettings(defaults: defaults, positions: positions)
+        XCTAssertTrue(settings.isRestoringWebPosition(id: "novel", chapterIndex: 0), "first chapter of an unread novel")
+        XCTAssertFalse(settings.isRestoringWebPosition(id: "novel", chapterIndex: 5), "explicitly chosen chapter is recorded")
+        positions.merge(["web:novel": SyncedReadingPosition(chapterIndex: 3, fraction: nil, updatedAt: Date(timeIntervalSince1970: 10))],
+                        webBooks: [])
+        XCTAssertTrue(settings.isRestoringWebPosition(id: "novel", chapterIndex: 3))
+        XCTAssertFalse(settings.isRestoringWebPosition(id: "novel", chapterIndex: 0), "starting over is a real change")
+        XCTAssertEqual(positions.all()["web:novel"]?.updatedAt, Date(timeIntervalSince1970: 10))
+    }
+
     func testEqualTimestampRetainsExistingMergeRule() {
         let store = ReadingPositionStore(defaults: preferences())
         let date = Date(timeIntervalSince1970: 20)
