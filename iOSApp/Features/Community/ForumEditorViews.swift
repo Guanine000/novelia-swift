@@ -537,6 +537,9 @@ struct ForumComposeView: View {
     @State private var selectedTagIDs: Set<Int64> = []
     @State private var isSending = false
     @State private var errorMessage: String?
+    /// 新帖从上次未发布的草稿恢复；编辑已有帖子不使用草稿。
+    @State private var restoredDraft = false
+    @State private var isConfirmingDiscard = false
 
     private var selectedCategory: ForumCategory? { categories.first { $0.id == selectedCategoryID } }
     @EnvironmentObject private var services: AppServices
@@ -547,10 +550,34 @@ struct ForumComposeView: View {
         self.initialCategorySlug = initialCategorySlug
         self.editingPost = editingPost
         self.onSaved = onSaved
-        _selectedCategoryID = State(initialValue: editingPost?.categoryId ?? categories.first(where: { $0.slug == initialCategorySlug })?.id ?? categories.first?.id)
-        _title = State(initialValue: editingPost?.title ?? "")
-        _content = State(initialValue: editingPost?.content ?? "")
-        _selectedTagIDs = State(initialValue: Set(editingPost?.tags.map(\.id) ?? []))
+        let draft = editingPost == nil ? ForumComposeDraft.load() : nil
+        _selectedCategoryID = State(initialValue: editingPost?.categoryId ?? draft?.categoryID
+            ?? categories.first(where: { $0.slug == initialCategorySlug })?.id ?? categories.first?.id)
+        _title = State(initialValue: editingPost?.title ?? draft?.title ?? "")
+        _content = State(initialValue: editingPost?.content ?? draft?.content ?? "")
+        _selectedTagIDs = State(initialValue: Set(editingPost?.tags.map(\.id) ?? draft?.tagIDs ?? []))
+        _restoredDraft = State(initialValue: draft != nil)
+    }
+
+    /// 编辑已有帖子时是否有未保存的修改。
+    private var hasUnsavedEdits: Bool {
+        guard let editingPost else { return false }
+        return title != editingPost.title || content != editingPost.content
+            || selectedCategoryID != editingPost.categoryId || selectedTagIDs != Set(editingPost.tags.map(\.id))
+    }
+
+    /// 新帖的输入随时存为草稿：离开页面或退出 App 后再次发帖可继续编写，发布成功后清除。
+    private func saveDraft() {
+        guard editingPost == nil else { return }
+        ForumComposeDraft(title: title, content: content, categoryID: selectedCategoryID, tagIDs: Array(selectedTagIDs)).save()
+    }
+
+    private func discardDraft() {
+        ForumComposeDraft.clear()
+        title = ""
+        content = ""
+        selectedTagIDs = []
+        restoredDraft = false
     }
 
     private var canSubmit: Bool {
@@ -561,6 +588,13 @@ struct ForumComposeView: View {
     var body: some View {
         Form {
             Section { ForumComposeNotice(isPost: true) }
+            if restoredDraft {
+                Section {
+                    Button("清空草稿", role: .destructive) { discardDraft() }
+                } footer: {
+                    Text("已恢复上次未发布的草稿。")
+                }
+            }
             if auth.username == nil {
                 Section {
                     Button("登录 Novelia后发布") { auth.isLoginPresented = true }
@@ -622,12 +656,27 @@ struct ForumComposeView: View {
         .background(NoveliaStyle.paper)
         .navigationTitle(editingPost == nil ? "新建帖子" : "编辑帖子")
         .forumInAppLinkDestinations()
-        .interactiveDismissDisabled(isSending)
+        .interactiveDismissDisabled(isSending || hasUnsavedEdits)
         .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: selectedCategoryID) { _, _ in selectedTagIDs.removeAll() }
+        .onChange(of: selectedCategoryID) { _, _ in
+            selectedTagIDs.removeAll()
+            saveDraft()
+        }
+        .onChange(of: title) { _, _ in saveDraft() }
+        .onChange(of: content) { _, _ in saveDraft() }
+        .onChange(of: selectedTagIDs) { _, _ in saveDraft() }
+        .confirmationDialog("放弃对帖子的修改？", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
+            Button("放弃修改", role: .destructive) { dismiss() }
+            Button("继续编辑", role: .cancel) {}
+        }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                if editingPost != nil { Button("取消") { dismiss() }.disabled(isSending) }
+                if editingPost != nil {
+                    Button("取消") {
+                        if hasUnsavedEdits { isConfirmingDiscard = true } else { dismiss() }
+                    }
+                    .disabled(isSending)
+                }
             }
             ToolbarItem(placement: .topBarTrailing) { if isSending { ProgressView() } }
         }
@@ -672,8 +721,37 @@ struct ForumComposeView: View {
                 saved = try await api.createPost(categoryID: selectedCategoryID,
                     title: cleanTitle, content: content.trimmingCharacters(in: .whitespacesAndNewlines), tagIDs: Array(selectedTagIDs))
             }
+            if editingPost == nil { ForumComposeDraft.clear() }
             onSaved?(saved)
             dismiss()
         } catch { errorMessage = error.localizedDescription }
+    }
+}
+
+/// 新帖草稿（本机），只保留一份；内容全空时删除。账号无关：登录前写的内容登录后仍可继续。
+struct ForumComposeDraft: Codable, Equatable {
+    private static let key = "forum.compose.draft.v1"
+    var title: String
+    var content: String
+    var categoryID: Int64?
+    var tagIDs: [Int64]
+
+    var isEmpty: Bool {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static func load(defaults: UserDefaults = .standard) -> ForumComposeDraft? {
+        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(ForumComposeDraft.self, from: $0) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    func save(defaults: UserDefaults = .standard) {
+        guard !isEmpty, let data = try? JSONEncoder().encode(self) else { return Self.clear(defaults: defaults) }
+        defaults.set(data, forKey: Self.key)
+    }
+
+    static func clear(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: key)
     }
 }

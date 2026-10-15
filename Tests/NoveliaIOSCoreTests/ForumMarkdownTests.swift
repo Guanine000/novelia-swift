@@ -92,4 +92,19 @@ final class ForumMarkdownTests: XCTestCase {
     func testCommentSubmissionUsesDoubleSpoilerMarkers() {
         XCTAssertEqual(forumCommentMarkdownForSubmission("前!!!!剧透!!!!后"), "前!!剧透!!后")
     }
+
+    /// 预览回复与分页重叠或顺序不同时，每次请求下一页并去重，不会卡在同一页或重复显示。
+    func testReplyPagingAdvancesPagesAndSkipsShownReplies() {
+        struct Reply: Identifiable, Equatable { let id: Int }
+        var paging = ReplyPaging()
+        let preview = [Reply(id: 1), Reply(id: 2)]
+        XCTAssertEqual(paging.nextPage, 0)
+        let first = paging.accept((1...3).map(Reply.init), shown: preview, pageSize: 3)
+        XCTAssertEqual(first, [Reply(id: 3)])
+        XCTAssertEqual(paging.nextPage, 1, "the next request asks for a new page even though only one reply was new")
+        XCTAssertFalse(paging.isExhausted)
+        let last = paging.accept([Reply(id: 4), Reply(id: 4)], shown: preview + first, pageSize: 3)
+        XCTAssertEqual(last, [Reply(id: 4)], "duplicates inside a page are dropped")
+        XCTAssertTrue(paging.isExhausted, "a short page ends paging")
+    }
 }

@@ -343,6 +343,7 @@ private struct ForumCommentCard: View {
     let onEdit: (ForumComment) -> Void
     let onError: (String) -> Void
     @State private var extraReplies: [ForumComment] = []
+    @State private var replyPaging = ReplyPaging()
     @State private var isLoadingReplies = false
 
     private var initialReplies: [ForumComment] { comment.replies?.items ?? [] }
@@ -382,7 +383,7 @@ private struct ForumCommentCard: View {
                     }
                 }
             }
-            if let count = comment.replyCount, Int64(allReplies.count) < count {
+            if let count = comment.replyCount, Int64(allReplies.count) < count, !replyPaging.isExhausted {
                 Button {
                     Task { await loadMoreReplies() }
                 } label: {
@@ -402,9 +403,8 @@ private struct ForumCommentCard: View {
         isLoadingReplies = true
         defer { isLoadingReplies = false }
         do {
-            let result = try await api.replies(postID: postID, rootID: comment.id, page: allReplies.count / 20, pageSize: 20)
-            let known = Set(allReplies.map(\.id))
-            extraReplies.append(contentsOf: result.items.filter { !known.contains($0.id) })
+            let result = try await api.replies(postID: postID, rootID: comment.id, page: replyPaging.nextPage, pageSize: 20)
+            extraReplies.append(contentsOf: replyPaging.accept(result.items, shown: allReplies, pageSize: 20))
         } catch {
             onError(error.localizedDescription)
         }
