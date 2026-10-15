@@ -167,6 +167,8 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 
 小说与论坛是同一个用户账号，但分别维护 `app=n` 与 `app=f` 会话。书籍评论虽然使用论坛来源，仍使用小说会话。改变这些对应关系必须有后端证据及相关回归。
 
+两种会话用同一个认证站点刷新 Cookie 续期，而该 Cookie 每次续期都会轮换。`AccountAuthStore` 与 `ForumAuthStore` 必须注入同一个 `SerialAsyncGate`（`AppServices` 统一组装），续期逐个执行，后一个读取前一个写回 WebView 的新 Cookie。续期进行中再调用 `refreshSession` 时等待同一结果；退出登录（`sessionGeneration` 变化）后的调用不复用旧结果。网络部分由 `AuthSessionRefresher` 实现，WebView Cookie 存储是唯一来源，请求设置 `httpShouldHandleCookies = false`。
+
 生产账号状态、API token provider 与续期入口使用同一 `SessionTokenStore`。生产适配继续使用原 Keychain/Vault；测试使用内存适配。不要在消费方直接读取 Vault、解析 JWT 判断账号，使用 `AccountSessionProviding` 的状态和 `matchesAccount`。
 
 保留登录桥接的 HTTPS、主框架、来源 host/port 检查、配置校验、受控 JS 数据编码及有界续期/重试。不为测试放宽生产检查，不把真实 token、Cookie 或密码写入代码、日志、测试、文档或记忆库。
@@ -376,7 +378,7 @@ Readium 与 Yuedu 是 Reader 功能内部的引擎选择。两个模型使用 Ap
 |---|---|
 | 文档、路径说明 | 链接、路径与现有实现一致；`git diff --check` |
 | API 协议、工厂、映射 | `APIServiceTests`、`ArchitectureReplacementTests`、`test_service_consumers.py`；相关 App 编译 |
-| 认证配置、桥接或账号 | `test_auth_login_bridge.py`、`test_unified_login.py` 及相关 API/实际账号联调 |
+| 认证配置、桥接或账号 | `test_auth_login_bridge.py`、`test_unified_login.py`、`test_auth_refresh_queue.py` 及相关 API/实际账号联调 |
 | 进度、统计、书库或同步 | 对应 Core 测试、`test_library_store.py`、`test_reading_statistics_store.py`；旧数据与合并回归 |
 | 阅读器或页面调用链 | 对应 EPUB/Core 测试与相关 UI 回归；必要的真机验收 |
 | 架构验证组装或发布配置 | 独立 Debug App UI 与生产 Release 编译、`check_architecture_release.py` |

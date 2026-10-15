@@ -60,6 +60,7 @@
   "ReleaseUpdates.swift": "Sources/NoveliaIOSCore/Support/ReleaseUpdates.swift",
   "DiagnosticContext.swift": "Sources/NoveliaIOSCore/Support/DiagnosticContext.swift",
   "ShareableLogPolicy.swift": "Sources/NoveliaIOSCore/Support/ShareableLogPolicy.swift",
+  "SerialAsyncGate.swift": "Sources/NoveliaIOSCore/Support/SerialAsyncGate.swift",
   "EPUBContainer.swift": "iOSApp/Features/Reader/EPUBReader/EPUBContainer.swift",
   "EPUBReaderModel.swift": "iOSApp/Features/Reader/EPUBReader/EPUBReaderModel.swift",
   "EPUBChapterSource.swift": "iOSApp/Features/Reader/EPUBReader/EPUBChapterSource.swift",

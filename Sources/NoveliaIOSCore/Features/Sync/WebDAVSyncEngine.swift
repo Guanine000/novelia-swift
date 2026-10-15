@@ -402,19 +402,4 @@ extension WebDAVSyncEngine {
 
 /// 串行执行会写入 WebDAV 清单的操作（书籍等内容同步与云端删除），先到先执行。
 /// 没有 ETag 的服务器无法用条件写入阻止覆盖，本机至少不让两个操作交错读写清单。
-@MainActor
-final class WebDAVManifestWriteGate {
-    private(set) var isBusy = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    func run<T>(_ operation: () async throws -> T) async rethrows -> T {
-        if isBusy {
-            await withCheckedContinuation { waiters.append($0) }
-        } else {
-            isBusy = true
-        }
-        // 有人等待时直接交给下一个，保持占用，避免中途被新来的操作插队。
-        defer { if waiters.isEmpty { isBusy = false } else { waiters.removeFirst().resume() } }
-        return try await operation()
-    }
-}
+typealias WebDAVManifestWriteGate = SerialAsyncGate

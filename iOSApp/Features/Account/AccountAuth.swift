@@ -14,20 +14,23 @@ final class AccountAuthStore: ObservableObject, AccountSessionProviding {
 
     weak var forumAuth: ForumAuthStore?
     private var sessionGeneration = 0
-    private let cookieStore = WKWebsiteDataStore.default().httpCookieStore
     nonisolated let tokenStore: any SessionTokenStore
     nonisolated var accessToken: String? { tokenStore.read() }
     let configuration: APIConfiguration
-    private let session: URLSession
-    private var siteOrigin: URL { configuration.novelOrigin }
     // 上游客户端在 auth.novelia.cc 续期，并读取该主机的 Cookie。
     // Origin 请求头仍使用应用来源（n.novelia.cc）。
-    private var refreshURL: URL { configuration.authentication.refreshURL(app: "n") }
+    private let refresher: AuthSessionRefresher
+    /// 与论坛会话共用：两者使用同一刷新 Cookie，续期必须逐个执行。
+    let refreshQueue: SerialAsyncGate
+    private var refreshTask: (generation: Int, task: Task<Bool, Never>)?
 
-    init(configuration: APIConfiguration = .production, session: URLSession = .shared, tokenStore: any SessionTokenStore = NovelKeychainTokenStore()) {
+    init(configuration: APIConfiguration = .production, session: URLSession = .shared,
+         tokenStore: any SessionTokenStore = NovelKeychainTokenStore(), refreshQueue: SerialAsyncGate = SerialAsyncGate()) {
         self.tokenStore = tokenStore
         self.configuration = configuration
-        self.session = session
+        self.refreshQueue = refreshQueue
+        refresher = AuthSessionRefresher(configuration: configuration, session: session, app: "n",
+                                         origin: configuration.novelOrigin)
         let savedToken = tokenStore.read()
         username = savedToken.flatMap { NoveliaSessionRenewal.claims($0)?.subject }
         if savedToken != nil && username == nil { tokenStore.clear() }
@@ -38,47 +41,26 @@ final class AccountAuthStore: ObservableObject, AccountSessionProviding {
         return NoveliaSessionRenewal.claims(token)?.subject == account
     }
 
+    /// 续期进行中再被调用时等待同一结果，不另发请求；退出登录后发起的调用不复用旧结果。
     func refreshSession() async -> Bool {
-        guard !isRefreshing else { return false }
         let generation = sessionGeneration
+        if let refreshTask, refreshTask.generation == generation { return await refreshTask.task.value }
+        let task = Task { await refreshQueue.run { await performRefresh(generation: generation) } }
+        refreshTask = (generation, task)
         isRefreshing = true
         errorMessage = nil
-        defer { isRefreshing = false }
+        let result = await task.value
+        if refreshTask?.task == task {
+            refreshTask = nil
+            isRefreshing = false
+        }
+        return result
+    }
 
+    private func performRefresh(generation: Int) async -> Bool {
+        guard generation == sessionGeneration else { return false }
         do {
-            let cookies = await cookiesForSite()
-            guard !cookies.isEmpty else {
-                errorMessage = "认证站点没有可用会话。请先在上方登录页面登录，再点“完成登录”。"
-                return false
-            }
-
-            var request = URLRequest(url: refreshURL)
-            request.httpMethod = "POST"
-            request.httpBody = Data()
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue(siteOrigin.absoluteString, forHTTPHeaderField: "Origin")
-            request.setValue(HTTPCookie.requestHeaderFields(with: cookies)["Cookie"], forHTTPHeaderField: "Cookie")
-            request.timeoutInterval = 30
-
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                throw AccountAuthError.invalidResponse
-            }
-            guard (200..<300).contains(http.statusCode) else {
-                throw AccountAuthError.refreshRejected(http.statusCode)
-            }
-
-            // URLSession 与 WKWebView 的 Cookie 存储相互独立。将轮换后的
-            // 刷新 Cookie 写回认证网页视图，供下次续期使用。
-            let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, pair in
-                if let key = pair.key as? String { result[key] = String(describing: pair.value) }
-            }
-            for cookie in HTTPCookie.cookies(withResponseHeaderFields: headers, for: refreshURL) {
-                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                    cookieStore.setCookie(cookie) { continuation.resume() }
-                }
-            }
-            let token = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            let token = try await refresher.fetchToken()
             guard Self.username(from: token) != nil else { throw AccountAuthError.invalidToken }
             guard generation == sessionGeneration else { return false }
             try tokenStore.save(token)
@@ -125,22 +107,6 @@ final class AccountAuthStore: ObservableObject, AccountSessionProviding {
         return true
     }
 
-    private func cookiesForSite() async -> [HTTPCookie] {
-        let allCookies: [HTTPCookie] = await withCheckedContinuation { continuation in
-            cookieStore.getAllCookies { cookies in
-                continuation.resume(returning: cookies)
-            }
-        }
-        let host = configuration.authentication.origin.host!
-        let path = refreshURL.path
-        return allCookies.filter { cookie in
-            let domain = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
-            let domainMatches = host == domain || host.hasSuffix(".\(domain)")
-            let pathMatches = path == cookie.path || path.hasPrefix(cookie.path.hasSuffix("/") ? cookie.path : "\(cookie.path)/")
-            return domainMatches && pathMatches && (!cookie.isSecure || refreshURL.scheme == "https")
-        }
-    }
-
     static func username(from token: String?) -> String? {
         guard let token else { return nil }
         let segments = token.split(separator: ".")
@@ -168,18 +134,21 @@ final class ForumAuthStore: ObservableObject, AccountSessionProviding {
 
     weak var accountAuth: AccountAuthStore?
     private var sessionGeneration = 0
-    private let cookieStore = WKWebsiteDataStore.default().httpCookieStore
     nonisolated let tokenStore: any SessionTokenStore
     nonisolated var accessToken: String? { tokenStore.read() }
     let configuration: APIConfiguration
-    private let session: URLSession
-    private var siteOrigin: URL { configuration.forumOrigin }
-    private var refreshURL: URL { configuration.authentication.refreshURL(app: "f") }
+    private let refresher: AuthSessionRefresher
+    /// 与小说会话共用：两者使用同一刷新 Cookie，续期必须逐个执行。
+    let refreshQueue: SerialAsyncGate
+    private var refreshTask: (generation: Int, task: Task<Bool, Never>)?
 
-    init(configuration: APIConfiguration = .production, session: URLSession = .shared, tokenStore: any SessionTokenStore = ForumKeychainTokenStore()) {
+    init(configuration: APIConfiguration = .production, session: URLSession = .shared,
+         tokenStore: any SessionTokenStore = ForumKeychainTokenStore(), refreshQueue: SerialAsyncGate = SerialAsyncGate()) {
         self.tokenStore = tokenStore
         self.configuration = configuration
-        self.session = session
+        self.refreshQueue = refreshQueue
+        refresher = AuthSessionRefresher(configuration: configuration, session: session, app: "f",
+                                         origin: configuration.forumOrigin)
         let savedToken = tokenStore.read()
         username = savedToken.flatMap { NoveliaSessionRenewal.claims($0)?.subject }
         if savedToken != nil && username == nil { tokenStore.clear() }
@@ -190,39 +159,26 @@ final class ForumAuthStore: ObservableObject, AccountSessionProviding {
         return NoveliaSessionRenewal.claims(token)?.subject == account
     }
 
+    /// 续期进行中再被调用时等待同一结果，不另发请求；退出登录后发起的调用不复用旧结果。
     func refreshSession() async -> Bool {
-        guard !isRefreshing else { return false }
         let generation = sessionGeneration
+        if let refreshTask, refreshTask.generation == generation { return await refreshTask.task.value }
+        let task = Task { await refreshQueue.run { await performRefresh(generation: generation) } }
+        refreshTask = (generation, task)
         isRefreshing = true
         errorMessage = nil
-        defer { isRefreshing = false }
+        let result = await task.value
+        if refreshTask?.task == task {
+            refreshTask = nil
+            isRefreshing = false
+        }
+        return result
+    }
+
+    private func performRefresh(generation: Int) async -> Bool {
+        guard generation == sessionGeneration else { return false }
         do {
-            let cookies = await cookiesForSite()
-            guard !cookies.isEmpty else {
-                errorMessage = "认证站点没有可用会话。请先在上方登录页面登录，再点“完成登录”。"
-                return false
-            }
-            var request = URLRequest(url: refreshURL)
-            request.httpMethod = "POST"
-            request.httpBody = Data()
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue(siteOrigin.absoluteString, forHTTPHeaderField: "Origin")
-            request.setValue(HTTPCookie.requestHeaderFields(with: cookies)["Cookie"], forHTTPHeaderField: "Cookie")
-            request.timeoutInterval = 30
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else { throw AccountAuthError.invalidResponse }
-            guard (200..<300).contains(http.statusCode) else { throw AccountAuthError.refreshRejected(http.statusCode) }
-            // URLSession 与 WKWebView 的 Cookie 存储相互独立。将轮换后的
-            // 刷新 Cookie 写回认证网页视图，供下次续期使用。
-            let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, pair in
-                if let key = pair.key as? String { result[key] = String(describing: pair.value) }
-            }
-            for cookie in HTTPCookie.cookies(withResponseHeaderFields: headers, for: refreshURL) {
-                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                    cookieStore.setCookie(cookie) { continuation.resume() }
-                }
-            }
-            let token = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            let token = try await refresher.fetchToken()
             guard let parsedUsername = AccountAuthStore.username(from: token) else { throw AccountAuthError.invalidToken }
             guard generation == sessionGeneration else { return false }
             if let expected = accountAuth?.username, parsedUsername != expected {
@@ -261,19 +217,6 @@ final class ForumAuthStore: ObservableObject, AccountSessionProviding {
         return success
     }
 
-    private func cookiesForSite() async -> [HTTPCookie] {
-        let allCookies: [HTTPCookie] = await withCheckedContinuation { continuation in
-            cookieStore.getAllCookies { continuation.resume(returning: $0) }
-        }
-        let host = configuration.authentication.origin.host!
-        let path = refreshURL.path
-        return allCookies.filter { cookie in
-            let domain = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
-            let domainMatches = host == domain || host.hasSuffix(".\(domain)")
-            let pathMatches = path == cookie.path || path.hasPrefix(cookie.path.hasSuffix("/") ? cookie.path : "\(cookie.path)/")
-            return domainMatches && pathMatches && (!cookie.isSecure || refreshURL.scheme == "https")
-        }
-    }
 }
 
 enum NoveliaForumSessionTokenVault {
@@ -341,13 +284,70 @@ enum NoveliaForumSessionTokenVault {
     }
 }
 
+/// 小说（n）与论坛（f）共用的续期请求：读取 WebView 中认证站点的 Cookie 换取令牌，
+/// 并把轮换后的刷新 Cookie 写回 WebView。WebView 的 Cookie 存储是唯一来源，
+/// 请求关闭 URLSession 的 Cookie 处理，避免系统存储里旧的刷新 Cookie 混入或被更新。
+@MainActor
+struct AuthSessionRefresher {
+    let configuration: APIConfiguration
+    let session: URLSession
+    let app: String
+    /// Origin 请求头使用应用来源（n.novelia.cc / f.novelia.cc），续期请求发往认证主机。
+    let origin: URL
+    private var refreshURL: URL { configuration.authentication.refreshURL(app: app) }
+    private var cookieStore: WKHTTPCookieStore { WKWebsiteDataStore.default().httpCookieStore }
+
+    func fetchToken() async throws -> String {
+        let cookies = await cookiesForSite()
+        guard !cookies.isEmpty else { throw AccountAuthError.missingSiteSession }
+        var request = URLRequest(url: refreshURL)
+        request.httpMethod = "POST"
+        request.httpBody = Data()
+        request.httpShouldHandleCookies = false
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(origin.absoluteString, forHTTPHeaderField: "Origin")
+        request.setValue(HTTPCookie.requestHeaderFields(with: cookies)["Cookie"], forHTTPHeaderField: "Cookie")
+        request.timeoutInterval = 30
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw AccountAuthError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw AccountAuthError.refreshRejected(http.statusCode) }
+        // URLSession 与 WKWebView 的 Cookie 存储相互独立。将轮换后的
+        // 刷新 Cookie 写回认证网页视图，供下次续期使用。
+        let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, pair in
+            if let key = pair.key as? String { result[key] = String(describing: pair.value) }
+        }
+        for cookie in HTTPCookie.cookies(withResponseHeaderFields: headers, for: refreshURL) {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                cookieStore.setCookie(cookie) { continuation.resume() }
+            }
+        }
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func cookiesForSite() async -> [HTTPCookie] {
+        let allCookies: [HTTPCookie] = await withCheckedContinuation { continuation in
+            cookieStore.getAllCookies { continuation.resume(returning: $0) }
+        }
+        let host = configuration.authentication.origin.host!
+        let path = refreshURL.path
+        return allCookies.filter { cookie in
+            let domain = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
+            let domainMatches = host == domain || host.hasSuffix(".\(domain)")
+            let pathMatches = path == cookie.path || path.hasPrefix(cookie.path.hasSuffix("/") ? cookie.path : "\(cookie.path)/")
+            return domainMatches && pathMatches && (!cookie.isSecure || refreshURL.scheme == "https")
+        }
+    }
+}
+
 private enum AccountAuthError: LocalizedError {
     case invalidResponse
     case refreshRejected(Int)
     case invalidToken
+    case missingSiteSession
 
     var errorDescription: String? {
         switch self {
+        case .missingSiteSession: "认证站点没有可用会话。请先在上方登录页面登录，再点“完成登录”。"
         case .invalidResponse: "认证服务返回了无法识别的响应。"
         case .refreshRejected(401): "登录状态已失效，请重新登录。"
         case let .refreshRejected(status): "认证令牌获取失败（HTTP \(status)）。"

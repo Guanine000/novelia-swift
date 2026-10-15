@@ -39,10 +39,11 @@ extension AppServices {
             authentication: try! AuthenticationConfiguration(origin: URL(string: "https://auth.example.invalid")!))
         let failure = ProcessInfo.processInfo.arguments.contains("-architectureFailFirstSearch") ? "searchNovels" : nil
         let backend = ArchitectureFixtureBackend(initialFailure: failure) { try await EPUBSampleBook.sampleURL() }
+        let refreshQueue = SerialAsyncGate()
         let account = AccountAuthStore(configuration: configuration,
-            tokenStore: FixtureTokenStore(username: ArchitectureFixtureBackend.username))
+            tokenStore: FixtureTokenStore(username: ArchitectureFixtureBackend.username), refreshQueue: refreshQueue)
         let forum = ForumAuthStore(configuration: configuration,
-            tokenStore: FixtureTokenStore(username: ArchitectureFixtureBackend.username))
+            tokenStore: FixtureTokenStore(username: ArchitectureFixtureBackend.username), refreshQueue: refreshQueue)
         return AppServices(configuration: configuration, api: backend.services(), account: account,
             forumAccount: forum, local: local, performsUpdateChecks: false)
     }
