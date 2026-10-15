@@ -295,12 +295,13 @@ struct ForumPostDetailView: View {
         defer { isSending = false }
         do {
             _ = try await api.createComment(postID: postID, content: content, rootID: replyRoot?.replyRootID)
-            draft = ""
-            replyRoot = nil
-            await loadComments(page: 0)
-            post = try await api.post(id: postID)
-            return nil
         } catch { return error.localizedDescription }
+        // 评论已发出：之后的刷新失败不算发送失败，否则用户可能重新发送而产生重复评论。
+        draft = ""
+        replyRoot = nil
+        await loadComments(page: 0)
+        if let refreshed = try? await api.post(id: postID) { post = refreshed }
+        return nil
     }
 
     @MainActor
@@ -411,10 +412,19 @@ private struct ForumCommentCard: View {
 }
 
 extension String {
-    var forumDisplayDate: String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = formatter.date(from: self) ?? ISO8601DateFormatter().date(from: self)
+    @MainActor var forumDisplayDate: String {
+        let date = ForumDateParsing.fractional.date(from: self) ?? ForumDateParsing.plain.date(from: self)
         return date?.formatted(date: .abbreviated, time: .shortened) ?? self
     }
+}
+
+/// 列表每行都会解析日期；解析器只建一次，仅在主线程（界面）使用。
+@MainActor
+private enum ForumDateParsing {
+    static let fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    static let plain = ISO8601DateFormatter()
 }
