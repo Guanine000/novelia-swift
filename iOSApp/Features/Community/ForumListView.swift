@@ -16,6 +16,7 @@ struct ForumView: View {
 private struct ForumContentView: View {
     @EnvironmentObject private var auth: ForumAuthStore
     @StateObject private var store: ForumStore
+    @State private var isConfirmingLogout = false
 
     init(initialCategory: String, initialQuery: String, api: any ForumService) {
         let store = ForumStore(api: api)
@@ -134,8 +135,7 @@ private struct ForumContentView: View {
                             }
                             if auth.username != nil {
                                 Button("退出登录", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                                    auth.logout()
-                                    Task { await store.selectSource(.all) }
+                                    isConfirmingLogout = true
                                 }
                             } else {
                                 Button("登录 Novelia", systemImage: "person.crop.circle.badge.plus") { auth.isLoginPresented = true }
@@ -168,6 +168,15 @@ private struct ForumContentView: View {
                     }
                 }
                 .searchable(text: $store.query, prompt: "搜索论坛帖子")
+                .confirmationDialog("退出登录？", isPresented: $isConfirmingLogout, titleVisibility: .visible) {
+                    Button("退出登录", role: .destructive) {
+                        auth.logout()
+                        Task { await store.selectSource(.all) }
+                    }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text("小说与论坛使用同一账号，会一起退出。")
+                }
                 .onSubmit(of: .search) { Task { await store.loadPosts(page: 0) } }
                 .refreshable { await store.refresh() }
                 .task { if store.categories.isEmpty { await store.refresh() } }

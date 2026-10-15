@@ -145,6 +145,12 @@ final class ReleaseUpdateTests: XCTestCase {
         let failed = await current.checkManually()
         XCTAssertEqual(failed, .failed)
         ReleaseMock.status = 200
+
+        // 重复点击：进行中的检查不另发请求，第二次返回 inProgress，界面不显示“无法获取”。
+        async let first = current.checkManually()
+        async let second = current.checkManually()
+        let results = await [first, second]
+        XCTAssertEqual(Set(results.map { "\($0)" }), ["upToDate(current: \"0.9.0\")", "inProgress"])
     }
 
     func testRateLimitUsesTrustedReleasePageAndReportsLimitIfBothFail() async {

@@ -105,6 +105,8 @@ enum NoveliaManualUpdateResult: Equatable {
     case upToDate(current: String)
     case failed
     case rateLimited
+    /// 上一次手动检查仍在进行，本次不另发请求，界面不提示。
+    case inProgress
 }
 
 private enum NoveliaUpdateError: Error { case rateLimited }
@@ -143,7 +145,7 @@ final class NoveliaUpdateStore: ObservableObject {
 
     /// “我的 → 版本 → 检查更新”：不受启动检查开关限制，也会再次提示之前忽略的版本。
     func checkManually() async -> NoveliaManualUpdateResult {
-        guard !isCheckingManually else { return .failed }
+        guard !isCheckingManually else { return .inProgress }
         isCheckingManually = true
         defer { isCheckingManually = false }
         let candidate: NoveliaGitHubRelease

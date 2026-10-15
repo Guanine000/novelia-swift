@@ -9,6 +9,7 @@ struct SettingsView: View {
     @EnvironmentObject private var updates: NoveliaUpdateStore
     @EnvironmentObject private var services: AppServices
     @State private var updateCheckMessage: String?
+    @State private var isConfirmingLogout = false
     @AppStorage(SettingsKey.appThemeColor) private var themeColorRaw = AppThemeColor.novelia.rawValue
     @AppStorage(SettingsKey.appThemeCustomHex) private var themeCustomHex = "559775"
     @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = false
@@ -32,7 +33,13 @@ struct SettingsView: View {
             Section("Novelia 账号") {
                 if let username = auth.username {
                     LabeledContent("已登录", value: username)
-                    Button("退出登录", role: .destructive) { auth.logout() }
+                    Button("退出登录", role: .destructive) { isConfirmingLogout = true }
+                        .confirmationDialog("退出登录？", isPresented: $isConfirmingLogout, titleVisibility: .visible) {
+                            Button("退出登录", role: .destructive) { auth.logout() }
+                            Button("取消", role: .cancel) {}
+                        } message: {
+                            Text("小说与论坛使用同一账号，会一起退出。")
+                        }
                 } else {
                     Text("登录后可使用需要账号的服务。密码由 Novelia 认证网页处理，App 只保存会话令牌。")
                         .font(.system(size: 13))
@@ -186,6 +193,7 @@ struct SettingsView: View {
         switch await updates.checkManually() {
         case .available: break
         case .upToDate(let current): updateCheckMessage = "暂无更新的公开正式版（当前 \(current)）。"
+        case .inProgress: break
         case .failed: updateCheckMessage = "暂时无法获取 GitHub 版本信息，请稍后重试。"
         case .rateLimited: updateCheckMessage = "GitHub 暂时限制了当前网络的更新查询，备用页面也未能连接。请稍后重试或切换网络。"
         }

@@ -30,9 +30,11 @@ enum EPUBError: LocalizedError {
     case missingContainer
     case missingOPF
     case emptySpine
+    case entryTooLarge
 
     var errorDescription: String? {
         switch self {
+        case .entryTooLarge: "EPUB 中有超过 \(EPUBContainer.maxEntryBytes / 1_048_576) MB 的单个文件，无法读取。"
         case .cannotOpenArchive: "无法打开 EPUB 压缩包。"
         case .missingContainer: "缺少 META-INF/container.xml。"
         case .missingOPF: "EPUB 缺少有效的 OPF 包描述文件。"
@@ -136,9 +138,16 @@ final class EPUBContainer {
         return (opfXML, directory)
     }
 
+    /// 单个条目解压后的上限。条目整块读入内存，异常或恶意 EPUB 的超大条目会耗尽内存导致闪退；
+    /// 正常书籍的章节、图片和字体远小于此值。
+    static let maxEntryBytes: UInt64 = 200 * 1_048_576
+
     private static func entryData(_ entry: Entry, from archive: Archive) async throws -> Data {
+        // 目录中的大小可能不实，解压时也累计检查。
+        guard entry.uncompressedSize <= maxEntryBytes else { throw EPUBError.entryTooLarge }
         var data = Data()
         let consumer: Consumer = { chunk in
+            guard UInt64(data.count + chunk.count) <= maxEntryBytes else { throw EPUBError.entryTooLarge }
             data.append(chunk)
         }
         _ = try await archive.extract(entry, consumer: consumer)

@@ -399,6 +399,7 @@ enum EPUBLayoutLog {
             case .missingContainer: return ("container", 0)
             case .missingOPF: return ("opf", 0)
             case .emptySpine: return ("spine", 0)
+            case .entryTooLarge: return ("entrySize", 0)
             }
         }
         let nsError = error as NSError
