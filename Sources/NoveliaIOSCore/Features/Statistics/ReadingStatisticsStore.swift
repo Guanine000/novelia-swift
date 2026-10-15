@@ -4,11 +4,14 @@ import Foundation
 import Security
 
 /// LocalAppServices 持有的统计存储，实现计时事件和同步快照接口；界面观察同一实例。
-/// 保留统计偏好键、设备身份及既有合并规则，关闭记录时结束计时但不删除历史。
+/// 保留设备身份及既有合并规则，关闭记录时结束计时但不删除历史。
+/// 本机累计与同步缓存保存在 `ReadingStatisticsFiles` 的文件中（旧版在偏好里，首次启动时迁移）；
+/// 开关、设备 ID 与名称等小数据仍在偏好中。
 @MainActor
 final class ReadingStatisticsStore: ObservableObject, ReadingTimeRecording, ReadingStatisticsSyncing {
-    private static let key = "reading.statistics.v1"
-    private static let syncKey = "reading.statistics.devices.v1"
+    /// 旧版保存本机累计与同步缓存的偏好键；只用于迁移和降级后再升级时的合并。
+    private static let legacyLocalKey = "reading.statistics.v1"
+    private static let legacySyncKey = "reading.statistics.devices.v1"
     private static let deviceKey = "reading.statistics.deviceID"
     private static let enabledKey = "reading.statistics.enabled"
     private static let everEnabledKey = "reading.statistics.everEnabled"
@@ -31,6 +34,7 @@ final class ReadingStatisticsStore: ObservableObject, ReadingTimeRecording, Read
     var recordingEnabledChanges: AnyPublisher<Bool, Never> { $isRecordingEnabled.eraseToAnyPublisher() }
     var hasEnabledRecording: Bool { defaults.bool(forKey: Self.everEnabledKey) }
     private let defaults: UserDefaults
+    private let files: ReadingStatisticsFiles
     private let deviceID: String
     /// 本机名称与类型；名称可由用户修改，随统计同步给其他设备显示。
     private(set) var deviceInfo: ReadingDeviceInfo
@@ -40,9 +44,13 @@ final class ReadingStatisticsStore: ObservableObject, ReadingTimeRecording, Read
 
     /// `deviceModel` 由 App 组装传入系统设备类型（iPhone、iPad），本类型不依赖 UIKit。
     /// `deviceIDs` 保存不随备份迁移的设备 ID；测试传入内存实现，避免读写真实 Keychain。
+    /// `directory` 为统计文件目录；测试传入临时目录。
     init(defaults: UserDefaults = .standard, deviceModel: String = "设备",
-         deviceIDs: any ReadingDeviceIDStoring = KeychainReadingDeviceIDStore()) {
+         deviceIDs: any ReadingDeviceIDStoring = KeychainReadingDeviceIDStore(),
+         directory: URL = ReadingStatisticsFiles.defaultDirectory) {
         self.defaults = defaults
+        let files = ReadingStatisticsFiles(directory: directory)
+        self.files = files
         let resolution = ReadingDeviceIdentity.resolve(
             keychainID: deviceIDs.load(), defaultsID: defaults.string(forKey: Self.deviceKey),
             defaultsBound: defaults.bool(forKey: Self.deviceKeychainBoundKey))
@@ -55,10 +63,10 @@ final class ReadingStatisticsStore: ObservableObject, ReadingTimeRecording, Read
         defaults.set(id, forKey: Self.deviceKey)
         let restoredInfo = defaults.data(forKey: Self.deviceInfoKey)
             .flatMap { try? JSONDecoder().decode(ReadingDeviceInfo.self, from: $0) }
-        var cache = defaults.data(forKey: Self.syncKey)
-            .flatMap { try? JSONDecoder().decode(ReadingStatisticsSync.self, from: $0) } ?? ReadingStatisticsSync()
-        var saved = defaults.data(forKey: Self.key)
-            .flatMap { try? JSONDecoder().decode(ReadingStatistics.self, from: $0) } ?? ReadingStatistics()
+        var cache = Self.load(ReadingStatisticsSync.self, from: files.devicesURL, legacyKey: Self.legacySyncKey,
+                              defaults: defaults, files: files, merge: ReadingStatisticsSync.merged) ?? ReadingStatisticsSync()
+        var saved = Self.load(ReadingStatistics.self, from: files.localURL, legacyKey: Self.legacyLocalKey,
+                              defaults: defaults, files: files, merge: ReadingStatistics.mergedMaximum) ?? ReadingStatistics()
         if let copiedID = resolution.copiedFromID {
             // 偏好来自另一台设备（备份恢复或迁移）：本机记录与名称归还原设备，本机从零开始计时。
             cache.devices[copiedID] = ReadingStatistics.mergedMaximum(cache.devices[copiedID] ?? ReadingStatistics(), saved)
@@ -67,8 +75,8 @@ final class ReadingStatisticsStore: ObservableObject, ReadingTimeRecording, Read
             }
             // 缓存中本机 ID 已有的记录（同步取回的本机历史）保留。
             saved = ReadingStatistics()
-            if let data = try? JSONEncoder().encode(saved) { defaults.set(data, forKey: Self.key) }
-            if let data = try? JSONEncoder().encode(cache) { defaults.set(data, forKey: Self.syncKey) }
+            files.write(saved, to: files.localURL)
+            files.write(cache, to: files.devicesURL)
         }
         var info = (resolution.copiedFromID == nil ? restoredInfo : nil)
             ?? ReadingDeviceInfo(name: deviceModel, model: deviceModel, updatedAt: .distantPast)
@@ -88,6 +96,20 @@ final class ReadingStatisticsStore: ObservableObject, ReadingTimeRecording, Read
         isRecordingEnabled = defaults.bool(forKey: Self.enabledKey)
         saveDeviceInfo()
         devices = deviceList(cache.devices)
+    }
+
+    /// 读取统计文件，并迁移旧版偏好中的同类数据。偏好与文件都有数据时（例如降级到旧版又升级回来），
+    /// 按既有规则合并，确保降级期间记录的时长不丢；写入文件成功后才删除偏好键。
+    private static func load<Value: Codable & Sendable>(
+        _ type: Value.Type, from url: URL, legacyKey: String, defaults: UserDefaults,
+        files: ReadingStatisticsFiles, merge: (Value, Value) -> Value
+    ) -> Value? {
+        let stored = files.read(type, from: url)
+        guard let data = defaults.data(forKey: legacyKey) else { return stored }
+        guard let legacy = try? JSONDecoder().decode(type, from: data) else { return stored }
+        let value = stored.map { merge($0, legacy) } ?? legacy
+        if files.writeNow(value, to: url) { defaults.removeObject(forKey: legacyKey) }
+        return value
     }
 
     var syncDeviceID: String { deviceID }
@@ -162,7 +184,7 @@ final class ReadingStatisticsStore: ObservableObject, ReadingTimeRecording, Read
         tracker.mergeBaseline(synced.devices[deviceID] ?? ReadingStatistics())
         // 本机名称只由本机修改，远端带回的本机记录不覆盖。
         synced.deviceInfo?[deviceID] = deviceInfo
-        if let data = try? JSONEncoder().encode(synced) { defaults.set(data, forKey: Self.syncKey) }
+        files.write(synced, to: files.devicesURL)
         persist()
         // 其他设备可能只改了名称，总时长不变时 persist 不会刷新列表。
         devices = deviceList(currentSnapshots)
@@ -171,7 +193,7 @@ final class ReadingStatisticsStore: ObservableObject, ReadingTimeRecording, Read
     private func persist() {
         let local = tracker.statistics
         if savedLocal != local {
-            if let data = try? JSONEncoder().encode(local) { defaults.set(data, forKey: Self.key) }
+            files.write(local, to: files.localURL)
             savedLocal = local
         }
         let snapshots = currentSnapshots
@@ -180,6 +202,51 @@ final class ReadingStatisticsStore: ObservableObject, ReadingTimeRecording, Read
             statistics = combined
             devices = deviceList(snapshots)
         }
+    }
+}
+
+/// 阅读统计的本机文件：`local.json` 为本机累计，`devices.json` 为含其他设备的同步缓存。
+/// 计时检查点频繁写入，编码与写盘在全局串行队列按提交顺序执行，不占用主线程；
+/// 读取先等待此前提交的写入完成，因此同一进程重新创建 Store 也能读到最新内容。
+/// 无法解码的文件改名保留（`.corrupt-<时间>`），不被新数据直接覆盖。
+final class ReadingStatisticsFiles: Sendable {
+    static var defaultDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ReadingStatistics", isDirectory: true)
+    }
+    private static let queue = DispatchQueue(label: "cc.novelia.reading-statistics.files", qos: .utility)
+
+    let directory: URL
+    var localURL: URL { directory.appendingPathComponent("local.json") }
+    var devicesURL: URL { directory.appendingPathComponent("devices.json") }
+
+    init(directory: URL) {
+        self.directory = directory
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    func read<Value: Decodable>(_ type: Value.Type, from url: URL) -> Value? {
+        Self.queue.sync {
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            if let value = try? JSONDecoder().decode(type, from: data) { return value }
+            let stamp = Int(Date().timeIntervalSince1970)
+            try? FileManager.default.moveItem(at: url, to: url.appendingPathExtension("corrupt-\(stamp)"))
+            return nil
+        }
+    }
+
+    func write<Value: Encodable & Sendable>(_ value: Value, to url: URL) {
+        Self.queue.async { _ = Self.persist(value, to: url) }
+    }
+
+    /// 迁移时同步写入，确认成功后才删除旧数据。
+    func writeNow<Value: Encodable & Sendable>(_ value: Value, to url: URL) -> Bool {
+        Self.queue.sync { Self.persist(value, to: url) }
+    }
+
+    private static func persist<Value: Encodable>(_ value: Value, to url: URL) -> Bool {
+        guard let data = try? JSONEncoder().encode(value) else { return false }
+        return (try? data.write(to: url, options: .atomic)) != nil
     }
 }
 

@@ -265,11 +265,13 @@ Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒�
 | 阅读进度 | `ReadingPositionStore` 的 Codable 数据与 legacy 兼容读取 |
 | 书籍文件和本地索引 | Application Support 内的两个书库目录与对应 Store |
 | 账号凭据 | `SessionTokenStore` 的生产 Keychain 适配 |
-| 阅读统计与设备统计 | `ReadingStatisticsStore` 的本地 Codable 数据 |
+| 阅读统计与设备统计 | `ReadingStatisticsStore`：本机累计与同步缓存在 Application Support `ReadingStatistics/` 的 `local.json`、`devices.json`（`ReadingStatisticsFiles` 后台串行写入）；开关、设备 ID 与名称在偏好 |
 | 解析、章节与排版缓存 | 各缓存实现；属于可重建数据，保持容量与失效规则 |
 | 云端同步状态 | WebDAV 清单、内容 blob 与独立统计数据 |
 
 删除书籍时 Store 一并删除书籍文件与封面；阅读位置按内容哈希保存，不随删除清除。系列归属与最近打开时间只在云端副本也删除成功后由 `LibraryStateStore.forget(keys:)` 清理（系列移出记录随同步传播），只删除本机时保留，因为同一书键可能仍以云端书籍出现。
+
+旧版把本机累计与同步缓存保存在偏好键 `reading.statistics.v1`、`reading.statistics.devices.v1`；启动时迁移到文件，写入成功后删除偏好键。偏好与文件同时存在（降级后又升级）时按既有最大值规则合并，不丢降级期间的时长。无法解码的统计文件改名为 `.corrupt-<时间>` 保留。
 
 阅读统计由 Core 的 `ReadingStatisticsStore` 保存并实现 `ReadingTimeRecording` 和 `ReadingStatisticsSyncing`。阅读界面的开始、检查点、结束事件经 App 计时适配传入 `ReadingActivityController`；统计界面消费同一 Store。记录开关关闭时停止计时，后台/离开阅读页的结束行为由事件桥接处理。修改计时要防止重复会话、后台计时和开启/关闭后状态不一致。
 
