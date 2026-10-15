@@ -486,7 +486,7 @@ final class EPUBReaderModel: ObservableObject {
             isRestoringPosition = false
             if status == .ready, !restored, let fraction = saved?.fraction, fraction > 0 {
                 restored = true
-                seek(to: fraction)
+                seek(to: fraction, restoring: true)
             }
             if status == .ready {
                 prepareTOCDiagnosticsPrompt(bookHash: bookHash)
@@ -850,7 +850,8 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     /// 拖动进度条后才定位，避免手指移动时反复排版和重建分页位图。
-    func seek(to progress: Double) {
+    /// `restoring` 为 true 时（打开时按旧版全书比例恢复）落页不写入阅读位置，不刷新同步时间戳。
+    func seek(to progress: Double, restoring: Bool = false) {
         guard !isAnimating, !isLayingOut, status == .ready,
               let container = source, let book = pageBook, container.chapterCount > 0 else { return }
         let fraction = min(max(progress, 0), 1)
@@ -875,10 +876,13 @@ final class EPUBReaderModel: ObservableObject {
             }
             guard pageBook === book else { return }
             let count = max(pageCount(spineIndex: spineIndex), 1)
+            let wasRestoringPosition = isRestoringPosition
+            if restoring { isRestoringPosition = true }
             location = EPUBReadingLocation(
                 spineIndex: spineIndex,
                 pageIndex: min(Int(pageFraction * Double(count)), count - 1)
             )
+            isRestoringPosition = wasRestoringPosition
             prefetchNeighbors(of: spineIndex)
         }
     }

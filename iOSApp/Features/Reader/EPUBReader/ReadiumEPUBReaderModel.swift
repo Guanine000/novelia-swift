@@ -59,6 +59,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     private var textBook: PagedTextBook?
     private var textPositionTask: Task<Void, Never>?
     private var receivedTextLocation = false
+    /// EPUB 打开后导航器报告的第一个位置就是恢复的位置，不写入，避免刷新同步时间戳。
+    private var receivedBookLocation = false
     @Published private(set) var textLoadFailure: String?
     private var failedTextHref: RelativeURL?
 
@@ -561,7 +563,10 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         self.locator = locator
         if textBook != nil {
             if previous != locator { saveTextPosition(locator) }
-        } else {
+        } else if !receivedBookLocation {
+            // 打开或恢复时不写入：同步前打开书若写入当前时间，会让本机旧进度盖过其他设备较新的进度。
+            receivedBookLocation = true
+        } else if previous != locator {
             save(locator)
         }
         makeWebViewsTransparent()
