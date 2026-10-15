@@ -73,7 +73,7 @@ public enum ShareableLogPolicy {
     private static let layoutFields = "book=\(hex8), trace=\(hex8), gen=[0-9]{1,8}, spine=[0-9]{1,8}, totalSpine=[0-9]{1,8}, currentSpine=[0-9]{1,8}, reason=\(layoutReason)"
 
     /// EPUB 阅读器记录的错误类型：使用固定名称，不包含错误描述。
-    public static let errorKinds = ["unsupported", "resource", "layout", "cancelled", "archive", "container", "opf", "spine", "cocoa", "posix", "url", "other"]
+    public static let errorKinds = ["unsupported", "resource", "layout", "cancelled", "archive", "container", "opf", "spine", "entrySize", "cocoa", "posix", "url", "other"]
     private static let errorKindPattern = "(?:" + errorKinds.joined(separator: "|") + ")"
     private static let reviewedDomains = ["NSCocoaErrorDomain", "NSPOSIXErrorDomain", "NSURLErrorDomain"]
     private static let domainPattern = "(?:" + (reviewedDomains + ["app"]).joined(separator: "|") + ")"
