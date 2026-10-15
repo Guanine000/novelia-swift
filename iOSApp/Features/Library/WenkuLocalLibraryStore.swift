@@ -114,9 +114,11 @@ final class WenkuLocalLibraryStore: ObservableObject {
     }
 
     /// 内容相同的本地书籍，通过 SHA-256 比较（按文件缓存哈希）。
-    private func existingBook(withContentHash hash: String, format: WebNovelFileFormat) async -> LocalWenkuEPUB? {
+    /// 大小不同的文件内容必然不同，先比较大小，只为大小相同的书计算哈希，避免大书库每次导入都读全部文件。
+    private func existingBook(withContentHash hash: String, format: WebNovelFileFormat, size: Int?) async -> LocalWenkuEPUB? {
         for book in books where book.resolvedFileFormat == format {
             let url = directory.appendingPathComponent(book.filename)
+            if let size, let existingSize = Self.fileSize(url), existingSize != size { continue }
             guard fileManager.fileExists(atPath: url.path),
                   let existing = try? await TXTBookCache.shared.contentHash(of: url) else { continue }
             if existing == hash { return book }
@@ -147,7 +149,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
                 try? fileManager.removeItem(at: fileURL)
                 throw WenkuLocalLibraryError.invalidTXT
             }
-            if let existing = await existingBook(withContentHash: newHash, format: .txt) {
+            if let existing = await existingBook(withContentHash: newHash, format: .txt, size: Self.fileSize(fileURL)) {
                 if existing.filename != fileURL.lastPathComponent { try? fileManager.removeItem(at: fileURL) }
                 throw LocalLibraryDuplicateError(existingTitle: existing.title, contentHash: newHash)
             }
@@ -180,7 +182,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
         let newHash = try await TXTBookCache.shared.contentHash(of: fileURL)
         let metadata = await Self.metadata(for: fileURL)
         // 在元数据读取后检查，覆盖同一本 EPUB 被重复导入或下载的情况。
-        if let existing = await existingBook(withContentHash: newHash, format: .epub) {
+        if let existing = await existingBook(withContentHash: newHash, format: .epub, size: Self.fileSize(fileURL)) {
             if existing.filename != fileURL.lastPathComponent { try? fileManager.removeItem(at: fileURL) }
             throw LocalLibraryDuplicateError(existingTitle: existing.title, contentHash: newHash)
         }
@@ -322,6 +324,10 @@ final class WenkuLocalLibraryStore: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let author = metadata.authors.joined(separator: ", ")
         return (title?.isEmpty == false ? title : nil, description?.isEmpty == false ? description : nil, author.isEmpty ? nil : author, metadata.cover)
+    }
+
+    nonisolated private static func fileSize(_ url: URL) -> Int? {
+        try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize
     }
 
     private static func safeFilename(_ filename: String, format: WebNovelFileFormat? = nil) -> String {

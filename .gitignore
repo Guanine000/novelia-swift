@@ -1,6 +1,7 @@
 # macOS and Xcode user-specific files
 .DS_Store
 **/xcuserdata/
+.vscode/
 
 # Xcode and Swift build products
 DerivedData/
