@@ -86,8 +86,12 @@ actor Backend: NovelCatalogService, NovelContentService, WenkuCatalogService,
     func cloudWenkuFavoriteFolders() async throws -> [NoveliaCloudFolder] {
         mark("wenkuFolders"); return [NoveliaCloudFolder(id: "folder", title: "Folder")]
     }
+    var slowFavorites = false
+    func configureSlowFavorites(_ value: Bool) { slowFavorites = value }
     func cloudFavorites(folderId: String, page: Int) async throws -> [Novel] {
-        mark("favorites"); return [book().settingCloudFavoriteFolder(folderId)]
+        mark("favorites")
+        if slowFavorites { try await Task.sleep(for: .milliseconds(150)) }
+        return [book().settingCloudFavoriteFolder(folderId)]
     }
     func cloudWenkuFavorites(folderId: String, page: Int, pageSize: Int) async throws -> WenkuNovelPage {
         mark("wenkuFavorites"); return WenkuNovelPage(novels: [], pageCount: 1)
@@ -147,11 +151,24 @@ actor Backend: NovelCatalogService, NovelContentService, WenkuCatalogService,
         precondition(favorites.contains(book("added")))
         try await favorites.remove(book("added"), account: "alice")
         precondition(!favorites.contains(book("added")))
+        // 刷新期间的增删在刷新结果写入后仍然有效。
+        await backend.configureSlowFavorites(true)
+        let racing = Task { await favorites.refresh(account: "alice") }
+        while !favorites.isLoading { await Task.yield() }
+        try await favorites.add(book("raced"), to: NoveliaCloudFolder(id: "folder", title: "Folder"), account: "alice")
+        try await favorites.remove(book(), account: "alice")
+        await racing.value
+        await backend.configureSlowFavorites(false)
+        precondition(favorites.contains(book("raced")) && !favorites.contains(book()), "edits during refresh survive the refresh result")
+        try await favorites.remove(book("raced"), account: "alice")
+        await favorites.refresh(account: "alice")
+        precondition(favorites.contains(book()), "a later refresh reflects the server again")
+        let readsBeforeLogout = await backend.count("favorites")
         session.logout()
         await favorites.refresh(account: "alice")
         precondition(favorites.errorMessage != nil)
         let reads = await backend.count("favorites")
-        precondition(reads == 1, "Wrong account must not call backend")
+        precondition(reads == readsBeforeLogout, "Wrong account must not call backend")
         await favorites.refresh(account: nil)
         precondition(favorites.novels.isEmpty)
         session.username = "alice"

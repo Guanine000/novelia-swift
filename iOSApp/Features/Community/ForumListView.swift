@@ -97,7 +97,7 @@ private struct ForumContentView: View {
                                 .font(.caption).foregroundStyle(NoveliaStyle.muted)
                             Spacer()
                             Button("下一页") { loadPage(store.page + 1, using: proxy) }
-                                .disabled(Int64((store.page + 1) * 20) >= store.total || store.isLoadingPosts)
+                                .disabled(!store.hasNextPage || store.isLoadingPosts)
                         }
                         .listRowBackground(Color.clear)
                     }

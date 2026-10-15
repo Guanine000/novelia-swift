@@ -14,6 +14,9 @@ final class FavoritesStore: ObservableObject {
     private let defaults: UserDefaults
     private var activeAccount: String?
     private var refreshGeneration = 0
+    /// 刷新进行中完成的增删（含详情页带回的状态），按发生顺序记录；刷新结果写入前重新套用，
+    /// 避免刷新开始前取得的旧列表盖过之后的操作。值为 nil 表示移除。
+    private var editsDuringRefresh: [(id: String, saved: Novel?)] = []
 
     init(api: any FavoritesService, session: any AccountSessionProviding, defaults: UserDefaults = .standard) {
         self.api = api
@@ -46,6 +49,7 @@ final class FavoritesStore: ObservableObject {
         }
 
         novels = cachedNovels(for: account)
+        editsDuringRefresh = []
         isLoading = true
         defer {
             if generation == refreshGeneration { isLoading = false }
@@ -66,7 +70,13 @@ final class FavoritesStore: ObservableObject {
                 }
             }
             guard generation == refreshGeneration, activeAccount == account else { return }
-            novels = deduplicated(fetched)
+            var refreshed = deduplicated(fetched)
+            for edit in editsDuringRefresh {
+                refreshed.removeAll { $0.id == edit.id }
+                if let saved = edit.saved { refreshed.insert(saved, at: 0) }
+            }
+            editsDuringRefresh = []
+            novels = refreshed
             saveCache(novels, for: account)
         } catch {
             guard generation == refreshGeneration, activeAccount == account else { return }
@@ -88,6 +98,7 @@ final class FavoritesStore: ObservableObject {
         let saved = compact(novel, folderID: folder.id)
         novels.removeAll { $0.id == saved.id }
         novels.insert(saved, at: 0)
+        recordEdit(id: saved.id, saved: saved)
         saveCache(novels, for: account)
         errorMessage = nil
     }
@@ -102,8 +113,13 @@ final class FavoritesStore: ObservableObject {
         try await api.removeCloudFavorite(providerId: providerId, novelId: novelId, folderId: folderID)
         guard activeAccount == account else { return }
         novels.removeAll { $0.id == novel.id }
+        recordEdit(id: novel.id, saved: nil)
         saveCache(novels, for: account)
         errorMessage = nil
+    }
+
+    private func recordEdit(id: String, saved: Novel?) {
+        if isLoading { editsDuringRefresh.append((id, saved)) }
     }
 
     /// 应用已登录小说详情返回的账户专属收藏状态。
@@ -111,12 +127,14 @@ final class FavoritesStore: ObservableObject {
         guard let account, activeAccount == account else { return }
         guard let folderID = novel.cloudFavoriteFolderID else {
             novels.removeAll { $0.id == novel.id }
+            recordEdit(id: novel.id, saved: nil)
             saveCache(novels, for: account)
             return
         }
         let saved = compact(novel, folderID: folderID)
         novels.removeAll { $0.id == novel.id }
         novels.insert(saved, at: 0)
+        recordEdit(id: saved.id, saved: saved)
         saveCache(novels, for: account)
     }
 

@@ -18,7 +18,8 @@ struct NovelDetailView: View {
     @State private var showCloudFavoriteOptions = false
     @State private var favoriteError: String?
     @State private var showFavoriteError = false
-    @State private var isLoadingFavoriteFolders = false
+    /// 读取收藏夹、加入或取消收藏进行中；期间禁用收藏按钮，避免连点重复请求。
+    @State private var isUpdatingFavorite = false
     @State private var downloadRequest: Novel?
     @AppStorage private var savedChapterIndex: Int
 
@@ -345,14 +346,16 @@ struct NovelDetailView: View {
                         .foregroundStyle(NoveliaStyle.brandGreen)
                 }
                 .accessibilityLabel(isCloudFavorite ? "取消网页收藏" : "收藏到网页端")
-                .disabled(isLoadingDetail || isLoadingFavoriteFolders)
+                .disabled(isLoadingDetail || isUpdatingFavorite)
             }
         }
         .confirmationDialog("收藏到网页端", isPresented: $showCloudFavoriteOptions, titleVisibility: .visible) {
             ForEach(cloudFolders) { folder in
                 Button(folder.title) {
                     guard let account = auth.username else { return }
+                    isUpdatingFavorite = true
                     Task {
+                        defer { isUpdatingFavorite = false }
                         do {
                             try await favorites.add(displayNovel, to: folder, account: account)
                             displayNovel = displayNovel.settingCloudFavoriteFolder(folder.id)
@@ -404,8 +407,11 @@ struct NovelDetailView: View {
             auth.isLoginPresented = true
             return
         }
+        guard !isUpdatingFavorite else { return }
         if isCloudFavorite {
+            isUpdatingFavorite = true
             Task {
+                defer { isUpdatingFavorite = false }
                 do {
                     try await favorites.remove(displayNovel, account: account)
                     displayNovel = displayNovel.settingCloudFavoriteFolder(nil)
@@ -414,9 +420,9 @@ struct NovelDetailView: View {
             }
             return
         }
-        isLoadingFavoriteFolders = true
+        isUpdatingFavorite = true
         Task {
-            defer { isLoadingFavoriteFolders = false }
+            defer { isUpdatingFavorite = false }
             do {
                 cloudFolders = try await favorites.folders(account: account)
                 guard auth.username == account else { return }
