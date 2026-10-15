@@ -558,6 +558,7 @@ struct NovelCommentsView: View {
     @State private var replyRoot: NoveliaComment?
     @State private var extraReplies: [Int: NoveliaCommentPage] = [:]
     @State private var loadingReplyIDs: Set<Int> = []
+    @State private var replyPaging: [Int: ReplyPaging] = [:]
     @State private var isLoading = false
     @State private var isSending = false
     @State private var errorMessage: String?
@@ -767,9 +768,9 @@ struct NovelCommentsView: View {
                 }
                 .padding(.leading, 4)
             }
-            if comment.replyCount > visibleReplies.count {
+            if comment.replyCount > visibleReplies.count, replyPaging[comment.id]?.isExhausted != true {
                 Button {
-                    Task { await loadMoreReplies(for: comment, loadedCount: visibleReplies.count) }
+                    Task { await loadMoreReplies(for: comment, shown: visibleReplies) }
                 } label: {
                     if loadingReplyIDs.contains(comment.id) {
                         ProgressView().controlSize(.small)
@@ -827,25 +828,23 @@ struct NovelCommentsView: View {
     }
 
     @MainActor
-    private func loadMoreReplies(for comment: NoveliaComment, loadedCount: Int) async {
+    /// `shown` 为已显示的回复（预览加已加载）；新页与它们按 ID 去重，避免预览回复重复出现。
+    private func loadMoreReplies(for comment: NoveliaComment, shown: [NoveliaComment]) async {
         guard loadingReplyIDs.insert(comment.id).inserted else { return }
         defer { loadingReplyIDs.remove(comment.id) }
         do {
             let api = services.api.bookComments
-            let nextPage = loadedCount / 20 + 1
+            var paging = replyPaging[comment.id] ?? ReplyPaging()
             let result = try await api.novelCommentReplies(
                 subjectKey: subjectKey,
                 rootID: comment.id,
-                page: nextPage,
+                page: paging.nextPage + 1,
                 pageSize: 20
             )
-            var existing = extraReplies[comment.id] ?? NoveliaCommentPage(total: result.total, items: [])
-            let existingIDs = Set(existing.items.map(\.id))
-            existing = NoveliaCommentPage(
-                total: result.total,
-                items: existing.items + result.items.filter { !existingIDs.contains($0.id) }
-            )
-            extraReplies[comment.id] = existing
+            let added = paging.accept(result.items, shown: shown, pageSize: 20)
+            replyPaging[comment.id] = paging
+            let existing = extraReplies[comment.id]?.items ?? []
+            extraReplies[comment.id] = NoveliaCommentPage(total: result.total, items: existing + added)
         } catch {
             sendError = error.localizedDescription
         }

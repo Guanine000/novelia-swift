@@ -38,7 +38,7 @@ struct TestScreen: View {
  }
 }
 """
-code='import SwiftUI\nimport UIKit\nimport Foundation\nprivate enum NoveliaStyle { static let ink = Color.primary; static let brandGreen = Color.green; static let paper = Color.white; static let card = Color.white; static let muted = Color.gray }\nprivate struct ForumCategory: Identifiable { let id: Int; let title: String; let slug: String }\n'+s[s.index('private struct ForumCategoryBar'):s.index('struct ForumErrorOverlay')]+markdown[markdown.index('private struct ForumMarkdownTable'):markdown.index('private struct ForumStarRating')]+core[core.index('// Forum Markdown parsing'):]+wenku[:wenku.index('public struct WenkuNovelDetail')]+tail
+code='import SwiftUI\nimport UIKit\nimport Foundation\nprivate enum NoveliaStyle { static let ink = Color.primary; static let brandGreen = Color.green; static let paper = Color.white; static let card = Color.white; static let muted = Color.gray }\nprivate struct ForumCategory: Identifiable { let id: Int; let title: String; let slug: String }\n'+s[s.index('private struct ForumCategoryBar'):s.index('struct ForumErrorOverlay')]+markdown[markdown.index('private struct ForumMarkdownTable'):markdown.index('private struct ForumStarRating')]+core[core.index('struct ForumPostRoute: Identifiable'):]+wenku[:wenku.index('public struct WenkuNovelDetail')]+tail
 code = code.replace('import SwiftUI\n', 'import SwiftUI\n' + (Path(__file__).resolve().parents[1]/'Sources/NoveliaIOSCore/Infrastructure/API/APIConfiguration.swift').read_text(), 1)
 (r/'TapRegression.swift').write_text(code)
 (r/'TapTests.swift').write_text('''import XCTest

@@ -75,7 +75,15 @@ private struct ForumContentView: View {
                         }
                         .listRowBackground(Color.clear)
                     } else if visiblePosts.isEmpty, !store.isLoadingPosts, store.errorMessage == nil {
-                        ContentUnavailableView(store.posts.isEmpty ? "这里还没有帖子" : "没有匹配的帖子", systemImage: "bubble.left.and.bubble.right", description: Text("切换分类或调整搜索词。"))
+                        ContentUnavailableView(store.posts.isEmpty ? "这里还没有帖子" : "本页没有匹配的帖子", systemImage: "bubble.left.and.bubble.right",
+                                               description: Text(filtersCurrentPageOnly ? "可翻页查看其他页的帖子。" : "切换分类或调整搜索词。"))
+                            .listRowBackground(Color.clear)
+                    }
+
+                    if filtersCurrentPageOnly {
+                        Label("“我的帖子”和“收藏”不支持服务器搜索，只在本页按标题筛选。", systemImage: "info.circle")
+                            .font(.footnote)
+                            .foregroundStyle(NoveliaStyle.muted)
                             .listRowBackground(Color.clear)
                     }
 
@@ -88,7 +96,7 @@ private struct ForumContentView: View {
                         .listRowBackground(NoveliaStyle.card)
                     }
 
-                    if store.total > 20 {
+                    if store.page > 0 || store.hasNextPage {
                         HStack {
                             Button("上一页") { loadPage(max(0, store.page - 1), using: proxy) }
                                 .disabled(store.page == 0 || store.isLoadingPosts)
@@ -189,10 +197,14 @@ private struct ForumContentView: View {
         }
     }
 
+    /// “我的帖子”和“收藏”的接口不接受搜索词，只能在已取回的本页中筛选标题。
+    private var filtersCurrentPageOnly: Bool {
+        store.source != .all && !store.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var visiblePosts: [ForumPost] {
-        guard store.source != .all else { return store.posts }
+        guard filtersCurrentPageOnly else { return store.posts }
         let term = store.query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty else { return store.posts }
         return store.posts.filter { $0.title.localizedCaseInsensitiveContains(term) }
     }
 }
