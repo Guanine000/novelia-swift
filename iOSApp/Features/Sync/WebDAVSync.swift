@@ -44,6 +44,8 @@ final class WebDAVSyncStore: ObservableObject {
     @Published private(set) var cloudDownloadProgress = 0.0
 
     private let keychainService = "cc.novelia.ios.port.webdav"
+    /// 内容同步与云端删除都会写清单，经此串行执行；按需下载不写清单，不经过这里。
+    private let manifestGate = WebDAVManifestWriteGate()
     /// 最近的同步阶段，用于失败提示。
     private var stage = WebDAVSyncProgress().stage
 
@@ -150,9 +152,14 @@ final class WebDAVSyncStore: ObservableObject {
         if content, let web, let wenku {
             autoState.content.lastAttempt = Date()
             do {
-                let engine = WebDAVSyncEngine(remote: client, local: local, web: web, wenku: wenku,
-                                              options: options, cloud: cloudBooks) { [weak self] in self?.show($0) }
-                let imported = try await engine.run()
+                if manifestGate.isBusy { progressDetail = "正在等待云端删除完成…" }
+                let result = try await manifestGate.run {
+                    try await WebDAVSyncEngine.runRetryingConcurrentChange {
+                        WebDAVSyncEngine(remote: client, local: local, web: web, wenku: wenku,
+                                         options: options, cloud: cloudBooks) { [weak self] in self?.show($0) }
+                    }
+                }
+                let imported = result.imported
                 autoState.content.lastSuccess = Date()
                 autoState.content.failures = 0
                 autoState.content.syncedFingerprint = WebDAVAutoSyncPolicy.fingerprint(local: local, web: web, wenku: wenku,
@@ -161,7 +168,7 @@ final class WebDAVSyncStore: ObservableObject {
                 summary = (options.books ? "云端新增 \(imported) 本书；本机网络小说 \(web.books.count) 本、文库 \(wenku.books.count) 本，未下载 \(cloudCount) 本。" : "")
                     + (options.tags ? "已同步屏蔽标签。" : "") + (options.backgrounds ? "已同步阅读背景。" : "")
                     + (options.fonts ? "已同步导入字体。" : "")
-                    + (engine.removedLocalCount > 0 ? "其他设备已从云端删除 \(engine.removedLocalCount) 本书，本机副本已一并删除。" : "")
+                    + (result.removedLocal > 0 ? "其他设备已从云端删除 \(result.removedLocal) 本书，本机副本已一并删除。" : "")
             } catch {
                 if isCancellation(error) { cancelled(prefix) } else {
                     folderCache.clear()
@@ -229,7 +236,7 @@ final class WebDAVSyncStore: ObservableObject {
     // MARK: 云端书籍
 
     /// 从云端删除书籍（书库键）：移除书目与不再引用的文件并记下删除时间，其他设备之后不会再上传或恢复它们。
-    /// 返回实际从云端清单移除的书数。
+    /// 正在同步时等同步写完清单后再执行，避免同步写回旧清单使删除的书重新出现。返回实际从云端清单移除的书数。
     @discardableResult
     func deleteFromCloud(keys: Set<String>) async throws -> Int {
         let account = username.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -239,7 +246,7 @@ final class WebDAVSyncStore: ObservableObject {
         let client = try WebDAVClient(address: address.trimmingCharacters(in: .whitespacesAndNewlines),
                                       username: account, password: password,
                                       folderCache: WebDAVFolderCache(defaults: .standard))
-        let removed = try await WebDAVCloudBookDeleter.delete(keys, from: client)
+        let removed = try await manifestGate.run { try await WebDAVCloudBookDeleter.delete(keys, from: client) }
         cloudBooks.remove(keys: keys)
         return removed
     }

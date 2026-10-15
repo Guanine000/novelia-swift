@@ -78,6 +78,8 @@ final class WebDAVSyncEngine {
     private var deletedLocalWenku: [LocalWenkuEPUB] = []
     /// 本次按云端删除记录从本机删除的书数。
     private(set) var removedLocalCount = 0
+    /// 已恢复到本机的新书数（下载全部文件模式）；清单写入失败也不回滚，重试时据此累计提示数量。
+    private(set) var restoredBeforeFailure = 0
 
     init(remote: any WebDAVRemote, local: any WebDAVSyncLocalState,
          web: any SyncBookLibrary<DownloadedWebNovel>, wenku: any SyncBookLibrary<LocalWenkuEPUB>,
@@ -297,6 +299,7 @@ final class WebDAVSyncEngine {
             } else {
                 try library.restoreFromSync(record, files: files)
                 restored += 1
+                restoredBeforeFailure += 1
             }
         }
         return restored
@@ -371,5 +374,46 @@ final class WebDAVSyncEngine {
             files.values.forEach { try? FileManager.default.removeItem(at: $0) }
             throw error
         }
+    }
+}
+
+extension WebDAVSyncEngine {
+    /// 清单写入因其他设备刚写过而冲突（412）时，重新读取清单并完整再执行一次，最多 `maxAttempts` 次。
+    /// 重跑是安全的：清单写入前只向本机追加/替换较新的书并按时间合并进度，重新规划不会重复导入；
+    /// 删除本机副本、云端书目、系列、标签、背景与字体都只在清单写入成功后套用。
+    /// 返回各次新恢复书数之和（失败那次已恢复到本机的书不会在下一次再计数）与成功那次删除的本机书数。
+    static func runRetryingConcurrentChange(maxAttempts: Int = 3,
+                                            make: () -> WebDAVSyncEngine) async throws -> (imported: Int, removedLocal: Int) {
+        var imported = 0
+        for attempt in 1...max(1, maxAttempts) {
+            let engine = make()
+            do {
+                imported += try await engine.run()
+                return (imported, engine.removedLocalCount)
+            } catch WebDAVSyncError.concurrentChange where attempt < maxAttempts {
+                imported += engine.restoredBeforeFailure
+                continue
+            }
+        }
+        throw WebDAVSyncError.concurrentChange
+    }
+}
+
+/// 串行执行会写入 WebDAV 清单的操作（书籍等内容同步与云端删除），先到先执行。
+/// 没有 ETag 的服务器无法用条件写入阻止覆盖，本机至少不让两个操作交错读写清单。
+@MainActor
+final class WebDAVManifestWriteGate {
+    private(set) var isBusy = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func run<T>(_ operation: () async throws -> T) async rethrows -> T {
+        if isBusy {
+            await withCheckedContinuation { waiters.append($0) }
+        } else {
+            isBusy = true
+        }
+        // 有人等待时直接交给下一个，保持占用，避免中途被新来的操作插队。
+        defer { if waiters.isEmpty { isBusy = false } else { waiters.removeFirst().resume() } }
+        return try await operation()
     }
 }
