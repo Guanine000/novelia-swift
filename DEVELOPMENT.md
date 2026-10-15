@@ -267,6 +267,8 @@ Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒�
 | 解析、章节与排版缓存 | 各缓存实现；属于可重建数据，保持容量与失效规则 |
 | 云端同步状态 | WebDAV 清单、内容 blob 与独立统计数据 |
 
+删除书籍时 Store 一并删除书籍文件与封面；阅读位置按内容哈希保存，不随删除清除。系列归属与最近打开时间只在云端副本也删除成功后由 `LibraryStateStore.forget(keys:)` 清理（系列移出记录随同步传播），只删除本机时保留，因为同一书键可能仍以云端书籍出现。
+
 阅读统计由 Core 的 `ReadingStatisticsStore` 保存并实现 `ReadingTimeRecording` 和 `ReadingStatisticsSyncing`。阅读界面的开始、检查点、结束事件经 App 计时适配传入 `ReadingActivityController`；统计界面消费同一 Store。记录开关关闭时停止计时，后台/离开阅读页的结束行为由事件桥接处理。修改计时要防止重复会话、后台计时和开启/关闭后状态不一致。
 
 ## WebDAV 同步实现
@@ -284,7 +286,7 @@ WebDAV 是独立传输能力，不使用小说 API 服务集合。`WebDAVSyncSto
 | `WebDAVAutoSyncPolicy.swift` | 自动同步的触发判断、失败退避与本机状态指纹（纯计算） |
 | `App/Integrations/SyncLocalStateAdapter.swift` | 连接实际进度、系列、背景、标签与字体状态；`WebDAVAutoSyncTriggers` 转交前后台与书库/系列/标签变化 |
 
-同步通过 `SyncBookLibrary` 读写两类书籍，通过 `WebDAVSyncLocalState` 访问其他本地状态。远端资源使用内容哈希引用，验证资源名和哈希后才导入。清单写入使用对应并发条件。阅读统计独立同步：每台设备只写 `statistics/<设备 ID>.json`（`ReadingDeviceStatisticsFile`），读取全部设备文件与旧版 `reading-statistics.json` 后按设备取最大值合并，因此不需要条件写入；不得把其他设备的时长写进本机文件，也不得再写旧版文件。设备 ID 用作文件名，须通过 `isValidDeviceID` 校验。设备名称（`ReadingDeviceInfo`）随统计同步，本机名称只由本机修改。
+同步通过 `SyncBookLibrary` 读写两类书籍，通过 `WebDAVSyncLocalState` 访问其他本地状态。远端资源使用内容哈希引用，验证资源名和哈希后才导入。清单写入使用对应并发条件。阅读统计独立同步：每台设备只写 `statistics/<设备 ID>.json`（`ReadingDeviceStatisticsFile`），读取全部设备文件与旧版 `reading-statistics.json` 后按设备取最大值合并，因此不需要条件写入；不得把其他设备的时长写进本机文件，也不得再写旧版文件。设备 ID 用作文件名，须通过 `isValidDeviceID` 校验。设备 ID 由 `ReadingDeviceIdentity` 决定：以 Keychain（`ThisDeviceOnly`，经 `ReadingDeviceIDStoring` 注入）为准；偏好中有 ID 但未绑定 Keychain 视为旧版升级并沿用该 ID；偏好已绑定但 Keychain 没有，视为从备份复制，生成新 ID，并把复制来的本机记录与名称归还原设备。测试必须注入内存实现，不读写真实 Keychain。设备名称（`ReadingDeviceInfo`）随统计同步，本机名称只由本机修改。
 
 为适应有请求频率限制的服务器，同步尽量少发请求：`WebDAVFolderCache` 记录已确认的目录，自动同步跳过 `verifyConnection`/`prepareFolders` 的请求，手动同步先清空再完整检查，任何同步失败都清空；引擎在清单与读取时内容相同时不写入；`ReadingStatisticsSyncCache` 记录已合并的设备文件版本（ETag，或修改时间与大小）、本机文件上传哈希和旧文件检查时间，只在统计套用到本机后保存，手动同步不使用；`format` 与当前格式不符时丢弃设备版本，重新读取一次全部设备文件。缓存丢失只会多发请求，不能影响合并结果。
 

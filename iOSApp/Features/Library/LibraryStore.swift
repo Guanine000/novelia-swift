@@ -313,6 +313,19 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
         }
     }
 
+    /// 书籍已从本机和云端一并删除：移出系列（移出记录带时间，随同步传播）并清除最近打开时间。
+    /// 只删除本机文件时不调用：同一本书之后可能作为云端书籍显示或被重新下载，应保留原归属。
+    func forget(keys: Set<String>) {
+        var state = series
+        for key in keys { state.assign(book: key, to: nil) }
+        save(state)
+        let opened = lastOpened.filter { !keys.contains($0.key) }
+        if opened.count != lastOpened.count {
+            lastOpened = opened
+            persistLastOpened()
+        }
+    }
+
     /// WebDAV 合并后的系列状态。
     func applySynced(_ state: LibrarySeriesState) {
         save(LibrarySeriesState.merged(series, state))

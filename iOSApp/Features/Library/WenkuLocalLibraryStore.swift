@@ -49,7 +49,8 @@ final class WenkuLocalLibraryStore: ObservableObject {
                                   filename: destination.lastPathComponent, addedAt: book.addedAt,
                                   lastLocatorJSON: book.lastLocatorJSON,
                                   bookDescription: book.bookDescription, author: book.author,
-                                  coverFilename: nil, metadataLoaded: book.metadataLoaded)
+                                  coverFilename: nil, metadataLoaded: book.metadataLoaded,
+                                  fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel)
         do {
             if let coverName = book.coverFilename, let coverSource = files[coverName] {
                 let coverDestination = directory.appendingPathComponent("cover-\(UUID().uuidString).jpg")
@@ -237,36 +238,10 @@ final class WenkuLocalLibraryStore: ObservableObject {
         if let cover = coverURL(for: book) { try? fileManager.removeItem(at: cover) }
     }
 
-    func save(data: Data, title: String, filename: String) async throws {
-        guard data.starts(with: [0x50, 0x4b]) else { throw WenkuLocalLibraryError.invalidEPUB }
-        let safeName = Self.safeFilename(filename)
-        let destination = uniqueDestination(for: safeName)
-        try data.write(to: destination, options: .atomic)
-        let metadata = await Self.metadata(for: destination)
-        let id = UUID()
-        let coverFilename = try? saveCover(metadata.cover, id: id)
-        books.insert(
-            LocalWenkuEPUB(
-                id: id,
-                title: metadata.title ?? title,
-                filename: destination.lastPathComponent,
-                addedAt: Date(),
-                bookDescription: metadata.description,
-                author: metadata.author,
-                coverFilename: coverFilename,
-                metadataLoaded: true
-            ), at: 0
-        )
-        do { try persistIndex() } catch {
-            books.removeAll { $0.id == id }
-            try? fileManager.removeItem(at: destination)
-            if let coverFilename { try? fileManager.removeItem(at: directory.appendingPathComponent(coverFilename)) }
-            throw error
-        }
-    }
-
+    /// 删除书籍文件、封面与索引记录。阅读位置按内容哈希保存，不在此删除，重新导入同一本书时可接着读。
     func remove(_ book: LocalWenkuEPUB) {
         try? fileManager.removeItem(at: fileURL(for: book))
+        if let cover = coverFileURL(for: book) { try? fileManager.removeItem(at: cover) }
         books.removeAll { $0.id == book.id }
         try? persistIndex()
     }
