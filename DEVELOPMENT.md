@@ -257,7 +257,7 @@ Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒�
 
 `WebNovelDownloadStore` 通过 `NovelDownloadService` 下载网络小说 EPUB，并在 Application Support 的 `WebNovelDownloads/` 管理文件与 `library.json`。`WenkuLocalLibraryStore` 在 `WenkuEPUB/` 管理文库及导入文件和索引，使用 `LocalLibraryIndexWriter` 写入索引。记录类型为 `DownloadedWebNovel` 和 `LocalWenkuEPUB`，定义在 Domain。
 
-下载接口负责把内容交付到指定目标，Store 负责本地记录和用户可见状态。修改下载/导入要检查文件成功而索引失败、取消、重复导入、封面处理、缺失文件及恢复流程。索引采用原子写入；新增持久化行为不能让失败操作留下可见但不可打开的记录。文件来源分类、记录 ID、内容哈希和路径具有不同用途，不要混为同一身份。
+下载接口负责把内容交付到指定目标，Store 负责本地记录和用户可见状态。修改下载/导入要检查文件成功而索引失败、取消、重复导入、封面处理、缺失文件及恢复流程。下载的 EPUB 经 `NoveliaAPIClient.acceptEPUBDownload` 检查（2xx、非空、ZIP 签名），任何失败都删除临时文件；导入的文件协调读取与复制在主线程之外执行，开始前先在目标位置建立空文件占住文件名。索引采用原子写入；新增持久化行为不能让失败操作留下可见但不可打开的记录。文件来源分类、记录 ID、内容哈希和路径具有不同用途，不要混为同一身份。
 
 通用文件哈希使用 `Support/FileContentHash.swift`。跨功能使用通用工具，不通过同步 UI 文件获取哈希方法。临时路径不写成长期书籍身份，缓存不能代替持久化事实。
 
