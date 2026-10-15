@@ -11,6 +11,9 @@ protocol ReadingPositionProviding: AnyObject {
     func epubPosition(hash: String) -> SyncedReadingPosition?
     func recordTXT(hash: String, position: TXTReadingPosition)
     func txtPosition(hash: String) -> TXTReadingPosition?
+    /// 删除书籍文件已不在书库、且早于 `cutoff` 未更新的 EPUB/TXT 位置；在线小说（web:）位置不处理。
+    @discardableResult
+    func pruneFilePositions(keepingHashes: Set<String>, olderThan cutoff: Date) -> Int
 }
 
 /// 供同步适配合并进度；具体存储负责旧数据和时间合并规则，阅读器无需调用此能力。

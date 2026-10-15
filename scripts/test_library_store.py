@@ -77,6 +77,8 @@ enum FileContentHash {
  let defaults = UserDefaults(suiteName: "NoveliaLibraryRegression-" + UUID().uuidString)!
  enum Key { static let hashes = "hashes" }
  var lastOpened: [String: Date] = [:]; var lastOpenedWrites = 0
+ var prunes: [Set<String>] = []
+ func pruneOrphanedState(books: [LibraryBook], keepingHashes: Set<String>) { prunes.append(keepingHashes) }
  func save(_ state: LibrarySeriesState) { series = state }
  func persistLastOpened() { lastOpenedWrites += 1 }
 '''
@@ -135,6 +137,15 @@ fixture += r'''
   let hashes = HashStore()
   await hashes.refreshHashes(for: targets)
   precondition(hashes.hashByBook.count == 30 && hashes.publications == 1, "one batch publication")
+  precondition(hashes.prunes.count == 1 && hashes.prunes[0].count == 30, "cleanup runs with every local hash")
+  let unreadable = LibraryBook(key: "missing", fileURL: directory.appendingPathComponent("missing.txt"))
+  let partial = HashStore()
+  await partial.refreshHashes(for: targets + [unreadable])
+  precondition(partial.prunes.isEmpty, "no cleanup while a local book has no hash")
+  var cloudOnly = LibraryBook(key: "cloud", fileURL: directory.appendingPathComponent("cloud.txt")); cloudOnly.cloudFileHash = "cloud-hash"
+  let withCloud = HashStore()
+  await withCloud.refreshHashes(for: [targets[0], cloudOnly])
+  precondition(withCloud.prunes.first?.contains("cloud-hash") == true, "cloud books keep their positions")
   let calls = FileContentHash.calls
   await hashes.refreshHashes(for: targets)
   precondition(FileContentHash.calls == calls && hashes.publications == 1, "cached batch does no hash or publish")

@@ -15,7 +15,12 @@ final class WebDAVSyncStore: ObservableObject {
             if !isEnabled { cancelAutomaticSync() }
         }
     }
-    @Published var address: String { didSet { UserDefaults.standard.set(address, forKey: SettingsKey.WebDAV.address) } }
+    @Published var address: String {
+        didSet {
+            UserDefaults.standard.set(address, forKey: SettingsKey.WebDAV.address)
+            updateETagWarning()
+        }
+    }
     @Published var username: String { didSet { UserDefaults.standard.set(username, forKey: SettingsKey.WebDAV.username) } }
     @Published var syncBooks: Bool { didSet { UserDefaults.standard.set(syncBooks, forKey: SettingsKey.WebDAV.syncBooks) } }
     @Published var syncTags: Bool { didSet { UserDefaults.standard.set(syncTags, forKey: SettingsKey.WebDAV.syncTags) } }
@@ -34,6 +39,8 @@ final class WebDAVSyncStore: ObservableObject {
     @Published private(set) var completedUnits = 0
     @Published private(set) var totalUnits = 1
     @Published var message: String?
+    /// 当前服务器上次同步时没有返回清单 ETag，设置页据此提示避免多设备同时同步。
+    @Published private(set) var serverLacksETag = false
 
     private let local: any WebDAVSyncLocalState
     private let statistics: any ReadingStatisticsSyncing
@@ -85,6 +92,20 @@ final class WebDAVSyncStore: ObservableObject {
         address = UserDefaults.standard.string(forKey: SettingsKey.WebDAV.address) ?? ""
         username = UserDefaults.standard.string(forKey: SettingsKey.WebDAV.username) ?? ""
         password = Self.readPassword(service: keychainService) ?? ""
+        updateETagWarning()
+    }
+
+    private var trimmedAddress: String { address.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private func updateETagWarning() {
+        let flagged = UserDefaults.standard.string(forKey: SettingsKey.WebDAV.manifestWithoutETag)
+        serverLacksETag = flagged != nil && flagged == trimmedAddress
+    }
+
+    private func recordETagSupport(lacking: Bool) {
+        if lacking { UserDefaults.standard.set(trimmedAddress, forKey: SettingsKey.WebDAV.manifestWithoutETag) }
+        else { UserDefaults.standard.removeObject(forKey: SettingsKey.WebDAV.manifestWithoutETag) }
+        updateETagWarning()
     }
 
     private var options: WebDAVSyncOptions {
@@ -160,6 +181,7 @@ final class WebDAVSyncStore: ObservableObject {
                     }
                 }
                 let imported = result.imported
+                recordETagSupport(lacking: result.lacksETag)
                 autoState.content.lastSuccess = Date()
                 autoState.content.failures = 0
                 autoState.content.syncedFingerprint = WebDAVAutoSyncPolicy.fingerprint(local: local, web: web, wenku: wenku,
@@ -500,7 +522,7 @@ struct WebDAVSyncView: View {
                 Text("默认关闭。使用下方服务器设置合并各设备的每日与逐书时长；开启后“立即同步”和自动同步都会包含阅读时长，重复同步不会重复累计。每台设备只写自己的统计文件，可在“阅读统计”中按设备查看。关闭记录也可同步已有统计。")
             }
             .disabled(syncStore.isSyncing)
-            Section("服务器") {
+            Section {
                 TextField("https://example.com/dav/", text: $syncStore.address)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -509,6 +531,17 @@ struct WebDAVSyncView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 SecureField("密码或应用密码", text: $syncStore.password)
+                if syncStore.serverLacksETag {
+                    Label {
+                        Text("此服务器不提供 ETag，无法发现多台设备同时同步造成的冲突，后同步的设备会覆盖先同步的书目改动。请避免多台设备同时同步。")
+                            .font(.footnote)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                    }
+                    .foregroundStyle(.orange)
+                }
+            } header: {
+                Text("服务器")
             }
             Section {
                 Button {
