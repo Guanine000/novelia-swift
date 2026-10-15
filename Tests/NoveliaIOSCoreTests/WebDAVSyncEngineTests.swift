@@ -113,6 +113,12 @@ private final class FakeLibrary<Record: SyncableBook>: SyncBookLibrary {
         log.events.append("\(name).restore")
         books.append(book)
         received[book.id] = contents(files)
+        // 与真实书库一样保留恢复的文件，之后的同步可以再上传它们。
+        self.files[book.id] = try files.mapValues { source in
+            let kept = source.deletingLastPathComponent().appendingPathComponent("restored-\(UUID())")
+            try FileManager.default.copyItem(at: source, to: kept)
+            return kept
+        }
     }
 
     func removeFromSync(_ book: Record) {
@@ -422,6 +428,78 @@ final class WebDAVSyncEngineTests: XCTestCase {
         XCTAssertNil(remote.blobs[only.hash], "unreferenced file is deleted")
         XCTAssertNotNil(remote.blobs[shared.hash], "file still used by another book is kept")
         XCTAssertEqual(remote.puts.last?.etag, "\"v0\"", "manifest write is conditional")
+    }
+
+    private func runRetrying(_ cloud: FakeCloud? = nil) async throws -> (imported: Int, removedLocal: Int) {
+        try await WebDAVSyncEngine.runRetryingConcurrentChange {
+            WebDAVSyncEngine(remote: remote, local: local, web: web, wenku: wenku, options: booksAndTags,
+                             defaults: defaults, cloud: cloud) { [weak self] in self?.progress.append($0) }
+        }
+    }
+
+    /// 清单写入冲突时重新读取并重跑：另一台设备在两次读取之间写入的书与本机上传都保留，已恢复的书不重复导入。
+    func testSyncRetriesAfterConcurrentChangeWithoutDuplicatingWork() async throws {
+        addLocal(webBook("local", at: 10), text: "local")
+        remoteManifest { $0.webBooks = [WebDAVBook(record: webBook("r", at: 10), assets: [remote.seed("r", as: "r.epub")])] }
+        remote.putErrors = [.concurrentChange]
+        let result = try await runRetrying()
+        XCTAssertEqual(result.imported, 1, "the book restored before the conflict is counted once")
+        XCTAssertEqual(log.count("web.restore"), 1)
+        XCTAssertEqual(log.count("remote.fetch"), 2, "the manifest is read again before retrying")
+        XCTAssertEqual(remote.puts.count, 2)
+        XCTAssertEqual(Set(remote.manifest?.webBooks.map(\.record.id) ?? []), ["local", "r"])
+    }
+
+    func testSyncRetryKeepsLocalCopiesUntilAManifestWriteSucceeds() async throws {
+        addLocal(webBook("a", at: 10), text: "a")
+        remoteManifest { $0.deletedBooks = ["web:a": date(50)] }
+        remote.putErrors = [.concurrentChange]
+        let result = try await runRetrying(FakeCloud())
+        XCTAssertEqual(result.removedLocal, 1)
+        XCTAssertEqual(log.count("web.remove"), 1, "deletion is applied once, after the successful write")
+    }
+
+    func testSyncRetryGivesUpAfterRepeatedConflicts() async {
+        remote.putError = .concurrentChange
+        do {
+            _ = try await runRetrying(FakeCloud())
+            XCTFail("expected failure")
+        } catch WebDAVSyncError.concurrentChange {
+        } catch { XCTFail("unexpected \(error)") }
+        XCTAssertEqual(remote.puts.count, 3)
+    }
+
+    func testOtherErrorsAreNotRetried() async {
+        remote.putError = .unexpectedResponse(500)
+        do {
+            _ = try await runRetrying(FakeCloud())
+            XCTFail("expected failure")
+        } catch {}
+        XCTAssertEqual(remote.puts.count, 1)
+    }
+
+    /// 写清单的操作先到先执行，互不交错。
+    func testManifestWriteGateSerializesInArrivalOrder() async {
+        let gate = WebDAVManifestWriteGate()
+        var order: [String] = []
+        var release: CheckedContinuation<Void, Never>?
+        let first = Task { @MainActor in
+            await gate.run {
+                order.append("sync.start")
+                await withCheckedContinuation { release = $0 }
+                order.append("sync.end")
+            }
+        }
+        while release == nil { await Task.yield() }
+        XCTAssertTrue(gate.isBusy)
+        let second = Task { @MainActor in await gate.run { order.append("delete") } }
+        let third = Task { @MainActor in await gate.run { order.append("sync2") } }
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(order, ["sync.start"], "later operations wait for the running one")
+        release?.resume()
+        await first.value; await second.value; await third.value
+        XCTAssertEqual(order, ["sync.start", "sync.end", "delete", "sync2"])
+        XCTAssertFalse(gate.isBusy)
     }
 
     func testDeleterRetriesAfterConcurrentChange() async throws {
