@@ -14,6 +14,7 @@ source = (root / 'iOSApp/Features/Library/LibraryStore.swift').read_text()
 display = source[source.index('    func displayBooks'):source.index('    func status(for')]
 identity = source[source.index('    nonisolated private static func identity'):source.index('    private func hash(for')]
 refresh = source[source.index('    func refreshHashes'):source.index('    // MARK: 排序设置')]
+forget = source[source.index('    func forget(keys:'):source.index('    /// WebDAV 合并后的系列状态。')]
 fixture = r'''
 import Foundation
 struct Novel { var id: String; var title: String; var author: String; var summary: String; var genres: [String]; var chapters: [String]; var accent: Accent }
@@ -74,8 +75,11 @@ enum FileContentHash {
  var hashByBook: [String: String] = [:] { didSet { publications += 1 } }
  let defaults = UserDefaults(suiteName: "NoveliaLibraryRegression-" + UUID().uuidString)!
  enum Key { static let hashes = "hashes" }
+ var lastOpened: [String: Date] = [:]; var lastOpenedWrites = 0
+ func save(_ state: LibrarySeriesState) { series = state }
+ func persistLastOpened() { lastOpenedWrites += 1 }
 '''
-fixture += display + identity + refresh + '\n}\n'
+fixture += display + identity + refresh + forget + '\n}\n'
 fixture += (root / 'Sources/NoveliaIOSCore/Features/Library/LibraryOrganizer.swift').read_text()
 fixture += r'''
 @main struct Checks {
@@ -153,7 +157,19 @@ fixture += r'''
   precondition(cancelledStore.publications == 1, "cancelled batch cannot overwrite latest library")
   await cancelledStore.refreshHashes(for: [])
   precondition(cancelledStore.hashByBook.isEmpty && cancelledStore.hashes.isEmpty, "empty library clears stale hashes")
-  print("Library EPUB duplicates, display grouping, move rollback and background hash/cache/cancellation regressions passed")
+  let forgetting = HashStore()
+  let kept = forgetting.series.createSeries(named: "Kept")
+  forgetting.series.assign(book: "wenku:gone", to: kept.id)
+  forgetting.series.assign(book: "wenku:stay", to: kept.id)
+  forgetting.lastOpened = ["wenku:gone": Date(), "wenku:stay": Date()]
+  forgetting.forget(keys: ["wenku:gone", "wenku:never-seen"])
+  precondition(forgetting.series.seriesID(forBook: "wenku:gone") == nil && forgetting.series.seriesID(forBook: "wenku:stay") == kept.id)
+  precondition(forgetting.series.memberships["wenku:gone"] != nil, "removal is recorded so sync propagates it")
+  precondition(forgetting.series.memberships["wenku:never-seen"] == nil, "unknown books add no records")
+  precondition(Set(forgetting.lastOpened.keys) == ["wenku:stay"] && forgetting.lastOpenedWrites == 1)
+  forgetting.forget(keys: ["wenku:gone"])
+  precondition(forgetting.lastOpenedWrites == 1, "nothing to forget writes nothing")
+  print("Library EPUB duplicates, display grouping, move rollback, forget-after-delete and background hash/cache/cancellation regressions passed")
  }
 }
 '''

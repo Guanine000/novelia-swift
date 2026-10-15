@@ -810,6 +810,7 @@ struct LibraryBookActionDialogs: ViewModifier {
     }
 
     /// 先删除本机文件，再按需删除云端副本；云端失败时本机删除不回滚，书会显示为云端书籍，可在其菜单中重试。
+    /// 云端也删除成功后，书不会再出现，才清理系列归属与最近打开时间。
     private func delete(_ books: [LibraryBook], fromCloud: Bool) {
         actions.pendingDelete = []
         actions.endSelection()
@@ -822,7 +823,9 @@ struct LibraryBookActionDialogs: ViewModifier {
         guard fromCloud else { return }
         Task {
             do {
-                try await syncStore.deleteFromCloud(keys: Set(books.map(\.key)))
+                let keys = Set(books.map(\.key))
+                try await syncStore.deleteFromCloud(keys: keys)
+                state.forget(keys: keys)
             } catch {
                 actions.actionError = "云端删除失败：\(error.localizedDescription)。这些书会显示为未下载的云端书籍，可在其菜单中再次“从云端删除”。"
             }
