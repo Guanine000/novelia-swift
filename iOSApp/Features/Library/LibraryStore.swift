@@ -250,6 +250,10 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
             hashes = result.cache
             defaults.set(hashes, forKey: Key.hashes)
         }
+        // 只有每本本机书都算出哈希时才清理，避免把暂时读不到的书当作已删除。
+        if result.byBook.count == targets.count {
+            pruneOrphanedState(books: books, keepingHashes: Set(result.byBook.values).union(books.compactMap(\.cloudFileHash)))
+        }
     }
 
     // MARK: 排序设置（仅保存在本机）
@@ -337,6 +341,32 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
     /// WebDAV 合并后的系列状态。
     func applySynced(_ state: LibrarySeriesState) {
         save(LibrarySeriesState.merged(series, state))
+    }
+
+    // MARK: 已删除书籍的残留
+
+    /// 共享阅读位置保留期：书删除后重新导入同一本仍可续读，超过此时间未更新才清理。
+    static let orphanedPositionAge: TimeInterval = 180 * 24 * 60 * 60
+    private var lastPrunedHashes: Set<String>?
+
+    /// 书已不在书库（本机与云端）时清理：最近打开时间立即清理；Readium 精确位置立即清理
+    /// （共享位置仍可近似恢复）；共享阅读位置超过保留期未更新才清理。书库为空时不清理。
+    private func pruneOrphanedState(books: [LibraryBook], keepingHashes: Set<String>) {
+        guard !books.isEmpty, keepingHashes != lastPrunedHashes else { return }
+        lastPrunedHashes = keepingHashes
+        let keys = Set(books.map(\.key))
+        let opened = lastOpened.filter { keys.contains($0.key) }
+        if opened.count != lastOpened.count {
+            lastOpened = opened
+            persistLastOpened()
+        }
+        for key in ReaderLocalCleanup.orphanedReadiumKeys(defaults.dictionaryRepresentation().keys, keepingHashes: keepingHashes) {
+            defaults.removeObject(forKey: key)
+        }
+        if readingPositions.pruneFilePositions(keepingHashes: keepingHashes,
+                                               olderThan: Date().addingTimeInterval(-Self.orphanedPositionAge)) > 0 {
+            reloadPositions()
+        }
     }
 
     private func save(_ state: LibrarySeriesState) {

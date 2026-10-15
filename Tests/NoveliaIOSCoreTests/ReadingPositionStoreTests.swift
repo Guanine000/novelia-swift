@@ -95,6 +95,27 @@ final class ReadingPositionStoreTests: XCTestCase {
         XCTAssertEqual(positions.all()["web:novel"]?.updatedAt, Date(timeIntervalSince1970: 10))
     }
 
+    /// 只清理书已不在书库、且超过保留期未更新的文件位置；在线小说位置一律保留。
+    func testPruneKeepsLibraryBooksRecentAndWebPositions() {
+        let store = ReadingPositionStore(defaults: preferences())
+        let old = Date(timeIntervalSince1970: 100), recent = Date(timeIntervalSince1970: 10_000)
+        func position(_ date: Date) -> SyncedReadingPosition { SyncedReadingPosition(chapterIndex: 1, fraction: nil, updatedAt: date) }
+        store.merge(["epub:kept": position(old), "txt:gone": position(old), "epub:gone": position(old),
+                     "txt:recent": position(recent), "web:novel": position(old)], webBooks: [])
+        let removed = store.pruneFilePositions(keepingHashes: ["kept"], olderThan: Date(timeIntervalSince1970: 5_000))
+        XCTAssertEqual(removed, 2)
+        XCTAssertEqual(Set(store.all().keys), ["epub:kept", "txt:recent", "web:novel"])
+    }
+
+    func testOrphanedReadiumKeysMatchOnlyBooksOutsideTheLibrary() {
+        let keys = ["readium.locator.v1.gone", "readium.locatorTime.v1.gone", "readium.locator.v1.kept",
+                    "readium.text.locator.v1.txt|gone|rules", "readium.text.time.v1.txt|gone|rules",
+                    "readium.text.locator.v1.txt|kept|rules", "readium.text.locator.v1.unexpected", "readerFontSize"]
+        XCTAssertEqual(Set(ReaderLocalCleanup.orphanedReadiumKeys(keys, keepingHashes: ["kept"])),
+                       ["readium.locator.v1.gone", "readium.locatorTime.v1.gone",
+                        "readium.text.locator.v1.txt|gone|rules", "readium.text.time.v1.txt|gone|rules"])
+    }
+
     func testEqualTimestampRetainsExistingMergeRule() {
         let store = ReadingPositionStore(defaults: preferences())
         let date = Date(timeIntervalSince1970: 20)

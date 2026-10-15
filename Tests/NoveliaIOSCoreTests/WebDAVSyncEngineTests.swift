@@ -38,6 +38,8 @@ private final class FakeRemote: WebDAVRemote {
     var putError: WebDAVSyncError?
     /// 依次只失败一次的写入错误。
     var putErrors: [WebDAVSyncError] = []
+    /// 模拟不返回 ETag 的服务器。
+    var omitsETag = false
     var onDownload: (() -> Void)?
     /// 交给引擎的临时文件；引擎负责删除。
     var handedOut: [URL] = []
@@ -59,7 +61,7 @@ private final class FakeRemote: WebDAVRemote {
     func fetchManifest() async throws -> (WebDAVManifest, String?, Bool) {
         log.events.append("remote.fetch")
         guard let manifest else { return (WebDAVManifest(), nil, false) }
-        return (try roundTrip(manifest), "\"v\(puts.count)\"", true)
+        return (try roundTrip(manifest), omitsETag ? nil : "\"v\(puts.count)\"", true)
     }
 
     func putManifest(_ manifest: WebDAVManifest, etag: String?, existed: Bool) async throws {
@@ -430,7 +432,7 @@ final class WebDAVSyncEngineTests: XCTestCase {
         XCTAssertEqual(remote.puts.last?.etag, "\"v0\"", "manifest write is conditional")
     }
 
-    private func runRetrying(_ cloud: FakeCloud? = nil) async throws -> (imported: Int, removedLocal: Int) {
+    private func runRetrying(_ cloud: FakeCloud? = nil) async throws -> (imported: Int, removedLocal: Int, lacksETag: Bool) {
         try await WebDAVSyncEngine.runRetryingConcurrentChange {
             WebDAVSyncEngine(remote: remote, local: local, web: web, wenku: wenku, options: booksAndTags,
                              defaults: defaults, cloud: cloud) { [weak self] in self?.progress.append($0) }
@@ -476,6 +478,16 @@ final class WebDAVSyncEngineTests: XCTestCase {
             XCTFail("expected failure")
         } catch {}
         XCTAssertEqual(remote.puts.count, 1)
+    }
+
+    func testReportsServersWithoutManifestETag() async throws {
+        let first = try await runRetrying(FakeCloud())
+        XCTAssertFalse(first.lacksETag, "first manifest write has nothing to compare")
+        let withETag = try await runRetrying(FakeCloud())
+        XCTAssertFalse(withETag.lacksETag)
+        remote.omitsETag = true
+        let withoutETag = try await runRetrying(FakeCloud())
+        XCTAssertTrue(withoutETag.lacksETag)
     }
 
     /// 写清单的操作先到先执行，互不交错。

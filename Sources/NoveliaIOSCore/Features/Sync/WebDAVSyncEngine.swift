@@ -80,6 +80,8 @@ final class WebDAVSyncEngine {
     private(set) var removedLocalCount = 0
     /// 已恢复到本机的新书数（下载全部文件模式）；清单写入失败也不回滚，重试时据此累计提示数量。
     private(set) var restoredBeforeFailure = 0
+    /// 服务器已有清单却没有返回 ETag：写清单无法带条件，多设备同时同步时后写入的会覆盖先写入的。
+    private(set) var manifestLacksETag = false
 
     init(remote: any WebDAVRemote, local: any WebDAVSyncLocalState,
          web: any SyncBookLibrary<DownloadedWebNovel>, wenku: any SyncBookLibrary<LocalWenkuEPUB>,
@@ -113,6 +115,7 @@ final class WebDAVSyncEngine {
         progress.stage = "读取远端书目"
         progress.detail = "正在读取远端书目…"
         let (fetchedManifest, etag, existed) = try await remote.fetchManifest()
+        manifestLacksETag = existed && etag == nil
         var manifest = fetchedManifest
         knownBlobs = WebDAVSyncPlanner.referencedBlobs(in: fetchedManifest)
         var imported = 0
@@ -383,14 +386,14 @@ extension WebDAVSyncEngine {
     /// 重跑是安全的：清单写入前只向本机追加/替换较新的书并按时间合并进度，重新规划不会重复导入；
     /// 删除本机副本、云端书目、系列、标签、背景与字体都只在清单写入成功后套用。
     /// 返回各次新恢复书数之和（失败那次已恢复到本机的书不会在下一次再计数）与成功那次删除的本机书数。
-    static func runRetryingConcurrentChange(maxAttempts: Int = 3,
-                                            make: () -> WebDAVSyncEngine) async throws -> (imported: Int, removedLocal: Int) {
+    static func runRetryingConcurrentChange(maxAttempts: Int = 3, make: () -> WebDAVSyncEngine)
+        async throws -> (imported: Int, removedLocal: Int, lacksETag: Bool) {
         var imported = 0
         for attempt in 1...max(1, maxAttempts) {
             let engine = make()
             do {
                 imported += try await engine.run()
-                return (imported, engine.removedLocalCount)
+                return (imported, engine.removedLocalCount, engine.manifestLacksETag)
             } catch WebDAVSyncError.concurrentChange where attempt < maxAttempts {
                 imported += engine.restoredBeforeFailure
                 continue
