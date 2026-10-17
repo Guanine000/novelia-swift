@@ -43,6 +43,7 @@ private final class FakeRemote: WebDAVRemote {
     /// 为 false 时模拟不支持列目录的服务器。
     var listsBlobs = true
     var onDownload: (() -> Void)?
+    var onPut: (() -> Void)?
     /// 交给引擎的临时文件；引擎负责删除。
     var handedOut: [URL] = []
 
@@ -71,6 +72,7 @@ private final class FakeRemote: WebDAVRemote {
         puts.append(Put(etag: etag, existed: existed))
         if let putError { throw putError }
         if !putErrors.isEmpty { throw putErrors.removeFirst() }
+        onPut?()
         self.manifest = try roundTrip(manifest)
     }
 
@@ -107,6 +109,9 @@ private final class FakeLibrary<Record: SyncableBook>: SyncBookLibrary {
     private let log: EventLog
     private let name: String
     var books: [Record] = []
+    var prepareError: Error?
+    var removalError: Error?
+    func prepareForSync() async throws { if let prepareError { throw prepareError } }
     var files: [Record.ID: [String: URL]] = [:]
     /// 恢复或替换时收到的文件内容（引擎随后会删除临时文件）。
     var received: [Record.ID: [String: Data]] = [:]
@@ -130,7 +135,8 @@ private final class FakeLibrary<Record: SyncableBook>: SyncBookLibrary {
         }
     }
 
-    func removeFromSync(_ book: Record) {
+    func removeFromSync(_ book: Record) async throws {
+        if let removalError { throw removalError }
         log.events.append("\(name).remove")
         books.removeAll { $0.id == book.id }
     }
@@ -517,6 +523,43 @@ final class WebDAVSyncEngineTests: XCTestCase {
         XCTAssertEqual(log.count("remote.fetch"), 2, "the manifest is read again before retrying")
         XCTAssertEqual(remote.puts.count, 2)
         XCTAssertEqual(Set(remote.manifest?.webBooks.map(\.record.id) ?? []), ["local", "r"])
+    }
+
+    func testUnreadableLocalIndexStopsBeforeAnyRemoteAccess() async {
+        web.prepareError = CocoaError(.fileReadCorruptFile)
+        do { _ = try await run(); XCTFail("unloaded library cannot be treated as empty") } catch {}
+        XCTAssertTrue(log.events.isEmpty)
+    }
+
+    func testLocalDeletionFailureAfterRemoteCommitKeepsBookAndCanRetry() async throws {
+        let book = webBook("a", at: 10)
+        addLocal(book, text: "a")
+        remoteManifest { $0.deletedBooks = ["web:a": date(50)] }
+        web.removalError = CocoaError(.fileWriteOutOfSpace)
+        do { _ = try await run(); XCTFail("local deletion failure cannot report success") } catch {}
+        XCTAssertEqual(web.books, [book])
+        XCTAssertEqual(remote.manifest?.deletedBooks?["web:a"], date(50))
+        web.removalError = nil
+        _ = try await run()
+        XCTAssertTrue(web.books.isEmpty)
+    }
+
+    func testReadingChangeWhileManifestIsBeingWrittenRemainsPending() async throws {
+        let book = webBook("a", at: 10)
+        addLocal(book, text: "a")
+        local.readingPositions = ["web:a": SyncedReadingPosition(chapterIndex: 1, fraction: nil, updatedAt: date(10))]
+        let before = WebDAVAutoSyncPolicy.fingerprint(local: local, web: web, wenku: wenku, options: booksAndTags)
+        remote.onPut = { [self] in
+            local.readingPositions["web:a"] = SyncedReadingPosition(chapterIndex: 5, fraction: nil, updatedAt: date(100))
+        }
+        _ = try await run()
+        XCTAssertEqual(remote.manifest?.positions["web:a"]?.chapterIndex, 1)
+        XCTAssertEqual(local.readingPositions["web:a"]?.chapterIndex, 5)
+        let after = WebDAVAutoSyncPolicy.fingerprint(local: local, web: web, wenku: wenku, options: booksAndTags)
+        XCTAssertNil(WebDAVAutoSyncPolicy.acknowledgedFingerprint(before: before, after: after))
+        remote.onPut = nil
+        _ = try await run()
+        XCTAssertEqual(remote.manifest?.positions["web:a"]?.chapterIndex, 5)
     }
 
     func testSyncRetryKeepsLocalCopiesUntilAManifestWriteSucceeds() async throws {

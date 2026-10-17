@@ -61,6 +61,7 @@ final class LibraryImportModel: ObservableObject {
     }
 
     private func importFile(_ pickedURL: URL) async throws {
+        try await library.loadIfNeeded()
         let extensionName = pickedURL.pathExtension.lowercased()
         let start = ContinuousClock.now
         let trace = DiagnosticContext.newTraceID()
@@ -175,19 +176,43 @@ struct LibraryImportProgressOverlay: View {
 enum LibraryMover {
     static func moveToWenku(_ book: DownloadedWebNovel, web: WebNovelDownloadStore,
                             wenku: WenkuLocalLibraryStore, state: LibraryStateStore) async throws {
+        try await web.loadIfNeeded()
+        guard web.books.contains(book) else { throw LibraryMoveError.sourceChanged }
         let created = try await wenku.importForMove(from: web.fileURL(for: book), sourceBook: book)
-        do { try web.removeForMove(book) }
-        catch { wenku.remove(created); throw error }
+        do { try await web.removeForMove(book) }
+        catch {
+            let failure = error
+            do { try await Task { try await wenku.removeForMove(created) }.value }
+            catch { throw LibraryMoveError.rollbackFailed }
+            throw failure
+        }
         state.transfer(from: "web:\(book.id)", to: "wenku:\(created.id.uuidString)")
     }
 
     static func moveToNetwork(_ book: LocalWenkuEPUB, web: WebNovelDownloadStore,
-                              wenku: WenkuLocalLibraryStore, state: LibraryStateStore) throws {
-        let created = try web.importForMove(from: wenku.fileURL(for: book), book: book)
-        do { try wenku.removeForMove(book) }
-        catch { web.remove(created); throw error }
+                              wenku: WenkuLocalLibraryStore, state: LibraryStateStore) async throws {
+        try await wenku.loadIfNeeded()
+        guard wenku.books.contains(book) else { throw LibraryMoveError.sourceChanged }
+        let created = try await web.importForMove(from: wenku.fileURL(for: book), book: book)
+        do { try await wenku.removeForMove(book) }
+        catch {
+            let failure = error
+            do { try await Task { try await web.removeForMove(created) }.value }
+            catch { throw LibraryMoveError.rollbackFailed }
+            throw failure
+        }
         state.transfer(from: "wenku:\(book.id.uuidString)", to: "web:\(created.id)")
     }
 }
 
 private let epubImportLog = Logger(subsystem: "cc.novelia.ios.port", category: "epub")
+
+private enum LibraryMoveError: LocalizedError {
+    case rollbackFailed, sourceChanged
+    var errorDescription: String? {
+        switch self {
+        case .rollbackFailed: "原书已保留，但目标书库的副本清理失败。请检查两个书库后重试，阅读进度未转移。"
+        case .sourceChanged: "书籍已被修改或移除，请刷新书库后重试。"
+        }
+    }
+}

@@ -19,6 +19,7 @@
 - [数据兼容](#数据兼容)
 - [文件注册与构建配置](#文件注册与构建配置)
 - [构建与验证](#构建与验证)
+- [性能基线](#性能基线)
 - [架构演进](#架构演进)
 - [文档维护](#文档维护)
 - [交付前检查](#交付前检查)
@@ -269,7 +270,9 @@ Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒�
 
 同步入库接口 `restoreFromSync`、`replaceFromSync` 与 `applySyncedMetadata` 为 async throws；书籍与封面复制交给 `LocalLibraryFileCopier` 的独立文件队列（与索引 writer 定义在同一源文件），主执行域不等待大文件复制。先复制到同目录暂存文件，成功后移动提交，不覆盖已有目标，失败清理暂存文件。复制完成后重新核对同一书目的状态，避免等待期间的编辑／删除被覆盖；失败只回滚本次书目，不恢复整个旧数组。
 
-索引队列与文件队列分开，避免同步索引提交被长复制占住。小型同步索引提交仍保留同步错误处理和回滚约定，尚非所有 I/O 都已异步化。
+`LocalLibraryRepository` 负责串行读取、修改快照、后台写盘和发布结果。两个书库 Store 的初始化不读取索引；Root 集成层先异步读取两个库，书库显示加载或可重试错误。只有两个 Store 的 `isReady` 都为真，聚合书库才向哈希刷新和孤立状态清理提供书目；`refreshHashes` 也显式检查 `librariesReady`，未就绪时保留已有哈希缓存与阅读状态；读取中或单库读取失败时不能拿另一库的部分列表清理阅读位置、最近打开时间或 Readium Locator。索引解码、重复记录整理及文件存在性检查在后台执行，损坏索引抛错并保留原文件，不能当成空书库继续覆盖。所有书库修改经 Repository；写入失败不发布候选快照，排队操作读取前一笔成功提交的最新数据。写盘开始前检查取消；已成功写盘时，即使随后收到取消也必须发布同一快照。
+
+索引与文件队列分开。文件清理在索引提交后异步进行，清理失败只可能留下不可见孤立文件。跨书库移动先加载并核对源记录、提交目标库，再删除源记录；源删除失败时通过独立的未取消任务回滚目标，回滚前也核对创建的目标记录，目标在等待期间被编辑则保留其修改；回滚失败要明确提示原书与目标副本均保留。系列和最近打开时间只在两边提交成功后转移。编辑信息为异步操作，保存期间禁止重复保存和手动关闭；原封面读取、相册图片缩略图解码及 JPEG 编码放在后台。
 
 索引采用原子写入；新增持久化行为不能让失败操作留下可见但不可打开的记录。文件来源分类、记录 ID、内容哈希和路径具有不同用途，不要混为同一身份。
 
@@ -307,11 +310,13 @@ WebDAV 是独立传输能力，不使用小说 API 服务集合。`WebDAVSyncSto
 | `WebDAVAutoSyncPolicy.swift` | 自动同步的触发判断、失败退避与本机状态指纹（纯计算） |
 | `App/Integrations/SyncLocalStateAdapter.swift` | 连接实际进度、书签、系列、背景、标签与字体状态；`WebDAVAutoSyncTriggers` 转交前后台与书库／系列／书签／标签变化 |
 
-同步通过 `SyncBookLibrary` 读写两类书籍，通过 `WebDAVSyncLocalState` 访问其他本地状态。远端资源使用内容哈希引用，验证资源名和哈希后才导入。清单写入使用对应并发条件；`WebDAVSyncStore` 经 `WebDAVSyncEngine.runRetryingConcurrentChange` 在 `concurrentChange`（412）时重新读取清单、以新引擎完整重跑（最多三次），重跑安全依赖“清单写入前只追加较新书籍与按时间合并、删除与设置在写入成功后套用”，修改引擎时须保持这一顺序。手动同步传入 `verifiesBlobs`：引擎先用 `WebDAVRemote.listBlobs`（PROPFIND Depth 1）找出清单引用却不在服务器上的 blob，从已知集合中移除，使上传流程补传本机仍有的文件，并在 `WebDAVSyncRunResult` 报告补传与仍缺失的数量；列目录失败或不支持时不补传、不让同步失败。下载遇到 404 抛出 `missingBlob`，同步中缺失的封面跳过，按需下载时封面列为可选文件。成功列目录后，主文件缺失的云端书籍经 `SyncCloudCatalog.setMissingFileKeys` 记入 `CloudBookStore.missingFileKeys`（随本机缓存保存，只保留仍存在的记录），下载遇到缺失也会标记；书库据此显示“云端文件缺失”并提供从云端删除，书目不自动删除。内容同步与 `deleteFromCloud` 经同一 `WebDAVManifestWriteGate` 先到先执行，不交错读写清单；统计同步和按需下载不写清单，不经过它。阅读统计独立同步：每台设备只写 `statistics/<设备 ID>.json`（`ReadingDeviceStatisticsFile`），读取全部设备文件与旧版 `reading-statistics.json` 后按设备取最大值合并，因此不需要条件写入；不得把其他设备的时长写进本机文件，也不得再写旧版文件。设备 ID 用作文件名，须通过 `isValidDeviceID` 校验。设备 ID 由 `ReadingDeviceIdentity` 决定：以 Keychain（`ThisDeviceOnly`，经 `ReadingDeviceIDStoring` 注入）为准；偏好中有 ID 但未绑定 Keychain 视为旧版升级并沿用该 ID；偏好已绑定但 Keychain 没有，视为从备份复制，生成新 ID，并把复制来的本机记录与名称归还原设备。测试必须注入内存实现，不读写真实 Keychain。设备名称（`ReadingDeviceInfo`）随统计同步，本机名称只由本机修改。
+同步通过 `SyncBookLibrary` 读写两类书籍（包含异步 `prepareForSync` 与可抛错的 `removeFromSync`），通过 `WebDAVSyncLocalState` 访问其他本地状态。远端资源使用内容哈希引用，验证资源名和哈希后才导入。清单写入使用对应并发条件；`WebDAVSyncStore` 经 `WebDAVSyncEngine.runRetryingConcurrentChange` 在 `concurrentChange`（412）时重新读取清单、以新引擎完整重跑（最多三次），重跑安全依赖“清单写入前只追加较新书籍与按时间合并、删除与设置在写入成功后套用”，修改引擎时须保持这一顺序。手动同步传入 `verifiesBlobs`：引擎先用 `WebDAVRemote.listBlobs`（PROPFIND Depth 1）找出清单引用却不在服务器上的 blob，从已知集合中移除，使上传流程补传本机仍有的文件，并在 `WebDAVSyncRunResult` 报告补传与仍缺失的数量；列目录失败或不支持时不补传、不让同步失败。下载遇到 404 抛出 `missingBlob`，同步中缺失的封面跳过，按需下载时封面列为可选文件。成功列目录后，主文件缺失的云端书籍经 `SyncCloudCatalog.setMissingFileKeys` 记入 `CloudBookStore.missingFileKeys`（随本机缓存保存，只保留仍存在的记录），下载遇到缺失也会标记；书库据此显示“云端文件缺失”并提供从云端删除，书目不自动删除。内容同步与 `deleteFromCloud` 经同一 `WebDAVManifestWriteGate` 先到先执行，不交错读写清单；统计同步和按需下载不写清单，不经过它。阅读统计独立同步：每台设备只写 `statistics/<设备 ID>.json`（`ReadingDeviceStatisticsFile`），读取全部设备文件与旧版 `reading-statistics.json` 后按设备取最大值合并，因此不需要条件写入；不得把其他设备的时长写进本机文件，也不得再写旧版文件。设备 ID 用作文件名，须通过 `isValidDeviceID` 校验。设备 ID 由 `ReadingDeviceIdentity` 决定：以 Keychain（`ThisDeviceOnly`，经 `ReadingDeviceIDStoring` 注入）为准；偏好中有 ID 但未绑定 Keychain 视为旧版升级并沿用该 ID；偏好已绑定但 Keychain 没有，视为从备份复制，生成新 ID，并把复制来的本机记录与名称归还原设备。测试必须注入内存实现，不读写真实 Keychain。设备名称（`ReadingDeviceInfo`）随统计同步，本机名称只由本机修改。
 
 为适应有请求频率限制的服务器，同步尽量少发请求：`WebDAVFolderCache` 记录已确认的目录，自动同步跳过 `verifyConnection`/`prepareFolders` 的请求，手动同步先清空再完整检查，任何同步失败都清空；引擎在清单与读取时内容相同时不写入；`ReadingStatisticsSyncCache` 记录已合并的设备文件版本（ETag，或修改时间与大小）、本机文件上传哈希和旧文件检查时间，只在统计套用到本机后保存，手动同步不使用；`format` 与当前格式不符时丢弃设备版本，重新读取一次全部设备文件。缓存丢失只会多发请求，不能影响合并结果。
 
 用户可见的同步行为与合并规则见 [WebDAV 同步](docs/WEBDAV.md)。实现上必须保持以下行为，修改同步时针对相关失败点验证：
+
+- 同步先等本地书库读取完成，读取失败不得将默认空数组上传；Store 在等待读取前占用同步状态，避免加载期间重复启动同步。本地删除提交失败向上传播，后续同步可以重试。
 
 - 清单文件条目带可选 `size`；上传时写入，`fillMissingSizes` 只在本机同一版本且哈希一致时补齐旧条目，不产生网络请求。
 - 云端删除写入 `deletedBooks`（`WebDAVDeletedBooks`）：同步时不恢复、不上传删除时间及之前的版本，本机的这类副本在清单写入成功后经 `SyncBookLibrary.removeFromSync` 删除；更新版本清除记录。`WebDAVCloudBookDeleter` 以条件写入清单（并发冲突重试三次），成功后才 `deleteBlob` 删除不再被引用的文件。
@@ -398,7 +403,7 @@ Readium 与 Yuedu 是 Reader 功能内部的引擎选择。两个模型使用 Ap
 | 文档、路径说明 | 链接、路径与现有实现一致；`git diff --check` |
 | API 协议、工厂、映射 | `APIServiceTests`、`ArchitectureReplacementTests`、`test_service_consumers.py`；相关 App 编译 |
 | 认证配置、桥接或账号 | `test_auth_login_bridge.py`、`test_unified_login.py`、`test_auth_refresh_queue.py` 及相关 API/实际账号联调 |
-| 进度、统计、书库或同步 | 对应 Core 测试、`test_library_store.py`、`test_reading_statistics_store.py`；旧数据与合并回归 |
+| 进度、统计、书库或同步 | 对应 Core 测试、`test_library_transactions.py`、`test_library_store.py`、`test_reading_statistics_store.py`；旧数据与合并回归 |
 | 阅读器或页面调用链 | 对应 EPUB/Core 测试与相关 UI 回归；必要的真机验收 |
 | 架构边界、验证组装或发布配置 | `check_architecture_boundaries.py`、独立 Debug App UI 与生产 Release 编译、`check_architecture_release.py` |
 | 开源依赖、许可或分发 | `docs/BUILD.md` 发布流程、许可与隐私校验、相关构建回归 |
@@ -412,14 +417,15 @@ python3 scripts/check_architecture_boundaries.py
 git diff --check
 ```
 
-其他离线回归脚本也通过 `python3 scripts/<脚本名>.py` 执行；先读取脚本参数与前置条件。`scripts/build_local_release.py` 发布前固定运行架构依赖检查和以下六项离线回归，另以 `test_local_release.py` 检查打包流程：
+其他离线回归脚本也通过 `python3 scripts/<脚本名>.py` 执行；先读取脚本参数与前置条件。`scripts/build_local_release.py` 发布前固定运行架构依赖检查和以下七项离线回归，另以 `test_local_release.py` 检查打包流程：
 
 | 脚本 | 覆盖范围 |
 |---|---|
 | `test_forum_filters.py` | 论坛 API 与列表状态（合成响应） |
 | `test_unified_login.py` | 统一登录流程（伪认证存储） |
 | `test_auth_login_bridge.py` | 注入的登录桥接脚本，不连接认证服务器 |
-| `test_library_store.py` | 书库文件移动与哈希（隔离文件） |
+| `test_library_store.py` | 书库展示分组、清理与后台哈希（隔离文件） |
+| `test_library_transactions.py` | 真实书库 Store 的旧格式、损坏索引、失败提交、移动回滚、取消与并发文件操作（平台服务为本地适配） |
 | `test_reading_statistics_store.py` | 阅读统计存储（隔离偏好） |
 | `test_service_consumers.py` | 功能 Store 与章节缓存通过注入服务工作 |
 
@@ -463,6 +469,10 @@ python3 scripts/check_architecture_release.py '<Release Novelia.app 内的 Novel
 ```
 
 不得把合成后台作为生产失败时的数据回退。网络探针只核对 URLSession 外部请求，允许 Readium 本地服务；不要把计数为 0 解释为所有 WebKit 外部请求均已审计。模拟器、合成服务、实际服务器、真机是不同的证据范围，交付时分别说明。外部 EPUB 扫描缺少 `SCAN_EPUB` 的跳过也要说明。
+
+## 性能基线
+
+性能测量、合成样本、主机微基准／模拟器／实体设备的证据区别和故障验收流程统一见 [性能基线与故障验收](docs/PERFORMANCE.md)。测量时记录源码身份与环境，避免在编译期间采集性能成绩。物理设备或真实服务器未覆盖时保持待验收状态。
 
 ## 架构演进
 

@@ -11,22 +11,49 @@ final class WenkuLocalLibraryStore: ObservableObject {
     private let fileManager: FileManager
     private let directory: URL
     private let indexURL: URL
-    private let indexWriter = LocalLibraryIndexWriter()
-    private let fileCopier = LocalLibraryFileCopier()
+    private let repository: LocalLibraryRepository<LocalWenkuEPUB>
+    private var hasLoaded = false
+    var isReady: Bool { hasLoaded }
+    @Published private(set) var isLoading = true
+    @Published private(set) var storageError: String?
+    private let fileCopier: LocalLibraryFileCopier
     private var isRefreshingMetadata = false
+    private let importGate = SerialAsyncGate()
 
-    init(fileManager: FileManager = .default) {
+    init(fileManager: FileManager = .default, directory: URL? = nil,
+         indexWriter: LocalLibraryIndexWriter = LocalLibraryIndexWriter(),
+         fileCopier: LocalLibraryFileCopier = LocalLibraryFileCopier()) {
         self.fileManager = fileManager
-        let applicationSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        directory = applicationSupport.appendingPathComponent("WenkuEPUB", isDirectory: true)
+        self.fileCopier = fileCopier
+        let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let directory = directory ?? support.appendingPathComponent("WenkuEPUB", isDirectory: true)
+        self.directory = directory
         indexURL = directory.appendingPathComponent("library.json")
-        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        if let data = try? Data(contentsOf: indexURL),
-           let saved = try? JSONDecoder().decode([LocalWenkuEPUB].self, from: data) {
-            books = LibraryOrganizer.uniqueRecords(
-                saved.filter { fileManager.fileExists(atPath: directory.appendingPathComponent($0.filename).path) },
+        repository = LocalLibraryRepository(url: indexURL, writer: indexWriter) { saved in
+            LibraryOrganizer.uniqueRecords(
+                saved.filter { FileManager.default.fileExists(atPath: directory.appendingPathComponent($0.filename).path) },
                 id: { $0.id }, date: { $0.addedAt })
         }
+    }
+
+    func loadIfNeeded() async throws {
+        guard !hasLoaded else { return }
+        do {
+            try await repository.load { if books != $0 { books = $0 } }
+            storageError = nil
+            isLoading = false
+            hasLoaded = true
+        } catch {
+            isLoading = false
+            if !(error is CancellationError) { storageError = "书库索引读取失败，原文件已保留。请重试或导出日志排查。" }
+            throw error
+        }
+    }
+
+    @discardableResult
+    private func commit<Value>(_ change: (inout [LocalWenkuEPUB]) throws -> Value) async throws -> Value {
+        try await loadIfNeeded()
+        return try await repository.update(change) { if books != $0 { books = $0 } }
     }
 
     func fileURL(for book: LocalWenkuEPUB) -> URL {
@@ -42,70 +69,61 @@ final class WenkuLocalLibraryStore: ObservableObject {
     }
 
     func restoreFromSync(_ book: LocalWenkuEPUB, files: [String: URL]) async throws {
+        try await loadIfNeeded()
         guard !books.contains(where: { $0.id == book.id }) else { return }
         guard let source = files[book.filename] else { throw CocoaError(.fileReadNoSuchFile) }
         let destination = directory.appendingPathComponent("sync-\(UUID().uuidString).\(book.resolvedFileFormat.fileExtension)")
-        try await fileCopier.copy(from: source, to: destination)
-        var restored = LocalWenkuEPUB(id: book.id, title: book.title,
-                                  filename: destination.lastPathComponent, addedAt: book.addedAt,
-                                  lastLocatorJSON: book.lastLocatorJSON,
-                                  bookDescription: book.bookDescription, author: book.author,
-                                  coverFilename: nil, metadataLoaded: book.metadataLoaded,
-                                  fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel,
-                                  metadataUpdatedAt: book.metadataUpdatedAt)
-        var inserted = false
+        var copied: [URL] = []
+        var restored = book
+        // 文件名属于本机，不改变书籍 ID、版本时间及内容身份。
+        restored = LocalWenkuEPUB(id: book.id, title: book.title, filename: destination.lastPathComponent,
+            addedAt: book.addedAt, lastLocatorJSON: book.lastLocatorJSON, bookDescription: book.bookDescription,
+            author: book.author, coverFilename: nil, metadataLoaded: book.metadataLoaded,
+            fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel, metadataUpdatedAt: book.metadataUpdatedAt)
         do {
-            if let coverName = book.coverFilename, let coverSource = files[coverName] {
-                let coverDestination = directory.appendingPathComponent("cover-\(UUID().uuidString).jpg")
-                try await fileCopier.copy(from: coverSource, to: coverDestination)
-                restored.coverFilename = coverDestination.lastPathComponent
+            try await fileCopier.copy(from: source, to: destination)
+            copied.append(destination)
+            if let name = book.coverFilename, let source = files[name] {
+                let cover = directory.appendingPathComponent("cover-\(UUID().uuidString).jpg")
+                try await fileCopier.copy(from: source, to: cover)
+                copied.append(cover)
+                restored.coverFilename = cover.lastPathComponent
             }
-            try Task.checkCancellation()
-            guard !books.contains(where: { $0.id == book.id }) else {
-                throw CocoaError(.fileWriteFileExists)
+            try await commit { records in
+                guard !records.contains(where: { $0.id == book.id }) else { throw CocoaError(.fileWriteFileExists) }
+                records.insert(restored, at: 0)
             }
-            books.insert(restored, at: 0)
-            inserted = true
-            try persistIndex()
-        } catch {
-            if inserted { books.removeAll { $0.id == book.id } }
-            try? fileManager.removeItem(at: destination)
-            if let cover = restored.coverFilename { try? fileManager.removeItem(at: directory.appendingPathComponent(cover)) }
-            throw error
-        }
+        } catch { await fileCopier.remove(copied); throw error }
     }
 
     func replaceFromSync(_ book: LocalWenkuEPUB, files: [String: URL]) async throws {
-        guard let old = books.first(where: { $0.id == book.id }),
-              let source = files[book.filename] else { throw CocoaError(.fileReadNoSuchFile) }
-        let destination = directory.appendingPathComponent("sync-\(UUID().uuidString).\(book.resolvedFileFormat.fileExtension)")
-        try await fileCopier.copy(from: source, to: destination)
-        var replacement = LocalWenkuEPUB(id: book.id, title: book.title,
-            filename: destination.lastPathComponent, addedAt: book.addedAt,
-            lastLocatorJSON: book.lastLocatorJSON, bookDescription: book.bookDescription,
-            author: book.author, coverFilename: nil, metadataLoaded: book.metadataLoaded,
-            fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel,
-            metadataUpdatedAt: book.metadataUpdatedAt)
-        do {
-            if let coverName = book.coverFilename, let coverSource = files[coverName] {
-                let coverDestination = directory.appendingPathComponent("cover-\(UUID().uuidString).jpg")
-                try await fileCopier.copy(from: coverSource, to: coverDestination)
-                replacement.coverFilename = coverDestination.lastPathComponent
-            }
-            try Task.checkCancellation()
-            guard let index = books.firstIndex(where: { $0.id == book.id }), books[index] == old else {
-                throw CocoaError(.fileNoSuchFile)
-            }
-            books[index] = replacement
-            try persistIndex()
-            try? fileManager.removeItem(at: fileURL(for: old))
-            if let oldCover = coverURL(for: old) { try? fileManager.removeItem(at: oldCover) }
-        } catch {
-            if let index = books.firstIndex(where: { $0.id == book.id }), books[index] == replacement { books[index] = old }
-            try? fileManager.removeItem(at: destination)
-            if let cover = replacement.coverFilename { try? fileManager.removeItem(at: directory.appendingPathComponent(cover)) }
-            throw error
+        try await loadIfNeeded()
+        guard let old = books.first(where: { $0.id == book.id }), let source = files[book.filename] else {
+            throw CocoaError(.fileReadNoSuchFile)
         }
+        let destination = directory.appendingPathComponent("sync-\(UUID().uuidString).\(book.resolvedFileFormat.fileExtension)")
+        var copied: [URL] = []
+        var replacement = LocalWenkuEPUB(id: book.id, title: book.title, filename: destination.lastPathComponent,
+            addedAt: book.addedAt, lastLocatorJSON: book.lastLocatorJSON, bookDescription: book.bookDescription,
+            author: book.author, coverFilename: nil, metadataLoaded: book.metadataLoaded,
+            fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel, metadataUpdatedAt: book.metadataUpdatedAt)
+        do {
+            try await fileCopier.copy(from: source, to: destination)
+            copied.append(destination)
+            if let name = book.coverFilename, let source = files[name] {
+                let cover = directory.appendingPathComponent("cover-\(UUID().uuidString).jpg")
+                try await fileCopier.copy(from: source, to: cover)
+                copied.append(cover)
+                replacement.coverFilename = cover.lastPathComponent
+            }
+            try await commit { records in
+                guard let index = records.firstIndex(where: { $0.id == book.id }), records[index] == old else {
+                    throw CocoaError(.fileWriteUnknown)
+                }
+                records[index] = replacement
+            }
+        } catch { await fileCopier.remove(copied); throw error }
+        await fileCopier.remove([fileURL(for: old)] + [coverFileURL(for: old)].compactMap { $0 })
     }
 
     enum CoverChange {
@@ -116,10 +134,10 @@ final class WenkuLocalLibraryStore: ObservableObject {
     /// 修改书库显示的书名、作者、简介与封面。只改索引记录与封面文件，不改书籍文件，
     /// 内容哈希不变，阅读进度、书签与统计不受影响；修改时间随书籍同步给其他设备。
     func updateMetadata(id: UUID, title: String, author: String?, description: String?,
-                        cover: CoverChange, now: Date = Date()) throws {
-        guard let index = books.firstIndex(where: { $0.id == id }) else { throw CocoaError(.fileNoSuchFile) }
-        let previous = books
-        var book = books[index]
+                        cover: CoverChange, now: Date = Date()) async throws {
+        try await loadIfNeeded()
+        guard let old = books.first(where: { $0.id == id }) else { throw CocoaError(.fileNoSuchFile) }
+        var book = old
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !cleanTitle.isEmpty { book.title = String(cleanTitle.prefix(200)) }
         book.author = Self.cleaned(author)
@@ -127,60 +145,54 @@ final class WenkuLocalLibraryStore: ObservableObject {
         book.metadataLoaded = true
         book.metadataUpdatedAt = now
         var newCover: String?
-        switch cover {
-        case .keep: break
-        case .remove: book.coverFilename = nil
-        case .replace(let image):
-            newCover = try saveCover(image, id: UUID())
-            book.coverFilename = newCover
-        }
-        books[index] = book
-        do { try persistIndex() } catch {
-            books = previous
-            if let newCover { try? fileManager.removeItem(at: directory.appendingPathComponent(newCover)) }
+        do {
+            switch cover {
+            case .keep: break
+            case .remove: book.coverFilename = nil
+            case .replace(let image):
+                newCover = try await saveCoverInBackground(image, id: UUID())
+                book.coverFilename = newCover
+            }
+            try await commit { records in
+                guard let index = records.firstIndex(where: { $0.id == id }), records[index] == old else {
+                    throw CocoaError(.fileWriteUnknown)
+                }
+                records[index] = book
+            }
+        } catch {
+            await fileCopier.remove(newCover.map { [directory.appendingPathComponent($0)] } ?? [])
             throw error
         }
-        if book.coverFilename != previous[index].coverFilename, let old = previous[index].coverFilename {
-            try? fileManager.removeItem(at: directory.appendingPathComponent(old))
-        }
+        if book.coverFilename != old.coverFilename { await fileCopier.remove([coverFileURL(for: old)].compactMap { $0 }) }
     }
 
-    /// 其他设备修改过同一文件版本的信息（较新）：套用书名、作者、简介与封面。`cover` 为下载好的封面临时文件。
+    /// 同一书目在复制封面期间发生编辑／删除时不覆盖它，由调用方重试合并。
     func applySyncedMetadata(_ remote: LocalWenkuEPUB, cover: URL?) async throws {
-        guard let index = books.firstIndex(where: { $0.id == remote.id }) else { return }
-        let old = books[index]
+        try await loadIfNeeded()
+        guard let old = books.first(where: { $0.id == remote.id }) else { return }
         var book = old
         book.title = remote.title
         book.author = remote.author
         book.bookDescription = remote.bookDescription
         book.metadataLoaded = true
         book.metadataUpdatedAt = remote.metadataUpdatedAt
-        var newCover: String?
-        if remote.coverFilename == nil {
-            book.coverFilename = nil
-        } else if let cover {
-            let name = "cover-\(UUID().uuidString).jpg"
-            try await fileCopier.copy(from: cover, to: directory.appendingPathComponent(name))
-            newCover = name
-            book.coverFilename = name
-        }
-        if Task.isCancelled {
-            if let newCover { try? fileManager.removeItem(at: directory.appendingPathComponent(newCover)) }
-            throw CancellationError()
-        }
-        guard let current = books.firstIndex(where: { $0.id == remote.id }), books[current] == old else {
-            if let newCover { try? fileManager.removeItem(at: directory.appendingPathComponent(newCover)) }
-            throw CocoaError(.fileWriteUnknown)
-        }
-        books[current] = book
-        do { try persistIndex() } catch {
-            books[current] = old
-            if let newCover { try? fileManager.removeItem(at: directory.appendingPathComponent(newCover)) }
-            throw error
-        }
-        if book.coverFilename != old.coverFilename, let old = old.coverFilename {
-            try? fileManager.removeItem(at: directory.appendingPathComponent(old))
-        }
+        var copied: [URL] = []
+        do {
+            if remote.coverFilename == nil { book.coverFilename = nil }
+            else if let cover {
+                let target = directory.appendingPathComponent("cover-\(UUID().uuidString).jpg")
+                try await fileCopier.copy(from: cover, to: target)
+                copied.append(target)
+                book.coverFilename = target.lastPathComponent
+            }
+            try await commit { records in
+                guard let index = records.firstIndex(where: { $0.id == remote.id }), records[index] == old else {
+                    throw CocoaError(.fileWriteUnknown)
+                }
+                records[index] = book
+            }
+        } catch { await fileCopier.remove(copied); throw error }
+        if book.coverFilename != old.coverFilename { await fileCopier.remove([coverFileURL(for: old)].compactMap { $0 }) }
     }
 
     private static func cleaned(_ text: String?) -> String? {
@@ -217,6 +229,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
 
     func registerDownloadedFile(at fileURL: URL, title: String, source: TXTLoadSource = .download,
                                 trace: String = DiagnosticContext.newTraceID()) async throws {
+        try await loadIfNeeded()
         guard fileURL.deletingLastPathComponent().standardizedFileURL == directory.standardizedFileURL else {
             throw WenkuLocalLibraryError.invalidEPUB
         }
@@ -246,12 +259,9 @@ final class WenkuLocalLibraryStore: ObservableObject {
                 id: UUID(), title: title, filename: fileURL.lastPathComponent,
                 addedAt: Date(), metadataLoaded: true, fileFormat: .txt
             )
-            books.insert(book, at: 0)
-            do {
-                try persistIndex()
-            } catch {
-                books.removeAll { $0.id == book.id }
-                try? fileManager.removeItem(at: fileURL)
+            do { try await insertImported(book, hash: newHash) }
+            catch {
+                if !books.contains(where: { $0.filename == fileURL.lastPathComponent }) { await fileCopier.remove([fileURL]) }
                 throw error
             }
             return
@@ -276,7 +286,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
             throw LocalLibraryDuplicateError(existingTitle: existing.title, contentHash: newHash)
         }
         let id = UUID()
-        let coverFilename = try? saveCover(metadata.cover, id: id)
+        let coverFilename = try? await saveCoverInBackground(metadata.cover, id: id)
         let book = LocalWenkuEPUB(
             id: id,
             title: metadata.title ?? title,
@@ -288,80 +298,104 @@ final class WenkuLocalLibraryStore: ObservableObject {
             metadataLoaded: true,
             fileFormat: .epub
         )
-        books.insert(book, at: 0)
-        do {
-            try persistIndex()
-        } catch {
-            books.removeAll { $0.id == book.id }
-            try? fileManager.removeItem(at: fileURL)
+        do { try await insertImported(book, hash: newHash) }
+        catch {
+            if !books.contains(where: { $0.filename == fileURL.lastPathComponent }) { await fileCopier.remove([fileURL]) }
+            await fileCopier.remove(coverFilename.map { [directory.appendingPathComponent($0)] } ?? [])
             throw error
+        }
+    }
+
+    /// 重复内容检查与提交共用串行入口；检查读取的始终是前一笔成功提交的书库。
+    private func insertImported(_ book: LocalWenkuEPUB, hash: String) async throws {
+        try await importGate.run {
+            if let existing = await existingBook(withContentHash: hash, format: book.resolvedFileFormat,
+                                                  size: Self.fileSize(fileURL(for: book))) {
+                throw LocalLibraryDuplicateError(existingTitle: existing.title, contentHash: hash)
+            }
+            try await commit { $0.insert(book, at: 0) }
         }
     }
 
     func importForMove(from source: URL, sourceBook: DownloadedWebNovel) async throws -> LocalWenkuEPUB {
+        try await loadIfNeeded()
         let format: WebNovelFileFormat = source.pathExtension.lowercased() == "txt" ? .txt : .epub
-        let destination = uniqueDestination(for: Self.safeFilename(source.lastPathComponent, format: format))
-        try fileManager.copyItem(at: source, to: destination)
-        let metadata = format == .epub ? await Self.metadata(for: destination) : (title: nil, description: nil, author: nil, cover: nil)
-        let id = UUID()
-        let coverFilename = try? saveCover(metadata.cover, id: id)
-        // 沿用原下载时间，使书库“导入时间”排序不因移动而改变。
-        let book = LocalWenkuEPUB(id: id, title: metadata.title ?? sourceBook.novel.title,
-            filename: destination.lastPathComponent, addedAt: sourceBook.downloadedAt,
-            bookDescription: metadata.description, author: metadata.author ?? sourceBook.novel.author,
-            coverFilename: coverFilename, metadataLoaded: true, fileFormat: format,
-            sourceWebNovel: sourceBook)
-        books.insert(book, at: 0)
-        do { try persistIndex() } catch {
-            books.removeAll { $0.id == id }
-            try? fileManager.removeItem(at: destination)
-            if let coverFilename { try? fileManager.removeItem(at: directory.appendingPathComponent(coverFilename)) }
-            throw error
+        let destination = directory.appendingPathComponent("move-\(UUID().uuidString).\(format.fileExtension)")
+        var copied: [URL] = []
+        do {
+            try await fileCopier.copy(from: source, to: destination)
+            copied.append(destination)
+            let metadata = format == .epub ? await Self.metadata(for: destination) : (title: nil, description: nil, author: nil, cover: nil)
+            let id = UUID()
+            let coverFilename = try await saveCoverInBackground(metadata.cover, id: id)
+            if let coverFilename { copied.append(directory.appendingPathComponent(coverFilename)) }
+            let book = LocalWenkuEPUB(id: id, title: metadata.title ?? sourceBook.novel.title,
+                filename: destination.lastPathComponent, addedAt: sourceBook.downloadedAt,
+                bookDescription: metadata.description, author: metadata.author ?? sourceBook.novel.author,
+                coverFilename: coverFilename, metadataLoaded: true, fileFormat: format, sourceWebNovel: sourceBook)
+            try await commit { $0.insert(book, at: 0) }
+            return book
+        } catch { await fileCopier.remove(copied); throw error }
+    }
+
+    func removeForMove(_ book: LocalWenkuEPUB) async throws {
+        try await commit { records in
+            guard let current = records.first(where: { $0.id == book.id }), current == book else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+            records.removeAll { $0.id == book.id }
         }
-        return book
+        await fileCopier.remove([fileURL(for: book)] + [coverFileURL(for: book)].compactMap { $0 })
     }
 
-    func removeForMove(_ book: LocalWenkuEPUB) throws {
-        let previous = books
-        books.removeAll { $0.id == book.id }
-        do { try persistIndex() } catch { books = previous; throw error }
-        try? fileManager.removeItem(at: fileURL(for: book))
-        if let cover = coverURL(for: book) { try? fileManager.removeItem(at: cover) }
-    }
-
-    /// 删除书籍文件、封面与索引记录。阅读位置按内容哈希保存，不在此删除，重新导入同一本书时可接着读。
-    func remove(_ book: LocalWenkuEPUB) {
-        try? fileManager.removeItem(at: fileURL(for: book))
-        if let cover = coverFileURL(for: book) { try? fileManager.removeItem(at: cover) }
-        books.removeAll { $0.id == book.id }
-        try? persistIndex()
+    /// 先提交索引，再清理文件；写盘失败时书目和原文件保持可用。
+    func remove(_ book: LocalWenkuEPUB) async throws {
+        let removed = try await commit { records -> LocalWenkuEPUB? in
+            let current = records.first { $0.id == book.id }
+            records.removeAll { $0.id == book.id }
+            return current
+        }
+        if let removed { await fileCopier.remove([fileURL(for: removed)] + [coverFileURL(for: removed)].compactMap { $0 }) }
     }
 
     func refreshMissingMetadata() async {
         guard !isRefreshingMetadata else { return }
-        let pending = books.filter { $0.metadataLoaded != true }
-        // 打开元数据完整的书库时，不应编码或重写整个索引。
-        guard !pending.isEmpty else { return }
         isRefreshingMetadata = true
         defer { isRefreshingMetadata = false }
-        var changed = false
-        for book in pending {
-            if Task.isCancelled { break }
-            let metadata = await Self.metadata(for: fileURL(for: book))
-            if Task.isCancelled { break }
-            let coverFilename = try? await saveCoverInBackground(metadata.cover, id: book.id)
-            guard let currentIndex = books.firstIndex(where: { $0.id == book.id }),
-                  books[currentIndex].metadataLoaded != true else { continue }
-            var updated = books[currentIndex]
-            if let title = metadata.title { updated.title = title }
-            updated.bookDescription = metadata.description
-            updated.author = metadata.author
-            updated.coverFilename = coverFilename
-            updated.metadataLoaded = true
-            books[currentIndex] = updated
-            changed = true
+        do {
+            try await loadIfNeeded()
+            storageError = nil
+            let pending = books.filter { $0.metadataLoaded != true }
+            let originals = Dictionary(uniqueKeysWithValues: pending.map { ($0.id, $0) })
+            guard !pending.isEmpty else { return }
+            var patches: [LocalWenkuEPUB] = []
+            var newCovers: [URL] = []
+            do {
+                for old in pending {
+                    try Task.checkCancellation()
+                    let metadata = await Self.metadata(for: fileURL(for: old))
+                    let cover = try await saveCoverInBackground(metadata.cover, id: UUID())
+                    if let cover { newCovers.append(directory.appendingPathComponent(cover)) }
+                    var book = old
+                    if let title = metadata.title { book.title = title }
+                    book.bookDescription = metadata.description
+                    book.author = metadata.author
+                    book.coverFilename = cover
+                    book.metadataLoaded = true
+                    patches.append(book)
+                }
+                try await commit { records in
+                    for book in patches {
+                        guard let index = records.firstIndex(where: { $0.id == book.id }), records[index] == originals[book.id] else { continue }
+                        records[index] = book
+                    }
+                }
+                let used = Set(books.compactMap(\.coverFilename))
+                await fileCopier.remove(newCovers.filter { !used.contains($0.lastPathComponent) })
+            } catch { await fileCopier.remove(newCovers); throw error }
+        } catch {
+            if !(error is CancellationError) { storageError = "书籍信息保存失败，请重试。" }
         }
-        if changed { try? await persistIndexInBackground() }
     }
 
     private func uniqueDestination(for filename: String) -> URL {
@@ -375,14 +409,6 @@ final class WenkuLocalLibraryStore: ObservableObject {
         return candidate
     }
 
-    private func persistIndex() throws {
-        try indexWriter.writeSync(books, to: indexURL)
-    }
-
-    private func persistIndexInBackground() async throws {
-        try await indexWriter.write(books, to: indexURL)
-    }
-
     private func saveCoverInBackground(_ image: UIImage?, id: UUID) async throws -> String? {
         guard let image else { return nil }
         let filename = "cover-\(id.uuidString).jpg"
@@ -392,13 +418,6 @@ final class WenkuLocalLibraryStore: ObservableObject {
             try data.write(to: url, options: .atomic)
             return filename
         }.value
-    }
-
-    private func saveCover(_ image: UIImage?, id: UUID) throws -> String? {
-        guard let image, let data = image.jpegData(compressionQuality: 0.82) else { return nil }
-        let filename = "cover-\(id.uuidString).jpg"
-        try data.write(to: directory.appendingPathComponent(filename), options: .atomic)
-        return filename
     }
 
     nonisolated private static func metadata(for url: URL) async -> (title: String?, description: String?, author: String?, cover: UIImage?) {

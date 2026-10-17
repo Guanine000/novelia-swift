@@ -644,6 +644,7 @@ private struct WenkuDownloadSheet: View {
                 translators: filenameTranslators,
                 authors: detail.authors
             )
+            try await localLibrary.loadIfNeeded()
             let destination = localLibrary.downloadDestination(for: filename)
             try await api.downloadWenkuEPUB(
                 to: destination,

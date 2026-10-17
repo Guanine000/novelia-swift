@@ -3,10 +3,12 @@ import SwiftUI
 import UIKit
 
 extension WebNovelDownloadStore: SyncBookLibrary {
-    func removeFromSync(_ book: DownloadedWebNovel) { remove(book) }
+    func prepareForSync() async throws { try await loadIfNeeded() }
+    func removeFromSync(_ book: DownloadedWebNovel) async throws { try await removeForMove(book) }
 }
 extension WenkuLocalLibraryStore: SyncBookLibrary {
-    func removeFromSync(_ book: LocalWenkuEPUB) { remove(book) }
+    func prepareForSync() async throws { try await loadIfNeeded() }
+    func removeFromSync(_ book: LocalWenkuEPUB) async throws { try await removeForMove(book) }
 }
 
 /// 把 App 前后台和本机书库、系列、标签的变化转交给 WebDAV 自动同步。
@@ -23,10 +25,15 @@ struct WebDAVAutoSyncTriggers: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .task { sync.startAutomaticSync(web: web, wenku: wenku) }
+            .task {
+                do { try await web.loadIfNeeded() } catch { /* Store 保留错误供界面重试。 */ }
+                do { try await wenku.loadIfNeeded() } catch { /* 仍尝试读取另一个书库。 */ }
+                // 两个库都尝试读取，单库损坏不能使另一个库一直显示加载中。
+                sync.startAutomaticSync(web: web, wenku: wenku)
+            }
             .onChange(of: scenePhase) { _, phase in sync.scenePhaseDidChange(phase) }
-            .onReceive(web.objectWillChange) { sync.localStateDidChange() }
-            .onReceive(wenku.objectWillChange) { sync.localStateDidChange() }
+            .onReceive(web.$books.dropFirst()) { _ in sync.localStateDidChange() }
+            .onReceive(wenku.$books.dropFirst()) { _ in sync.localStateDidChange() }
             .onReceive(library.objectWillChange) { sync.localStateDidChange() }
             .onReceive(blockedTags.objectWillChange) { sync.localStateDidChange() }
             .onReceive(bookmarks.$records.dropFirst()) { _ in sync.localStateDidChange() }

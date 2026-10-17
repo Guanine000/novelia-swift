@@ -17,23 +17,50 @@ final class WebNovelDownloadStore: ObservableObject {
 
     private let fileManager: FileManager
     private let directory: URL
-    private let syncFileCopier = LocalLibraryFileCopier()
+    private let syncFileCopier: LocalLibraryFileCopier
     private let indexURL: URL
     private let api: any NovelDownloadService
+    private let repository: LocalLibraryRepository<DownloadedWebNovel>
+    private var hasLoaded = false
+    var isReady: Bool { hasLoaded }
+    @Published private(set) var isLoading = true
+    @Published private(set) var storageError: String?
 
-    init(api: any NovelDownloadService, fileManager: FileManager = .default) {
+    init(api: any NovelDownloadService, fileManager: FileManager = .default, directory: URL? = nil,
+         indexWriter: LocalLibraryIndexWriter = LocalLibraryIndexWriter(),
+         fileCopier: LocalLibraryFileCopier = LocalLibraryFileCopier()) {
         self.api = api
         self.fileManager = fileManager
-        let applicationSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        directory = applicationSupport.appendingPathComponent("WebNovelDownloads", isDirectory: true)
+        self.syncFileCopier = fileCopier
+        let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let directory = directory ?? support.appendingPathComponent("WebNovelDownloads", isDirectory: true)
+        self.directory = directory
         indexURL = directory.appendingPathComponent("library.json")
-        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        if let data = try? Data(contentsOf: indexURL),
-           let saved = try? JSONDecoder().decode([DownloadedWebNovel].self, from: data) {
-            books = LibraryOrganizer.uniqueRecords(
-                saved.filter { fileManager.fileExists(atPath: directory.appendingPathComponent($0.fileFilename).path) },
+        repository = LocalLibraryRepository(url: indexURL, writer: indexWriter) { saved in
+            LibraryOrganizer.uniqueRecords(
+                saved.filter { FileManager.default.fileExists(atPath: directory.appendingPathComponent($0.fileFilename).path) },
                 id: { $0.id }, date: { $0.downloadedAt })
         }
+    }
+
+    func loadIfNeeded() async throws {
+        guard !hasLoaded else { return }
+        do {
+            try await repository.load { if books != $0 { books = $0 } }
+            storageError = nil
+            isLoading = false
+            hasLoaded = true
+        } catch {
+            isLoading = false
+            if !(error is CancellationError) { storageError = "网络小说书库索引读取失败，原文件已保留。请重试或导出日志排查。" }
+            throw error
+        }
+    }
+
+    @discardableResult
+    private func commit<Value>(_ change: (inout [DownloadedWebNovel]) throws -> Value) async throws -> Value {
+        try await loadIfNeeded()
+        return try await repository.update(change) { if books != $0 { books = $0 } }
     }
 
     func isDownloaded(_ novelID: String) -> Bool {
@@ -50,6 +77,7 @@ final class WebNovelDownloadStore: ObservableObject {
         progress[novel.id] = WebNovelDownloadProgress(completed: 0, total: 1)
 
         do {
+            try await loadIfNeeded()
             try Task.checkCancellation()
             let effectiveSource = mode == .original ? nil : translationSource
             let filename = Self.websiteDownloadFilename(title: novel.title, mode: mode,
@@ -73,59 +101,60 @@ final class WebNovelDownloadStore: ObservableObject {
                 downloadMode: mode,
                 fileFormat: .epub
             )
-            let previousBooks = books
-            books.removeAll { $0.id == novel.id }
-            books.insert(record, at: 0)
+            let old: DownloadedWebNovel?
             do {
-                try persistIndex()
-            } catch {
-                books = previousBooks
-                try? fileManager.removeItem(at: dataURL)
-                throw error
-            }
-            if let old = previousBooks.first(where: { $0.id == novel.id }) {
-                removeStoredFile(for: old)
-            }
+                old = try await commit { records in
+                    let previous = records.first { $0.id == novel.id }
+                    records.removeAll { $0.id == novel.id }
+                    records.insert(record, at: 0)
+                    return previous
+                }
+            } catch { await syncFileCopier.remove([dataURL]); throw error }
+            if let old { await syncFileCopier.remove([fileURL(for: old)]) }
         } catch {
             errors[novel.id] = error.localizedDescription
         }
         progress[novel.id] = nil
     }
 
-    func remove(_ book: DownloadedWebNovel) {
-        removeStoredFile(for: book)
-        books.removeAll { $0.id == book.id }
-        try? persistIndex()
+    /// 索引提交失败时保留原文件，用户可以重试删除。
+    func remove(_ book: DownloadedWebNovel) async throws {
+        let removed = try await commit { records -> DownloadedWebNovel? in
+            let current = records.first { $0.id == book.id }
+            records.removeAll { $0.id == book.id }
+            return current
+        }
+        if let removed { await syncFileCopier.remove([fileURL(for: removed)]) }
     }
 
-    func importForMove(from source: URL, book: LocalWenkuEPUB) throws -> DownloadedWebNovel {
+    func importForMove(from source: URL, book: LocalWenkuEPUB) async throws -> DownloadedWebNovel {
+        try await loadIfNeeded()
         let format = book.resolvedFileFormat
         let novel = book.sourceWebNovel?.novel ?? Novel(id: "local-\(book.id.uuidString)", title: book.title,
-            author: book.author ?? "", summary: book.bookDescription ?? "",
-            genres: [], chapters: [], accent: .plum)
-        guard !books.contains(where: { $0.id == novel.id }) else {
-            throw WebNovelMoveError.alreadyExists
-        }
-        let destination = uniqueDestination(for: source.lastPathComponent)
-        try fileManager.copyItem(at: source, to: destination)
-        let record = DownloadedWebNovel(novel: novel,
-            fileFilename: destination.lastPathComponent, downloadedAt: book.sourceWebNovel?.downloadedAt ?? book.addedAt,
+            author: book.author ?? "", summary: book.bookDescription ?? "", genres: [], chapters: [], accent: .plum)
+        let destination = directory.appendingPathComponent("move-\(UUID().uuidString).\(format.fileExtension)")
+        try await syncFileCopier.copy(from: source, to: destination)
+        let record = DownloadedWebNovel(novel: novel, fileFilename: destination.lastPathComponent,
+            downloadedAt: book.sourceWebNovel?.downloadedAt ?? book.addedAt,
             translationSource: book.sourceWebNovel?.translationSource,
             downloadMode: book.sourceWebNovel?.downloadMode, fileFormat: format)
-        books.insert(record, at: 0)
-        do { try persistIndex() } catch {
-            books.removeAll { $0.id == record.id }
-            try? fileManager.removeItem(at: destination)
-            throw error
-        }
+        do {
+            try await commit { records in
+                guard !records.contains(where: { $0.id == novel.id }) else { throw WebNovelMoveError.alreadyExists }
+                records.insert(record, at: 0)
+            }
+        } catch { await syncFileCopier.remove([destination]); throw error }
         return record
     }
 
-    func removeForMove(_ book: DownloadedWebNovel) throws {
-        let previous = books
-        books.removeAll { $0.id == book.id }
-        do { try persistIndex() } catch { books = previous; throw error }
-        removeStoredFile(for: book)
+    func removeForMove(_ book: DownloadedWebNovel) async throws {
+        try await commit { records in
+            guard let current = records.first(where: { $0.id == book.id }), current == book else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+            records.removeAll { $0.id == book.id }
+        }
+        await syncFileCopier.remove([fileURL(for: book)])
     }
 
     func fileURL(for book: DownloadedWebNovel) -> URL {
@@ -138,67 +167,41 @@ final class WebNovelDownloadStore: ObservableObject {
     }
 
     func restoreFromSync(_ book: DownloadedWebNovel, files: [String: URL]) async throws {
+        try await loadIfNeeded()
         guard !books.contains(where: { $0.id == book.id }) else { return }
         guard let source = files[book.fileFilename] else { throw CocoaError(.fileReadNoSuchFile) }
-        var copied: [URL] = []
+        let destination = directory.appendingPathComponent("sync-\(UUID().uuidString).\(book.resolvedFileFormat.fileExtension)")
+        try await syncFileCopier.copy(from: source, to: destination)
+        let restored = DownloadedWebNovel(novel: book.novel, fileFilename: destination.lastPathComponent,
+            downloadedAt: book.downloadedAt, translationSource: book.translationSource,
+            downloadMode: book.downloadMode, fileFormat: book.fileFormat)
         do {
-            let destination = directory.appendingPathComponent("sync-\(UUID().uuidString).\(book.resolvedFileFormat.fileExtension)")
-            try await syncFileCopier.copy(from: source, to: destination)
-            copied.append(destination)
-            let restored = DownloadedWebNovel(
-                novel: book.novel,
-                fileFilename: destination.lastPathComponent,
-                downloadedAt: book.downloadedAt,
-                translationSource: book.translationSource,
-                downloadMode: book.downloadMode,
-                fileFormat: book.fileFormat
-            )
-            try Task.checkCancellation()
-            guard !books.contains(where: { $0.id == book.id }) else { throw CocoaError(.fileWriteFileExists) }
-            books.insert(restored, at: 0)
-            do { try persistIndex() } catch {
-                books.removeAll { $0.id == book.id }
-                throw error
+            try await commit { records in
+                guard !records.contains(where: { $0.id == book.id }) else { throw CocoaError(.fileWriteFileExists) }
+                records.insert(restored, at: 0)
             }
-        } catch {
-            for url in copied { try? fileManager.removeItem(at: url) }
-            throw error
-        }
+        } catch { await syncFileCopier.remove([destination]); throw error }
     }
 
     func replaceFromSync(_ book: DownloadedWebNovel, files: [String: URL]) async throws {
-        guard let old = books.first(where: { $0.id == book.id }),
-              let source = files[book.fileFilename] else {
+        try await loadIfNeeded()
+        guard let old = books.first(where: { $0.id == book.id }), let source = files[book.fileFilename] else {
             throw CocoaError(.fileReadNoSuchFile)
         }
-        var copied: [URL] = []
+        let destination = directory.appendingPathComponent("sync-\(UUID().uuidString).\(book.resolvedFileFormat.fileExtension)")
+        try await syncFileCopier.copy(from: source, to: destination)
+        let replacement = DownloadedWebNovel(novel: book.novel, fileFilename: destination.lastPathComponent,
+            downloadedAt: book.downloadedAt, translationSource: book.translationSource,
+            downloadMode: book.downloadMode, fileFormat: book.fileFormat)
         do {
-            let destination = directory.appendingPathComponent("sync-\(UUID().uuidString).\(book.resolvedFileFormat.fileExtension)")
-            try await syncFileCopier.copy(from: source, to: destination)
-            copied.append(destination)
-            let replacement = DownloadedWebNovel(novel: book.novel,
-                fileFilename: destination.lastPathComponent, downloadedAt: book.downloadedAt,
-                translationSource: book.translationSource, downloadMode: book.downloadMode,
-                fileFormat: book.fileFormat)
-            try Task.checkCancellation()
-            guard let index = books.firstIndex(where: { $0.id == book.id }), books[index] == old else {
-                throw CocoaError(.fileNoSuchFile)
+            try await commit { records in
+                guard let index = records.firstIndex(where: { $0.id == book.id }), records[index] == old else {
+                    throw CocoaError(.fileWriteUnknown)
+                }
+                records[index] = replacement
             }
-            books[index] = replacement
-            try persistIndex()
-            removeStoredFile(for: old)
-        } catch {
-            // 复制阶段尚未改变书目；提交后的同步写盘失败在主执行域立即回滚。
-            if let index = books.firstIndex(where: { $0.id == book.id }), books[index].fileFilename == copied.first?.lastPathComponent {
-                books[index] = old
-            }
-            for url in copied { try? fileManager.removeItem(at: url) }
-            throw error
-        }
-    }
-
-    private func removeStoredFile(for book: DownloadedWebNovel) {
-        try? fileManager.removeItem(at: fileURL(for: book))
+        } catch { await syncFileCopier.remove([destination]); throw error }
+        await syncFileCopier.remove([fileURL(for: old)])
     }
 
     private func uniqueDestination(for filename: String) -> URL {
@@ -220,10 +223,6 @@ final class WebNovelDownloadStore: ObservableObject {
         return "\(mode.apiValue).\(translator)\(safeTitle).epub"
     }
 
-    private func persistIndex() throws {
-        let data = try JSONEncoder().encode(books)
-        try data.write(to: indexURL, options: .atomic)
-    }
 
 }
 

@@ -156,6 +156,10 @@ final class WebDAVSyncStore: ObservableObject {
             isSyncing = false
             finishAutomaticRun()
         }
+        do {
+            try await web?.prepareForSync()
+            try await wenku?.prepareForSync()
+        } catch { message = "书库读取失败，本轮同步未开始。"; return }
         // 目录缓存：自动同步跳过已确认的目录检查；手动同步先清空，重新完整检查一次。失败时清空。
         let folderCache = WebDAVFolderCache(defaults: defaults)
         if trigger == nil { folderCache.clear() }
