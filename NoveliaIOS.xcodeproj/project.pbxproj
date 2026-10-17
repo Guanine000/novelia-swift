@@ -62,6 +62,8 @@
 		C30000000000000000000005 /* EPUBLayoutCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000006 /* EPUBLayoutCoordinator.swift */; };
 		C20000000000000000000001 /* ShareableLogPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002 /* ShareableLogPolicy.swift */; };
 		C2A00000000000000000000A /* SerialAsyncGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A00000000000000000000B /* SerialAsyncGate.swift */; };
+		C2A00000000000000000000C /* ReadiumLocatorKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A00000000000000000000D /* ReadiumLocatorKeys.swift */; };
+		C2A00000000000000000000E /* ReplyPaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A00000000000000000000F /* ReplyPaging.swift */; };
 		A10000000000000000000044 /* SettingsKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000041 /* SettingsKeys.swift */; };
 		D30000000000000000000001 /* ReaderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000002 /* ReaderSettings.swift */; };
 		D30000000000000000000003 /* ReaderSettingsAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = D30000000000000000000004 /* ReaderSettingsAdapters.swift */; };
@@ -152,6 +154,8 @@
 		C30000000000000000000006 /* EPUBLayoutCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBLayoutCoordinator.swift; sourceTree = "<group>"; };
 		C20000000000000000000002 /* ShareableLogPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/ShareableLogPolicy.swift; sourceTree = "<group>"; };
 		C2A00000000000000000000B /* SerialAsyncGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/SerialAsyncGate.swift; sourceTree = "<group>"; };
+		C2A00000000000000000000D /* ReadiumLocatorKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReadiumLocatorKeys.swift; sourceTree = "<group>"; };
+		C2A00000000000000000000F /* ReplyPaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Community/ReplyPaging.swift; sourceTree = "<group>"; };
 		B10000000000000000000041 /* SettingsKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/SettingsKeys.swift; sourceTree = "<group>"; };
 		D30000000000000000000002 /* ReaderSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderSettings.swift; sourceTree = "<group>"; };
 		D30000000000000000000004 /* ReaderSettingsAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderSettingsAdapters.swift; sourceTree = "<group>"; };
@@ -307,6 +311,8 @@
 				D30000000000000000000002 /* ReaderSettings.swift */,
 				C20000000000000000000002 /* ShareableLogPolicy.swift */,
 				C2A00000000000000000000B /* SerialAsyncGate.swift */,
+				C2A00000000000000000000D /* ReadiumLocatorKeys.swift */,
+				C2A00000000000000000000F /* ReplyPaging.swift */,
 				C30000000000000000000004 /* TXTBookCache.swift */,
 				C30000000000000000000002 /* DiagnosticContext.swift */,
 				E51000000000000000000001 /* LibraryOrganizer.swift */,
@@ -540,6 +546,8 @@
 				D30000000000000000000001 /* ReaderSettings.swift in Sources */,
 				C20000000000000000000001 /* ShareableLogPolicy.swift in Sources */,
 				C2A00000000000000000000A /* SerialAsyncGate.swift in Sources */,
+				C2A00000000000000000000C /* ReadiumLocatorKeys.swift in Sources */,
+				C2A00000000000000000000E /* ReplyPaging.swift in Sources */,
 				C30000000000000000000005 /* EPUBLayoutCoordinator.swift in Sources */,
 				C30000000000000000000003 /* TXTBookCache.swift in Sources */,
 				C30000000000000000000001 /* DiagnosticContext.swift in Sources */,

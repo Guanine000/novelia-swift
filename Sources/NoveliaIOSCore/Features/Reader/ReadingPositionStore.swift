@@ -98,28 +98,3 @@ final class ReadingPositionStore: ReadingPositionSynchronizing {
         }
     }
 }
-
-
-/// 书籍已不在书库（本机与云端）时，清理阅读器只在本机保存的附加记录。
-/// 键前缀须与 Readium 阅读器写入的一致（ReadiumEPUBReaderModel、ReadiumTextPublication）。
-enum ReaderLocalCleanup {
-    /// EPUB：`<前缀><文件哈希>`。
-    static let readiumBookPrefixes = ["readium.locator.v1.", "readium.locatorTime.v1."]
-    /// TXT：`<前缀>txt|<文件哈希>|<分章规则指纹>`。
-    static let readiumTextPrefixes = ["readium.text.locator.v1.", "readium.text.time.v1."]
-
-    /// Readium 精确位置只用于本机快速恢复，书不在书库时没有用处；共享阅读位置另按时间清理。
-    static func orphanedReadiumKeys(_ keys: some Sequence<String>, keepingHashes: Set<String>) -> [String] {
-        keys.filter { key in
-            if let prefix = readiumBookPrefixes.first(where: key.hasPrefix) {
-                return !keepingHashes.contains(String(key.dropFirst(prefix.count)))
-            }
-            if let prefix = readiumTextPrefixes.first(where: key.hasPrefix) {
-                let parts = key.dropFirst(prefix.count).split(separator: "|", omittingEmptySubsequences: false)
-                guard parts.count == 3, parts[0] == "txt" else { return false }
-                return !keepingHashes.contains(String(parts[1]))
-            }
-            return false
-        }
-    }
-}

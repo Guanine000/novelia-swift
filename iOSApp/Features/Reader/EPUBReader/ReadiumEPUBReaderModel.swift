@@ -184,9 +184,9 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             let progression = min(1, max(0, location.locations.progression ?? 0))
             book.onPosition(unit, EPUBChapterProgress.offset(progression: progression, length: length))
             if let identity = book.readiumIdentity, let json = try? location.jsonString() {
-                UserDefaults.standard.set(json, forKey: "readium.text.locator.v1.\(identity)")
+                UserDefaults.standard.set(json, forKey: ReadiumLocatorKeys.textLocator(identity: identity))
                 // 回调可能更新同步位置，精确 Locator 的时间在它之后记录。
-                UserDefaults.standard.set(Date(), forKey: "readium.text.time.v1.\(identity)")
+                UserDefaults.standard.set(Date(), forKey: ReadiumLocatorKeys.textTime(identity: identity))
             }
         }
     }
@@ -480,8 +480,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     // MARK: 进度
 
-    private var locatorKey: String? { bookHash.map { "readium.locator.v1.\($0)" } }
-    private var locatorTimeKey: String? { bookHash.map { "readium.locatorTime.v1.\($0)" } }
+    private var locatorKey: String? { bookHash.map(ReadiumLocatorKeys.bookLocator(hash:)) }
+    private var locatorTimeKey: String? { bookHash.map(ReadiumLocatorKeys.bookTime(hash:)) }
 
     private func save(_ locator: Locator) {
         guard let hash = bookHash,

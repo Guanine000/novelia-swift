@@ -124,7 +124,7 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 手动同步 / 自动同步触发 → WebDAVSyncStore → 计划与引擎 → 远端接口 + 本地状态接口
 ```
 
-社区使用 `ForumStore` 持有列表/分类/查询状态，帖子、评论和编辑页面消费 `ForumService`。Core 的 `ForumMarkdown.swift` 提供 Markdown 相关处理与链接路由，界面层负责渲染、展开剧透等交互。修改富文本或链接时保留配置来源检查、相对链接处理与内部导航，不在渲染组件中建立另一套 API 请求。
+社区使用 `ForumStore` 持有列表/分类/查询状态，帖子、评论和编辑页面消费 `ForumService`。Core 的 `ForumMarkdown.swift` 提供 Markdown 相关处理与链接路由，`ReplyPaging.swift` 提供论坛评论与小说书评共用的“加载更多回复”分页，界面层负责渲染、展开剧透等交互。修改富文本或链接时保留配置来源检查、相对链接处理与内部导航，不在渲染组件中建立另一套 API 请求。
 
 设置通过 `SettingsKeys.swift` 中的已有键及对应状态对象保存偏好。背景、字体、标签和分章规则有各自的存储/适配；设置界面负责用户操作，阅读器负责消费结果，同步通过 App 适配获取可同步部分。新增设置时明确默认值、已保存值、立即生效范围和是否同步。
 
@@ -264,14 +264,14 @@ Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒�
 | 数据类型 | 保存方式与负责者 |
 |---|---|
 | 界面、阅读与功能偏好 | `UserDefaults` / `@AppStorage` 与对应设置对象 |
-| 阅读进度 | `ReadingPositionStore` 的 Codable 数据与 legacy 兼容读取 |
+| 阅读进度 | `ReadingPositionStore` 的 Codable 数据与 legacy 兼容读取；Readium 本机精确位置的键名由 `ReadiumLocatorKeys` 定义 |
 | 书籍文件和本地索引 | Application Support 内的两个书库目录与对应 Store |
 | 账号凭据 | `SessionTokenStore` 的生产 Keychain 适配 |
 | 阅读统计与设备统计 | `ReadingStatisticsStore`：本机累计与同步缓存在 Application Support `ReadingStatistics/` 的 `local.json`、`devices.json`（`ReadingStatisticsFiles` 后台串行写入）；开关、设备 ID 与名称在偏好 |
 | 解析、章节与排版缓存 | 各缓存实现；属于可重建数据，保持容量与失效规则 |
 | 云端同步状态 | WebDAV 清单、内容 blob 与独立统计数据 |
 
-删除书籍时 Store 一并删除书籍文件与封面；阅读位置按内容哈希保存，不随删除清除。`LibraryStateStore` 在每本本机书都算出哈希后清理残留：不在书库（本机与云端）的最近打开时间与 Readium 精确位置（`ReaderLocalCleanup`，键前缀须与阅读器一致）立即清理，EPUB/TXT 共享位置超过 180 天未更新才清理，在线小说（web:）位置不清理；书库为空时不清理。系列归属与最近打开时间只在云端副本也删除成功后由 `LibraryStateStore.forget(keys:)` 清理（系列移出记录随同步传播），只删除本机时保留，因为同一书键可能仍以云端书籍出现。
+删除书籍时 Store 一并删除书籍文件与封面；阅读位置按内容哈希保存，不随删除清除。`LibraryStateStore` 在每本本机书都算出哈希后清理残留：不在书库（本机与云端）的最近打开时间与 Readium 精确位置（键名统一由 `ReadiumLocatorKeys` 定义，阅读器与清理共用）立即清理，EPUB/TXT 共享位置超过 180 天未更新才清理，在线小说（web:）位置不清理；书库为空时不清理。系列归属与最近打开时间只在云端副本也删除成功后由 `LibraryStateStore.forget(keys:)` 清理（系列移出记录随同步传播），只删除本机时保留，因为同一书键可能仍以云端书籍出现。
 
 旧版把本机累计与同步缓存保存在偏好键 `reading.statistics.v1`、`reading.statistics.devices.v1`；启动时迁移到文件，写入成功后删除偏好键。偏好与文件同时存在（降级后又升级）时按既有最大值规则合并，不丢降级期间的时长。无法解码的统计文件改名为 `.corrupt-<时间>` 保留。
 
