@@ -146,7 +146,8 @@ final class CloudBookStore: ObservableObject, SyncCloudCatalog {
     }
 }
 
-/// 从云端删除书籍：从清单移除并记下删除时间，清单写入成功后再删除不再被引用的文件。
+/// 从云端删除书籍：从清单移除并记下删除时间，保留底层文件。
+/// 清单条件写入不能保护后续文件清理；另一设备可能已重新引用同一文件，故不在此回收 blob。
 /// 清单写入遇到并发修改时重新读取后重试，最多三次。返回实际从清单中移除的书数。
 enum WebDAVCloudBookDeleter {
     static func delete(_ keys: Set<String>, from remote: any WebDAVRemote, at date: Date = Date()) async throws -> Int {
@@ -157,14 +158,12 @@ enum WebDAVCloudBookDeleter {
             guard existed else { return 0 }
             var manifest = fetched
             let before = manifest.webBooks.count + manifest.wenkuBooks.count
-            let unused = WebDAVDeletedBooks.remove(keys, from: &manifest, at: date)
+            _ = WebDAVDeletedBooks.remove(keys, from: &manifest, at: date)
             do {
                 try await remote.putManifest(manifest, etag: etag, existed: true)
             } catch WebDAVSyncError.concurrentChange where attempt < 2 {
                 continue
             }
-            // 清单已不引用这些文件；个别删除失败只会留下无用文件，不影响同步。
-            for hash in unused.sorted() { try? await remote.deleteBlob(hash) }
             return before - manifest.webBooks.count - manifest.wenkuBooks.count
         }
         throw WebDAVSyncError.concurrentChange
