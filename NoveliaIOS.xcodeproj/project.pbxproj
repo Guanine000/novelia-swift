@@ -77,6 +77,7 @@
 		E70000000000000000000002 /* ReadingStatisticsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71000000000000000000002 /* ReadingStatisticsViews.swift */; };
 		E50000000000000000000002 /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000002 /* LibraryStore.swift */; };
 		E50000000000000000000003 /* LibraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000003 /* LibraryViews.swift */; };
+		E50000000000000000000012 /* LibraryArchiveExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000012 /* LibraryArchiveExport.swift */; };
 		E50000000000000000000004 /* AppTabs.swift in Sources */ = {isa = PBXBuildFile; fileRef = E51000000000000000000004 /* AppTabs.swift */; };
 		E60000000000000000000001 /* LocalBookRecords.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000001 /* LocalBookRecords.swift */; };
 		E60000000000000000000002 /* WebDAVManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000002 /* WebDAVManifest.swift */; };
@@ -174,6 +175,7 @@
 		E71000000000000000000002 /* ReadingStatisticsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Statistics/ReadingStatisticsViews.swift; sourceTree = "<group>"; };
 		E51000000000000000000002 /* LibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/LibraryStore.swift; sourceTree = "<group>"; };
 		E51000000000000000000003 /* LibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/LibraryViews.swift; sourceTree = "<group>"; };
+		E51000000000000000000012 /* LibraryArchiveExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/LibraryArchiveExport.swift; sourceTree = "<group>"; };
 		E51000000000000000000004 /* AppTabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/AppTabs.swift; sourceTree = "<group>"; };
 		E61000000000000000000001 /* LocalBookRecords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/LocalBookRecords.swift; sourceTree = "<group>"; };
 		E61000000000000000000002 /* WebDAVManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Sync/WebDAVManifest.swift; sourceTree = "<group>"; };
@@ -287,6 +289,7 @@
 				B10000000000000000000042 /* CoverImage.swift */,
 				D30000000000000000000004 /* ReaderSettingsAdapters.swift */,
 				E51000000000000000000003 /* LibraryViews.swift */,
+				E51000000000000000000012 /* LibraryArchiveExport.swift */,
 				E51000000000000000000002 /* LibraryStore.swift */,
 				E71000000000000000000002 /* ReadingStatisticsViews.swift */,
 			);
@@ -546,6 +549,7 @@
 				A10000000000000000000031 /* ReleaseUpdates.swift in Sources */,
 				A10000000000000000000032 /* SyncMerge.swift in Sources */,
 				E50000000000000000000003 /* LibraryViews.swift in Sources */,
+				E50000000000000000000012 /* LibraryArchiveExport.swift in Sources */,
 				E50000000000000000000002 /* LibraryStore.swift in Sources */,
 				E50000000000000000000001 /* LibraryOrganizer.swift in Sources */,
 				E70000000000000000000001 /* ReadingStatistics.swift in Sources */,

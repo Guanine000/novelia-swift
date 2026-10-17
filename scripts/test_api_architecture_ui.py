@@ -7,6 +7,9 @@ import tempfile
 import json
 import hashlib
 import plistlib
+import shutil
+import time
+import uuid
 import zipfile
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--device', required=True)
@@ -17,9 +20,12 @@ parser.add_argument('--library-count', type=int, choices=[0, 300, 3000], default
 parser.add_argument('--iterations', type=int, choices=range(2, 11), default=3)
 parser.add_argument('--result-json', type=Path)
 parser.add_argument('--epub-failure', choices=['archive', 'chapter', 'spine'], help='Exercise a synthetic broken EPUB in the dedicated App only')
+parser.add_argument('--library-archive', action='store_true', help='Exercise library/series multi-select archive sharing in the dedicated App only')
 args = parser.parse_args()
 if args.epub_failure and args.performance:
     parser.error('--epub-failure cannot be combined with --performance')
+if args.library_archive and (args.epub_failure or args.performance):
+    parser.error('--library-archive cannot be combined with --epub-failure or --performance')
 if plistlib.loads((Path(args.app)/'Info.plist').read_bytes()).get('CFBundleIdentifier') != 'cc.novelia.ios.architecture-validation':
     parser.error('Requires the dedicated architecture-validation App bundle')
 r = Path(tempfile.mkdtemp(prefix='NoveliaArchitectureUI-'))
@@ -119,6 +125,138 @@ final class TapTests: XCTestCase {
  }
 }
 ''', encoding='utf-8')
+if args.library_archive:
+    subprocess.run(['xcrun','simctl','terminate',args.device,'cc.novelia.ios.architecture-validation'],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    data_root = Path(subprocess.check_output(['xcrun','simctl','get_app_container',args.device,
+                                            'cc.novelia.ios.architecture-validation','data'], text=True).strip())
+    support = data_root/'Library/Application Support'
+    shutil.rmtree(support, ignore_errors=True)
+    library_dir = support/'WenkuEPUB'
+    library_dir.mkdir(parents=True, exist_ok=True)
+    samples = Path(__file__).resolve().parents[1]/'build/acceptance/1.0.0/samples'
+    for filename, sample in (('sample-a.epub', '01-正常-三章-带封面.epub'), ('sample-b.epub', '03-长章节-单章约五万字.epub')):
+        shutil.copyfile(samples/sample, library_dir/filename)
+    reference = time.time() - 978307200.0
+    records = [
+        {'id': str(uuid.uuid4()).upper(), 'title': '验收样本甲', 'filename': 'sample-a.epub',
+         'addedAt': reference, 'metadataLoaded': True, 'fileFormat': 'epub'},
+        {'id': str(uuid.uuid4()).upper(), 'title': '验收样本乙', 'filename': 'sample-b.epub',
+         'addedAt': reference - 60, 'metadataLoaded': True, 'fileFormat': 'epub'},
+    ]
+    (library_dir/'library.json').write_text(json.dumps(records), encoding='utf-8')
+    (r/'TapTests.swift').write_text(r'''import XCTest
+final class TapTests: XCTestCase {
+ let bundle = "cc.novelia.ios.architecture-validation"
+ func start() -> XCUIApplication {
+  continueAfterFailure = false
+  let app = XCUIApplication(bundleIdentifier: bundle)
+  app.launchArguments = ["-architectureValidation"]
+  app.launch()
+  XCTAssertTrue(app.staticTexts["architecture-validation-status"].waitForExistence(timeout: 20))
+  return app
+ }
+ func waitForShareSheet(_ app: XCUIApplication, timeout: TimeInterval = 60) -> Bool {
+  let deadline = Date().addingTimeInterval(timeout)
+  while Date() < deadline {
+   if app.buttons["拷贝"].exists || app.otherElements["ActivityListView"].exists { return true }
+   RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+  }
+  return false
+ }
+ func selectedCount(_ app: XCUIApplication, _ count: Int) {
+  XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "已选 \(count) 本")).firstMatch.waitForExistence(timeout: 20))
+ }
+ func beginSelection(_ app: XCUIApplication, title: String) {
+  let row = app.staticTexts[title].firstMatch
+  XCTAssertTrue(row.waitForExistence(timeout: 20)); row.press(forDuration: 0.8)
+  selectedCount(app, 1)
+ }
+ func library(_ app: XCUIApplication) { app.tabBars.buttons["书库"].tap() }
+ func shot(_ name: String) {
+  let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+  attachment.name = name
+  attachment.lifetime = .keepAlways
+  add(attachment)
+ }
+ func seriesSegment(_ app: XCUIApplication) {
+  let segment = app.segmentedControls.buttons.matching(NSPredicate(format: "label CONTAINS %@", "系列")).firstMatch
+  XCTAssertTrue(segment.waitForExistence(timeout: 20)); segment.tap()
+ }
+ func booksSegment(_ app: XCUIApplication) {
+  let segment = app.segmentedControls.buttons.matching(NSPredicate(format: "label CONTAINS %@", "全部书籍")).firstMatch
+  XCTAssertTrue(segment.waitForExistence(timeout: 20)); segment.tap()
+ }
+ func testLibraryBatchArchiveAndSeries() {
+  var app = start()
+  library(app)
+  XCTAssertTrue(app.staticTexts["验收样本甲"].firstMatch.waitForExistence(timeout: 20))
+  XCTAssertTrue(app.staticTexts["验收样本乙"].firstMatch.waitForExistence(timeout: 20))
+  // 顶部“选择”按钮也能进入多选，此时未选中任何书。
+  let selectButton = app.buttons["选择"]
+  XCTAssertTrue(selectButton.waitForExistence(timeout: 20), "书库右上角应有“选择”按钮")
+  selectButton.tap()
+  selectedCount(app, 0)
+  XCTAssertTrue(app.buttons["完成"].waitForExistence(timeout: 20)); app.buttons["完成"].tap()
+
+  // 书库多选：全选两本后压缩分享。
+  beginSelection(app, title: "验收样本甲")
+  app.buttons["全选"].tap()
+  selectedCount(app, 2)
+  shot("library-multiselect")
+  app.buttons["压缩分享"].tap()
+  XCTAssertTrue(waitForShareSheet(app), "压缩两本书后应打开系统分享面板")
+  shot("library-share-sheet")
+  app.terminate()
+  // 新建系列并压缩分享整个系列。
+  app = start()
+  library(app)
+  beginSelection(app, title: "验收样本甲")
+  app.buttons["移入系列"].tap()
+  let newSeries = app.buttons["新建系列…"]
+  XCTAssertTrue(newSeries.waitForExistence(timeout: 20)); newSeries.tap()
+  let field = app.textFields.firstMatch
+  XCTAssertTrue(field.waitForExistence(timeout: 20))
+  field.typeText("验收系列")
+  app.buttons["创建并移入"].tap()
+  seriesSegment(app)
+  let series = app.staticTexts["验收系列"].firstMatch
+  XCTAssertTrue(series.waitForExistence(timeout: 20))
+  series.press(forDuration: 0.8)
+  let shareSeries = app.buttons["压缩后分享"]
+  XCTAssertTrue(shareSeries.waitForExistence(timeout: 20))
+  shot("series-context-menu")
+  shareSeries.tap()
+  XCTAssertTrue(waitForShareSheet(app), "系列长按压缩分享应打开系统分享面板")
+  shot("series-share-sheet")
+  app.terminate()
+  // 系列详情批量移出，再在书库批量删除。
+  app = start()
+  library(app)
+  seriesSegment(app)
+  let seriesAgain = app.staticTexts["验收系列"].firstMatch
+  XCTAssertTrue(seriesAgain.waitForExistence(timeout: 20)); seriesAgain.tap()
+  beginSelection(app, title: "验收样本甲")
+  // 系列里只有一本，进入多选即为全选。
+  XCTAssertTrue(app.buttons["取消全选"].waitForExistence(timeout: 20))
+  selectedCount(app, 1)
+  shot("series-detail-multiselect")
+  app.buttons["移出系列"].tap()
+  app.navigationBars.buttons.element(boundBy: 0).tap()
+  booksSegment(app)
+  XCTAssertTrue(app.staticTexts["验收样本甲"].firstMatch.waitForExistence(timeout: 20))
+  XCTAssertTrue(app.staticTexts["验收样本乙"].firstMatch.waitForExistence(timeout: 20))
+  beginSelection(app, title: "验收样本乙")
+  app.buttons["全选"].tap()
+  selectedCount(app, 2)
+  app.buttons["删除"].tap()
+  let localOnly = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "仅删除本机")).firstMatch
+  XCTAssertTrue(localOnly.waitForExistence(timeout: 20)); localOnly.tap()
+  XCTAssertTrue(app.staticTexts["书库还没有书"].firstMatch.waitForExistence(timeout: 20))
+  app.terminate()
+ }
+}
+''')
 if args.performance:
     performance = r'''import XCTest
 final class TapTests: XCTestCase {
@@ -296,6 +434,20 @@ with (r / 'test.log').open('w') as log:
     sample.unlink(missing_ok=True)
    else:
     sample.write_bytes(previous_sample)
+if args.library_archive:
+    data_root = Path(subprocess.check_output(['xcrun','simctl','get_app_container',args.device,
+                                            'cc.novelia.ios.architecture-validation','data'], text=True).strip())
+    share_dir = data_root/'tmp/NoveliaShare'
+    zips = sorted(share_dir.glob('*.zip')) if share_dir.exists() else []
+    if not zips:
+        raise SystemExit(f'No shared archive produced under {share_dir}')
+    for archive_path in zips:
+        with zipfile.ZipFile(archive_path) as archive:
+            names = archive.namelist()
+            assert names, f'Empty archive: {archive_path}'
+            assert all(not name.startswith('/') and '..' not in name.split('/') for name in names), f'Unsafe entry in {archive_path}: {names}'
+            assert all(archive.getinfo(name).file_size > 0 for name in names), f'Empty entry in {archive_path}: {names}'
+            print(f'archive {archive_path.name}: ' + ', '.join(names), flush=True)
 if args.performance:
     metrics = subprocess.run(['xcrun','xcresulttool','get','test-results','metrics','--path',
                               str(next((r/'DerivedData/Logs/Test').glob('*.xcresult'))), '--compact'],
