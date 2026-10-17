@@ -405,6 +405,9 @@ enum EPUBLayoutLog {
             case .missingOPF: return ("opf", 0)
             case .emptySpine: return ("spine", 0)
             case .entryTooLarge: return ("entrySize", 0)
+            case .missingChapter: return ("chapterMissing", 0)
+            case .unreadableEntry: return ("entryRead", 0)
+            case .invalidChapter: return ("chapterIndex", 0)
             }
         }
         let nsError = error as NSError

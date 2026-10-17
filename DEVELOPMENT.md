@@ -202,6 +202,8 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 
 阅读内容与排版引擎分开处理。在线内容通过 `NovelContentService` 获取，本地 TXT 由 Core 的 `TXTChapterParser` 和 `TXTBookCache` 处理；EPUB 由 `EPUBContainer` 读取容器、章节和资源。不要把下载或网站认证逻辑放进排版模型。
 
+默认 EPUB 容器的章节读取保留缺失文件、解压／CRC 失败和条目大小上限错误，不统一转换为 OPF 缺失。用户错误说明包含包内路径，日志只记录固定分类。容器打开失败通过模型持有的可取消任务重试；章节失败保留来源以允许重试或从目录跳过。容器只读，不修补原 EPUB。异常合成包回归在 `EPUBFailureTests`；独立验证 App 的 UI 脚本支持 `--epub-failure archive` 和 `--epub-failure chapter`，分别验证打开失败和缺失首章后的恢复入口。脚本仅改写专用验证 App 的样例文件，结束后恢复。
+
 | 实现 | 主要职责 |
 |---|---|
 | `ReaderView.swift` | 在线滚动阅读、正文/译文选择，以及在线分页入口和章节缓存 |

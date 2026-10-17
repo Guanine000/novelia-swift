@@ -385,6 +385,13 @@ final class EPUBReaderModel: ObservableObject {
         }
     }
 
+    /// 容器打开失败时尚无章节来源；重新读取原文件，沿用可取消的打开任务。
+    func retryOpening(url: URL) {
+        guard case .failed = status, source == nil, openTask == nil else { return }
+        status = .idle
+        start(url: url)
+    }
+
     func start(textBook: PagedTextBook) {
         guard status == .idle, openTask == nil else { return }
         textBookmarkKey = textBook.bookmarkKey

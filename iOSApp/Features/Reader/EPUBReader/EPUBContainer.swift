@@ -31,6 +31,9 @@ enum EPUBError: LocalizedError {
     case missingOPF
     case emptySpine
     case entryTooLarge
+    case missingChapter(path: String)
+    case unreadableEntry(path: String)
+    case invalidChapter(index: Int)
 
     var errorDescription: String? {
         switch self {
@@ -39,6 +42,9 @@ enum EPUBError: LocalizedError {
         case .missingContainer: "缺少 META-INF/container.xml。"
         case .missingOPF: "EPUB 缺少有效的 OPF 包描述文件。"
         case .emptySpine: "EPUB 的 spine 为空，没有可阅读章节。"
+        case .missingChapter(let path): "章节文件缺失：\(path)。已尝试路径解码和大小写回退查找；请重新获取 EPUB，或在有目录时选择其他章节。"
+        case .unreadableEntry(let path): "书内文件无法读取：\(path)。文件可能已损坏，请重新获取 EPUB 后重试。"
+        case .invalidChapter(let index): "章节位置无效（第 \(index + 1) 章），请重新打开书籍或通过目录选择章节。"
         }
     }
 }
@@ -120,18 +126,18 @@ final class EPUBContainer {
 
     /// 读取 container.xml 指向的 OPF 文本及其 ZIP 内目录（含结尾 /，根为 ""）。
     private static func packageDocument(in archive: Archive) async throws -> (xml: String, directory: String) {
-        guard let containerEntry = try? await archive.get("META-INF/container.xml"),
-              let containerXML = try? await entryText(containerEntry, from: archive) else {
+        guard let containerEntry = try? await archive.get("META-INF/container.xml") else {
             throw EPUBError.missingContainer
         }
+        let containerXML = try await entryText(containerEntry, from: archive)
         guard let rootPath = XMLValueParser.elementValue("rootfile", attribute: "full-path", xml: containerXML),
               !rootPath.isEmpty else {
             throw EPUBError.missingOPF
         }
-        guard let opfEntry = try? await archive.get(rootPath),
-              let opfXML = try? await entryText(opfEntry, from: archive) else {
+        guard let opfEntry = try? await archive.get(rootPath) else {
             throw EPUBError.missingOPF
         }
+        let opfXML = try await entryText(opfEntry, from: archive)
         let directory = rootPath.contains("/")
             ? String(rootPath[...(rootPath.lastIndex(of: "/")!)])
             : ""
@@ -143,14 +149,30 @@ final class EPUBContainer {
     static let maxEntryBytes: UInt64 = 200 * 1_048_576
 
     private static func entryData(_ entry: Entry, from archive: Archive) async throws -> Data {
+        try Task.checkCancellation()
         // 目录中的大小可能不实，解压时也累计检查。
         guard entry.uncompressedSize <= maxEntryBytes else { throw EPUBError.entryTooLarge }
         var data = Data()
         let consumer: Consumer = { chunk in
+            try Task.checkCancellation()
             guard UInt64(data.count + chunk.count) <= maxEntryBytes else { throw EPUBError.entryTooLarge }
             data.append(chunk)
         }
-        _ = try await archive.extract(entry, consumer: consumer)
+        do {
+            // ZIPFoundation 返回实际 CRC，调用方负责与目录记录比较。
+            let checksum = try await archive.extract(entry, consumer: consumer)
+            guard checksum == entry.checksum, UInt64(data.count) == entry.uncompressedSize else {
+                throw EPUBError.unreadableEntry(path: entry.path)
+            }
+            try Task.checkCancellation()
+        } catch let error as EPUBError {
+            throw error
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // 用户界面保留包内路径；日志只记录固定错误分类，避免写出书名或正文。
+            throw EPUBError.unreadableEntry(path: entry.path)
+        }
         return data
     }
 
@@ -220,10 +242,11 @@ final class EPUBContainer {
     private(set) var flexGridRewriteCount = 0
 
     func chapterHTML(at index: Int) async throws -> String {
-        guard spine.indices.contains(index) else { throw EPUBError.emptySpine }
-        guard let data = await entryData(atPath: spine[index].href) else {
-            throw EPUBError.missingOPF
+        guard spine.indices.contains(index) else { throw EPUBError.invalidChapter(index: index) }
+        guard let entry = await resolveEntry(spine[index].href) else {
+            throw EPUBError.missingChapter(path: spine[index].href)
         }
+        let data = try await Self.entryData(entry, from: archive)
         let text = String(data: data, encoding: .utf8)
             ?? String(data: data, encoding: .isoLatin1)
             ?? String(decoding: data, as: UTF8.self)
@@ -706,9 +729,10 @@ final class EPUBContainer {
     }
 
     private func chapterHTML(path: String) async throws -> String {
-        guard let data = await entryData(atPath: path) else {
-            throw EPUBError.missingOPF
+        guard let entry = await resolveEntry(path) else {
+            throw EPUBError.missingChapter(path: path)
         }
+        let data = try await Self.entryData(entry, from: archive)
         let text = String(data: data, encoding: .utf8)
             ?? String(data: data, encoding: .isoLatin1)
             ?? String(decoding: data, as: UTF8.self)
