@@ -90,6 +90,10 @@ final class WebDAVSyncEngine {
     private(set) var repairedBlobs: Set<String> = []
     /// 写入的清单仍引用、服务器缺少且本机没有可补传的文件数；需要在仍有这些书的设备上同步。
     private(set) var unrepairedBlobCount = 0
+    /// 本次是否成功列出服务器文件；为 false 时不更新云端书籍的缺失标记。
+    private var didListBlobs = false
+    /// 书籍文件缺失、本机也没有的云端书籍（书名，用于完成提示）。
+    private(set) var missingCloudBookTitles: [String] = []
 
     init(remote: any WebDAVRemote, local: any WebDAVSyncLocalState,
          web: any SyncBookLibrary<DownloadedWebNovel>, wenku: any SyncBookLibrary<LocalWenkuEPUB>,
@@ -131,6 +135,7 @@ final class WebDAVSyncEngine {
             progress.detail = "正在核对云端文件…"
             // 列目录失败或服务器不支持时照常同步，只是不补传。
             if let present = try? await remote.listBlobs() {
+                didListBlobs = true
                 missingBlobs = knownBlobs.subtracting(present)
                 knownBlobs.formIntersection(present)
             }
@@ -262,6 +267,14 @@ final class WebDAVSyncEngine {
         removedLocalCount = deletedLocalWeb.count + deletedLocalWenku.count
         if let cloud, let pendingCloud {
             try cloud.replaceCloudBooks(web: pendingCloud.web, wenku: pendingCloud.wenku, covers: pendingCloud.covers)
+            if didListBlobs {
+                // 只看书籍主文件：封面缺失不影响阅读。书目不自动删除，由用户在书库中决定。
+                let stillMissing = missingBlobs.subtracting(repairedBlobs)
+                let web = pendingCloud.web.filter { $0.mainAsset.map { stillMissing.contains($0.hash) } ?? false }
+                let wenku = pendingCloud.wenku.filter { $0.mainAsset.map { stillMissing.contains($0.hash) } ?? false }
+                cloud.setMissingFileKeys(Set(web.map(\.libraryKey) + wenku.map(\.libraryKey)))
+                missingCloudBookTitles = web.map(\.record.syncTitle) + wenku.map(\.record.syncTitle)
+            }
         }
         if options.tags { local.applyBlockedTags(manifest.blockedTags ?? [:]) }
         if options.books, let series = manifest.librarySeries { local.applyLibrarySeries(series) }
@@ -425,7 +438,8 @@ extension WebDAVSyncEngine {
                 return WebDAVSyncRunResult(imported: imported, removedLocal: engine.removedLocalCount,
                                            lacksETag: engine.manifestLacksETag,
                                            repairedBlobs: engine.repairedBlobs.count,
-                                           unrepairedBlobs: engine.unrepairedBlobCount)
+                                           unrepairedBlobs: engine.unrepairedBlobCount,
+                                           missingCloudBookTitles: engine.missingCloudBookTitles)
             } catch WebDAVSyncError.concurrentChange where attempt < maxAttempts {
                 imported += engine.restoredBeforeFailure
                 continue
@@ -444,6 +458,8 @@ struct WebDAVSyncRunResult: Equatable {
     var repairedBlobs = 0
     /// 服务器仍缺少、本机也没有的文件数。
     var unrepairedBlobs = 0
+    /// 书籍文件缺失的云端书籍书名，书库中标记为“云端文件缺失”。
+    var missingCloudBookTitles: [String] = []
 }
 
 /// 串行执行会写入 WebDAV 清单的操作（书籍等内容同步与云端删除），先到先执行。

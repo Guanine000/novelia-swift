@@ -194,7 +194,7 @@ final class WebDAVSyncStore: ObservableObject {
                     + (options.fonts ? "已同步导入字体。" : "")
                     + (result.removedLocal > 0 ? "其他设备已从云端删除 \(result.removedLocal) 本书，本机副本已一并删除。" : "")
                     + (result.repairedBlobs > 0 ? "已补传 \(result.repairedBlobs) 个云端缺失的文件。" : "")
-                    + (result.unrepairedBlobs > 0 ? "云端仍缺少 \(result.unrepairedBlobs) 个文件，本机没有这些书，请在仍有它们的设备上手动同步。" : "")
+                    + Self.missingSummary(result)
             } catch {
                 if isCancellation(error) { cancelled(prefix) } else {
                     folderCache.clear()
@@ -294,19 +294,40 @@ final class WebDAVSyncStore: ObservableObject {
         let progress: (Int, Int) -> Void = { [weak self] done, total in
             self?.cloudDownloadProgress = Double(done) / Double(max(total, 1))
         }
-        if let book = cloudBooks.webBooks.first(where: { "web:\($0.record.id)" == key }) {
-            let files = try await WebDAVCloudBookDownloader.download(book.assets, from: client, onProgress: progress)
-            defer { files.values.forEach { try? FileManager.default.removeItem(at: $0) } }
-            try web.restoreFromSync(book.record, files: files)
-            cloudBooks.remove(webID: book.record.id)
-        } else if let book = cloudBooks.wenkuBooks.first(where: { "wenku:\($0.record.id.uuidString)" == key }) {
-            let files = try await WebDAVCloudBookDownloader.download(book.assets, from: client, onProgress: progress)
-            defer { files.values.forEach { try? FileManager.default.removeItem(at: $0) } }
-            try wenku.restoreFromSync(book.record, files: files)
-            cloudBooks.remove(wenkuID: book.record.id)
-        } else {
-            throw WebDAVSyncError.invalidAsset
+        do {
+            if let book = cloudBooks.webBooks.first(where: { $0.libraryKey == key }) {
+                let files = try await WebDAVCloudBookDownloader.download(book.assets, from: client, onProgress: progress)
+                defer { files.values.forEach { try? FileManager.default.removeItem(at: $0) } }
+                try web.restoreFromSync(book.record, files: files)
+                cloudBooks.remove(webID: book.record.id)
+            } else if let book = cloudBooks.wenkuBooks.first(where: { $0.libraryKey == key }) {
+                // 封面缺失只是没有封面，书照常下载。
+                let files = try await WebDAVCloudBookDownloader.download(
+                    book.assets, from: client, optionalFilenames: Set([book.record.coverFilename].compactMap { $0 }),
+                    onProgress: progress)
+                defer { files.values.forEach { try? FileManager.default.removeItem(at: $0) } }
+                try wenku.restoreFromSync(book.record, files: files)
+                cloudBooks.remove(wenkuID: book.record.id)
+            } else {
+                throw WebDAVSyncError.invalidAsset
+            }
+        } catch WebDAVSyncError.missingBlob {
+            // 书库据此显示“云端文件缺失”，并提供从云端删除。
+            cloudBooks.markMissingFile(key: key)
+            throw WebDAVSyncError.missingBlob
         }
+    }
+
+    /// 缺失书籍列出书名（最多 3 本）；其他缺失文件（如字体、背景）只报数量。
+    private static func missingSummary(_ result: WebDAVSyncRunResult) -> String {
+        let titles = result.missingCloudBookTitles
+        if !titles.isEmpty {
+            let named = titles.prefix(3).map { "《\($0)》" }.joined()
+            let more = titles.count > 3 ? "等 \(titles.count) 本书" : ""
+            return "\(named)\(more)的云端文件缺失、本机也没有，已在书库中标记，可从云端删除，或在仍有它们的设备上手动同步。"
+        }
+        guard result.unrepairedBlobs > 0 else { return "" }
+        return "云端仍缺少 \(result.unrepairedBlobs) 个文件，本机没有可补传的副本，请在仍有这些内容的设备上手动同步。"
     }
 
     private func isCancellation(_ error: Error) -> Bool {

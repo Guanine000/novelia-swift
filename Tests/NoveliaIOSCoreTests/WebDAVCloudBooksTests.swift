@@ -28,7 +28,7 @@ private final class BlobRemote: WebDAVRemote {
     func uploadBlob(_ file: URL, hash: String) async throws {}
     func deleteBlob(_ hash: String) async throws {}
     func downloadBlob(_ hash: String) async throws -> URL {
-        guard hash != failing, let data = blobs[hash] else { throw WebDAVSyncError.unexpectedResponse(404) }
+        guard hash != failing, let data = blobs[hash] else { throw WebDAVSyncError.missingBlob }
         let url = directory.appendingPathComponent("blob-\(UUID())")
         try data.write(to: url)
         handedOut.append(url)
@@ -104,6 +104,35 @@ final class WebDAVCloudBooksTests: XCTestCase {
         XCTAssertFalse(remote.handedOut.isEmpty)
         XCTAssertTrue(remote.handedOut.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) },
                       "partial downloads are deleted")
+    }
+
+    /// 缺失标记随记录持久保存，只保留仍存在的云端书籍；旧缓存没有该字段也能读取。
+    func testMissingFileMarksPersistAndFollowRecords() throws {
+        let store = CloudBookStore(directory: directory)
+        let kept = book(cover: nil), dropped = book(cover: nil)
+        try store.replaceCloudBooks(web: [], wenku: [kept, dropped], covers: [:])
+        store.setMissingFileKeys([kept.libraryKey, dropped.libraryKey, "wenku:unknown"])
+        XCTAssertEqual(store.missingFileKeys, [kept.libraryKey, dropped.libraryKey], "unknown keys are ignored")
+        store.remove(wenkuID: dropped.record.id)
+        XCTAssertEqual(store.missingFileKeys, [kept.libraryKey])
+        XCTAssertEqual(CloudBookStore(directory: directory).missingFileKeys, [kept.libraryKey], "marks survive relaunch")
+        try store.replaceCloudBooks(web: [], wenku: [kept], covers: [:])
+        XCTAssertEqual(store.missingFileKeys, [kept.libraryKey], "a sync without verification keeps the mark")
+        store.setMissingFileKeys([])
+        XCTAssertTrue(CloudBookStore(directory: directory).missingFileKeys.isEmpty)
+    }
+
+    func testDownloaderSkipsMissingOptionalCoverOnly() async throws {
+        let remote = BlobRemote(directory: directory)
+        let main = remote.seed("book", as: "book.epub"), cover = remote.seed("cover", as: "cover.jpg")
+        remote.blobs[cover.hash] = nil
+        let files = try await WebDAVCloudBookDownloader.download([main, cover], from: remote, optionalFilenames: ["cover.jpg"])
+        XCTAssertEqual(Set(files.keys), ["book.epub"])
+        remote.blobs[main.hash] = nil
+        do {
+            _ = try await WebDAVCloudBookDownloader.download([main, cover], from: remote, optionalFilenames: ["cover.jpg"])
+            XCTFail("a missing book file still fails")
+        } catch WebDAVSyncError.missingBlob {}
     }
 
     func testDownloaderRejectsUnsafeFilenames() async {
