@@ -7,6 +7,7 @@ import tempfile
 import json
 import hashlib
 import plistlib
+import zipfile
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--device', required=True)
 parser.add_argument('--app', required=True, help='Built dedicated architecture-validation Novelia.app')
@@ -15,7 +16,12 @@ parser.add_argument('--performance', action='store_true', help='Record simulator
 parser.add_argument('--library-count', type=int, choices=[0, 300, 3000], default=300)
 parser.add_argument('--iterations', type=int, choices=range(2, 11), default=3)
 parser.add_argument('--result-json', type=Path)
+parser.add_argument('--epub-failure', choices=['archive', 'chapter'], help='Exercise a synthetic broken EPUB in the dedicated App only')
 args = parser.parse_args()
+if args.epub_failure and args.performance:
+    parser.error('--epub-failure cannot be combined with --performance')
+if plistlib.loads((Path(args.app)/'Info.plist').read_bytes()).get('CFBundleIdentifier') != 'cc.novelia.ios.architecture-validation':
+    parser.error('Requires the dedicated architecture-validation App bundle')
 r = Path(tempfile.mkdtemp(prefix='NoveliaArchitectureUI-'))
 # Boot only the selected simulator; the installed App has its own bundle/data.
 subprocess.run(['xcrun','simctl','boot',args.device], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -206,9 +212,68 @@ p=r/'TapRegression.xcodeproj';p.mkdir(exist_ok=True);(p/'project.pbxproj').write
 d=p/'xcshareddata/xcschemes';d.mkdir(parents=True,exist_ok=True)
 def ref(n,name):return f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{ID(n)}" BuildableName="{name}" BlueprintName="{name.split(".")[0]}" ReferencedContainer="container:TapRegression.xcodeproj"/>'
 (d/'TapTests.xcscheme').write_text('<?xml version="1.0" encoding="UTF-8"?><Scheme version="1.3"><BuildAction parallelizeBuildables="YES"><BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="NO" buildForArchiving="NO" buildForAnalyzing="YES">'+ref(10,'TapRegression.app')+'</BuildActionEntry><BuildActionEntry buildForTesting="YES" buildForRunning="NO" buildForProfiling="NO" buildForArchiving="NO" buildForAnalyzing="NO">'+ref(11,'TapTests.xctest')+'</BuildActionEntry></BuildActionEntries></BuildAction><TestAction buildConfiguration="Debug" shouldUseLaunchSchemeArgsEnv="YES"><Testables><TestableReference skipped="NO">'+ref(11,'TapTests.xctest')+'</TestableReference></Testables></TestAction></Scheme>')
+sample = None
+previous_sample = None
+if args.epub_failure:
+    subprocess.run(['xcrun','simctl','terminate',args.device,'cc.novelia.ios.architecture-validation'],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    data_root = Path(subprocess.check_output(['xcrun','simctl','get_app_container',args.device,
+                                            'cc.novelia.ios.architecture-validation','data'], text=True).strip())
+    sample = data_root/'Documents/prototype-sample.epub'
+    sample.parent.mkdir(parents=True, exist_ok=True)
+    previous_sample = sample.read_bytes() if sample.exists() else None
+    if args.epub_failure == 'archive':
+        sample.write_bytes(b'PK invalid synthetic EPUB')
+    else:
+        with zipfile.ZipFile(sample, 'w') as archive:
+            archive.writestr('META-INF/container.xml', '<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>')
+            archive.writestr('book.opf', '<package><manifest><item id="a" href="missing.xhtml" media-type="application/xhtml+xml"/><item id="b" href="readable.xhtml" media-type="application/xhtml+xml"/><item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="a"/><itemref idref="b"/></spine></package>')
+            archive.writestr('nav.xhtml', '<nav><a href="missing.xhtml">缺失章节</a><a href="readable.xhtml">可读章节</a></nav>')
+            archive.writestr('readable.xhtml', '<html><body>' + '<p>异常章节之后仍能阅读的合成正文。</p>' * 120 + '</body></html>')
+    body = r'''
+  XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "无法打开 EPUB 压缩包")).firstMatch.waitForExistence(timeout: 20))
+  app.buttons["复制错误说明"].tap()
+  app.buttons["重新打开"].tap()
+  XCTAssertTrue(app.buttons["重新打开"].waitForExistence(timeout: 20))
+''' if args.epub_failure == 'archive' else r'''
+  XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "章节文件缺失：missing.xhtml")).firstMatch.waitForExistence(timeout: 20))
+  app.buttons["复制错误说明"].tap()
+  app.buttons["重试"].tap()
+  XCTAssertTrue(app.buttons["选择其他章节"].waitForExistence(timeout: 20))
+  app.buttons["选择其他章节"].tap()
+  app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "可读章节")).firstMatch.tap()
+  let next = app.buttons["下一页"]
+  XCTAssertTrue(next.waitForExistence(timeout: 30))
+  expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: next)
+  waitForExpectations(timeout: 30)
+  XCTAssertFalse(app.buttons["关闭阅读器"].exists)
+  next.tap()
+'''
+    (r/'TapTests.swift').write_text(r'''import XCTest
+final class TapTests: XCTestCase {
+ func testBrokenEPUBRecovery() {
+  continueAfterFailure = false
+  let app = XCUIApplication(bundleIdentifier: "cc.novelia.ios.architecture-validation")
+  app.launchArguments = ["-architectureValidation", "-resetArchitectureValidation", "-openEPUBPrototype"]
+  app.launch(); defer { app.terminate() }
+''' + body + r'''
+  let back = app.buttons["关闭阅读器"].exists ? app.buttons["关闭阅读器"] : app.buttons["返回"]
+  back.tap()
+  XCTAssertTrue(app.tabBars.buttons["书库"].waitForExistence(timeout: 10))
+ }
+}
+''')
 print(f'UI test artifacts: {r}', flush=True)
 with (r / 'test.log').open('w') as log:
- subprocess.run(['xcodebuild','-project',str(p),'-scheme','TapTests','-destination',f'platform=iOS Simulator,id={args.device}','-derivedDataPath',str(r/'DerivedData'),'-parallel-testing-enabled','NO','test'] + ([f'-only-testing:{args.only_testing}'] if args.only_testing else []),stdout=log,stderr=subprocess.STDOUT,check=True)
+ try:
+  subprocess.run(['xcodebuild','-project',str(p),'-scheme','TapTests','-destination',f'platform=iOS Simulator,id={args.device}','-derivedDataPath',str(r/'DerivedData'),'-parallel-testing-enabled','NO','test'] + ([f'-only-testing:{args.only_testing}'] if args.only_testing else []),stdout=log,stderr=subprocess.STDOUT,check=True)
+ finally:
+  if sample is not None:
+   subprocess.run(['xcrun','simctl','terminate',args.device,'cc.novelia.ios.architecture-validation'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+   if previous_sample is None:
+    sample.unlink(missing_ok=True)
+   else:
+    sample.write_bytes(previous_sample)
 if args.performance:
     metrics = subprocess.run(['xcrun','xcresulttool','get','test-results','metrics','--path',
                               str(next((r/'DerivedData/Logs/Test').glob('*.xcresult'))), '--compact'],

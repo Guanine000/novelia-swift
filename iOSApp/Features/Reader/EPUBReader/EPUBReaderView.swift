@@ -76,15 +76,23 @@ private struct EPUBReaderViewContent: View {
                     ProgressView(textBook == nil ? "正在解析 EPUB…" : "正在排版…")
                 case .failed(let message):
                     ContentUnavailableView {
-                        Label("无法排版", systemImage: "exclamationmark.triangle")
+                        Label("无法读取或排版", systemImage: "exclamationmark.triangle")
                     } description: {
-                        Text(message)
+                        Text(message).textSelection(.enabled)
                     } actions: {
                         if model.source != nil {
                             Button("重试") { model.retry() }
                                 .buttonStyle(.borderedProminent)
                                 .tint(NoveliaStyle.brandGreen)
+                        } else if let bookURL {
+                            Button("重新打开") { model.retryOpening(url: bookURL) }
+                                .buttonStyle(.borderedProminent)
                         }
+                        if model.source?.toc.isEmpty == false {
+                            Button("选择其他章节") { isShowingTOC = true }
+                        }
+                        Button("复制错误说明") { UIPasteboard.general.string = message }
+                        Button("关闭阅读器") { dismiss() }
                     }
                 case .ready:
                     EPUBReaderPageSurface(model: model, showChrome: $showChrome, size: geometry.size)
