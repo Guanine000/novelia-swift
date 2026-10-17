@@ -35,13 +35,19 @@ struct LibraryView: View {
     }
     private var sortOptions: LibrarySortOptions { state.sortOptions(scope: nil) }
 
+    /// 多选可作用到的书：搜索结果，或“全部书籍”中未归入系列的书。
+    private var selectableBooks: [LibraryBook] {
+        let books = state.displayBooks(from: allBooks).filter { sourceFilter.includes(isWenku: $0.isWenku) }
+        if isSearching, !LibraryOrganizer.normalized(query).isEmpty {
+            return books.filter { LibraryOrganizer.matches(title: $0.title, author: $0.author, query: query) }
+        }
+        return segment == .books ? books.filter { state.series.seriesID(forBook: $0.key) == nil } : []
+    }
+
     var body: some View {
         let sourceBooks = allBooks
         let books = state.displayBooks(from: sourceBooks).filter { sourceFilter.includes(isWenku: $0.isWenku) }
-        // 多选的范围是当前列出的书：搜索结果，或“全部书籍”中未归入系列的书。
-        let selectable: [LibraryBook] = isSearching && !LibraryOrganizer.normalized(query).isEmpty
-            ? books.filter { LibraryOrganizer.matches(title: $0.title, author: $0.author, query: query) }
-            : segment == .books ? books.filter { state.series.seriesID(forBook: $0.key) == nil } : []
+        let selectable = selectableBooks
         List {
             if !sourceBooks.isEmpty, let error = webDownloads.storageError ?? wenkuDownloads.storageError {
                 VStack(alignment: .leading) {
@@ -248,6 +254,13 @@ struct LibraryView: View {
             }
             .accessibilityLabel("搜索书库")
             LibrarySortMenu(options: sortOptions) { state.setSortOptions($0, scope: nil) }
+            if !selectableBooks.isEmpty {
+                Button { bookActions.beginSelection() } label: {
+                    Image(systemName: "checklist")
+                }
+                .accessibilityLabel("选择")
+                .accessibilityHint("进入多选，可批量移入系列、删除或压缩分享")
+            }
             Button {
                 importer.isShowingFileImporter = true
             } label: {
@@ -337,7 +350,7 @@ struct LibraryView: View {
                         .opacity(0)
                     }
                     .libraryListRow()
-                    .contextMenu { LibrarySeriesMenuItems(seriesID: series.id, name: series.name, actions: bookActions) }
+                    .contextMenu { LibrarySeriesMenuItems(seriesID: series.id, name: series.name, books: members, actions: bookActions) }
             }
         }
     }
@@ -425,7 +438,9 @@ struct LibrarySeriesDetailView: View {
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .top) { searchBar }
         .safeAreaInset(edge: .bottom) {
-            if bookActions.isSelecting { LibrarySelectionBar(books: visible, actions: bookActions) }
+            if bookActions.isSelecting {
+                LibrarySelectionBar(books: visible, actions: bookActions, archiveTitle: series?.name ?? "系列")
+            }
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle(series?.name ?? "系列")
@@ -443,9 +458,16 @@ struct LibrarySeriesDetailView: View {
                 }
                 .accessibilityLabel("在系列中搜索")
                 LibrarySortMenu(options: options) { state.setSortOptions($0, scope: seriesID) }
+                if !visible.isEmpty {
+                    Button { bookActions.beginSelection() } label: {
+                        Image(systemName: "checklist")
+                    }
+                    .accessibilityLabel("选择")
+                    .accessibilityHint("进入多选，可批量移出系列、删除或压缩分享")
+                }
                 Menu {
                     Button { isAddingBooks = true } label: { Label("添加书籍", systemImage: "plus") }
-                    LibrarySeriesMenuItems(seriesID: seriesID, name: series?.name ?? "", actions: bookActions)
+                    LibrarySeriesMenuItems(seriesID: seriesID, name: series?.name ?? "", books: members, actions: bookActions)
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -565,9 +587,19 @@ private struct LibraryAddToSeriesSheet: View {
 private struct LibrarySeriesMenuItems: View {
     let seriesID: String
     let name: String
+    /// 系列中的书；压缩后分享整卷时使用。
+    let books: [LibraryBook]
     let actions: LibraryBookActions
 
+    private var shareableCount: Int { books.filter { !$0.isCloudOnly }.count }
+
     var body: some View {
+        Button {
+            actions.prepareArchiveShare(books: books, title: "\(name) \(books.count) 本")
+        } label: {
+            Label("压缩后分享", systemImage: "doc.zipper")
+        }
+        .disabled(shareableCount == 0 || actions.isPreparingArchive)
         Button {
             actions.renameName = name
             actions.renamingSeries = LibrarySeriesTarget(id: seriesID, name: name)
@@ -607,6 +639,18 @@ final class LibraryBookActions: ObservableObject {
     /// 多选：长按书籍进入，点击切换选择。
     @Published private(set) var isSelecting = false
     @Published private(set) var selectedKeys: Set<String> = []
+    /// 已生成的压缩包，非 nil 时弹出系统分享面板。
+    @Published var shareArchive: LibraryArchiveShare?
+    /// 正在打包压缩包；批量分享时用于禁用重复点击与显示进度。
+    @Published private(set) var isPreparingArchive = false
+
+    private var archiveTask: Task<Void, Never>?
+
+    /// 顶部“选择”按钮进入多选，开始时未选中任何书。
+    func beginSelection() {
+        isSelecting = true
+        selectedKeys = []
+    }
 
     func beginSelection(with book: LibraryBook) {
         isSelecting = true
@@ -622,6 +666,28 @@ final class LibraryBookActions: ObservableObject {
     func endSelection() {
         isSelecting = false
         selectedKeys = []
+    }
+
+    /// 把选中的书压缩成 zip 后打开系统分享；系列长按菜单也复用这里。
+    func prepareArchiveShare(books: [LibraryBook], title: String) {
+        guard !isPreparingArchive else { return }
+        archiveTask?.cancel()
+        isPreparingArchive = true
+        archiveTask = Task {
+            defer { isPreparingArchive = false }
+            do {
+                let archive = try await LibraryArchiveExporter.makeArchive(books: books, title: title)
+                guard !Task.isCancelled else {
+                    try? FileManager.default.removeItem(at: archive.url)
+                    return
+                }
+                shareArchive = archive
+            } catch is CancellationError {
+                // 用户离开页面或重新发起，忽略。
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
     }
 }
 
@@ -655,9 +721,12 @@ struct LibrarySelectionToolbar: ToolbarContent {
 struct LibrarySelectionBar: View {
     let books: [LibraryBook]
     @ObservedObject var actions: LibraryBookActions
+    /// 压缩包标题前缀：书库为“书库”，系列详情传入系列名。
+    var archiveTitle = "书库"
     @EnvironmentObject private var state: LibraryStateStore
 
     private var selected: [LibraryBook] { books.filter { actions.selectedKeys.contains($0.key) } }
+    private var shareableCount: Int { selected.filter { !$0.isCloudOnly }.count }
 
     var body: some View {
         let selected = selected
@@ -696,6 +765,15 @@ struct LibrarySelectionBar: View {
                 barLabel("删除", systemImage: "trash")
             }
             .disabled(selected.isEmpty)
+            Button {
+                actions.prepareArchiveShare(books: selected, title: "\(archiveTitle) \(selected.count) 本")
+            } label: {
+                barLabel("压缩分享", systemImage: "doc.zipper")
+            }
+            .disabled(shareableCount == 0 || actions.isPreparingArchive)
+            .accessibilityHint(shareableCount < selected.count
+                               ? "云端书籍没有本机文件，只会压缩已下载的书"
+                               : "把选中的书打成一个压缩包后分享")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -735,6 +813,10 @@ struct LibraryBookActionDialogs: ViewModifier {
                     }
                 }
             }
+            .sheet(item: $actions.shareArchive, onDismiss: { actions.shareArchive = nil }) { archive in
+                LibraryArchiveShareSheet(url: archive.url)
+                    .ignoresSafeArea()
+            }
             .alert("《\(actions.missingCloudBook?.title ?? "")》的云端文件缺失",
                    isPresented: .init(get: { actions.missingCloudBook != nil },
                                       set: { if !$0 { actions.missingCloudBook = nil } }),
@@ -757,6 +839,18 @@ struct LibraryBookActionDialogs: ViewModifier {
             } message: { book in
                 let size = book.cloudDownloadSizeText.map { "大小约 \($0)。" } ?? "大小未知。"
                 Text("这本书只保存在 WebDAV 中，需要先下载到本机才能阅读。\(size)下载会消耗 WebDAV 流量。")
+            }
+            .overlay {
+                if actions.isPreparingArchive {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .tint(NoveliaStyle.brandGreen)
+                        Text("正在压缩书籍…").font(.subheadline)
+                    }
+                    .padding(20)
+                    .frame(maxWidth: 240)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                }
             }
             .overlay {
                 if let key = syncStore.downloadingCloudBook {
