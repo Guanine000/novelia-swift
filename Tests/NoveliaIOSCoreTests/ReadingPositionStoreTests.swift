@@ -111,7 +111,9 @@ final class ReadingPositionStoreTests: XCTestCase {
         let keys = ["readium.locator.v1.gone", "readium.locatorTime.v1.gone", "readium.locator.v1.kept",
                     "readium.text.locator.v1.txt|gone|rules", "readium.text.time.v1.txt|gone|rules",
                     "readium.text.locator.v1.txt|kept|rules", "readium.text.locator.v1.unexpected", "readerFontSize"]
-        XCTAssertEqual(Set(ReaderLocalCleanup.orphanedReadiumKeys(keys, keepingHashes: ["kept"])),
+        XCTAssertEqual(ReadiumLocatorKeys.bookLocator(hash: "h"), "readium.locator.v1.h", "stored key names are a compatibility contract")
+        XCTAssertEqual(ReadiumLocatorKeys.textTime(identity: "txt|h|r"), "readium.text.time.v1.txt|h|r")
+        XCTAssertEqual(Set(ReadiumLocatorKeys.orphanedKeys(keys, keepingHashes: ["kept"])),
                        ["readium.locator.v1.gone", "readium.locatorTime.v1.gone",
                         "readium.text.locator.v1.txt|gone|rules", "readium.text.time.v1.txt|gone|rules"])
     }

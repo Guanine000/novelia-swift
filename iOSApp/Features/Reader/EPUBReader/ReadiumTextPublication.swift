@@ -15,8 +15,8 @@ enum ReadiumTextPublication {
                                 defaults: UserDefaults = .standard) async throws -> Locator? {
         guard publication.readingOrder.indices.contains(unit) else { return nil }
         if let identity,
-           let json = defaults.string(forKey: "readium.text.locator.v1.\(identity)"),
-           let savedAt = defaults.object(forKey: "readium.text.time.v1.\(identity)") as? Date,
+           let json = defaults.string(forKey: ReadiumLocatorKeys.textLocator(identity: identity)),
+           let savedAt = defaults.object(forKey: ReadiumLocatorKeys.textTime(identity: identity)) as? Date,
            savedAt >= (updatedAt ?? .distantPast),
            let value = try? JSONValue(jsonString: json),
            let saved = try? Locator(json: value, warnings: nil),

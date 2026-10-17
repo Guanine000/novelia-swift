@@ -61,6 +61,8 @@
   "DiagnosticContext.swift": "Sources/NoveliaIOSCore/Support/DiagnosticContext.swift",
   "ShareableLogPolicy.swift": "Sources/NoveliaIOSCore/Support/ShareableLogPolicy.swift",
   "SerialAsyncGate.swift": "Sources/NoveliaIOSCore/Support/SerialAsyncGate.swift",
+  "ReadiumLocatorKeys.swift": "Sources/NoveliaIOSCore/Features/Reader/ReadiumLocatorKeys.swift",
+  "ReplyPaging.swift": "Sources/NoveliaIOSCore/Features/Community/ReplyPaging.swift",
   "EPUBContainer.swift": "iOSApp/Features/Reader/EPUBReader/EPUBContainer.swift",
   "EPUBReaderModel.swift": "iOSApp/Features/Reader/EPUBReader/EPUBReaderModel.swift",
   "EPUBChapterSource.swift": "iOSApp/Features/Reader/EPUBReader/EPUBChapterSource.swift",

@@ -368,7 +368,7 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
             lastOpened = opened
             persistLastOpened()
         }
-        for key in ReaderLocalCleanup.orphanedReadiumKeys(defaults.dictionaryRepresentation().keys, keepingHashes: keepingHashes) {
+        for key in ReadiumLocatorKeys.orphanedKeys(defaults.dictionaryRepresentation().keys, keepingHashes: keepingHashes) {
             defaults.removeObject(forKey: key)
         }
         if readingPositions.pruneFilePositions(keepingHashes: keepingHashes,
