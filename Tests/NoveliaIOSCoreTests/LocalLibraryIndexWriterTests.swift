@@ -58,6 +58,56 @@ final class LocalLibraryIndexWriterTests: XCTestCase {
         XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.hasPrefix(".copy-") })
     }
 
+    @MainActor
+    func testRepositoryPublishesOnlyAfterSuccessfulWriteAndPreservesExistingDataOnFailure() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("library.json")
+        try JSONEncoder().encode(["old"]).write(to: url)
+        let writer = LocalLibraryIndexWriter { _, _ in throw CocoaError(.fileWriteOutOfSpace) }
+        let repository = LocalLibraryRepository<String>(url: url, writer: writer)
+        var published: [String] = []
+        try await repository.load { published = $0 }
+        do {
+            try await repository.update({ $0.append("new") }, publish: { published = $0 })
+            XCTFail("expected write failure")
+        } catch {}
+        XCTAssertEqual(published, ["old"])
+        XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(contentsOf: url)), ["old"])
+    }
+
+    @MainActor
+    func testCorruptIndexIsRetainedAndCanBeRetriedAfterRepair() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("library.json")
+        let damaged = Data("broken".utf8)
+        try damaged.write(to: url)
+        let repository = LocalLibraryRepository<String>(url: url)
+        do { try await repository.update({ $0.append("new") }, publish: { _ in XCTFail("must not publish") }); XCTFail("must reject corrupt data") }
+        catch {}
+        XCTAssertEqual(try Data(contentsOf: url), damaged)
+        try JSONEncoder().encode(["repaired"]).write(to: url)
+        var loaded: [String] = []
+        try await repository.load { loaded = $0 }
+        XCTAssertEqual(loaded, ["repaired"])
+    }
+
+    @MainActor
+    func testConcurrentRepositoryChangesBuildOnTheLatestCommittedSnapshot() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repository = LocalLibraryRepository<String>(url: url)
+        var published: [String] = []
+        async let first: Void = repository.update({ $0.append("first") }, publish: { published = $0 })
+        async let second: Void = repository.update({ $0.append("second") }, publish: { published = $0 })
+        _ = try await (first, second)
+        XCTAssertEqual(Set(published), ["first", "second"])
+        XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(contentsOf: url)), published)
+    }
+
     func testWriteFailurePropagatesWithoutReplacingExistingIndex() async throws {
         let parent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let url = parent.appendingPathComponent("library.json")

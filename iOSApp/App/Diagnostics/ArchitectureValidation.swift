@@ -15,6 +15,9 @@ extension AppServices {
                 try? FileManager.default.removeItem(at: support.appendingPathComponent(name))
             }
         }
+        if ProcessInfo.processInfo.arguments.contains("-seedPerformanceLibrary") {
+            seedPerformanceLibrary()
+        }
         URLProtocol.registerClass(ArchitectureNetworkTrap.self)
         let readium = ProcessInfo.processInfo.arguments.contains("-architectureReadium")
         UserDefaults.standard.set(readium, forKey: SettingsKey.readerEPUBReadium)
@@ -57,6 +60,36 @@ extension AppServices {
         return AppServices(configuration: configuration, api: backend.services(), account: account,
             forumAccount: forum, local: local, performsUpdateChecks: false)
     }
+    /// 只为独立 Debug App 生成固定合成样本，基准脚本在计时前单独执行此步骤。
+    private static func seedPerformanceLibrary() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-performanceLibraryCount"), arguments.indices.contains(index + 1),
+              let count = Int(arguments[index + 1]), [0, 300, 3000].contains(count) else { return }
+        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("WenkuEPUB", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            var records: [LocalWenkuEPUB] = []
+            for item in 0..<count {
+                let filename = "benchmark-\(item).txt"
+                let text = "第一章 起点\n性能基准正文 \(item)\n第二章 后续\n合成文本。"
+                try Data(text.utf8).write(to: directory.appendingPathComponent(filename))
+                records.append(LocalWenkuEPUB(id: UUID(), title: String(format: "基准书籍 %04d", item),
+                    filename: filename, addedAt: Date(timeIntervalSince1970: Double(item)), metadataLoaded: true, fileFormat: .txt))
+            }
+            if arguments.contains("-performanceLargeTXT") {
+                let sentence = "性能基准正文，用于测量本地长文本的首次打开。\n"
+                let paragraph = String(repeating: sentence, count: max(1, (9 * 1024 * 1024 / 300 - 128) / sentence.utf8.count))
+                var text = ""
+                for chapter in 1...300 { text += "第\(chapter)章 基准章节\n" + paragraph }
+                try Data(text.utf8).write(to: directory.appendingPathComponent("benchmark-large.txt"))
+                records.append(LocalWenkuEPUB(id: UUID(), title: "基准长 TXT", filename: "benchmark-large.txt",
+                    addedAt: Date(), metadataLoaded: true, fileFormat: .txt))
+            }
+            try JSONEncoder().encode(records).write(to: directory.appendingPathComponent("library.json"), options: .atomic)
+        } catch { preconditionFailure("Unable to seed isolated performance fixtures") }
+    }
+
 }
 
 /// 验证组装的设备身份和同步密码只存内存，不读取或写入 Keychain。

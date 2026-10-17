@@ -37,7 +37,7 @@ python3 -I scripts/build_local_release.py --allow-dirty --simulator '<模拟器�
 
 ### 脚本做了什么
 
-脚本运行 Swift 包逻辑／排版测试（不运行模拟器 UI 测试）、架构依赖检查与六项离线回归、Release 真机构建、架构验证代码排除检查、原始依赖许可与包内资源核对、IPA 隐私检查，生成未签名 IPA、完整对应源码、锁定依赖完整源码／许可（含 Readium 阅读器脚本所用 npm 包的原始发布包，按锁定文件 SHA-512 校验，并补充两项发布包缺失的 TypeScript 原始源码及构建配置）、BUILD.json 和 SHA256SUMS。
+脚本运行 Swift 包逻辑／排版测试（不运行模拟器 UI 测试）、架构依赖检查与七项离线回归、Release 真机构建、架构验证代码排除检查、原始依赖许可与包内资源核对、IPA 隐私检查，生成未签名 IPA、完整对应源码、锁定依赖完整源码／许可（含 Readium 阅读器脚本所用 npm 包的原始发布包，按锁定文件 SHA-512 校验，并补充两项发布包缺失的 TypeScript 原始源码及构建配置）、BUILD.json 和 SHA256SUMS。
 
 ### 注意事项
 
@@ -68,3 +68,7 @@ python3 scripts/verify_release_privacy.py <IPA路径>
 ## API 架构与开发时替换
 
 开发时的 API 配置和实现由 `NoveliaApp` / `AppServices` 统一组装，页面与 Store 通过业务服务接口调用。接口、功能实现和维护方法见[开发文档](../DEVELOPMENT.md)，其中也说明功能落点、依赖注入、API/认证替换、本地状态与数据兼容，以及对应验证方式。替换服务器格式需要实现对应服务；认证采用当前 Cookie/JWT 适配，其他认证协议需要相应适配。
+
+## 性能与故障验证
+
+发布脚本包含真实书库 Store 的隔离事务故障回归；性能基线需要单独采集，不随打包脚本自动测量。合成样本、运行命令及真机／真实 WebDAV 验收边界见[性能基线与故障验收](PERFORMANCE.md)。

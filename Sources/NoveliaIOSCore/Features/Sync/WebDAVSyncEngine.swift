@@ -8,17 +8,19 @@ import Foundation
 protocol SyncBookLibrary<Record>: AnyObject {
     associatedtype Record: SyncableBook
     var books: [Record] { get }
+    func prepareForSync() async throws
     /// 该书需要上传的文件，键为远端记录中的文件名。
     func syncFiles(for book: Record) -> [String: URL]
     func restoreFromSync(_ book: Record, files: [String: URL]) async throws
     func replaceFromSync(_ book: Record, files: [String: URL]) async throws
     /// 其他设备已从云端删除这本书：删除本机文件与记录。
-    func removeFromSync(_ book: Record)
+    func removeFromSync(_ book: Record) async throws
     /// 其他设备修改过同一文件版本的书库信息（较新）：套用书名、作者、简介与封面（`cover` 为下载好的封面）。
     func applySyncedMetadata(_ book: Record, cover: URL?) async throws
 }
 
 extension SyncBookLibrary {
+    func prepareForSync() async throws {}
     func applySyncedMetadata(_ book: Record, cover: URL?) async throws {}
 }
 
@@ -132,6 +134,8 @@ final class WebDAVSyncEngine {
     /// 标签、系列、背景与字体在清单写入成功后才套用到本机。阅读位置例外：在上传前按时间合并进本机，
     /// 以便写入清单的是合并结果；按时间合并可重复执行，清单写入失败也不会产生错误进度。
     func run() async throws -> Int {
+        try await web.prepareForSync()
+        try await wenku.prepareForSync()
         var finished = false
         defer {
             saveHashes(pruning: finished && options.books)
@@ -283,8 +287,8 @@ final class WebDAVSyncEngine {
         if !existed || !Self.sameContent(manifest, fetchedManifest) {
             try await remote.putManifest(manifest, etag: etag, existed: existed)
         }
-        deletedLocalWeb.forEach(web.removeFromSync)
-        deletedLocalWenku.forEach(wenku.removeFromSync)
+        for book in deletedLocalWeb { try await web.removeFromSync(book) }
+        for book in deletedLocalWenku { try await wenku.removeFromSync(book) }
         removedLocalCount = deletedLocalWeb.count + deletedLocalWenku.count
         if let cloud, let pendingCloud {
             try cloud.replaceCloudBooks(web: pendingCloud.web, wenku: pendingCloud.wenku, covers: pendingCloud.covers)

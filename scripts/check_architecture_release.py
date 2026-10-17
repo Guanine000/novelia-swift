@@ -9,7 +9,7 @@ parser.add_argument('executable', type=Path)
 args = parser.parse_args()
 data = args.executable.read_bytes()
 for marker in [b'-architectureValidation', b'-resetArchitectureValidation', b'-architectureReadium',
-               b'-architectureFailFirstSearch', b'-architectureTXT', b'ArchitectureNetworkTrap', b'architecture-user']:
+               b'-architectureFailFirstSearch', b'-seedPerformanceLibrary', b'-performanceLibraryCount', b'-performanceLargeTXT', b'-architectureTXT', b'ArchitectureNetworkTrap', b'architecture-user']:
     if marker in data:
         raise SystemExit('Unexpected validation runtime marker: ' + marker.decode())
 symbols = subprocess.check_output(['nm', '-gj', str(args.executable)], text=True)

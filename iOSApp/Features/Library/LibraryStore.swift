@@ -230,8 +230,9 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
 
     /// 文件身份、哈希及缓存清理都在后台完成；只在批次结束时发布一次。
     /// 取消旧批次时不提交部分结果，避免新增/删除书籍后旧任务覆盖新书库。
-    func refreshHashes(for books: [LibraryBook]) async {
+    func refreshHashes(for books: [LibraryBook], librariesReady: Bool = true) async {
         hashRefreshGeneration += 1
+        guard librariesReady else { return }
         let generation = hashRefreshGeneration
         let targets = books.filter { !$0.isCloudOnly }.map { (key: $0.key, url: $0.fileURL) }
         let cached = hashes

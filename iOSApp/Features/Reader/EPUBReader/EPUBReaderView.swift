@@ -46,6 +46,7 @@ private struct EPUBReaderViewContent: View {
     @State private var isShowingTOC = false
     @State private var isShowingStyle = false
     @State private var isShowingBookmarks = false
+    @State private var didCopyDiagnostics = false
     @State private var showChrome = true
     @State private var isScrubbing = false
     @State private var scrubProgress = 0.0
@@ -432,7 +433,7 @@ private struct EPUBReaderViewContent: View {
             VStack(alignment: .leading, spacing: 20) {
                 Label("本书有目录与排版说明", systemImage: "info.circle")
                     .font(.headline)
-                Text("打开目录可以查看本书的目录解析和排版兼容性诊断。详情支持长按选择与复制。")
+                Text("打开目录可以查看本书的目录解析和排版兼容性诊断。可点击复制全部说明，也支持长按选择文字。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 DisclosureGroup(isExpanded: $model.isTOCDiagnosticsExpanded) {
@@ -449,6 +450,14 @@ private struct EPUBReaderViewContent: View {
                     Text("诊断说明（\(model.tocDiagnosticMessages.count)）")
                         .font(.subheadline.weight(.medium))
                 }
+                Button {
+                    UIPasteboard.general.string = model.tocDiagnosticMessages.joined(separator: "\n\n")
+                    didCopyDiagnostics = true
+                } label: {
+                    Label(didCopyDiagnostics ? "已复制" : "复制全部说明",
+                          systemImage: didCopyDiagnostics ? "checkmark" : "doc.on.doc")
+                }
+                .disabled(model.tocDiagnosticMessages.isEmpty)
                 Spacer(minLength: 0)
             }
             .padding(24)
@@ -462,6 +471,7 @@ private struct EPUBReaderViewContent: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+        .onAppear { didCopyDiagnostics = false }
     }
 
     // MARK: 阅读样式（二级面板；点击应用后一次性重排）

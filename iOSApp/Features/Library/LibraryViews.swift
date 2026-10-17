@@ -28,7 +28,11 @@ struct LibraryView: View {
     @State private var hasTriggeredSync = false
     @State private var isShowingSyncProgress = false
 
-    private var allBooks: [LibraryBook] { state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks) }
+    private var allBooks: [LibraryBook] {
+        // 只给哈希／孤立状态清理完整书库，不能把尚未读取的另一库误判为已删除。
+        guard webDownloads.isReady, wenkuDownloads.isReady else { return [] }
+        return state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks)
+    }
     private var sortOptions: LibrarySortOptions { state.sortOptions(scope: nil) }
 
     var body: some View {
@@ -39,6 +43,12 @@ struct LibraryView: View {
             ? books.filter { LibraryOrganizer.matches(title: $0.title, author: $0.author, query: query) }
             : segment == .books ? books.filter { state.series.seriesID(forBook: $0.key) == nil } : []
         List {
+            if !sourceBooks.isEmpty, let error = webDownloads.storageError ?? wenkuDownloads.storageError {
+                VStack(alignment: .leading) {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                    Button("重试读取") { Task { try? await webDownloads.loadIfNeeded(); await wenkuDownloads.refreshMissingMetadata() } }
+                }
+            }
             if sourceBooks.isEmpty {
                 // 空状态放在 overlay 中显示；ContentUnavailableView 作为 List 行时操作按钮会被压成细长色条。
             } else if isSearching && !LibraryOrganizer.normalized(query).isEmpty {
@@ -87,7 +97,16 @@ struct LibraryView: View {
             }
         }
         .libraryListStyle()
-        .overlay { if sourceBooks.isEmpty { emptyLibrary } }
+        .overlay {
+            if webDownloads.isLoading || wenkuDownloads.isLoading { ProgressView("正在读取书库…") }
+            else if sourceBooks.isEmpty, let error = webDownloads.storageError ?? wenkuDownloads.storageError {
+                ContentUnavailableView {
+                    Label("无法读取书库", systemImage: "exclamationmark.triangle")
+                } description: { Text(error) } actions: {
+                    Button("重试") { Task { try? await webDownloads.loadIfNeeded(); await wenkuDownloads.refreshMissingMetadata() } }
+                }
+            } else if sourceBooks.isEmpty { emptyLibrary }
+        }
         .safeAreaInset(edge: .bottom) {
             if bookActions.isSelecting { LibrarySelectionBar(books: selectable, actions: bookActions) }
         }
@@ -120,7 +139,9 @@ struct LibraryView: View {
         .onAppear { state.reloadPositions() }
         .task { importer.attach(wenkuDownloads) }
         .task { await wenkuDownloads.refreshMissingMetadata() }
-        .task(id: sourceBooks) { await state.refreshHashes(for: sourceBooks) }
+        .task(id: sourceBooks) {
+            await state.refreshHashes(for: sourceBooks, librariesReady: webDownloads.isReady && wenkuDownloads.isReady)
+        }
         .fullScreenCover(isPresented: $importer.isShowingFileImporter) {
             EPUBFilePicker(contentTypes: [
                 UTType(filenameExtension: "txt") ?? .plainText,
@@ -709,7 +730,7 @@ struct LibraryBookActionDialogs: ViewModifier {
                 if case .wenku(let record) = book.origin,
                    let current = wenkuDownloads.books.first(where: { $0.id == record.id }) {
                     LibraryBookInfoEditor(record: current, coverURL: wenkuDownloads.coverURL(for: current)) { title, author, description, cover in
-                        try wenkuDownloads.updateMetadata(id: current.id, title: title, author: author,
+                        try await wenkuDownloads.updateMetadata(id: current.id, title: title, author: author,
                                                           description: description, cover: cover)
                     }
                 }
@@ -843,14 +864,19 @@ struct LibraryBookActionDialogs: ViewModifier {
     private func delete(_ books: [LibraryBook], fromCloud: Bool) {
         actions.pendingDelete = []
         actions.endSelection()
-        for book in books where !book.isCloudOnly {
-            switch book.origin {
-            case .webNovel(let record): webDownloads.remove(record)
-            case .wenku(let record): wenkuDownloads.remove(record)
-            }
-        }
-        guard fromCloud else { return }
         Task {
+            do {
+                for book in books where !book.isCloudOnly {
+                    switch book.origin {
+                    case .webNovel(let record): try await webDownloads.remove(record)
+                    case .wenku(let record): try await wenkuDownloads.remove(record)
+                    }
+                }
+            } catch {
+                actions.actionError = "本机删除未完成，未成功删除的书目与文件已保留，请重试。"
+                return
+            }
+            guard fromCloud else { return }
             do {
                 let keys = Set(books.map(\.key))
                 try await syncStore.deleteFromCloud(keys: keys)
@@ -984,8 +1010,10 @@ struct LibraryBookRow: View {
                 Label("编辑信息", systemImage: "pencil")
             }
             Button {
-                do { try LibraryMover.moveToNetwork(record, web: webDownloads, wenku: wenkuDownloads, state: state) }
-                catch { actions.actionError = error.localizedDescription }
+                Task {
+                    do { try await LibraryMover.moveToNetwork(record, web: webDownloads, wenku: wenkuDownloads, state: state) }
+                    catch { actions.actionError = error.localizedDescription }
+                }
             } label: {
                 Label("移至网络小说", systemImage: "arrow.right.arrow.left")
             }
