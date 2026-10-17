@@ -293,7 +293,7 @@ Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒�
 | 解析、章节与排版缓存 | 各缓存实现；属于可重建数据，保持容量与失效规则 |
 | 云端同步状态 | WebDAV 清单、内容 blob 与独立统计数据 |
 
-文库与导入书籍的“编辑信息”经 `WenkuLocalLibraryStore.updateMetadata` 只修改索引记录与封面文件并记下 `metadataUpdatedAt`，不改书籍文件，内容哈希及挂在其上的进度、书签、统计不变。同步时同一文件版本（`syncTimestamp` 相同）先由引擎 `mergeEditedMetadata` 按该时间套用较新的远端信息（`SyncBookLibrary.applySyncedMetadata`，下载封面 blob），再规划上传，使清单写回合并后的记录；网络小说不提供编辑。删除书籍时 Store 一并删除书籍文件与封面；阅读位置按内容哈希保存，不随删除清除。`LibraryStateStore` 在每本本机书都算出哈希后清理残留：不在书库（本机与云端）的最近打开时间与 Readium 精确位置（键名统一由 `ReadiumLocatorKeys` 定义，阅读器与清理共用）立即清理，EPUB/TXT 共享位置超过 180 天未更新才清理，在线小说（web:）位置不清理；书库为空时不清理。系列归属与最近打开时间只在云端副本也删除成功后由 `LibraryStateStore.forget(keys:)` 清理（系列移出记录随同步传播），只删除本机时保留，因为同一书键可能仍以云端书籍出现。
+文库与导入书籍的“编辑信息”经 `WenkuLocalLibraryStore.updateMetadata` 只修改索引记录与封面文件并记下 `metadataUpdatedAt`，不改书籍文件，内容哈希及挂在其上的进度、书签、统计不变。同步时同一文件版本（`syncTimestamp` 相同）先由引擎 `mergeEditedMetadata` 按该时间套用较新的远端信息（`SyncBookLibrary.applySyncedMetadata`，下载封面 blob），再规划上传，使清单写回合并后的记录。封面下载后引擎重新比较当前记录，实际 Store 在应用前再次检查 `addedAt` 与 `metadataUpdatedAt`，仅接受同文件版本且严格较新的远端信息；复制与提交期间仍按完整快照检查，避免覆盖在途编辑。网络小说不提供编辑。删除书籍时 Store 一并删除书籍文件与封面；阅读位置按内容哈希保存，不随删除清除。`LibraryStateStore` 在每本本机书都算出哈希后清理残留：不在书库（本机与云端）的最近打开时间与 Readium 精确位置（键名统一由 `ReadiumLocatorKeys` 定义，阅读器与清理共用）立即清理，EPUB/TXT 共享位置超过 180 天未更新才清理，在线小说（web:）位置不清理；书库为空时不清理。系列归属与最近打开时间只在云端副本也删除成功后由 `LibraryStateStore.forget(keys:)` 清理（系列移出记录随同步传播），只删除本机时保留，因为同一书键可能仍以云端书籍出现。
 
 旧版把本机累计与同步缓存保存在偏好键 `reading.statistics.v1`、`reading.statistics.devices.v1`；启动时迁移到文件，写入成功后删除偏好键。偏好与文件同时存在（降级后又升级）时按既有最大值规则合并，不丢降级期间的时长。无法解码的统计文件改名为 `.corrupt-<时间>` 保留。
 
@@ -323,7 +323,7 @@ WebDAV 是独立传输能力，不使用小说 API 服务集合。`WebDAVSyncSto
 - 同步先等本地书库读取完成，读取失败不得将默认空数组上传；Store 在等待读取前占用同步状态，避免加载期间重复启动同步。本地删除提交失败向上传播，后续同步可以重试。
 
 - 清单文件条目带可选 `size`；上传时写入，`fillMissingSizes` 只在本机同一版本且哈希一致时补齐旧条目，不产生网络请求。
-- 云端删除写入 `deletedBooks`（`WebDAVDeletedBooks`）：同步时不恢复、不上传删除时间及之前的版本，本机的这类副本在清单写入成功后经 `SyncBookLibrary.removeFromSync` 删除；更新版本清除记录。`WebDAVCloudBookDeleter` 以条件写入清单（并发冲突重试三次），成功后才 `deleteBlob` 删除不再被引用的文件。
+- 云端删除写入 `deletedBooks`（`WebDAVDeletedBooks`）：同步时不恢复、不上传删除时间及之前的版本，本机的这类副本在清单写入成功后经 `SyncBookLibrary.removeFromSync` 删除；更新版本清除记录。`WebDAVCloudBookDeleter` 以条件写入清单（并发冲突重试三次），只提交书目移除与墓碑，不调用 `deleteBlob`。清单提交后的跨设备重新引用无法受本机串行门或清单 ETag 保护，故暂缓物理回收 blob；未来回收需要独立协调设计，不能靠 DELETE 前再读一次清单规避竞态。
 - 书籍同步不自动下载书籍文件：App 给引擎传入 `CloudBookStore`（`SyncCloudCatalog`），本机没有的书只记为云端书籍并下载 EPUB 封面，本机已有的书不被远端较新版本替换；上传不变。云端书籍在清单写入成功后才更新，记录与封面保存在 Application Support/WebDAVCloudBooks，属于可重建缓存。书库把它们并入 `LibraryBook`（`cloudFileHash` 为主文件哈希，用于阅读位置与去重），打开前经 `WebDAVSyncStore.downloadCloudBook` 用 `WebDAVCloudBookDownloader` 下载并 `restoreFromSync`。引擎不传 `cloud` 时保持下载全部文件的旧行为（测试使用）。
 - 同步由用户手动触发，或在开启自动同步后由前台、背景、本机改动和网络恢复触发；两者走同一执行路径，同一时间只跑一个。是否自动执行只由 `WebDAVAutoSyncPolicy` 判断，指纹只读已有本地接口，不读文件内容；书签变化与书库／标签一样接入延迟推送。成功后只在执行前后指纹一致时确认已覆盖；在途编辑或远端合并导致状态变化时清空成功指纹，保守保留待同步状态，下次触发可补跑。统计同样使用上传前快照与合并后的本机状态比较，不能把新累计时长误记已上传。本地删除不传播到云端。
 - 自动同步状态（`webdav.autoSync.state.v1`）分清单内容与阅读时长两部分，各自记录指纹、成功时间与失败退避，成功后记录时间，但指纹仅按上述确认规则更新；内容失败时不再同步统计，统计失败不影响已完成的内容同步；进入背景时用后台时间完成，到期取消，依赖“清单最后写入”保证中断安全。

@@ -44,6 +44,7 @@ private final class FakeRemote: WebDAVRemote {
     var listsBlobs = true
     var onDownload: (() -> Void)?
     var onPut: (() -> Void)?
+    var onDidPut: (() -> Void)?
     /// 交给引擎的临时文件；引擎负责删除。
     var handedOut: [URL] = []
 
@@ -74,6 +75,7 @@ private final class FakeRemote: WebDAVRemote {
         if !putErrors.isEmpty { throw putErrors.removeFirst() }
         onPut?()
         self.manifest = try roundTrip(manifest)
+        onDidPut?()
     }
 
     func uploadBlob(_ file: URL, hash: String) async throws {
@@ -441,8 +443,8 @@ final class WebDAVSyncEngineTests: XCTestCase {
 
     // MARK: 云端删除
 
-    /// 从云端删除：移除书目与不再引用的文件、记下删除时间；共用文件保留。
-    func testDeleterRemovesBooksAndUnusedBlobsAndRecordsDeletion() async throws {
+    /// 删除书目并记录墓碑，保留文件以免破坏其他设备正在建立的引用。
+    func testDeleterRemovesBooksButRetainsBlobsAndRecordsDeletion() async throws {
         let shared = remote.seed("shared", as: "a.epub")
         let only = remote.seed("only", as: "b.epub")
         remoteManifest {
@@ -458,9 +460,27 @@ final class WebDAVSyncEngineTests: XCTestCase {
         XCTAssertEqual(manifest.webBooks.map(\.record.id), ["c"])
         XCTAssertEqual(manifest.deletedBooks, ["web:a": date(100), "web:b": date(100)])
         XCTAssertEqual(Set(manifest.positions.keys), ["web:c"])
-        XCTAssertNil(remote.blobs[only.hash], "unreferenced file is deleted")
+        XCTAssertNotNil(remote.blobs[only.hash], "unreferenced file is retained for concurrent reuse")
         XCTAssertNotNil(remote.blobs[shared.hash], "file still used by another book is kept")
+        XCTAssertEqual(log.count("remote.deleteBlob"), 0)
         XCTAssertEqual(remote.puts.last?.etag, "\"v0\"", "manifest write is conditional")
+    }
+
+    /// 另一设备在删除清单提交后重新引用同内容，删除方不能再按旧清单清理文件。
+    func testDeleterKeepsBlobReusedByAnotherDeviceAfterManifestCommit() async throws {
+        let asset = remote.seed("shared book contents", as: "a.epub")
+        remoteManifest { $0.webBooks = [WebDAVBook(record: webBook("a", at: 10), assets: [asset])] }
+        remote.onDidPut = { [self] in
+            let reused = WebDAVAsset(filename: "b.epub", hash: asset.hash)
+            remote.manifest?.webBooks.append(WebDAVBook(record: webBook("b", at: 110), assets: [reused]))
+        }
+        let removed = try await WebDAVCloudBookDeleter.delete(["web:a"], from: remote, at: date(100))
+        XCTAssertEqual(removed, 1)
+        XCTAssertEqual(remote.manifest?.webBooks.map(\.record.id), ["b"])
+        let file = try await remote.downloadBlob(asset.hash)
+        defer { try? FileManager.default.removeItem(at: file) }
+        XCTAssertEqual(try Data(contentsOf: file), Data("shared book contents".utf8))
+        XCTAssertEqual(log.count("remote.deleteBlob"), 0)
     }
 
     private func runRetrying(_ cloud: FakeCloud? = nil, verifiesBlobs: Bool = false) async throws -> WebDAVSyncRunResult {
@@ -674,6 +694,29 @@ final class WebDAVSyncEngineTests: XCTestCase {
         _ = try await run()
         XCTAssertEqual(wenku.appliedMetadata.count, 1)
         XCTAssertEqual(remote.manifest?.wenkuBooks.first?.record.title, "本机更新的书名")
+    }
+
+    /// 远端较新检查之后下载封面，本机在网络等待期间的编辑仍须保留并上传。
+    func testMetadataEditedLocallyDuringCoverDownloadWinsOverRemoteSnapshot() async throws {
+        let mine = wenkuBook(at: 10)
+        addLocal(mine, text: "book")
+        _ = try await run()
+        let file = try XCTUnwrap(remote.manifest?.wenkuBooks.first?.assets.first)
+        var theirs = mine
+        theirs.title = "远端旧快照"
+        theirs.metadataUpdatedAt = date(20)
+        theirs.coverFilename = "cover.jpg"
+        let cover = remote.seed("remote cover", as: "cover.jpg")
+        remoteManifest { $0.wenkuBooks = [WebDAVBook(record: theirs, assets: [file, cover])] }
+        remote.onDownload = { [self] in
+            wenku.books[0].title = "网络等待期间的新编辑"
+            wenku.books[0].metadataUpdatedAt = date(30)
+        }
+        _ = try await run()
+        XCTAssertTrue(wenku.appliedMetadata.isEmpty)
+        XCTAssertEqual(wenku.books.first?.title, "网络等待期间的新编辑")
+        XCTAssertEqual(remote.manifest?.wenkuBooks.first?.record.title, "网络等待期间的新编辑")
+        XCTAssertEqual(remote.manifest?.wenkuBooks.first?.record.metadataUpdatedAt, date(30))
     }
 
     /// 写清单的操作先到先执行，互不交错。

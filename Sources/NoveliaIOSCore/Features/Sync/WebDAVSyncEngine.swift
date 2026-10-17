@@ -334,6 +334,10 @@ final class WebDAVSyncEngine {
                     cover = file
                 } catch WebDAVSyncError.missingBlob {}
             }
+            // 下载封面会让出执行；本机在此期间可能已经编辑或更换同一本书的文件版本。
+            guard let current = wenku.books.first(where: { $0.id == item.record.id }),
+                  current.syncTimestamp == item.record.syncTimestamp,
+                  (item.record.metadataUpdatedAt ?? .distantPast) > (current.metadataUpdatedAt ?? .distantPast) else { continue }
             try await wenku.applySyncedMetadata(item.record, cover: cover)
             updatedMetadataCount += 1
         }

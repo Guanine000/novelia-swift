@@ -166,10 +166,13 @@ final class WenkuLocalLibraryStore: ObservableObject {
         if book.coverFilename != old.coverFilename { await fileCopier.remove([coverFileURL(for: old)].compactMap { $0 }) }
     }
 
-    /// 同一书目在复制封面期间发生编辑／删除时不覆盖它，由调用方重试合并。
+    /// 网络等待期间可能已有本机编辑或文件版本替换，应用前重新比较版本与修改时间。
+    /// 复制封面期间再次编辑／删除时仍拒绝旧快照提交，由调用方重试合并。
     func applySyncedMetadata(_ remote: LocalWenkuEPUB, cover: URL?) async throws {
         try await loadIfNeeded()
-        guard let old = books.first(where: { $0.id == remote.id }) else { return }
+        guard let old = books.first(where: { $0.id == remote.id }),
+              old.addedAt == remote.addedAt,
+              (remote.metadataUpdatedAt ?? .distantPast) > (old.metadataUpdatedAt ?? .distantPast) else { return }
         var book = old
         book.title = remote.title
         book.author = remote.author

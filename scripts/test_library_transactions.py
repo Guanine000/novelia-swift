@@ -171,6 +171,38 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   precondition(edits.books == [original] && fm.fileExists(atPath: edits.fileURL(for: original).path))
   try await edits.remove(original); precondition(edits.books.isEmpty)
   precondition(!fm.fileExists(atPath: edits.fileURL(for: original).path))
+  // 网络封面下载后才调用实际 Store：旧快照不能覆盖更晚的本机编辑，时间相同也保留本机。
+  let syncEditDir = root.appendingPathComponent("sync-metadata")
+  let syncOriginal = try createBook(syncEditDir)[0]
+  let syncEdits = WenkuLocalLibraryStore(directory: syncEditDir)
+  try await syncEdits.loadIfNeeded()
+  var remoteSnapshot = syncOriginal
+  remoteSnapshot.title = "Old remote snapshot"
+  remoteSnapshot.metadataUpdatedAt = Date(timeIntervalSince1970: 100)
+  try await syncEdits.updateMetadata(id: syncOriginal.id, title: "New local edit", author: "Local author", description: "Local description", cover: .replace(UIImage()))
+  let newLocal = syncEdits.books[0]
+  let newCover = syncEdits.coverFileURL(for: newLocal)!
+  let coverBytes = try Data(contentsOf: newCover)
+  precondition(newLocal.metadataUpdatedAt! > remoteSnapshot.metadataUpdatedAt!)
+  try await syncEdits.applySyncedMetadata(remoteSnapshot, cover: nil)
+  precondition(syncEdits.books == [newLocal])
+  remoteSnapshot.metadataUpdatedAt = newLocal.metadataUpdatedAt
+  try await syncEdits.applySyncedMetadata(remoteSnapshot, cover: nil)
+  precondition(syncEdits.books == [newLocal])
+  let persistedLocal = try disk(syncEditDir)
+  let preservedCover = try Data(contentsOf: newCover)
+  precondition(persistedLocal == [newLocal] && preservedCover == coverBytes)
+  // 即使修改时间更晚，也不能跨文件版本套用信息；正常的同版本较新信息仍可落盘。
+  let wrongVersion = LocalWenkuEPUB(id: syncOriginal.id, title: "Wrong file version", filename: syncOriginal.filename,
+                              addedAt: syncOriginal.addedAt.addingTimeInterval(1), metadataUpdatedAt: Date.distantFuture)
+  try await syncEdits.applySyncedMetadata(wrongVersion, cover: nil)
+  precondition(syncEdits.books == [newLocal])
+  remoteSnapshot.metadataUpdatedAt = newLocal.metadataUpdatedAt!.addingTimeInterval(10)
+  remoteSnapshot.title = "Valid newer remote edit"
+  try await syncEdits.applySyncedMetadata(remoteSnapshot, cover: nil)
+  precondition(syncEdits.books[0].title == remoteSnapshot.title && syncEdits.books[0].coverFilename == nil)
+  let persistedRemote = try disk(syncEditDir)
+  precondition(persistedRemote == syncEdits.books && !fm.fileExists(atPath: newCover.path))
   // Background metadata failures remain retryable and do not leave a stale error after success.
   let metadataDir = root.appendingPathComponent("metadata")
   var incomplete = try createBook(metadataDir)[0]; incomplete.metadataLoaded = nil
@@ -290,7 +322,7 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   precondition(race.books.isEmpty)
   let raceNames = try fm.contentsOfDirectory(atPath: raceDir.path)
   precondition(!raceNames.contains { $0.hasPrefix("sync-") || $0.hasPrefix(".copy-") })
-  print("Library transactions passed: legacy load, corrupt-index recovery, failed edit/delete, move rollback and rollback failure, in-flight commit, cancellation and copy/delete race")
+  print("Library transactions passed: legacy load, corrupt-index recovery, failed edit/delete, stale/equal/wrong-version synced metadata, newer remote metadata persistence, move rollback and rollback failure, in-flight commit, cancellation and copy/delete race")
  }
  @MainActor static func responsiveness(_ root: URL, synchronous: Bool) async throws -> [String: Double] {
   var maxGap = 0.0
