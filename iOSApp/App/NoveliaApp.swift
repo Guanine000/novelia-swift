@@ -279,9 +279,12 @@ struct RootView: View {
             NoveliaLoginSheet(auth: auth)
         }
         .fullScreenCover(isPresented: .constant(opensSampleReaderDirectly)) {
+            // 全屏呈现不继承上面注入的环境对象，阅读器需要的对象在此单独注入。
             NavigationStack {
                 EPUBReaderHost(initialURL: nil)
             }
+            .environmentObject(services.local.readerSettings)
+            .environmentObject(services.local.recording)
         }
     }
 

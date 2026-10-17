@@ -46,6 +46,7 @@ final class AppServices: ObservableObject {
 @MainActor
 final class LocalAppServices {
     let positions: ReadingPositionStore
+    let bookmarks: ReaderBookmarkStore
     let readerSettings: ReaderSettings
     let recording: ReadingActivityController
     let statistics: ReadingStatisticsStore
@@ -57,14 +58,17 @@ final class LocalAppServices {
     init(defaults: UserDefaults = .standard, recorder: (any ReadingTimeRecording)? = nil) {
         let positions = ReadingPositionStore(defaults: defaults)
         self.positions = positions
-        readerSettings = ReaderSettings(defaults: defaults, positions: positions)
+        let bookmarks = ReaderBookmarkStore(directory: ReaderBookmarkStore.defaultDirectory)
+        self.bookmarks = bookmarks
+        readerSettings = ReaderSettings(defaults: defaults, positions: positions, bookmarks: bookmarks)
         statistics = ReadingStatisticsStore(defaults: defaults, deviceModel: UIDevice.current.model)
         recording = ReadingActivityController(recorder: recorder ?? statistics)
         library = LibraryStateStore(positions: positions, defaults: defaults)
         let cloudBooks = CloudBookStore()
         self.cloudBooks = cloudBooks
         sync = WebDAVSyncStore(local: AppWebDAVSyncLocalState(blocked: .shared, backgrounds: .shared,
-                                                           positions: positions, library: library),
+                                                           positions: positions, library: library,
+                                                           bookmarkStore: bookmarks),
                                statistics: statistics, cloudBooks: cloudBooks)
     }
 }

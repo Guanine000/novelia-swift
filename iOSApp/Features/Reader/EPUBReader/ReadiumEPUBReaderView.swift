@@ -27,6 +27,7 @@ private struct ReadiumEPUBReaderViewContent: View {
     @State private var showChrome = true
     @State private var isShowingTOC = false
     @State private var isShowingStyle = false
+    @State private var isShowingBookmarks = false
     @State private var isScrubbing = false
     @State private var scrubProgress = 0.0
     @State private var draftStyle = EPUBReaderStyle()
@@ -99,6 +100,8 @@ private struct ReadiumEPUBReaderViewContent: View {
                     .allowsHitTesting(false)
             }
         }
+        // 书签／搜索面板弹出键盘时不缩小阅读视口，避免整书重新分页并跳页。
+        .ignoresSafeArea(.keyboard)
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .statusBarHidden(true)
@@ -131,6 +134,14 @@ private struct ReadiumEPUBReaderViewContent: View {
             if model.status == .ready { await model.scanBookDiagnostics() }
         }
         .sheet(isPresented: $isShowingTOC) { tocSheet }
+        .sheet(isPresented: $isShowingBookmarks) {
+            if let key = model.bookmarkKey {
+                ReaderBookmarksSearchSheet(store: settings.bookmarks, bookKey: key, chapterCount: model.chapterCount,
+                                           chapterTitle: { model.chapterTitle($0) },
+                                           chapterText: { try await model.chapterPlainText($0) },
+                                           onJump: { model.jump(toChapter: $0, progression: $1) })
+            }
+        }
         .sheet(isPresented: $isShowingStyle) { styleSheet }
         .sheet(item: $model.activeNote) { note in noteSheet(note) }
     }
@@ -154,6 +165,16 @@ private struct ReadiumEPUBReaderViewContent: View {
                 .frame(maxWidth: .infinity)
             if textBook == nil { engineBadge }
             if let accessory { accessory }
+            if let key = model.bookmarkKey, model.status == .ready {
+                ReaderBookmarkButton(store: settings.bookmarks, bookKey: key, pageRange: model.currentPageRange,
+                                     chapterTitle: model.currentChapterTitle, snippet: { await model.currentPageSnippet() })
+                Button {
+                    isShowingBookmarks = true
+                } label: {
+                    Image(systemName: "magnifyingglass").frame(width: 36, height: 36)
+                }
+                .accessibilityLabel("书签与搜索")
+            }
             Button {
                 model.isTOCDiagnosticsExpanded = false
                 isShowingTOC = true

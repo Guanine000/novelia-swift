@@ -225,6 +225,10 @@ EPUB 默认采用 YueduCoreText 分页；实验性 Readium 开关可用于 EPUB�
 
 Resource 每次请求重新创建，避免将一次加载失败固化为缓存结果。重试可以重建 Readium 导航器并恢复失败位置；章节请求、位置换算和预取保持取消检查，不能让旧请求覆盖当前章节，也不能为翻页阻塞主线程。
 
+### 书签与书内搜索
+
+书签（`ReaderBookmark`，Domain）以阅读位置身份 `epub:<哈希>`／`txt:<哈希>` 归属书籍，位置为章节加章内比例，两种引擎都用 `jump(toChapter:progression:)` 跳转；在线小说没有书签身份（`bookmarkKey` 为 nil），沿用在线阅读器的章节书签。`currentPageRange` 给出当前页在章内的比例范围：Yuedu 取页首与下一页的源文本偏移，Readium 按该章位置数估计页宽。书内搜索由 Core 的 `BookTextSearch` 逐章提取纯文本完成，提取规则与 `EPUBChapterProgress.textLength` 一致，使比例与阅读位置同一口径；只搜索本机内容，最多 500 条。两种引擎共用 `ReaderBookmarksSearchSheet` 与 `ReaderBookmarkButton`。书签随书籍同步写入清单 `bookmarks`，按 ID 与 `updatedAt` 合并、远端记录先校验，只上传清单中书籍的书签，清单写入成功后才套用到本机。
+
 ### 进度恢复与设置兼容
 
 TXT 的共享位置使用 `txt:<内容哈希>`，保存章节、单元、偏移及单元数。`TXTReadingPosition.pagedStart(in:)` 在单元数量仍匹配时恢复分页位置，否则回退章节起点；同章节滚动位置更新保留分页信息，跨章节后清除失效的单元位置。保留旧 `txtReadingPosition.v1.<hash>` 的读取兼容。
@@ -265,6 +269,7 @@ Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒�
 |---|---|
 | 界面、阅读与功能偏好 | `UserDefaults` / `@AppStorage` 与对应设置对象 |
 | 阅读进度 | `ReadingPositionStore` 的 Codable 数据与 legacy 兼容读取；Readium 本机精确位置的键名由 `ReadiumLocatorKeys` 定义 |
+| 书签 | `ReaderBookmarkStore`：Application Support `Bookmarks/bookmarks.json`，键为书签 ID，删除保留墓碑；经 `ReaderSettings.bookmarks` 交给阅读器 |
 | 书籍文件和本地索引 | Application Support 内的两个书库目录与对应 Store |
 | 账号凭据 | `SessionTokenStore` 的生产 Keychain 适配 |
 | 阅读统计与设备统计 | `ReadingStatisticsStore`：本机累计与同步缓存在 Application Support `ReadingStatistics/` 的 `local.json`、`devices.json`（`ReadingStatisticsFiles` 后台串行写入）；开关、设备 ID 与名称在偏好 |

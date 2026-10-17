@@ -102,6 +102,13 @@ enum WebDAVSyncPlanner {
         return positions.filter { webKeys.contains($0.key) || fileKeys.contains($0.key) }
     }
 
+    /// 只同步清单中书籍的书签（含墓碑）；本机已删除、也不在云端的书的书签留在本机。
+    static func bookmarksToSync(_ bookmarks: [String: ReaderBookmark], in manifest: WebDAVManifest) -> [String: ReaderBookmark] {
+        let hashes = (manifest.webBooks.flatMap(\.assets) + manifest.wenkuBooks.flatMap(\.assets)).map(\.hash)
+        let keys = Set(hashes.map { "epub:\($0)" } + hashes.map { "txt:\($0)" })
+        return bookmarks.filter { keys.contains($0.value.bookKey) }
+    }
+
     /// 浅色、深色背景各自比较：远端严格较新才采用远端。
     static func planBackground(local: SyncedReaderBackground, remote: SyncedReaderBackground?) -> BackgroundSyncDecision {
         guard let remote, remote.updatedAt > local.updatedAt else { return .useLocal }

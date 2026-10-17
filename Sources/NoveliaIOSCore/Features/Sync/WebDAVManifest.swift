@@ -40,6 +40,8 @@ struct WebDAVManifest: Codable {
     var librarySeries: LibrarySeriesState? = nil
     /// 已从云端删除的书 `[书库键: 删除时间]`，见 `WebDAVDeletedBooks`。旧版应用不识别，可能再次上传这些书。
     var deletedBooks: [String: Date]? = nil
+    /// 阅读器书签 `[书签 ID: 书签]`，含删除墓碑；随书籍同步。0.22.0 之前的版本不识别，写回清单时会丢弃。
+    var bookmarks: [String: ReaderBookmark]? = nil
 }
 
 enum WebDAVSyncError: LocalizedError, Equatable {

@@ -9,13 +9,17 @@ final class ReaderSettings: ObservableObject {
     static let fontRange: ClosedRange<Double> = 12...36
     static let epubStyleKey = "epubPrototype.readerStyle.v1"
     let positions: any ReadingPositionProviding
+    /// EPUB 与本地 TXT 的书签；未注入时只保存在内存。
+    let bookmarks: ReaderBookmarkStore
     let defaults: UserDefaults
     @Published private var storedFontSize: Double
     @Published private var storedAppearance: String
     @Published private var storedPagedText: Bool
 
-    init(defaults: UserDefaults = .standard, positions: (any ReadingPositionProviding)? = nil) {
+    init(defaults: UserDefaults = .standard, positions: (any ReadingPositionProviding)? = nil,
+         bookmarks: ReaderBookmarkStore? = nil) {
         self.positions = positions ?? ReadingPositionStore(defaults: defaults)
+        self.bookmarks = bookmarks ?? ReaderBookmarkStore()
         self.defaults = defaults
         let epubStyle = defaults.data(forKey: Self.epubStyleKey)
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }

@@ -114,6 +114,7 @@ enum WebDAVAutoSyncPolicy {
             hasher.add("wenku", wenku.books)
             hasher.add("positions", local.readingPositions)
             hasher.add("series", local.librarySeries)
+            hasher.add("bookmarks", local.bookmarks)
         }
         if options.tags { hasher.add("tags", local.blockedTags) }
         return hasher.finish()

@@ -11,7 +11,7 @@ extension AppServices {
         if ProcessInfo.processInfo.arguments.contains("-resetArchitectureValidation") {
             UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
             let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            for name in ["Library", "WebNovelDownloads", "WenkuEPUB", "ReadingStatistics"] {
+            for name in ["Library", "WebNovelDownloads", "WenkuEPUB", "ReadingStatistics", "Bookmarks"] {
                 try? FileManager.default.removeItem(at: support.appendingPathComponent(name))
             }
         }

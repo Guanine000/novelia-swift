@@ -283,7 +283,8 @@ private struct TXTPagedReader: View {
                     guard position != settings.positions.txtPosition(hash: hash) else { return }
                     settings.positions.recordTXT(hash: hash, position: position)
                 }, readiumIdentity: identity,
-                positionUpdatedAt: settings.positions.all()["txt:\(hash)"]?.updatedAt)
+                positionUpdatedAt: settings.positions.all()["txt:\(hash)"]?.updatedAt,
+                bookmarkKey: "txt:\(hash)")
         } catch {
             guard !Task.isCancelled else { return }
             let nsError = error as NSError
