@@ -21,6 +21,8 @@ struct PagedTextBook {
     /// TXT 的 Readium Locator 独立保存，身份包含内容哈希及分章规则。
     var readiumIdentity: String? = nil
     var positionUpdatedAt: Date? = nil
+    /// 书签与书内搜索使用的身份（本地 TXT 为 `txt:<文件哈希>`）；在线小说为 nil，不提供这两项功能。
+    var bookmarkKey: String? = nil
 }
 
 struct EPUBReaderView: View {
@@ -43,6 +45,7 @@ private struct EPUBReaderViewContent: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var isShowingTOC = false
     @State private var isShowingStyle = false
+    @State private var isShowingBookmarks = false
     @State private var showChrome = true
     @State private var isScrubbing = false
     @State private var scrubProgress = 0.0
@@ -153,6 +156,8 @@ private struct EPUBReaderViewContent: View {
             }
             .sheet(isPresented: $model.isShowingTOCDiagnosticsPrompt) { tocDiagnosticsPrompt }
         }
+        // 书签／搜索面板弹出键盘时不缩小阅读视口，避免整书重新分页并跳页。
+        .ignoresSafeArea(.keyboard)
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         // 阅读器已经在自己的浮层中显示时间和电量。
@@ -162,6 +167,14 @@ private struct EPUBReaderViewContent: View {
                                                        title: bookURL?.deletingPathExtension().lastPathComponent ?? "样例书", kind: .epub),
                           ready: model.status == .ready)
         .sheet(isPresented: $isShowingTOC) { tocSheet }
+        .sheet(isPresented: $isShowingBookmarks) {
+            if let key = model.bookmarkKey {
+                ReaderBookmarksSearchSheet(store: settings.bookmarks, bookKey: key, chapterCount: model.chapterCount,
+                                           chapterTitle: { model.chapterTitle($0) },
+                                           chapterText: { try await model.chapterPlainText($0) },
+                                           onJump: { model.jump(toChapter: $0, progression: $1) })
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NoveliaImportedFontsChanged"))) { _ in model.refreshBackground() }
         .onChange(of: settings.fontSize) { _, _ in synchronizeSettings(systemIsDark: colorScheme == .dark) }
         .onChange(of: settings.appearanceRaw) { _, _ in synchronizeSettings(systemIsDark: colorScheme == .dark) }
@@ -202,6 +215,17 @@ private struct EPUBReaderViewContent: View {
                 .lineLimit(1)
                 .frame(maxWidth: .infinity)
             if let accessory { accessory }
+            if let key = model.bookmarkKey {
+                ReaderBookmarkButton(store: settings.bookmarks, bookKey: key, pageRange: model.currentPageRange,
+                                     chapterTitle: currentChapterTitle, snippet: { model.currentPageSnippet })
+                Button {
+                    isShowingBookmarks = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .frame(width: 36, height: 36)
+                }
+                .accessibilityLabel("书签与搜索")
+            }
             Button {
                 isShowingTOC = true
             } label: {

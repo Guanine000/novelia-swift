@@ -207,6 +207,11 @@ final class EPUBPageBook {
         }.min()
     }
 
+    /// 已排版章节的源文本（`sourceOffset` 所度量的文本）；未排版时为 nil。
+    func sourceText(spineIndex: Int) -> String? {
+        chapters[spineIndex]?.sourceText
+    }
+
     /// 已排版章节文本的 UTF-16 长度（`sourceOffset` 所度量的文本范围）。
     func sourceLength(spineIndex: Int) -> Int? {
         chapters[spineIndex].map { $0.sourceText.utf16.count }

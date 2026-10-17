@@ -14,6 +14,7 @@ final class WebDAVManifestTests: XCTestCase {
         XCTAssertNil(legacy.backgrounds)
         XCTAssertNil(legacy.fonts)
         XCTAssertNil(legacy.librarySeries)
+        XCTAssertNil(legacy.bookmarks)
     }
 
     func testSyncedRecordsRoundTrip() throws {

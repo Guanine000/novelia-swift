@@ -387,6 +387,7 @@ final class EPUBReaderModel: ObservableObject {
 
     func start(textBook: PagedTextBook) {
         guard status == .idle, openTask == nil else { return }
+        textBookmarkKey = textBook.bookmarkKey
         openTask = Task { [weak self] in
             await self?.open(source: textBook.source, unit: textBook.startUnit,
                              offset: textBook.startOffset, onPosition: textBook.onPosition)
@@ -812,13 +813,16 @@ final class EPUBReaderModel: ObservableObject {
            spineIndex + 1 < container.chapterCount {
             ids.append(pageID(spineIndex + 1, 0))
         }
-        for id in ids where !(pageBook.isRendered(id)) && !scheduledRenders.contains(id) {
+        // 只预渲染实际存在的页：章首的“上一页”（-1）与章末的“下一页”永远渲染不出来，
+        // 若照样排队，每次失败都会发布变化、触发重绘并再次排队，形成持续占满 CPU 的循环。
+        for id in ids where (0..<pageCount(spineIndex: id.spineIndex)).contains(id.pageIndex)
+            && !pageBook.isRendered(id) && !scheduledRenders.contains(id) {
             scheduledRenders.insert(id)
             Task { [weak self] in
                 guard let self else { return }
-                _ = self.pageBook?.renderedImage(for: id, scale: self.displayScale, background: background, backgroundImage: settings.backgrounds.image(dark: self.isDarkMode, landscape: self.viewportSize.width > self.viewportSize.height))
+                let image = self.pageBook?.renderedImage(for: id, scale: self.displayScale, background: background, backgroundImage: settings.backgrounds.image(dark: self.isDarkMode, landscape: self.viewportSize.width > self.viewportSize.height))
                 self.scheduledRenders.remove(id)
-                self.objectWillChange.send()
+                if image != nil { self.objectWillChange.send() }
             }
         }
     }
@@ -1056,6 +1060,78 @@ final class EPUBReaderModel: ObservableObject {
                                              aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
                                              context: layoutContext(.navigate))
                 if pageBook === book { prefetchNeighbors(of: spineIndex) }
+            } catch {
+                guard pageBook === book, EPUBLayoutLog.failure(error).kind != "cancelled" else { return }
+                lastLayoutFailure = EPUBLayoutLog.failure(error)
+                status = .failed(describeLayoutError(error))
+            }
+        }
+    }
+
+    // MARK: 书签与书内搜索
+
+    private var textBookmarkKey: String?
+
+    /// 书签与搜索使用的书籍身份：EPUB 为 `epub:<文件哈希>`，本地 TXT 为 `txt:<文件哈希>`；在线小说为 nil。
+    var bookmarkKey: String? { openedBookHash.map { "epub:\($0)" } ?? textBookmarkKey }
+
+    /// 当前显示的页（双页时两页）在本章内的比例范围。
+    var currentPageRange: (chapter: Int, range: Range<Double>)? {
+        guard status == .ready, let book = pageBook, let length = book.sourceLength(spineIndex: location.spineIndex), length > 0,
+              let start = book.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex) else { return nil }
+        let end = book.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex + pageStride) ?? length
+        let lower = min(1, Double(start) / Double(length))
+        // 本章最后一页包含比例 1。
+        let upper = end >= length ? 1.000_001 : max(lower + 1e-9, Double(end) / Double(length))
+        return (location.spineIndex, lower..<upper)
+    }
+
+    /// 当前页开头的一段正文，作为书签摘要。
+    var currentPageSnippet: String {
+        guard let book = pageBook, let text = book.sourceText(spineIndex: location.spineIndex),
+              let start = book.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex) else { return "" }
+        let utf16 = text.utf16
+        guard let from = utf16.index(utf16.startIndex, offsetBy: start, limitedBy: utf16.endIndex),
+              let index = from.samePosition(in: text) else { return "" }
+        return String(text[index...].prefix(ReaderBookmark.maxSnippetLength))
+    }
+
+    var chapterCount: Int { source?.chapterCount ?? 0 }
+
+    /// 一章的纯文本（书内搜索与书签摘要使用），换算口径与阅读位置一致。
+    func chapterPlainText(_ index: Int) async throws -> String {
+        guard let source, (0..<source.chapterCount).contains(index) else { throw CancellationError() }
+        return BookTextSearch.plainText(html: try await source.chapterHTML(at: index))
+    }
+
+    /// 章节标题：取 spine 不晚于该章的最后一个目录项。
+    func chapterTitle(_ index: Int) -> String? {
+        source?.toc.last { ($0.spineIndex ?? .max) <= index }?.title
+    }
+
+    /// 跳到书签或搜索结果：目标章未排版时先排版，再按章内比例找到所在页。属于用户操作，会记录阅读位置。
+    func jump(toChapter spineIndex: Int, progression: Double) {
+        guard !isAnimating, !isLayingOut, let container = source, let book = pageBook,
+              (0..<container.chapterCount).contains(spineIndex) else { return }
+        if let navigateTaskID, let previous = layoutTasks.removeValue(forKey: navigateTaskID) { previous.cancel() }
+        navigateTaskID = track { [weak self] in
+            guard let self else { return }
+            isLayingOut = true
+            defer { isLayingOut = false }
+            do {
+                if !book.isChapterComplete(spineIndex) {
+                    try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
+                                                 aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                                 context: layoutContext(.navigate))
+                }
+                guard pageBook === book else { return }
+                let offset = book.sourceLength(spineIndex: spineIndex).map {
+                    EPUBChapterProgress.offset(progression: progression, length: $0)
+                }
+                var page = offset.flatMap { book.pageIndex(spineIndex: spineIndex, containingSourceOffset: $0) } ?? 0
+                if usesDoublePage { page = (page / 2) * 2 }
+                location = EPUBReadingLocation(spineIndex: spineIndex, pageIndex: page)
+                prefetchNeighbors(of: spineIndex)
             } catch {
                 guard pageBook === book, EPUBLayoutLog.failure(error).kind != "cancelled" else { return }
                 lastLayoutFailure = EPUBLayoutLog.failure(error)

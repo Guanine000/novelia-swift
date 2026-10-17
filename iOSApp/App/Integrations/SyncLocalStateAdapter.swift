@@ -39,12 +39,15 @@ struct AppWebDAVSyncLocalState: WebDAVSyncLocalState {
     let backgrounds: ReaderBackgroundStore
     let positions: any ReadingPositionSynchronizing
     let library: any LibrarySeriesManaging
+    let bookmarkStore: ReaderBookmarkStore
     var readingPositions: [String: SyncedReadingPosition] { positions.all() }
     func mergeReadingPositions(_ remote: [String: SyncedReadingPosition], webBooks: [DownloadedWebNovel]) {
         positions.merge(remote, webBooks: webBooks)
     }
     var librarySeries: LibrarySeriesState { library.series }
     func applyLibrarySeries(_ series: LibrarySeriesState) { library.applySynced(series) }
+    var bookmarks: [String: ReaderBookmark] { bookmarkStore.records }
+    func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) { bookmarkStore.applySynced(bookmarks) }
     var blockedTags: [String: SyncedBlockedTag] { blocked.syncStates }
     func applyBlockedTags(_ tags: [String: SyncedBlockedTag]) { blocked.applySynced(tags) }
     func background(dark: Bool) throws -> SyncedReaderBackground { try backgrounds.syncSnapshot(dark: dark) }

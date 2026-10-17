@@ -23,6 +23,9 @@ protocol WebDAVSyncLocalState {
     func mergeReadingPositions(_ remote: [String: SyncedReadingPosition], webBooks: [DownloadedWebNovel])
     var librarySeries: LibrarySeriesState { get }
     func applyLibrarySeries(_ series: LibrarySeriesState)
+    /// 阅读器书签（含删除墓碑），随书籍同步。
+    var bookmarks: [String: ReaderBookmark] { get }
+    func applyBookmarks(_ bookmarks: [String: ReaderBookmark])
     var blockedTags: [String: SyncedBlockedTag] { get }
     func applyBlockedTags(_ tags: [String: SyncedBlockedTag])
     func background(dark: Bool) throws -> SyncedReaderBackground
@@ -34,6 +37,11 @@ protocol WebDAVSyncLocalState {
     /// 本机导入字体文件，键为内容哈希。
     func fontFiles() throws -> [String: URL]
     func applyFonts(_ records: [String: SyncedImportedFont], files: [String: URL]) throws
+}
+
+extension WebDAVSyncLocalState {
+    var bookmarks: [String: ReaderBookmark] { [:] }
+    func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) {}
 }
 
 struct WebDAVSyncOptions: Equatable {
@@ -196,6 +204,9 @@ final class WebDAVSyncEngine {
             try await fillMissingSizes(&manifest.wenkuBooks, from: wenku)
             manifest.positions = WebDAVSyncPlanner.positionsToSync(local.readingPositions, in: manifest)
             manifest.librarySeries = LibrarySeriesState.merged(local.librarySeries, manifest.librarySeries ?? LibrarySeriesState())
+            let bookmarks = WebDAVSyncPlanner.bookmarksToSync(
+                ReaderBookmark.merged(local.bookmarks, manifest.bookmarks ?? [:]), in: manifest)
+            if manifest.bookmarks != nil || !bookmarks.isEmpty { manifest.bookmarks = bookmarks }
         }
         if options.tags {
             manifest.blockedTags = BlockedTagsStore.merged(local.blockedTags, manifest.blockedTags ?? [:])
@@ -278,6 +289,7 @@ final class WebDAVSyncEngine {
         }
         if options.tags { local.applyBlockedTags(manifest.blockedTags ?? [:]) }
         if options.books, let series = manifest.librarySeries { local.applyLibrarySeries(series) }
+        if options.books, let bookmarks = manifest.bookmarks { local.applyBookmarks(bookmarks) }
         if options.backgrounds {
             for dark in [false, true] {
                 if let value = manifest.backgrounds?[dark ? "dark" : "light"] {

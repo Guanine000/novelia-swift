@@ -158,6 +158,13 @@ private final class FakeLocalState: WebDAVSyncLocalState {
     var fontRecords: [String: SyncedImportedFont] = [:]
     var fontFileURLs: [String: URL] = [:]
     var appliedFonts: (records: [String: SyncedImportedFont], files: [String: Data])?
+    var bookmarks: [String: ReaderBookmark] = [:]
+    var appliedBookmarks: [String: ReaderBookmark]?
+
+    func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) {
+        log.events.append("local.applyBookmarks")
+        appliedBookmarks = bookmarks
+    }
 
     init(log: EventLog, directory: URL) {
         self.log = log
@@ -539,6 +546,39 @@ final class WebDAVSyncEngineTests: XCTestCase {
         remote.omitsETag = true
         let withoutETag = try await runRetrying(FakeCloud())
         XCTAssertTrue(withoutETag.lacksETag)
+    }
+
+    private func bookmark(_ key: String, at seconds: TimeInterval, deleted: Bool? = nil) -> ReaderBookmark {
+        ReaderBookmark(id: UUID(), bookKey: key, chapterIndex: 1, chapterProgression: 0.5, chapterTitle: "章",
+                       snippet: "片段", createdAt: date(seconds), updatedAt: date(seconds), deleted: deleted)
+    }
+
+    /// 书签随书籍同步：两端按 ID 合并（较新者胜，含删除），只上传清单中书籍的书签；清单写入后才套用到本机。
+    func testBookmarksMergeForBooksInManifestOnly() async throws {
+        let book = wenkuBook(at: 10)
+        addLocal(book, text: "local book")
+        _ = try await run()
+        let hash = try XCTUnwrap(remote.manifest?.wenkuBooks.first?.assets.first?.hash)
+        let mine = bookmark("epub:\(hash)", at: 20)
+        let orphan = bookmark("epub:" + String(repeating: "0", count: 64), at: 20)
+        var theirs = bookmark("epub:\(hash)", at: 30)
+        let invalid = ReaderBookmark(id: UUID(), bookKey: "web:x", chapterIndex: 0, chapterProgression: 0, chapterTitle: nil,
+                                     snippet: "", createdAt: date(1), updatedAt: date(1))
+        local.bookmarks = [mine.id.uuidString: mine, orphan.id.uuidString: orphan]
+        remoteManifest { $0.bookmarks = [theirs.id.uuidString: theirs, invalid.id.uuidString: invalid] }
+        _ = try await run()
+        XCTAssertEqual(Set(remote.manifest?.bookmarks.map { Array($0.keys) } ?? []), [mine.id.uuidString, theirs.id.uuidString],
+                       "orphans stay local, invalid remote records are dropped")
+        XCTAssertEqual(local.appliedBookmarks?[theirs.id.uuidString], theirs)
+        XCTAssertLessThan(log.events.lastIndex(of: "remote.put") ?? .max, log.events.lastIndex(of: "local.applyBookmarks") ?? -1)
+
+        // 另一台设备删除了书签：较新的墓碑覆盖本机。
+        local.bookmarks = remote.manifest?.bookmarks ?? [:]
+        theirs.deleted = true
+        theirs.updatedAt = date(40)
+        remoteManifest { $0.bookmarks?[theirs.id.uuidString] = theirs }
+        _ = try await run()
+        XCTAssertEqual(local.appliedBookmarks?[theirs.id.uuidString]?.isDeleted, true)
     }
 
     /// 写清单的操作先到先执行，互不交错。

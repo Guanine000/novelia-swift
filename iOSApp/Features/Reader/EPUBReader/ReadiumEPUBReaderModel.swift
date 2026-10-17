@@ -101,6 +101,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             bookTitle = publication.metadata.title ?? url.deletingPathExtension().lastPathComponent
             if case .success(let positions) = await publication.positions() {
                 positionCount = positions.count
+                let index = ReadiumNavigationIndex(readingOrder: publication.readingOrder, tableOfContents: [])
+                positionsPerResource = positions.reduce(into: [:]) { counts, locator in
+                    if let resource = index.resourceIndex(for: locator.href) { counts[resource, default: 0] += 1 }
+                }
             }
             var embedded: [ReadiumTOCItem] = []
             if case .success(let links) = await publication.tableOfContents() {
@@ -451,6 +455,62 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     func jump(to item: ReadiumTOCItem) {
         Task { _ = await navigator?.go(to: item.link) }
+    }
+
+    // MARK: 书签与书内搜索
+
+    /// 每个阅读顺序资源的位置数，用来估计当前页在章内的范围。
+    private var positionsPerResource: [Int: Int] = [:]
+
+    /// 书签与搜索使用的书籍身份：EPUB 为 `epub:<文件哈希>`，本地 TXT 为 `txt:<文件哈希>`；在线小说为 nil。
+    var bookmarkKey: String? { bookHash.map { "epub:\($0)" } ?? textBook?.bookmarkKey }
+
+    var chapterCount: Int { publication?.readingOrder.count ?? 0 }
+
+    /// 当前页在本章内的比例范围。Readium 不提供页尾位置，按该章位置数（约每 1024 字一个）估计页宽。
+    var currentPageRange: (chapter: Int, range: Range<Double>)? {
+        guard let locator, let index = navigationIndex?.resourceIndex(for: locator.href) else { return nil }
+        let lower = min(1, max(0, locator.locations.progression ?? 0))
+        let width = 1 / Double(max(positionsPerResource[index] ?? 1, 1))
+        return (index, lower..<min(1.000_001, lower + width))
+    }
+
+    /// 当前页开头附近的正文，作为书签摘要。Readium 没有页内文本接口：按章内比例从章节纯文本中截取，
+    /// 读取失败时退回 Locator 自带的文本片段。
+    func currentPageSnippet() async -> String {
+        if let range = currentPageRange, let text = try? await chapterPlainText(range.chapter), !text.isEmpty {
+            let utf16 = text.utf16
+            let offset = EPUBChapterProgress.offset(progression: range.range.lowerBound, length: utf16.count)
+            if let from = utf16.index(utf16.startIndex, offsetBy: offset, limitedBy: utf16.endIndex),
+               let start = from.samePosition(in: text) {
+                return String(text[start...].prefix(ReaderBookmark.maxSnippetLength))
+            }
+        }
+        return String((locator?.text.highlight ?? locator?.text.after ?? "").prefix(ReaderBookmark.maxSnippetLength))
+    }
+
+    func chapterTitle(_ index: Int) -> String? {
+        guard let publication, publication.readingOrder.indices.contains(index) else { return nil }
+        return navigationIndex?.tocIndex(for: publication.readingOrder[index].url()).map { toc[$0].title }
+            ?? publication.readingOrder[index].title
+    }
+
+    /// 一章的纯文本：TXT 取生成的章节，EPUB 读取资源 HTML。
+    func chapterPlainText(_ index: Int) async throws -> String {
+        if let source = textBook?.source { return BookTextSearch.plainText(html: try await source.chapterHTML(at: index)) }
+        guard let publication, publication.readingOrder.indices.contains(index),
+              let resource = publication.get(publication.readingOrder[index]),
+              case .success(let html) = await resource.read().asString() else { throw CancellationError() }
+        return BookTextSearch.plainText(html: html)
+    }
+
+    /// 跳到书签或搜索结果；导航器报告新位置后照常记录阅读进度。
+    func jump(toChapter index: Int, progression: Double) {
+        guard let publication, publication.readingOrder.indices.contains(index) else { return }
+        Task {
+            guard let base = await publication.locate(publication.readingOrder[index]) else { return }
+            _ = await navigator?.go(to: base.copy(locations: { $0.progression = min(1, max(0, progression)) }))
+        }
     }
 
     func seek(to progression: Double) {
