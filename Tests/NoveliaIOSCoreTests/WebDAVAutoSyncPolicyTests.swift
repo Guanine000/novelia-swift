@@ -54,6 +54,16 @@ final class WebDAVAutoSyncPolicyTests: XCTestCase {
         WebDAVAutoSyncPolicy.shouldSync(trigger, part: part, fingerprint: fingerprint, now: now)
     }
 
+    func testChangesDuringSuccessfulTransferRemainDirtyAfterThrottleExpires() {
+        let acknowledged = WebDAVAutoSyncPolicy.acknowledgedFingerprint(before: "uploaded", after: "edited-during-upload")
+        let completed = state(success: 61, fingerprint: acknowledged)
+        XCTAssertTrue(should(.background, completed, fingerprint: "edited-during-upload"))
+        XCTAssertTrue(should(.localChange, completed, fingerprint: "edited-during-upload"))
+        // 拉取合并也可能改变本机状态，保守补跑一次；无变化的后续同步会恢复干净状态。
+        let settled = WebDAVAutoSyncPolicy.acknowledgedFingerprint(before: "merged", after: "merged")
+        XCTAssertFalse(should(.localChange, state(success: 61, fingerprint: settled), fingerprint: "merged"))
+    }
+
     // MARK: 触发规则
 
     func testForegroundSyncsWhenNeverSyncedStaleOrDirty() {

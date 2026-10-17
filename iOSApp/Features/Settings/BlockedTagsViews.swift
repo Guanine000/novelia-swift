@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 import ImageIO
 
 struct BlockedTagsView: View {
-    @ObservedObject private var blocked = BlockedTagsStore.shared
+    @EnvironmentObject private var blocked: BlockedTagsStore
     @State private var newTag = ""
     var body: some View {
         Form {
@@ -36,7 +36,7 @@ struct BlockedTagsView: View {
 /// 作品详情页标签区的二级菜单：勾选屏蔽/解除本作品的标签，并保留进入标签屏蔽管理的入口。
 struct TagBlockingMenu: View {
     let tags: [String]
-    @ObservedObject private var blocked = BlockedTagsStore.shared
+    @EnvironmentObject private var blocked: BlockedTagsStore
     @State private var showsManager = false
 
     var body: some View {

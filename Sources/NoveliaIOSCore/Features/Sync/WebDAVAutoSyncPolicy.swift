@@ -21,7 +21,7 @@ enum WebDAVAutoSyncTrigger: String, Equatable {
 struct WebDAVAutoSyncPart: Codable, Equatable {
     var lastAttempt: Date?
     var lastSuccess: Date?
-    /// 上次成功同步结束时本机状态的指纹；与当前指纹不同即有未推送的改动。
+    /// 确认可覆盖本次本机状态的成功同步指纹；传输期间状态变化时置空，保留待同步状态。
     var syncedFingerprint: String?
     /// 连续失败次数，用于退避；成功后清零，取消不计入。
     var failures = 0
@@ -62,6 +62,12 @@ struct WebDAVAutoSyncState: Codable, Equatable {
 }
 
 enum WebDAVAutoSyncPolicy {
+    /// 只有执行前后状态一致，才确认整个本机状态已覆盖。合并远端引起的变化也保守补跑一次；
+    /// 不能用结束时的实时状态，把传输期间尚未上传的编辑误记为成功。
+    static func acknowledgedFingerprint(before: String, after: String) -> String? {
+        before == after ? after : nil
+    }
+
     /// 回到前台时，距上次成功同步超过该间隔才拉取远端。
     static let staleInterval: TimeInterval = 10 * 60
     /// 两次自动同步之间至少间隔的时间，避免频繁切换前后台时连续请求有频率限制的服务器。

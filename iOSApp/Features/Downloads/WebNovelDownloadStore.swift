@@ -17,6 +17,7 @@ final class WebNovelDownloadStore: ObservableObject {
 
     private let fileManager: FileManager
     private let directory: URL
+    private let syncFileCopier = LocalLibraryFileCopier()
     private let indexURL: URL
     private let api: any NovelDownloadService
 
@@ -136,13 +137,13 @@ final class WebNovelDownloadStore: ObservableObject {
         return fileManager.fileExists(atPath: url.path) ? [book.fileFilename: url] : [:]
     }
 
-    func restoreFromSync(_ book: DownloadedWebNovel, files: [String: URL]) throws {
+    func restoreFromSync(_ book: DownloadedWebNovel, files: [String: URL]) async throws {
         guard !books.contains(where: { $0.id == book.id }) else { return }
         guard let source = files[book.fileFilename] else { throw CocoaError(.fileReadNoSuchFile) }
         var copied: [URL] = []
         do {
-            let destination = uniqueDestination(for: book.fileFilename)
-            try fileManager.copyItem(at: source, to: destination)
+            let destination = directory.appendingPathComponent("sync-\(UUID().uuidString).\(book.resolvedFileFormat.fileExtension)")
+            try await syncFileCopier.copy(from: source, to: destination)
             copied.append(destination)
             let restored = DownloadedWebNovel(
                 novel: book.novel,
@@ -152,6 +153,8 @@ final class WebNovelDownloadStore: ObservableObject {
                 downloadMode: book.downloadMode,
                 fileFormat: book.fileFormat
             )
+            try Task.checkCancellation()
+            guard !books.contains(where: { $0.id == book.id }) else { throw CocoaError(.fileWriteFileExists) }
             books.insert(restored, at: 0)
             do { try persistIndex() } catch {
                 books.removeAll { $0.id == book.id }
@@ -163,29 +166,32 @@ final class WebNovelDownloadStore: ObservableObject {
         }
     }
 
-    func replaceFromSync(_ book: DownloadedWebNovel, files: [String: URL]) throws {
-        let previousBooks = books
-        guard let old = previousBooks.first(where: { $0.id == book.id }),
+    func replaceFromSync(_ book: DownloadedWebNovel, files: [String: URL]) async throws {
+        guard let old = books.first(where: { $0.id == book.id }),
               let source = files[book.fileFilename] else {
             throw CocoaError(.fileReadNoSuchFile)
         }
         var copied: [URL] = []
         do {
-            let destination = uniqueDestination(for: book.fileFilename)
-            try fileManager.copyItem(at: source, to: destination)
+            let destination = directory.appendingPathComponent("sync-\(UUID().uuidString).\(book.resolvedFileFormat.fileExtension)")
+            try await syncFileCopier.copy(from: source, to: destination)
             copied.append(destination)
             let replacement = DownloadedWebNovel(novel: book.novel,
                 fileFilename: destination.lastPathComponent, downloadedAt: book.downloadedAt,
                 translationSource: book.translationSource, downloadMode: book.downloadMode,
                 fileFormat: book.fileFormat)
-            guard let index = books.firstIndex(where: { $0.id == book.id }) else {
+            try Task.checkCancellation()
+            guard let index = books.firstIndex(where: { $0.id == book.id }), books[index] == old else {
                 throw CocoaError(.fileNoSuchFile)
             }
             books[index] = replacement
             try persistIndex()
             removeStoredFile(for: old)
         } catch {
-            books = previousBooks
+            // 复制阶段尚未改变书目；提交后的同步写盘失败在主执行域立即回滚。
+            if let index = books.firstIndex(where: { $0.id == book.id }), books[index].fileFilename == copied.first?.lastPathComponent {
+                books[index] = old
+            }
             for url in copied { try? fileManager.removeItem(at: url) }
             throw error
         }

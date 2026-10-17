@@ -28,7 +28,17 @@ extension AppServices {
                                        metadataLoaded: true, fileFormat: .txt)
             try! JSONEncoder().encode([record]).write(to: directory.appendingPathComponent("library.json"))
         }
-        let local = LocalAppServices()
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let credentials = ArchitectureLocalCredentials()
+        let local = LocalAppServices(
+            defaults: .standard,
+            bookmarks: ReaderBookmarkStore(directory: support.appendingPathComponent("Bookmarks")),
+            statistics: ReadingStatisticsStore(defaults: .standard, deviceIDs: credentials,
+                                                directory: support.appendingPathComponent("ReadingStatistics")),
+            blockedTags: BlockedTagsStore(defaults: .standard),
+            backgrounds: ReaderBackgroundStore(defaults: .standard, directory: support.appendingPathComponent("ReaderBackgrounds")),
+            cloudBooks: CloudBookStore(directory: support.appendingPathComponent("WebDAVCloudBooks")),
+            passwordStore: WebDAVPasswordStore(load: { credentials.password }, save: { credentials.password = $0 }))
         local.readerSettings.pagedTextReading = readium
         let configuration = APIConfiguration(
             novelAPI: URL(string: "https://novels.example.invalid/api/")!,
@@ -47,6 +57,14 @@ extension AppServices {
         return AppServices(configuration: configuration, api: backend.services(), account: account,
             forumAccount: forum, local: local, performsUpdateChecks: false)
     }
+}
+
+/// 验证组装的设备身份和同步密码只存内存，不读取或写入 Keychain。
+private final class ArchitectureLocalCredentials: ReadingDeviceIDStoring {
+    private var deviceID: String?
+    var password: String?
+    func load() -> String? { deviceID }
+    func save(_ id: String) -> Bool { deviceID = id; return true }
 }
 #endif
 

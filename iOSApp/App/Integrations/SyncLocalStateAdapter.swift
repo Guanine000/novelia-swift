@@ -19,6 +19,7 @@ struct WebDAVAutoSyncTriggers: ViewModifier {
     let wenku: WenkuLocalLibraryStore
     let library: LibraryStateStore
     let blockedTags: BlockedTagsStore
+    let bookmarks: ReaderBookmarkStore
 
     func body(content: Content) -> some View {
         content
@@ -28,6 +29,7 @@ struct WebDAVAutoSyncTriggers: ViewModifier {
             .onReceive(wenku.objectWillChange) { sync.localStateDidChange() }
             .onReceive(library.objectWillChange) { sync.localStateDidChange() }
             .onReceive(blockedTags.objectWillChange) { sync.localStateDidChange() }
+            .onReceive(bookmarks.$records.dropFirst()) { _ in sync.localStateDidChange() }
     }
 }
 
@@ -47,7 +49,7 @@ struct AppWebDAVSyncLocalState: WebDAVSyncLocalState {
     var librarySeries: LibrarySeriesState { library.series }
     func applyLibrarySeries(_ series: LibrarySeriesState) { library.applySynced(series) }
     var bookmarks: [String: ReaderBookmark] { bookmarkStore.records }
-    func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) { bookmarkStore.applySynced(bookmarks) }
+    func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) throws { try bookmarkStore.applySynced(bookmarks) }
     var blockedTags: [String: SyncedBlockedTag] { blocked.syncStates }
     func applyBlockedTags(_ tags: [String: SyncedBlockedTag]) { blocked.applySynced(tags) }
     func background(dark: Bool) throws -> SyncedReaderBackground { try backgrounds.syncSnapshot(dark: dark) }

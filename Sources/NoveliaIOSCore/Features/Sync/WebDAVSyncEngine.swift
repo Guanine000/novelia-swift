@@ -10,16 +10,16 @@ protocol SyncBookLibrary<Record>: AnyObject {
     var books: [Record] { get }
     /// 该书需要上传的文件，键为远端记录中的文件名。
     func syncFiles(for book: Record) -> [String: URL]
-    func restoreFromSync(_ book: Record, files: [String: URL]) throws
-    func replaceFromSync(_ book: Record, files: [String: URL]) throws
+    func restoreFromSync(_ book: Record, files: [String: URL]) async throws
+    func replaceFromSync(_ book: Record, files: [String: URL]) async throws
     /// 其他设备已从云端删除这本书：删除本机文件与记录。
     func removeFromSync(_ book: Record)
     /// 其他设备修改过同一文件版本的书库信息（较新）：套用书名、作者、简介与封面（`cover` 为下载好的封面）。
-    func applySyncedMetadata(_ book: Record, cover: URL?) throws
+    func applySyncedMetadata(_ book: Record, cover: URL?) async throws
 }
 
 extension SyncBookLibrary {
-    func applySyncedMetadata(_ book: Record, cover: URL?) throws {}
+    func applySyncedMetadata(_ book: Record, cover: URL?) async throws {}
 }
 
 /// 书籍以外随同步合并的本机状态：阅读位置、书库系列、屏蔽标签、阅读背景与导入字体。
@@ -31,7 +31,7 @@ protocol WebDAVSyncLocalState {
     func applyLibrarySeries(_ series: LibrarySeriesState)
     /// 阅读器书签（含删除墓碑），随书籍同步。
     var bookmarks: [String: ReaderBookmark] { get }
-    func applyBookmarks(_ bookmarks: [String: ReaderBookmark])
+    func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) throws
     var blockedTags: [String: SyncedBlockedTag] { get }
     func applyBlockedTags(_ tags: [String: SyncedBlockedTag])
     func background(dark: Bool) throws -> SyncedReaderBackground
@@ -47,7 +47,7 @@ protocol WebDAVSyncLocalState {
 
 extension WebDAVSyncLocalState {
     var bookmarks: [String: ReaderBookmark] { [:] }
-    func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) {}
+    func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) throws {}
 }
 
 struct WebDAVSyncOptions: Equatable {
@@ -299,7 +299,7 @@ final class WebDAVSyncEngine {
         }
         if options.tags { local.applyBlockedTags(manifest.blockedTags ?? [:]) }
         if options.books, let series = manifest.librarySeries { local.applyLibrarySeries(series) }
-        if options.books, let bookmarks = manifest.bookmarks { local.applyBookmarks(bookmarks) }
+        if options.books, let bookmarks = manifest.bookmarks { try local.applyBookmarks(bookmarks) }
         if options.backgrounds {
             for dark in [false, true] {
                 if let value = manifest.backgrounds?[dark ? "dark" : "light"] {
@@ -330,7 +330,7 @@ final class WebDAVSyncEngine {
                     cover = file
                 } catch WebDAVSyncError.missingBlob {}
             }
-            try wenku.applySyncedMetadata(item.record, cover: cover)
+            try await wenku.applySyncedMetadata(item.record, cover: cover)
             updatedMetadataCount += 1
         }
     }
@@ -383,9 +383,9 @@ final class WebDAVSyncEngine {
             let files = try await download(item.book.assets, title: record.syncTitle)
             defer { files.values.forEach { try? FileManager.default.removeItem(at: $0) } }
             if item.replacesLocal {
-                try library.replaceFromSync(record, files: files)
+                try await library.replaceFromSync(record, files: files)
             } else {
-                try library.restoreFromSync(record, files: files)
+                try await library.restoreFromSync(record, files: files)
                 restored += 1
                 restoredBeforeFailure += 1
             }

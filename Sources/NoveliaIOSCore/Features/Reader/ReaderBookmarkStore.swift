@@ -38,7 +38,7 @@ final class ReaderBookmarkStore: ObservableObject {
 
     @discardableResult
     func add(bookKey: String, chapterIndex: Int, progression: Double, chapterTitle: String?, snippet: String,
-             now: Date = Date()) -> ReaderBookmark {
+             now: Date = Date()) throws -> ReaderBookmark {
         let cleaned = snippet.split(whereSeparator: \.isNewline).joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let bookmark = ReaderBookmark(
@@ -48,30 +48,39 @@ final class ReaderBookmarkStore: ObservableObject {
             snippet: String(cleaned.prefix(ReaderBookmark.maxSnippetLength)), createdAt: now, updatedAt: now)
         var next = records
         next[bookmark.id.uuidString] = bookmark
-        save(next)
+        try save(next)
         return bookmark
     }
 
     /// 删除保留为墓碑，使其他设备同步后也删除。
-    func remove(_ id: UUID, now: Date = Date()) {
-        guard var bookmark = records[id.uuidString], !bookmark.isDeleted else { return }
-        bookmark.deleted = true
-        bookmark.updatedAt = now
+    func remove(_ id: UUID, now: Date = Date()) throws {
+        try remove([id], now: now)
+    }
+
+    /// 同一页有多个书签时一次提交，失败不产生部分删除。
+    func remove(_ ids: [UUID], now: Date = Date()) throws {
         var next = records
-        next[id.uuidString] = bookmark
-        save(next)
+        for id in ids {
+            guard var bookmark = next[id.uuidString], !bookmark.isDeleted else { continue }
+            bookmark.deleted = true
+            bookmark.updatedAt = now
+            next[id.uuidString] = bookmark
+        }
+        try save(next)
     }
 
     /// WebDAV 合并后的书签。
-    func applySynced(_ remote: [String: ReaderBookmark]) {
-        save(ReaderBookmark.merged(records, remote))
+    func applySynced(_ remote: [String: ReaderBookmark]) throws {
+        try save(ReaderBookmark.merged(records, remote))
     }
 
-    private func save(_ next: [String: ReaderBookmark]) {
+    private func save(_ next: [String: ReaderBookmark]) throws {
         guard next != records else { return }
+        // 持久化成功才发布；失败保留旧状态，由阅读界面或同步调用方呈现错误并允许重试。
+        if let fileURL {
+            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(next).write(to: fileURL, options: .atomic)
+        }
         records = next
-        guard let fileURL else { return }
-        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(next) { try? data.write(to: fileURL, options: .atomic) }
     }
 }

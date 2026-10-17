@@ -166,9 +166,11 @@ private final class FakeLocalState: WebDAVSyncLocalState {
     var fontFileURLs: [String: URL] = [:]
     var appliedFonts: (records: [String: SyncedImportedFont], files: [String: Data])?
     var bookmarks: [String: ReaderBookmark] = [:]
+    var bookmarkSaveError: Error?
     var appliedBookmarks: [String: ReaderBookmark]?
 
-    func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) {
+    func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) throws {
+        if let bookmarkSaveError { throw bookmarkSaveError }
         log.events.append("local.applyBookmarks")
         appliedBookmarks = bookmarks
     }
@@ -561,6 +563,21 @@ final class WebDAVSyncEngineTests: XCTestCase {
     }
 
     /// 书签随书籍同步：两端按 ID 合并（较新者胜，含删除），只上传清单中书籍的书签；清单写入后才套用到本机。
+    func testBookmarkPersistenceFailurePropagatesAfterRemoteCommitAndRetryRecovers() async throws {
+        local.bookmarkSaveError = CocoaError(.fileWriteUnknown)
+        let book = wenkuBook(at: 10)
+        addLocal(book, text: "content")
+        let mark = bookmark("epub:" + FileContentHash.sha256(Data("content".utf8)), at: 10)
+        local.bookmarks = [mark.id.uuidString: mark]
+        do {
+            _ = try await run()
+            XCTFail("Local persistence failure must not report success")
+        } catch { XCTAssertNil(local.appliedBookmarks) }
+        local.bookmarkSaveError = nil
+        _ = try await run()
+        XCTAssertNotNil(local.appliedBookmarks)
+    }
+
     func testBookmarksMergeForBooksInManifestOnly() async throws {
         let book = wenkuBook(at: 10)
         addLocal(book, text: "local book")

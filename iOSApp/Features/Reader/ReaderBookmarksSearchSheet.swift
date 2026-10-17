@@ -17,6 +17,7 @@ struct ReaderBookmarksSearchSheet: View {
     let onJump: (Int, Double) -> Void
     @State var tab: Tab = .bookmarks
     @Environment(\.dismiss) private var dismiss
+    @State private var saveError: String?
     @State private var query = ""
     @State private var hits: [BookTextSearch.Hit] = []
     @State private var searchedQuery: String?
@@ -45,6 +46,9 @@ struct ReaderBookmarksSearchSheet: View {
         }
         .presentationDetents([.medium, .large])
         .onDisappear { searchTask?.cancel() }
+        .alert("书签保存失败", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+            Button("好", role: .cancel) { saveError = nil }
+        } message: { Text(saveError ?? "") }
     }
 
     // MARK: 书签
@@ -77,7 +81,9 @@ struct ReaderBookmarksSearchSheet: View {
                     }
                 }
                 .swipeActions {
-                    Button("删除", role: .destructive) { store.remove(bookmark.id) }
+                    Button("删除", role: .destructive) {
+                        do { try store.remove(bookmark.id) } catch { saveError = "未能保存删除操作，请重试。" }
+                    }
                 }
             }
         }
@@ -170,19 +176,22 @@ struct ReaderBookmarkButton: View {
     let chapterTitle: String?
     /// 书签摘要：Yuedu 直接取页内文本，Readium 需读取章节正文，因此为异步。
     let snippet: () async -> String
+    @State private var saveError: String?
 
     var body: some View {
         let existing = pageRange.map { store.bookmarks(for: bookKey, chapter: $0.chapter, in: $0.range) } ?? []
         Button {
             if !existing.isEmpty {
-                existing.forEach { store.remove($0.id) }
+                do { try store.remove(existing.map(\.id)) }
+                catch { saveError = "未能保存删除操作，请重试。" }
             } else if let pageRange {
                 // 先记下位置再取摘要，期间翻页不影响书签位置。
                 let title = chapterTitle
                 Task {
                     let text = await snippet()
-                    store.add(bookKey: bookKey, chapterIndex: pageRange.chapter, progression: pageRange.range.lowerBound,
-                              chapterTitle: title, snippet: text)
+                    do { try store.add(bookKey: bookKey, chapterIndex: pageRange.chapter, progression: pageRange.range.lowerBound,
+                              chapterTitle: title, snippet: text) }
+                    catch { saveError = "书签未能保存，请重试。" }
                 }
             }
         } label: {
@@ -191,5 +200,8 @@ struct ReaderBookmarkButton: View {
         }
         .disabled(pageRange == nil)
         .accessibilityLabel(existing.isEmpty ? "添加书签" : "移除书签")
+        .alert("书签保存失败", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+            Button("好", role: .cancel) { saveError = nil }
+        } message: { Text(saveError ?? "") }
     }
 }

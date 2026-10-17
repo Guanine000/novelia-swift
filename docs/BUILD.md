@@ -37,7 +37,7 @@ python3 -I scripts/build_local_release.py --allow-dirty --simulator '<模拟器�
 
 ### 脚本做了什么
 
-脚本运行 Swift 包逻辑／排版测试（不运行模拟器 UI 测试）、六项离线回归、Release 真机构建、架构验证代码排除检查、原始依赖许可与包内资源核对、IPA 隐私检查，生成未签名 IPA、完整对应源码、锁定依赖完整源码／许可（含 Readium 阅读器脚本所用 npm 包的原始发布包，按锁定文件 SHA-512 校验，并补充两项发布包缺失的 TypeScript 原始源码及构建配置）、BUILD.json 和 SHA256SUMS。
+脚本运行 Swift 包逻辑／排版测试（不运行模拟器 UI 测试）、架构依赖检查与六项离线回归、Release 真机构建、架构验证代码排除检查、原始依赖许可与包内资源核对、IPA 隐私检查，生成未签名 IPA、完整对应源码、锁定依赖完整源码／许可（含 Readium 阅读器脚本所用 npm 包的原始发布包，按锁定文件 SHA-512 校验，并补充两项发布包缺失的 TypeScript 原始源码及构建配置）、BUILD.json 和 SHA256SUMS。
 
 ### 注意事项
 

@@ -110,7 +110,7 @@ private struct WenkuNovelList: View {
         let select: (Int) -> Void
     }
 
-    @ObservedObject private var blocked = BlockedTagsStore.shared
+    @EnvironmentObject private var blocked: BlockedTagsStore
     @EnvironmentObject private var localLibrary: WenkuLocalLibraryStore
     let novels: [WenkuNovelOutline]
     let loading: Bool
@@ -203,7 +203,7 @@ struct WenkuNovelRow: View {
 }
 
 struct WenkuDetailView: View {
-    @ObservedObject private var blocked = BlockedTagsStore.shared
+    @EnvironmentObject private var blocked: BlockedTagsStore
     @EnvironmentObject private var auth: AccountAuthStore
     @EnvironmentObject private var store: WenkuStore
     @EnvironmentObject private var localLibrary: WenkuLocalLibraryStore

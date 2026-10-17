@@ -228,6 +228,8 @@ struct RootView: View {
         .environmentObject(services.local.cloudBooks)
         .environmentObject(services.local.statistics)
         .environmentObject(services.local.recording)
+        .environmentObject(services.local.blockedTags)
+        .environmentObject(services.local.backgrounds)
         .environmentObject(auth)
         .environmentObject(forumAuth)
         .environmentObject(favorites)
@@ -238,7 +240,8 @@ struct RootView: View {
         .environmentObject(webDAVSync)
         .environmentObject(updates)
         .modifier(WebDAVAutoSyncTriggers(sync: webDAVSync, web: webNovelDownloads, wenku: wenkuDownloads,
-                                         library: services.local.library, blockedTags: .shared))
+                                         library: services.local.library, blockedTags: services.local.blockedTags,
+                                         bookmarks: services.local.bookmarks))
         .task { if services.performsUpdateChecks { await updates.check() } }
         .task(id: auth.username) {
             // 作品详情的收藏状态依赖这两份收藏；原先由“书架”页加载。
@@ -285,6 +288,8 @@ struct RootView: View {
             }
             .environmentObject(services.local.readerSettings)
             .environmentObject(services.local.recording)
+            .environmentObject(services.local.blockedTags)
+            .environmentObject(services.local.backgrounds)
         }
     }
 
