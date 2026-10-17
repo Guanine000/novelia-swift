@@ -785,7 +785,12 @@ final class EPUBReaderModel: ObservableObject {
                     failedChapters.remove(neighbor)
                 } catch {
                     // 预取结果挂在当前 book 上，代次切换即整体作废
-                    if generationSnapshot == generation, EPUBLayoutLog.failure(error).kind != "cancelled" {
+                    let kind = EPUBLayoutLog.failure(error).kind
+                    // 章节内容永久缺失或损坏时重试也不会成功，不值得反复弹
+                    // 「相邻章节加载失败」；用户真翻到那一章会看到具体错误页。
+                    if generationSnapshot == generation,
+                       kind != "cancelled",
+                       !EPUBLayoutLog.isPermanentContentFailure(kind) {
                         failedChapters.insert(neighbor)
                     }
                 }
@@ -1066,13 +1071,27 @@ final class EPUBReaderModel: ObservableObject {
                 try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
                                              aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
                                              context: layoutContext(.navigate))
-                if pageBook === book { prefetchNeighbors(of: spineIndex) }
+                if pageBook === book {
+                    // 从失败页经目录或书内链接跳到可读章节时恢复阅读状态；
+                    // 否则失败页会一直盖住新排好的章节，看起来像「换章也没用」。
+                    markReadyAfterRecovery(spineIndex: spineIndex)
+                    prefetchNeighbors(of: spineIndex)
+                }
             } catch {
                 guard pageBook === book, EPUBLayoutLog.failure(error).kind != "cancelled" else { return }
                 lastLayoutFailure = EPUBLayoutLog.failure(error)
                 status = .failed(describeLayoutError(error))
             }
         }
+    }
+
+    /// 目录、书签或链接跳章成功，但状态仍停在失败页时，恢复为可阅读。
+    private func markReadyAfterRecovery(spineIndex: Int) {
+        guard status != .ready else { return }
+        failedChapters.remove(spineIndex)
+        status = .ready
+        // 失败期间 location 的写入被忽略，这里补一次，让阅读位置照常记录。
+        location = EPUBReadingLocation(spineIndex: spineIndex, pageIndex: location.pageIndex)
     }
 
     // MARK: 书签与书内搜索
@@ -1137,6 +1156,7 @@ final class EPUBReaderModel: ObservableObject {
                 }
                 var page = offset.flatMap { book.pageIndex(spineIndex: spineIndex, containingSourceOffset: $0) } ?? 0
                 if usesDoublePage { page = (page / 2) * 2 }
+                markReadyAfterRecovery(spineIndex: spineIndex)
                 location = EPUBReadingLocation(spineIndex: spineIndex, pageIndex: page)
                 prefetchNeighbors(of: spineIndex)
             } catch {

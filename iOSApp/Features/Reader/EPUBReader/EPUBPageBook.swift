@@ -418,6 +418,12 @@ enum EPUBLayoutLog {
         default: return ("other", 0)
         }
     }
+
+    /// 章节内容本身的永久性问题：离线文件缺失、条目损坏或章节位置无效，
+    /// 重试或预取重排都不会恢复，因此不用于「相邻章节加载失败，点击重试」提示。
+    static func isPermanentContentFailure(_ kind: String) -> Bool {
+        kind == "chapterMissing" || kind == "entryRead" || kind == "chapterIndex"
+    }
 }
 
 /// 按阶段统计引擎跟踪事件，供仅在 Debug 中启用的章节摘要使用。

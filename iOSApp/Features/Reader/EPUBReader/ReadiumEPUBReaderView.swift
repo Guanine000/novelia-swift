@@ -61,9 +61,15 @@ private struct ReadiumEPUBReaderViewContent: View {
                     ContentUnavailableView {
                         Label("无法打开", systemImage: "exclamationmark.triangle")
                     } description: {
-                        Text(message)
+                        Text(message).textSelection(.enabled)
                     } actions: {
-                        if textBook != nil { Button("重试") { model.retryTextLoad() } }
+                        if textBook != nil {
+                            Button("重试") { model.retryTextLoad() }
+                        } else if let bookURL {
+                            Button("重新打开") { model.retryOpening(url: bookURL) }
+                        }
+                        Button("复制错误说明") { UIPasteboard.general.string = message }
+                        Button("关闭阅读器") { dismiss() }
                     }
                 case .ready:
                     ReadiumNavigatorHost(model: model)
