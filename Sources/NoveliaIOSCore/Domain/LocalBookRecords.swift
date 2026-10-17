@@ -43,6 +43,9 @@ struct LocalWenkuEPUB: Codable, Identifiable, Hashable, Sendable {
     var metadataLoaded: Bool? = nil
     var fileFormat: WebNovelFileFormat? = nil
     var sourceWebNovel: DownloadedWebNovel? = nil
+    /// 用户在书库中修改书名、作者、简介或封面的时间；为 nil 表示仍是导入时读出的信息。
+    /// 同一文件版本在设备间按此时间合并这些信息，不改动书籍文件。
+    var metadataUpdatedAt: Date? = nil
     var resolvedFileFormat: WebNovelFileFormat {
         fileFormat ?? (filename.lowercased().hasSuffix(".txt") ? .txt : .epub)
     }

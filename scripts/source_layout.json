@@ -67,6 +67,7 @@
   "ReaderBookmarkStore.swift": "Sources/NoveliaIOSCore/Features/Reader/ReaderBookmarkStore.swift",
   "BookTextSearch.swift": "Sources/NoveliaIOSCore/Features/Reader/BookTextSearch.swift",
   "ReaderBookmarksSearchSheet.swift": "iOSApp/Features/Reader/ReaderBookmarksSearchSheet.swift",
+  "LibraryBookInfoEditor.swift": "iOSApp/Features/Library/LibraryBookInfoEditor.swift",
   "EPUBContainer.swift": "iOSApp/Features/Reader/EPUBReader/EPUBContainer.swift",
   "EPUBReaderModel.swift": "iOSApp/Features/Reader/EPUBReader/EPUBReaderModel.swift",
   "EPUBChapterSource.swift": "iOSApp/Features/Reader/EPUBReader/EPUBChapterSource.swift",

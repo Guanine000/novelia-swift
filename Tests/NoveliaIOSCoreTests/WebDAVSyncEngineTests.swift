@@ -135,6 +135,13 @@ private final class FakeLibrary<Record: SyncableBook>: SyncBookLibrary {
         books.removeAll { $0.id == book.id }
     }
 
+    var appliedMetadata: [(record: Record, cover: Data?)] = []
+    func applySyncedMetadata(_ book: Record, cover: URL?) throws {
+        log.events.append("\(name).applyMetadata")
+        appliedMetadata.append((book, cover.flatMap { try? Data(contentsOf: $0) }))
+        if let index = books.firstIndex(where: { $0.id == book.id }) { books[index] = book }
+    }
+
     func replaceFromSync(_ book: Record, files: [String: URL]) throws {
         log.events.append("\(name).replace")
         books.removeAll { $0.id == book.id }
@@ -579,6 +586,34 @@ final class WebDAVSyncEngineTests: XCTestCase {
         remoteManifest { $0.bookmarks?[theirs.id.uuidString] = theirs }
         _ = try await run()
         XCTAssertEqual(local.appliedBookmarks?[theirs.id.uuidString]?.isDeleted, true)
+    }
+
+    /// 同一文件版本的书：书库信息按修改时间合并，较新的远端信息（含封面）先套用到本机，再写回合并后的记录。
+    func testEditedMetadataMergesForTheSameFileVersion() async throws {
+        var mine = wenkuBook(at: 10)
+        addLocal(mine, text: "book")
+        _ = try await run()
+        let file = try XCTUnwrap(remote.manifest?.wenkuBooks.first?.assets.first)
+        var theirs = mine
+        theirs.title = "其他设备改的书名"
+        theirs.coverFilename = "cover.jpg"
+        theirs.metadataUpdatedAt = date(20)
+        let cover = remote.seed("new cover", as: "cover.jpg")
+        remoteManifest { $0.wenkuBooks = [WebDAVBook(record: theirs, assets: [file, cover])] }
+        _ = try await run()
+        XCTAssertEqual(wenku.appliedMetadata.first?.record.title, "其他设备改的书名")
+        XCTAssertEqual(wenku.appliedMetadata.first?.cover, Data("new cover".utf8))
+        XCTAssertEqual(remote.manifest?.wenkuBooks.first?.record.title, "其他设备改的书名", "the merged record is written back")
+        XCTAssertEqual(log.count("wenku.replace"), 0, "the book file is not downloaded again")
+
+        // 本机修改较新：不套用远端，清单写回本机的信息。
+        mine = wenku.books[0]
+        mine.title = "本机更新的书名"
+        mine.metadataUpdatedAt = date(30)
+        wenku.books = [mine]
+        _ = try await run()
+        XCTAssertEqual(wenku.appliedMetadata.count, 1)
+        XCTAssertEqual(remote.manifest?.wenkuBooks.first?.record.title, "本机更新的书名")
     }
 
     /// 写清单的操作先到先执行，互不交错。

@@ -46,6 +46,7 @@
 		A10000000000000000000036 /* BlockedTagsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000033 /* BlockedTagsViews.swift */; };
 		A10000000000000000000037 /* ReaderBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000034 /* ReaderBackground.swift */; };
 		C2A000000000000000000016 /* ReaderBookmarksSearchSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A000000000000000000017 /* ReaderBookmarksSearchSheet.swift */; };
+		C2A000000000000000000018 /* LibraryBookInfoEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A000000000000000000019 /* LibraryBookInfoEditor.swift */; };
 		A10000000000000000000038 /* DiscoverViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000035 /* DiscoverViews.swift */; };
 		A10000000000000000000039 /* NovelDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000036 /* NovelDetailViews.swift */; };
 		A10000000000000000000040 /* LibraryComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000037 /* LibraryComponents.swift */; };
@@ -142,6 +143,7 @@
 		B10000000000000000000033 /* BlockedTagsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Settings/BlockedTagsViews.swift; sourceTree = "<group>"; };
 		B10000000000000000000034 /* ReaderBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderBackground.swift; sourceTree = "<group>"; };
 		C2A000000000000000000017 /* ReaderBookmarksSearchSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderBookmarksSearchSheet.swift; sourceTree = "<group>"; };
+		C2A000000000000000000019 /* LibraryBookInfoEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/LibraryBookInfoEditor.swift; sourceTree = "<group>"; };
 		B10000000000000000000035 /* DiscoverViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Discover/DiscoverViews.swift; sourceTree = "<group>"; };
 		B10000000000000000000036 /* NovelDetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Discover/NovelDetailViews.swift; sourceTree = "<group>"; };
 		B10000000000000000000037 /* LibraryComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/LibraryComponents.swift; sourceTree = "<group>"; };
@@ -275,6 +277,7 @@
 				B10000000000000000000033 /* BlockedTagsViews.swift */,
 				B10000000000000000000034 /* ReaderBackground.swift */,
 				C2A000000000000000000017 /* ReaderBookmarksSearchSheet.swift */,
+				C2A000000000000000000019 /* LibraryBookInfoEditor.swift */,
 				B10000000000000000000035 /* DiscoverViews.swift */,
 				B10000000000000000000036 /* NovelDetailViews.swift */,
 				B10000000000000000000037 /* LibraryComponents.swift */,
@@ -529,6 +532,7 @@
 				A10000000000000000000036 /* BlockedTagsViews.swift in Sources */,
 				A10000000000000000000037 /* ReaderBackground.swift in Sources */,
 				C2A000000000000000000016 /* ReaderBookmarksSearchSheet.swift in Sources */,
+				C2A000000000000000000018 /* LibraryBookInfoEditor.swift in Sources */,
 				A10000000000000000000038 /* DiscoverViews.swift in Sources */,
 				A10000000000000000000039 /* NovelDetailViews.swift in Sources */,
 				A10000000000000000000040 /* LibraryComponents.swift in Sources */,

@@ -579,6 +579,8 @@ final class LibraryBookActions: ObservableObject {
     @Published var pendingCloudDownload: LibraryBook?
     /// 文件已不在服务器上的云端书籍：打开时或下载失败后提示，可从云端删除。
     @Published var missingCloudBook: LibraryBook?
+    /// 正在编辑书库信息的文库／导入书籍。
+    @Published var editingBook: LibraryBook?
     /// 下载完成的书，页面据此打开阅读。
     @Published var downloadedBookKey: String?
     /// 多选：长按书籍进入，点击切换选择。
@@ -703,6 +705,15 @@ struct LibraryBookActionDialogs: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .sheet(item: $actions.editingBook) { book in
+                if case .wenku(let record) = book.origin,
+                   let current = wenkuDownloads.books.first(where: { $0.id == record.id }) {
+                    LibraryBookInfoEditor(record: current, coverURL: wenkuDownloads.coverURL(for: current)) { title, author, description, cover in
+                        try wenkuDownloads.updateMetadata(id: current.id, title: title, author: author,
+                                                          description: description, cover: cover)
+                    }
+                }
+            }
             .alert("《\(actions.missingCloudBook?.title ?? "")》的云端文件缺失",
                    isPresented: .init(get: { actions.missingCloudBook != nil },
                                       set: { if !$0 { actions.missingCloudBook = nil } }),
@@ -969,6 +980,9 @@ struct LibraryBookRow: View {
                 Label("移至文库", systemImage: "arrow.right.arrow.left")
             }
         case .wenku(let record):
+            Button { actions.editingBook = book } label: {
+                Label("编辑信息", systemImage: "pencil")
+            }
             Button {
                 do { try LibraryMover.moveToNetwork(record, web: webDownloads, wenku: wenkuDownloads, state: state) }
                 catch { actions.actionError = error.localizedDescription }

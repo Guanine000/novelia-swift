@@ -50,7 +50,8 @@ final class WenkuLocalLibraryStore: ObservableObject {
                                   lastLocatorJSON: book.lastLocatorJSON,
                                   bookDescription: book.bookDescription, author: book.author,
                                   coverFilename: nil, metadataLoaded: book.metadataLoaded,
-                                  fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel)
+                                  fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel,
+                                  metadataUpdatedAt: book.metadataUpdatedAt)
         do {
             if let coverName = book.coverFilename, let coverSource = files[coverName] {
                 let coverDestination = directory.appendingPathComponent("cover-\(UUID().uuidString).jpg")
@@ -77,7 +78,8 @@ final class WenkuLocalLibraryStore: ObservableObject {
             filename: destination.lastPathComponent, addedAt: book.addedAt,
             lastLocatorJSON: book.lastLocatorJSON, bookDescription: book.bookDescription,
             author: book.author, coverFilename: nil, metadataLoaded: book.metadataLoaded,
-            fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel)
+            fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel,
+            metadataUpdatedAt: book.metadataUpdatedAt)
         do {
             if let coverName = book.coverFilename, let coverSource = files[coverName] {
                 let coverDestination = directory.appendingPathComponent("cover-\(UUID().uuidString).jpg")
@@ -97,6 +99,78 @@ final class WenkuLocalLibraryStore: ObservableObject {
             if let cover = replacement.coverFilename { try? fileManager.removeItem(at: directory.appendingPathComponent(cover)) }
             throw error
         }
+    }
+
+    enum CoverChange {
+        case keep, remove
+        case replace(UIImage)
+    }
+
+    /// 修改书库显示的书名、作者、简介与封面。只改索引记录与封面文件，不改书籍文件，
+    /// 内容哈希不变，阅读进度、书签与统计不受影响；修改时间随书籍同步给其他设备。
+    func updateMetadata(id: UUID, title: String, author: String?, description: String?,
+                        cover: CoverChange, now: Date = Date()) throws {
+        guard let index = books.firstIndex(where: { $0.id == id }) else { throw CocoaError(.fileNoSuchFile) }
+        let previous = books
+        var book = books[index]
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleanTitle.isEmpty { book.title = String(cleanTitle.prefix(200)) }
+        book.author = Self.cleaned(author)
+        book.bookDescription = Self.cleaned(description)
+        book.metadataLoaded = true
+        book.metadataUpdatedAt = now
+        var newCover: String?
+        switch cover {
+        case .keep: break
+        case .remove: book.coverFilename = nil
+        case .replace(let image):
+            newCover = try saveCover(image, id: UUID())
+            book.coverFilename = newCover
+        }
+        books[index] = book
+        do { try persistIndex() } catch {
+            books = previous
+            if let newCover { try? fileManager.removeItem(at: directory.appendingPathComponent(newCover)) }
+            throw error
+        }
+        if book.coverFilename != previous[index].coverFilename, let old = previous[index].coverFilename {
+            try? fileManager.removeItem(at: directory.appendingPathComponent(old))
+        }
+    }
+
+    /// 其他设备修改过同一文件版本的信息（较新）：套用书名、作者、简介与封面。`cover` 为下载好的封面临时文件。
+    func applySyncedMetadata(_ remote: LocalWenkuEPUB, cover: URL?) throws {
+        guard let index = books.firstIndex(where: { $0.id == remote.id }) else { return }
+        let previous = books
+        var book = books[index]
+        book.title = remote.title
+        book.author = remote.author
+        book.bookDescription = remote.bookDescription
+        book.metadataLoaded = true
+        book.metadataUpdatedAt = remote.metadataUpdatedAt
+        var newCover: String?
+        if remote.coverFilename == nil {
+            book.coverFilename = nil
+        } else if let cover {
+            let name = "cover-\(UUID().uuidString).jpg"
+            try fileManager.copyItem(at: cover, to: directory.appendingPathComponent(name))
+            newCover = name
+            book.coverFilename = name
+        }
+        books[index] = book
+        do { try persistIndex() } catch {
+            books = previous
+            if let newCover { try? fileManager.removeItem(at: directory.appendingPathComponent(newCover)) }
+            throw error
+        }
+        if book.coverFilename != previous[index].coverFilename, let old = previous[index].coverFilename {
+            try? fileManager.removeItem(at: directory.appendingPathComponent(old))
+        }
+    }
+
+    private static func cleaned(_ text: String?) -> String? {
+        let value = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? nil : String(value.prefix(4000))
     }
 
     func coverURL(for book: LocalWenkuEPUB) -> URL? {
