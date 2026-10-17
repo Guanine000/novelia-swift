@@ -276,7 +276,7 @@ Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒�
 | 解析、章节与排版缓存 | 各缓存实现；属于可重建数据，保持容量与失效规则 |
 | 云端同步状态 | WebDAV 清单、内容 blob 与独立统计数据 |
 
-删除书籍时 Store 一并删除书籍文件与封面；阅读位置按内容哈希保存，不随删除清除。`LibraryStateStore` 在每本本机书都算出哈希后清理残留：不在书库（本机与云端）的最近打开时间与 Readium 精确位置（键名统一由 `ReadiumLocatorKeys` 定义，阅读器与清理共用）立即清理，EPUB/TXT 共享位置超过 180 天未更新才清理，在线小说（web:）位置不清理；书库为空时不清理。系列归属与最近打开时间只在云端副本也删除成功后由 `LibraryStateStore.forget(keys:)` 清理（系列移出记录随同步传播），只删除本机时保留，因为同一书键可能仍以云端书籍出现。
+文库与导入书籍的“编辑信息”经 `WenkuLocalLibraryStore.updateMetadata` 只修改索引记录与封面文件并记下 `metadataUpdatedAt`，不改书籍文件，内容哈希及挂在其上的进度、书签、统计不变。同步时同一文件版本（`syncTimestamp` 相同）先由引擎 `mergeEditedMetadata` 按该时间套用较新的远端信息（`SyncBookLibrary.applySyncedMetadata`，下载封面 blob），再规划上传，使清单写回合并后的记录；网络小说不提供编辑。删除书籍时 Store 一并删除书籍文件与封面；阅读位置按内容哈希保存，不随删除清除。`LibraryStateStore` 在每本本机书都算出哈希后清理残留：不在书库（本机与云端）的最近打开时间与 Readium 精确位置（键名统一由 `ReadiumLocatorKeys` 定义，阅读器与清理共用）立即清理，EPUB/TXT 共享位置超过 180 天未更新才清理，在线小说（web:）位置不清理；书库为空时不清理。系列归属与最近打开时间只在云端副本也删除成功后由 `LibraryStateStore.forget(keys:)` 清理（系列移出记录随同步传播），只删除本机时保留，因为同一书键可能仍以云端书籍出现。
 
 旧版把本机累计与同步缓存保存在偏好键 `reading.statistics.v1`、`reading.statistics.devices.v1`；启动时迁移到文件，写入成功后删除偏好键。偏好与文件同时存在（降级后又升级）时按既有最大值规则合并，不丢降级期间的时长。无法解码的统计文件改名为 `.corrupt-<时间>` 保留。
 

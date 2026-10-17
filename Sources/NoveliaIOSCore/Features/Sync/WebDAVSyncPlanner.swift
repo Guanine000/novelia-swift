@@ -12,6 +12,13 @@ protocol SyncableBook: Codable, Identifiable {
     var syncTitle: String { get }
     /// 上传前确认本机文件齐全。
     func hasRequiredSyncFiles(_ files: [String: URL]) -> Bool
+    /// 书库中手动修改信息的时间，同一文件版本按此合并信息；不支持修改的记录为 nil。
+    var metadataUpdatedAt: Date? { get }
+}
+
+extension DownloadedWebNovel {
+    /// 网络小说的信息来自网站，不在书库中修改。
+    var metadataUpdatedAt: Date? { nil }
 }
 
 extension DownloadedWebNovel: SyncableBook {

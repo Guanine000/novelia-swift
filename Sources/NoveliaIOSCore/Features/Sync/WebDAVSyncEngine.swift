@@ -14,6 +14,12 @@ protocol SyncBookLibrary<Record>: AnyObject {
     func replaceFromSync(_ book: Record, files: [String: URL]) throws
     /// 其他设备已从云端删除这本书：删除本机文件与记录。
     func removeFromSync(_ book: Record)
+    /// 其他设备修改过同一文件版本的书库信息（较新）：套用书名、作者、简介与封面（`cover` 为下载好的封面）。
+    func applySyncedMetadata(_ book: Record, cover: URL?) throws
+}
+
+extension SyncBookLibrary {
+    func applySyncedMetadata(_ book: Record, cover: URL?) throws {}
 }
 
 /// 书籍以外随同步合并的本机状态：阅读位置、书库系列、屏蔽标签、阅读背景与导入字体。
@@ -86,6 +92,8 @@ final class WebDAVSyncEngine {
     private var deletedLocalWenku: [LocalWenkuEPUB] = []
     /// 本次按云端删除记录从本机删除的书数。
     private(set) var removedLocalCount = 0
+    /// 本次套用其他设备修改的书库信息的书数。
+    private(set) var updatedMetadataCount = 0
     /// 已恢复到本机的新书数（下载全部文件模式）；清单写入失败也不回滚，重试时据此累计提示数量。
     private(set) var restoredBeforeFailure = 0
     /// 服务器已有清单却没有返回 ETag：写清单无法带条件，多设备同时同步时后写入的会覆盖先写入的。
@@ -152,6 +160,8 @@ final class WebDAVSyncEngine {
         if options.books {
             manifest.webBooks = WebDAVSyncPlanner.uniqueBooks(manifest.webBooks)
             manifest.wenkuBooks = WebDAVSyncPlanner.uniqueBooks(manifest.wenkuBooks)
+            // 先套用其他设备较新的书库信息，随后的规划与上传就写回合并后的记录。
+            try await mergeEditedMetadata(manifest.wenkuBooks)
             // 云端已删除的书不恢复也不上传；重新下载或导入的更新版本照常同步。
             var deleted = manifest.deletedBooks ?? [:]
             let webBooks = WebDAVDeletedBooks.apply(local: web.books, remote: manifest.webBooks, deleted: &deleted)
@@ -302,6 +312,27 @@ final class WebDAVSyncEngine {
         progress.detail = "同步完成"
         finished = true
         return imported
+    }
+
+    /// 同一文件版本（`syncTimestamp` 相同）的书，远端书库信息的修改时间较新时套用到本机。
+    /// 与阅读位置一样按时间合并，可重复执行；封面缺失时只更新文字信息。
+    private func mergeEditedMetadata(_ remoteBooks: [WebDAVBook<LocalWenkuEPUB>]) async throws {
+        for item in remoteBooks {
+            guard let localBook = wenku.books.first(where: { $0.id == item.record.id }),
+                  localBook.syncTimestamp == item.record.syncTimestamp,
+                  (item.record.metadataUpdatedAt ?? .distantPast) > (localBook.metadataUpdatedAt ?? .distantPast) else { continue }
+            try Task.checkCancellation()
+            var cover: URL?
+            if let name = item.record.coverFilename, let asset = item.assets.first(where: { $0.filename == name }) {
+                do {
+                    let file = try await remote.downloadBlob(asset.hash)
+                    temporaryCovers.append(file)
+                    cover = file
+                } catch WebDAVSyncError.missingBlob {}
+            }
+            try wenku.applySyncedMetadata(item.record, cover: cover)
+            updatedMetadataCount += 1
+        }
     }
 
     /// 旧清单的文件没有大小：本机有同一版本（记录时间相同）且内容哈希一致时补上，之后写回清单。
