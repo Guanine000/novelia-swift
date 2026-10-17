@@ -30,6 +30,34 @@ final class LocalLibraryIndexWriterTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(contentsOf: url)), ["new", "edited"])
     }
 
+    @MainActor
+    func testBackgroundCopyKeepsSourceAndDoesNotOverwriteDestination() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = directory.appendingPathComponent("source.epub")
+        let destination = directory.appendingPathComponent("copied.epub")
+        let content = Data(repeating: 42, count: 1024 * 1024)
+        try content.write(to: source)
+        let writer = LocalLibraryFileCopier()
+        try await writer.copy(from: source, to: destination)
+        XCTAssertEqual(try Data(contentsOf: destination), content)
+        XCTAssertEqual(try Data(contentsOf: source), content)
+        do {
+            try await writer.copy(from: source, to: destination)
+            XCTFail("Existing destinations must not be overwritten")
+        } catch { XCTAssertEqual(try Data(contentsOf: destination), content) }
+        let missing = directory.appendingPathComponent("missing")
+        let failed = directory.appendingPathComponent("failed.epub")
+        do {
+            try await writer.copy(from: missing, to: failed)
+            XCTFail("Missing source must fail")
+        } catch {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: failed.path))
+        }
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.hasPrefix(".copy-") })
+    }
+
     func testWriteFailurePropagatesWithoutReplacingExistingIndex() async throws {
         let parent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let url = parent.appendingPathComponent("library.json")

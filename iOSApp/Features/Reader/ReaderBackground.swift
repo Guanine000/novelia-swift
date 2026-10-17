@@ -71,7 +71,7 @@ final class ReaderBackgroundStore: ObservableObject {
 }
 
 struct ReaderBackgroundView: View {
-    @ObservedObject private var store = ReaderBackgroundStore.shared
+    @EnvironmentObject private var store: ReaderBackgroundStore
     let dark: Bool
     let fallback: Color
     var body: some View {
@@ -90,7 +90,7 @@ struct ReaderBackgroundView: View {
 }
 
 struct ReaderBackgroundSettingsView: View {
-    @ObservedObject private var store = ReaderBackgroundStore.shared
+    @EnvironmentObject private var store: ReaderBackgroundStore
     @State private var dark = false
     @State private var landscape = false
     @State private var selectedPhoto: PhotosPickerItem?

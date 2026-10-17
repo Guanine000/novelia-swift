@@ -11,25 +11,25 @@ import UIKit
 final class WebDAVSyncStore: ObservableObject {
     @Published var isEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(isEnabled, forKey: SettingsKey.WebDAV.enabled)
+            defaults.set(isEnabled, forKey: SettingsKey.WebDAV.enabled)
             if !isEnabled { cancelAutomaticSync() }
         }
     }
     @Published var address: String {
         didSet {
-            UserDefaults.standard.set(address, forKey: SettingsKey.WebDAV.address)
+            defaults.set(address, forKey: SettingsKey.WebDAV.address)
             updateETagWarning()
         }
     }
-    @Published var username: String { didSet { UserDefaults.standard.set(username, forKey: SettingsKey.WebDAV.username) } }
-    @Published var syncBooks: Bool { didSet { UserDefaults.standard.set(syncBooks, forKey: SettingsKey.WebDAV.syncBooks) } }
-    @Published var syncTags: Bool { didSet { UserDefaults.standard.set(syncTags, forKey: SettingsKey.WebDAV.syncTags) } }
-    @Published var syncBackgrounds: Bool { didSet { UserDefaults.standard.set(syncBackgrounds, forKey: SettingsKey.WebDAV.syncBackgrounds) } }
-    @Published var syncFonts: Bool { didSet { UserDefaults.standard.set(syncFonts, forKey: SettingsKey.WebDAV.syncFonts) } }
-    @Published var syncStatistics: Bool { didSet { UserDefaults.standard.set(syncStatistics, forKey: SettingsKey.WebDAV.syncStatistics) } }
+    @Published var username: String { didSet { defaults.set(username, forKey: SettingsKey.WebDAV.username) } }
+    @Published var syncBooks: Bool { didSet { defaults.set(syncBooks, forKey: SettingsKey.WebDAV.syncBooks) } }
+    @Published var syncTags: Bool { didSet { defaults.set(syncTags, forKey: SettingsKey.WebDAV.syncTags) } }
+    @Published var syncBackgrounds: Bool { didSet { defaults.set(syncBackgrounds, forKey: SettingsKey.WebDAV.syncBackgrounds) } }
+    @Published var syncFonts: Bool { didSet { defaults.set(syncFonts, forKey: SettingsKey.WebDAV.syncFonts) } }
+    @Published var syncStatistics: Bool { didSet { defaults.set(syncStatistics, forKey: SettingsKey.WebDAV.syncStatistics) } }
     @Published var autoSyncEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(autoSyncEnabled, forKey: SettingsKey.WebDAV.autoSync)
+            defaults.set(autoSyncEnabled, forKey: SettingsKey.WebDAV.autoSync)
             if autoSyncEnabled { requestAutomaticSync(.foreground) } else { cancelAutomaticSync() }
         }
     }
@@ -50,7 +50,8 @@ final class WebDAVSyncStore: ObservableObject {
     @Published private(set) var downloadingCloudBook: String?
     @Published private(set) var cloudDownloadProgress = 0.0
 
-    private let keychainService = "cc.novelia.ios.port.webdav"
+    private let defaults: UserDefaults
+    private let passwordStore: WebDAVPasswordStore
     /// 内容同步与云端删除都会写清单，经此串行执行；按需下载不写清单，不经过这里。
     private let manifestGate = WebDAVManifestWriteGate()
     /// 最近的同步阶段，用于失败提示。
@@ -60,7 +61,7 @@ final class WebDAVSyncStore: ObservableObject {
     private var autoState: WebDAVAutoSyncState {
         didSet {
             guard autoState != oldValue, let data = try? JSONEncoder().encode(autoState) else { return }
-            UserDefaults.standard.set(data, forKey: SettingsKey.WebDAV.autoSyncState)
+            defaults.set(data, forKey: SettingsKey.WebDAV.autoSyncState)
         }
     }
     /// 书库由 RootView 持有，集成层启动自动同步时交给本 Store。
@@ -76,35 +77,38 @@ final class WebDAVSyncStore: ObservableObject {
     private var recheckAfterSync = false
     private var backgroundTask = UIBackgroundTaskIdentifier.invalid
 
-    init(local: any WebDAVSyncLocalState, statistics: any ReadingStatisticsSyncing, cloudBooks: CloudBookStore) {
+    init(local: any WebDAVSyncLocalState, statistics: any ReadingStatisticsSyncing, cloudBooks: CloudBookStore,
+         defaults: UserDefaults = .standard, passwordStore: WebDAVPasswordStore? = nil) {
+        self.defaults = defaults
+        self.passwordStore = passwordStore ?? .keychain
         self.local = local
         self.statistics = statistics
         self.cloudBooks = cloudBooks
-        isEnabled = UserDefaults.standard.object(forKey: SettingsKey.WebDAV.enabled) as? Bool ?? false
-        syncBooks = UserDefaults.standard.object(forKey: SettingsKey.WebDAV.syncBooks) as? Bool ?? true
-        syncTags = UserDefaults.standard.object(forKey: SettingsKey.WebDAV.syncTags) as? Bool ?? true
-        syncBackgrounds = UserDefaults.standard.bool(forKey: SettingsKey.WebDAV.syncBackgrounds)
-        syncFonts = UserDefaults.standard.bool(forKey: SettingsKey.WebDAV.syncFonts)
-        syncStatistics = UserDefaults.standard.bool(forKey: SettingsKey.WebDAV.syncStatistics)
-        autoSyncEnabled = UserDefaults.standard.bool(forKey: SettingsKey.WebDAV.autoSync)
-        autoState = UserDefaults.standard.data(forKey: SettingsKey.WebDAV.autoSyncState)
+        isEnabled = defaults.object(forKey: SettingsKey.WebDAV.enabled) as? Bool ?? false
+        syncBooks = defaults.object(forKey: SettingsKey.WebDAV.syncBooks) as? Bool ?? true
+        syncTags = defaults.object(forKey: SettingsKey.WebDAV.syncTags) as? Bool ?? true
+        syncBackgrounds = defaults.bool(forKey: SettingsKey.WebDAV.syncBackgrounds)
+        syncFonts = defaults.bool(forKey: SettingsKey.WebDAV.syncFonts)
+        syncStatistics = defaults.bool(forKey: SettingsKey.WebDAV.syncStatistics)
+        autoSyncEnabled = defaults.bool(forKey: SettingsKey.WebDAV.autoSync)
+        autoState = defaults.data(forKey: SettingsKey.WebDAV.autoSyncState)
             .flatMap { try? JSONDecoder().decode(WebDAVAutoSyncState.self, from: $0) } ?? WebDAVAutoSyncState()
-        address = UserDefaults.standard.string(forKey: SettingsKey.WebDAV.address) ?? ""
-        username = UserDefaults.standard.string(forKey: SettingsKey.WebDAV.username) ?? ""
-        password = Self.readPassword(service: keychainService) ?? ""
+        address = defaults.string(forKey: SettingsKey.WebDAV.address) ?? ""
+        username = defaults.string(forKey: SettingsKey.WebDAV.username) ?? ""
+        password = self.passwordStore.load() ?? ""
         updateETagWarning()
     }
 
     private var trimmedAddress: String { address.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private func updateETagWarning() {
-        let flagged = UserDefaults.standard.string(forKey: SettingsKey.WebDAV.manifestWithoutETag)
+        let flagged = defaults.string(forKey: SettingsKey.WebDAV.manifestWithoutETag)
         serverLacksETag = flagged != nil && flagged == trimmedAddress
     }
 
     private func recordETagSupport(lacking: Bool) {
-        if lacking { UserDefaults.standard.set(trimmedAddress, forKey: SettingsKey.WebDAV.manifestWithoutETag) }
-        else { UserDefaults.standard.removeObject(forKey: SettingsKey.WebDAV.manifestWithoutETag) }
+        if lacking { defaults.set(trimmedAddress, forKey: SettingsKey.WebDAV.manifestWithoutETag) }
+        else { defaults.removeObject(forKey: SettingsKey.WebDAV.manifestWithoutETag) }
         updateETagWarning()
     }
 
@@ -153,7 +157,7 @@ final class WebDAVSyncStore: ObservableObject {
             finishAutomaticRun()
         }
         // 目录缓存：自动同步跳过已确认的目录检查；手动同步先清空，重新完整检查一次。失败时清空。
-        let folderCache = WebDAVFolderCache(defaults: .standard)
+        let folderCache = WebDAVFolderCache(defaults: defaults)
         if trigger == nil { folderCache.clear() }
         let client: WebDAVClient
         do {
@@ -161,7 +165,7 @@ final class WebDAVSyncStore: ObservableObject {
             guard !account.isEmpty, !account.contains(":"), !password.isEmpty else {
                 throw WebDAVSyncError.missingCredentials
             }
-            try savePassword()
+            try passwordStore.save(password)
             client = try WebDAVClient(address: address.trimmingCharacters(in: .whitespacesAndNewlines),
                                       username: account, password: password, folderCache: folderCache)
         } catch {
@@ -172,13 +176,14 @@ final class WebDAVSyncStore: ObservableObject {
         var summary = ""
         if content, let web, let wenku {
             autoState.content.lastAttempt = Date()
+            let before = WebDAVAutoSyncPolicy.fingerprint(local: local, web: web, wenku: wenku, options: options)
             do {
                 if manifestGate.isBusy { progressDetail = "正在等待云端删除完成…" }
                 let result = try await manifestGate.run {
                     try await WebDAVSyncEngine.runRetryingConcurrentChange {
                         // 手动同步核对服务器 blobs/ 并补传缺失文件；自动同步为节省请求不核对。
                         WebDAVSyncEngine(remote: client, local: local, web: web, wenku: wenku,
-                                         options: options, cloud: cloudBooks,
+                                         options: options, defaults: defaults, cloud: cloudBooks,
                                          verifiesBlobs: trigger == nil) { [weak self] in self?.show($0) }
                     }
                 }
@@ -186,8 +191,8 @@ final class WebDAVSyncStore: ObservableObject {
                 recordETagSupport(lacking: result.lacksETag)
                 autoState.content.lastSuccess = Date()
                 autoState.content.failures = 0
-                autoState.content.syncedFingerprint = WebDAVAutoSyncPolicy.fingerprint(local: local, web: web, wenku: wenku,
-                                                                                       options: options)
+                autoState.content.syncedFingerprint = WebDAVAutoSyncPolicy.acknowledgedFingerprint(
+                    before: before, after: WebDAVAutoSyncPolicy.fingerprint(local: local, web: web, wenku: wenku, options: options))
                 let cloudCount = cloudBooks.webBooks.count + cloudBooks.wenkuBooks.count
                 summary = (options.books ? "云端新增 \(imported) 本书；本机网络小说 \(web.books.count) 本、文库 \(wenku.books.count) 本，未下载 \(cloudCount) 本。" : "")
                     + (options.tags ? "已同步屏蔽标签。" : "") + (options.backgrounds ? "已同步阅读背景。" : "")
@@ -222,13 +227,16 @@ final class WebDAVSyncStore: ObservableObject {
                 // 手动同步不用缓存，重新读取全部设备文件。
                 let saved = trigger == nil ? nil : loadStatisticsCache()
                 let cache = saved?.server == client.serverKey ? saved! : ReadingStatisticsSyncCache(server: client.serverKey)
+                let snapshot = statistics.syncSnapshot()
+                let before = WebDAVAutoSyncPolicy.fingerprint(statistics: snapshot)
                 let (merged, updatedCache) = try await ReadingStatisticsSynchronizer(remote: client)
-                    .sync(statistics.syncSnapshot(), deviceID: statistics.syncDeviceID, cache: cache)
+                    .sync(snapshot, deviceID: statistics.syncDeviceID, cache: cache)
                 statistics.applySynced(merged)
                 saveStatisticsCache(updatedCache)
                 autoState.statistics.lastSuccess = Date()
                 autoState.statistics.failures = 0
-                autoState.statistics.syncedFingerprint = WebDAVAutoSyncPolicy.fingerprint(statistics: statistics.syncSnapshot())
+                autoState.statistics.syncedFingerprint = WebDAVAutoSyncPolicy.acknowledgedFingerprint(
+                    before: before, after: WebDAVAutoSyncPolicy.fingerprint(statistics: statistics.syncSnapshot()))
                 completedUnits = totalUnits
                 progressDetail = "同步完成"
                 summary += content ? "已合并阅读时长。" : "已合并各设备阅读统计。"
@@ -248,14 +256,14 @@ final class WebDAVSyncStore: ObservableObject {
     }
 
     private func loadStatisticsCache() -> ReadingStatisticsSyncCache? {
-        UserDefaults.standard.data(forKey: SettingsKey.WebDAV.statisticsCache)
+        defaults.data(forKey: SettingsKey.WebDAV.statisticsCache)
             .flatMap { try? JSONDecoder().decode(ReadingStatisticsSyncCache.self, from: $0) }
     }
 
     /// 只在统计已套用到本机后保存，保证缓存记下的设备版本都已合并进本机数据。
     private func saveStatisticsCache(_ cache: ReadingStatisticsSyncCache) {
         if let data = try? JSONEncoder().encode(cache) {
-            UserDefaults.standard.set(data, forKey: SettingsKey.WebDAV.statisticsCache)
+            defaults.set(data, forKey: SettingsKey.WebDAV.statisticsCache)
         }
     }
 
@@ -271,7 +279,7 @@ final class WebDAVSyncStore: ObservableObject {
         }
         let client = try WebDAVClient(address: address.trimmingCharacters(in: .whitespacesAndNewlines),
                                       username: account, password: password,
-                                      folderCache: WebDAVFolderCache(defaults: .standard))
+                                      folderCache: WebDAVFolderCache(defaults: defaults))
         let removed = try await manifestGate.run { try await WebDAVCloudBookDeleter.delete(keys, from: client) }
         cloudBooks.remove(keys: keys)
         return removed
@@ -290,7 +298,7 @@ final class WebDAVSyncStore: ObservableObject {
         defer { downloadingCloudBook = nil }
         let client = try WebDAVClient(address: address.trimmingCharacters(in: .whitespacesAndNewlines),
                                       username: account, password: password,
-                                      folderCache: WebDAVFolderCache(defaults: .standard))
+                                      folderCache: WebDAVFolderCache(defaults: defaults))
         let progress: (Int, Int) -> Void = { [weak self] done, total in
             self?.cloudDownloadProgress = Double(done) / Double(max(total, 1))
         }
@@ -298,7 +306,7 @@ final class WebDAVSyncStore: ObservableObject {
             if let book = cloudBooks.webBooks.first(where: { $0.libraryKey == key }) {
                 let files = try await WebDAVCloudBookDownloader.download(book.assets, from: client, onProgress: progress)
                 defer { files.values.forEach { try? FileManager.default.removeItem(at: $0) } }
-                try web.restoreFromSync(book.record, files: files)
+                try await web.restoreFromSync(book.record, files: files)
                 cloudBooks.remove(webID: book.record.id)
             } else if let book = cloudBooks.wenkuBooks.first(where: { $0.libraryKey == key }) {
                 // 封面缺失只是没有封面，书照常下载。
@@ -306,7 +314,7 @@ final class WebDAVSyncStore: ObservableObject {
                     book.assets, from: client, optionalFilenames: Set([book.record.coverFilename].compactMap { $0 }),
                     onProgress: progress)
                 defer { files.values.forEach { try? FileManager.default.removeItem(at: $0) } }
-                try wenku.restoreFromSync(book.record, files: files)
+                try await wenku.restoreFromSync(book.record, files: files)
                 cloudBooks.remove(wenkuID: book.record.id)
             } else {
                 throw WebDAVSyncError.invalidAsset
@@ -463,7 +471,17 @@ final class WebDAVSyncStore: ObservableObject {
         totalUnits = progress.totalUnits
     }
 
-    private func savePassword() throws {
+}
+
+/// 同步凭据的访问边界；生产沿用既有 Keychain 服务，隔离组装可提供内存读写。
+@MainActor
+struct WebDAVPasswordStore {
+    let load: () -> String?
+    let save: (String) throws -> Void
+    private static let keychainService = "cc.novelia.ios.port.webdav"
+    static let keychain = WebDAVPasswordStore(load: { readPassword() }, save: { try savePassword($0) })
+
+    private static func savePassword(_ password: String) throws {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                     kSecAttrService as String: keychainService,
                                     kSecAttrAccount as String: "password"]
@@ -481,9 +499,9 @@ final class WebDAVSyncStore: ObservableObject {
         guard result == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(result)) }
     }
 
-    private static func readPassword(service: String) -> String? {
+    private static func readPassword() -> String? {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                                    kSecAttrService as String: service,
+                                    kSecAttrService as String: keychainService,
                                     kSecAttrAccount as String: "password",
                                     kSecReturnData as String: true,
                                     kSecMatchLimit as String: kSecMatchLimitOne]

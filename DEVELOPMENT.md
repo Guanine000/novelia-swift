@@ -84,7 +84,7 @@ Core 功能逻辑 → Domain 与通用 Support
 
 实例所有权分为两类：
 
-- `AppServices` 持有配置、API 集合、小说账号、论坛账号和 `LocalAppServices`；后者持有进度、阅读设置、统计、计时控制器、书库状态与同步。
+- `AppServices` 持有配置、API 集合、小说账号、论坛账号和 `LocalAppServices`；后者持有进度、书签、阅读设置、统计、计时控制器、书库状态、标签、背景、云端书目与同步。
 - `RootView` 持有并注入收藏、历史、远端文库、网络小说下载和本地文库/导入书库 Store。需要 API 的 Store 在初始化时接收对应服务。
 
 Root 还连接账号恢复、续期注册、账号变化后的收藏刷新、前台恢复与更新检查。把新的启动行为放在正确生命周期中，防止视图重建重复启动任务。页面内的查询状态由页面自己的状态对象持有；共享持久化状态不能随页面销毁而重新创建。
@@ -175,7 +175,11 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 
 ## 本地状态与跨功能连接
 
-`LocalAppServices` 创建并持有进度、阅读设置、阅读统计、计时控制器、书库状态和 WebDAV 同步实例。Root 注入观察对象，阅读器、书库和同步必须使用同一套实例。
+`LocalAppServices` 组装并持有进度、书签、阅读设置、阅读统计、计时控制器、书库状态、标签、背景、云端书目和 WebDAV 同步实例。Root 注入观察对象，阅读器、书库和同步必须使用同一套实例。
+
+`LocalAppServices()` 是生产入口；替代组装使用显式初始化器，必须提供偏好存储、书签、统计、标签、背景、云端书目和 `WebDAVPasswordStore`。不能仅传入隔离 defaults 就假定文件或 Keychain 已隔离。生产继续沿用旧目录、偏好键和 Keychain 服务。Root 向 Feature 注入同一标签／背景对象，页面不得再自行查找它们的共享实例。平台字体注册仍由 `EPUBLocalFonts` 管理，不属于这个容器的隔离契约。
+
+`WebDAVSyncStore` 的设置、自动状态、目录缓存、统计缓存及引擎哈希缓存使用注入的 defaults；密码读写经 `WebDAVPasswordStore`，生产为原 Keychain 适配，测试可注入内存闭包。独立 Debug 验证 App 使用显式组装及内存设备身份／同步密码，不进入生产 Keychain 入口。
 
 不得恢复 `ReaderSettings.shared`、`LibraryStateStore.shared`、`ReadingStatisticsStore.shared`，不得在子页面创建第二套生产状态。`ReadingPositionStore` 与书库排序设置在内存缓存已读取的数据（进度写入仍立即落盘），同一偏好存储出现第二个实例会读到过期进度。测试可使用隔离 `UserDefaults` 构造独立服务；阅读设置与进度应使用相同的注入存储。
 
@@ -191,7 +195,7 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 
 阅读计时由 `App/Integrations/ReadingTimeTracking.swift` 连接；同步状态由 `SyncLocalStateAdapter.swift` 连接。阅读器不要导入具体统计 Store 或调用 WebDAV UI 的静态方法。WebDAV Store 不自行查找阅读设置、下载、背景、标签或书库单例。
 
-项目仍保留部分解析、布局、图片缓存和背景、标签、规则等共享服务；这不代表新增持久化功能可以继续引入全局单例。修改现有共享服务时核对生命周期、并发与状态隔离，避免为一次小需求全面重写。
+项目仍保留部分解析、布局、图片缓存和规则等共享服务；生产入口也沿用既有背景与标签共享对象，但页面和同步通过 App 注入的同一对象访问。这不代表新增持久化功能可以继续引入全局单例。修改现有共享服务时核对生命周期、并发与状态隔离，避免为一次小需求全面重写。
 
 ## 阅读器实现
 
@@ -261,7 +265,13 @@ Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒�
 
 `WebNovelDownloadStore` 通过 `NovelDownloadService` 下载网络小说 EPUB，并在 Application Support 的 `WebNovelDownloads/` 管理文件与 `library.json`。`WenkuLocalLibraryStore` 在 `WenkuEPUB/` 管理文库及导入文件和索引，使用 `LocalLibraryIndexWriter` 写入索引。记录类型为 `DownloadedWebNovel` 和 `LocalWenkuEPUB`，定义在 Domain。
 
-下载接口负责把内容交付到指定目标，Store 负责本地记录和用户可见状态。修改下载/导入要检查文件成功而索引失败、取消、重复导入、封面处理、缺失文件及恢复流程。下载的 EPUB 经 `NoveliaAPIClient.acceptEPUBDownload` 检查（2xx、非空、ZIP 签名），任何失败都删除临时文件；导入的文件协调读取与复制在主线程之外执行，开始前先在目标位置建立空文件占住文件名。索引采用原子写入；新增持久化行为不能让失败操作留下可见但不可打开的记录。文件来源分类、记录 ID、内容哈希和路径具有不同用途，不要混为同一身份。
+下载接口负责把内容交付到指定目标，Store 负责本地记录和用户可见状态。修改下载/导入要检查文件成功而索引失败、取消、重复导入、封面处理、缺失文件及恢复流程。下载的 EPUB 经 `NoveliaAPIClient.acceptEPUBDownload` 检查（2xx、非空、ZIP 签名），任何失败都删除临时文件；导入的文件协调读取与复制在主线程之外执行，开始前先在目标位置建立空文件占住文件名。
+
+同步入库接口 `restoreFromSync`、`replaceFromSync` 与 `applySyncedMetadata` 为 async throws；书籍与封面复制交给 `LocalLibraryFileCopier` 的独立文件队列（与索引 writer 定义在同一源文件），主执行域不等待大文件复制。先复制到同目录暂存文件，成功后移动提交，不覆盖已有目标，失败清理暂存文件。复制完成后重新核对同一书目的状态，避免等待期间的编辑／删除被覆盖；失败只回滚本次书目，不恢复整个旧数组。
+
+索引队列与文件队列分开，避免同步索引提交被长复制占住。小型同步索引提交仍保留同步错误处理和回滚约定，尚非所有 I/O 都已异步化。
+
+索引采用原子写入；新增持久化行为不能让失败操作留下可见但不可打开的记录。文件来源分类、记录 ID、内容哈希和路径具有不同用途，不要混为同一身份。
 
 通用文件哈希使用 `Support/FileContentHash.swift`。跨功能使用通用工具，不通过同步 UI 文件获取哈希方法。临时路径不写成长期书籍身份，缓存不能代替持久化事实。
 
@@ -269,7 +279,7 @@ Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒�
 |---|---|
 | 界面、阅读与功能偏好 | `UserDefaults` / `@AppStorage` 与对应设置对象 |
 | 阅读进度 | `ReadingPositionStore` 的 Codable 数据与 legacy 兼容读取；Readium 本机精确位置的键名由 `ReadiumLocatorKeys` 定义 |
-| 书签 | `ReaderBookmarkStore`：Application Support `Bookmarks/bookmarks.json`，键为书签 ID，删除保留墓碑；经 `ReaderSettings.bookmarks` 交给阅读器 |
+| 书签 | `ReaderBookmarkStore`：Application Support `Bookmarks/bookmarks.json`，键为书签 ID，删除保留墓碑；创建目录、编码与原子写入成功后才发布 records，失败抛给阅读界面／同步调用方，单页批量删除一次提交；经 `ReaderSettings.bookmarks` 交给阅读器 |
 | 书籍文件和本地索引 | Application Support 内的两个书库目录与对应 Store |
 | 账号凭据 | `SessionTokenStore` 的生产 Keychain 适配 |
 | 阅读统计与设备统计 | `ReadingStatisticsStore`：本机累计与同步缓存在 Application Support `ReadingStatistics/` 的 `local.json`、`devices.json`（`ReadingStatisticsFiles` 后台串行写入）；开关、设备 ID 与名称在偏好 |
@@ -295,7 +305,7 @@ WebDAV 是独立传输能力，不使用小说 API 服务集合。`WebDAVSyncSto
 | `SyncMerge.swift` | 同步数据合并规则 |
 | `WebDAVCloudBooks.swift` | 云端书籍记录与封面缓存（`CloudBookStore`）、按需下载 |
 | `WebDAVAutoSyncPolicy.swift` | 自动同步的触发判断、失败退避与本机状态指纹（纯计算） |
-| `App/Integrations/SyncLocalStateAdapter.swift` | 连接实际进度、系列、背景、标签与字体状态；`WebDAVAutoSyncTriggers` 转交前后台与书库/系列/标签变化 |
+| `App/Integrations/SyncLocalStateAdapter.swift` | 连接实际进度、书签、系列、背景、标签与字体状态；`WebDAVAutoSyncTriggers` 转交前后台与书库／系列／书签／标签变化 |
 
 同步通过 `SyncBookLibrary` 读写两类书籍，通过 `WebDAVSyncLocalState` 访问其他本地状态。远端资源使用内容哈希引用，验证资源名和哈希后才导入。清单写入使用对应并发条件；`WebDAVSyncStore` 经 `WebDAVSyncEngine.runRetryingConcurrentChange` 在 `concurrentChange`（412）时重新读取清单、以新引擎完整重跑（最多三次），重跑安全依赖“清单写入前只追加较新书籍与按时间合并、删除与设置在写入成功后套用”，修改引擎时须保持这一顺序。手动同步传入 `verifiesBlobs`：引擎先用 `WebDAVRemote.listBlobs`（PROPFIND Depth 1）找出清单引用却不在服务器上的 blob，从已知集合中移除，使上传流程补传本机仍有的文件，并在 `WebDAVSyncRunResult` 报告补传与仍缺失的数量；列目录失败或不支持时不补传、不让同步失败。下载遇到 404 抛出 `missingBlob`，同步中缺失的封面跳过，按需下载时封面列为可选文件。成功列目录后，主文件缺失的云端书籍经 `SyncCloudCatalog.setMissingFileKeys` 记入 `CloudBookStore.missingFileKeys`（随本机缓存保存，只保留仍存在的记录），下载遇到缺失也会标记；书库据此显示“云端文件缺失”并提供从云端删除，书目不自动删除。内容同步与 `deleteFromCloud` 经同一 `WebDAVManifestWriteGate` 先到先执行，不交错读写清单；统计同步和按需下载不写清单，不经过它。阅读统计独立同步：每台设备只写 `statistics/<设备 ID>.json`（`ReadingDeviceStatisticsFile`），读取全部设备文件与旧版 `reading-statistics.json` 后按设备取最大值合并，因此不需要条件写入；不得把其他设备的时长写进本机文件，也不得再写旧版文件。设备 ID 用作文件名，须通过 `isValidDeviceID` 校验。设备 ID 由 `ReadingDeviceIdentity` 决定：以 Keychain（`ThisDeviceOnly`，经 `ReadingDeviceIDStoring` 注入）为准；偏好中有 ID 但未绑定 Keychain 视为旧版升级并沿用该 ID；偏好已绑定但 Keychain 没有，视为从备份复制，生成新 ID，并把复制来的本机记录与名称归还原设备。测试必须注入内存实现，不读写真实 Keychain。设备名称（`ReadingDeviceInfo`）随统计同步，本机名称只由本机修改。
 
@@ -306,11 +316,11 @@ WebDAV 是独立传输能力，不使用小说 API 服务集合。`WebDAVSyncSto
 - 清单文件条目带可选 `size`；上传时写入，`fillMissingSizes` 只在本机同一版本且哈希一致时补齐旧条目，不产生网络请求。
 - 云端删除写入 `deletedBooks`（`WebDAVDeletedBooks`）：同步时不恢复、不上传删除时间及之前的版本，本机的这类副本在清单写入成功后经 `SyncBookLibrary.removeFromSync` 删除；更新版本清除记录。`WebDAVCloudBookDeleter` 以条件写入清单（并发冲突重试三次），成功后才 `deleteBlob` 删除不再被引用的文件。
 - 书籍同步不自动下载书籍文件：App 给引擎传入 `CloudBookStore`（`SyncCloudCatalog`），本机没有的书只记为云端书籍并下载 EPUB 封面，本机已有的书不被远端较新版本替换；上传不变。云端书籍在清单写入成功后才更新，记录与封面保存在 Application Support/WebDAVCloudBooks，属于可重建缓存。书库把它们并入 `LibraryBook`（`cloudFileHash` 为主文件哈希，用于阅读位置与去重），打开前经 `WebDAVSyncStore.downloadCloudBook` 用 `WebDAVCloudBookDownloader` 下载并 `restoreFromSync`。引擎不传 `cloud` 时保持下载全部文件的旧行为（测试使用）。
-- 同步由用户手动触发，或在开启自动同步后由前台、背景、本机改动和网络恢复触发；两者走同一执行路径，同一时间只跑一个。是否自动执行只由 `WebDAVAutoSyncPolicy` 判断，指纹只读已有本地接口，不读文件内容。本地删除不传播到云端。
-- 自动同步状态（`webdav.autoSync.state.v1`）分清单内容与阅读时长两部分，各自记录指纹、成功时间与失败退避，成功后更新；内容失败时不再同步统计，统计失败不影响已完成的内容同步；进入背景时用后台时间完成，到期取消，依赖“清单最后写入”保证中断安全。
+- 同步由用户手动触发，或在开启自动同步后由前台、背景、本机改动和网络恢复触发；两者走同一执行路径，同一时间只跑一个。是否自动执行只由 `WebDAVAutoSyncPolicy` 判断，指纹只读已有本地接口，不读文件内容；书签变化与书库／标签一样接入延迟推送。成功后只在执行前后指纹一致时确认已覆盖；在途编辑或远端合并导致状态变化时清空成功指纹，保守保留待同步状态，下次触发可补跑。统计同样使用上传前快照与合并后的本机状态比较，不能把新累计时长误记已上传。本地删除不传播到云端。
+- 自动同步状态（`webdav.autoSync.state.v1`）分清单内容与阅读时长两部分，各自记录指纹、成功时间与失败退避，成功后记录时间，但指纹仅按上述确认规则更新；内容失败时不再同步统计，统计失败不影响已完成的内容同步；进入背景时用后台时间完成，到期取消，依赖“清单最后写入”保证中断安全。
 - 执行失败或取消时，已传输文件不自动回滚。
-- 清单在流程末尾写入；标签、系列、背景和字体在清单写成功后才应用。
-- 远端清单引用的 blob 视为已存在，不逐个询问服务器；因此服务器上被手动删除的 blob 不会自动补传。
+- 清单在流程末尾写入；标签、系列、书签、背景和字体在清单写成功后才应用。书签套用必须持久化成功，失败时向调用方抛错，保留待重试状态；远端已提交的清单不回滚。
+- 自动同步不逐个检查远端 blob；手动同步列目录并在本机仍有文件时补传缺失 blob，列目录不受支持时不补传。
 
 ## 网络、缓存与诊断约定
 
@@ -390,7 +400,7 @@ Readium 与 Yuedu 是 Reader 功能内部的引擎选择。两个模型使用 Ap
 | 认证配置、桥接或账号 | `test_auth_login_bridge.py`、`test_unified_login.py`、`test_auth_refresh_queue.py` 及相关 API/实际账号联调 |
 | 进度、统计、书库或同步 | 对应 Core 测试、`test_library_store.py`、`test_reading_statistics_store.py`；旧数据与合并回归 |
 | 阅读器或页面调用链 | 对应 EPUB/Core 测试与相关 UI 回归；必要的真机验收 |
-| 架构验证组装或发布配置 | 独立 Debug App UI 与生产 Release 编译、`check_architecture_release.py` |
+| 架构边界、验证组装或发布配置 | `check_architecture_boundaries.py`、独立 Debug App UI 与生产 Release 编译、`check_architecture_release.py` |
 | 开源依赖、许可或分发 | `docs/BUILD.md` 发布流程、许可与隐私校验、相关构建回归 |
 
 从仓库根目录运行 Core/EPUB 测试：
@@ -398,10 +408,11 @@ Readium 与 Yuedu 是 Reader 功能内部的引擎选择。两个模型使用 Ap
 ```sh
 scripts/run_package_tests.sh '<可用模拟器名称或 UDID>'
 python3 scripts/test_service_consumers.py
+python3 scripts/check_architecture_boundaries.py
 git diff --check
 ```
 
-其他离线回归脚本也通过 `python3 scripts/<脚本名>.py` 执行；先读取脚本参数与前置条件。`scripts/build_local_release.py` 发布前固定运行以下六项离线回归，另以 `test_local_release.py` 检查打包流程：
+其他离线回归脚本也通过 `python3 scripts/<脚本名>.py` 执行；先读取脚本参数与前置条件。`scripts/build_local_release.py` 发布前固定运行架构依赖检查和以下六项离线回归，另以 `test_local_release.py` 检查打包流程：
 
 | 脚本 | 覆盖范围 |
 |---|---|
@@ -454,6 +465,8 @@ python3 scripts/check_architecture_release.py '<Release Novelia.app 内的 Novel
 不得把合成后台作为生产失败时的数据回退。网络探针只核对 URLSession 外部请求，允许 Readium 本地服务；不要把计数为 0 解释为所有 WebKit 外部请求均已审计。模拟器、合成服务、实际服务器、真机是不同的证据范围，交付时分别说明。外部 EPUB 扫描缺少 `SCAN_EPUB` 的跳过也要说明。
 
 ## 架构演进
+
+`check_architecture_boundaries.py` 检查 Domain 不反向引用 UI／App／具体 API、Infrastructure 不引用界面组装、Feature 不直接引用具体 API、阅读器不引用同步 UI／具体统计 Store。它是忽略注释与普通字符串的窄范围静态守卫，不替代 Swift 编译和实际替代服务测试；当前仍保持单 App 编译模块。
 
 架构注释使用中文。关键类型说明职责、实例所有者、依赖与需要保留的兼容行为；复杂流程说明原因和边界。注释应描述实际实现，避免重复类型名、逐行翻译普通代码或写入当次工作成果。调整实现时同步更新相关注释，许可证原文与工具指令保持原样。
 

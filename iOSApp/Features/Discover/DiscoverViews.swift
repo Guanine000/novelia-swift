@@ -226,7 +226,7 @@ struct DiscoverView: View {
 }
 
 private struct DiscoverContentView: View {
-    @ObservedObject private var blocked = BlockedTagsStore.shared
+    @EnvironmentObject private var blocked: BlockedTagsStore
     @State private var query = ""
     @StateObject private var store: DiscoverStore
     private let showsNavigationBar: Bool
@@ -381,7 +381,7 @@ private struct RankingView: View {
 }
 
 private struct RankingContentView: View {
-    @ObservedObject private var blocked = BlockedTagsStore.shared
+    @EnvironmentObject private var blocked: BlockedTagsStore
     @State private var page = 1
     @StateObject private var store: RankingStore
 
@@ -486,7 +486,7 @@ struct TagSearchResultsView: View {
 }
 
 private struct TagSearchContentView: View {
-    @ObservedObject private var blocked = BlockedTagsStore.shared
+    @EnvironmentObject private var blocked: BlockedTagsStore
     let tag: String
     @StateObject private var store: DiscoverStore
 

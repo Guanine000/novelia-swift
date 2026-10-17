@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 struct NovelDetailView: View {
     @EnvironmentObject private var services: AppServices
-    @ObservedObject private var blocked = BlockedTagsStore.shared
+    @EnvironmentObject private var blocked: BlockedTagsStore
     @EnvironmentObject private var auth: AccountAuthStore
     @EnvironmentObject private var favorites: FavoritesStore
     @EnvironmentObject private var webNovelDownloads: WebNovelDownloadStore

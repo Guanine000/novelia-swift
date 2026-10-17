@@ -54,21 +54,37 @@ final class LocalAppServices {
     let sync: WebDAVSyncStore
     /// 只在云端有文件的书；书库显示，同步更新。
     let cloudBooks: CloudBookStore
+    let blockedTags: BlockedTagsStore
+    let backgrounds: ReaderBackgroundStore
 
-    init(defaults: UserDefaults = .standard, recorder: (any ReadingTimeRecording)? = nil) {
+    /// 生产入口显式提供默认资源，旧偏好键、文件目录与 Keychain 身份保持不变。
+    convenience init() {
+        self.init(defaults: .standard,
+                  bookmarks: ReaderBookmarkStore(directory: ReaderBookmarkStore.defaultDirectory),
+                  statistics: ReadingStatisticsStore(deviceModel: UIDevice.current.model),
+                  blockedTags: .shared, backgrounds: .shared, cloudBooks: CloudBookStore(),
+                  passwordStore: .keychain)
+    }
+
+    /// 替代组装必须提供全部持久化对象，避免只隔离偏好却意外访问生产文件与凭据。
+    /// 字体由平台字体注册服务管理，不属于此容器的隔离契约。
+    init(defaults: UserDefaults, bookmarks: ReaderBookmarkStore, statistics: ReadingStatisticsStore,
+         blockedTags: BlockedTagsStore, backgrounds: ReaderBackgroundStore, cloudBooks: CloudBookStore,
+         passwordStore: WebDAVPasswordStore, recorder: (any ReadingTimeRecording)? = nil) {
         let positions = ReadingPositionStore(defaults: defaults)
         self.positions = positions
-        let bookmarks = ReaderBookmarkStore(directory: ReaderBookmarkStore.defaultDirectory)
         self.bookmarks = bookmarks
+        self.statistics = statistics
+        self.blockedTags = blockedTags
+        self.backgrounds = backgrounds
         readerSettings = ReaderSettings(defaults: defaults, positions: positions, bookmarks: bookmarks)
-        statistics = ReadingStatisticsStore(defaults: defaults, deviceModel: UIDevice.current.model)
         recording = ReadingActivityController(recorder: recorder ?? statistics)
         library = LibraryStateStore(positions: positions, defaults: defaults)
-        let cloudBooks = CloudBookStore()
         self.cloudBooks = cloudBooks
-        sync = WebDAVSyncStore(local: AppWebDAVSyncLocalState(blocked: .shared, backgrounds: .shared,
+        sync = WebDAVSyncStore(local: AppWebDAVSyncLocalState(blocked: blockedTags, backgrounds: backgrounds,
                                                            positions: positions, library: library,
                                                            bookmarkStore: bookmarks),
-                               statistics: statistics, cloudBooks: cloudBooks)
+                               statistics: statistics, cloudBooks: cloudBooks,
+                               defaults: defaults, passwordStore: passwordStore)
     }
 }
