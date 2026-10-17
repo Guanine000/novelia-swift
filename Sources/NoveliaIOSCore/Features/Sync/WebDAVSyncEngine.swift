@@ -82,13 +82,22 @@ final class WebDAVSyncEngine {
     private(set) var restoredBeforeFailure = 0
     /// 服务器已有清单却没有返回 ETag：写清单无法带条件，多设备同时同步时后写入的会覆盖先写入的。
     private(set) var manifestLacksETag = false
+    /// 为 true 时（手动同步）先列出服务器 blobs/，清单引用却已不在服务器上的文件由本机补传。
+    private let verifiesBlobs: Bool
+    /// 同步开始时清单引用、服务器却没有的文件。
+    private var missingBlobs: Set<String> = []
+    /// 本次补传的缺失文件。
+    private(set) var repairedBlobs: Set<String> = []
+    /// 写入的清单仍引用、服务器缺少且本机没有可补传的文件数；需要在仍有这些书的设备上同步。
+    private(set) var unrepairedBlobCount = 0
 
     init(remote: any WebDAVRemote, local: any WebDAVSyncLocalState,
          web: any SyncBookLibrary<DownloadedWebNovel>, wenku: any SyncBookLibrary<LocalWenkuEPUB>,
          options: WebDAVSyncOptions, defaults: UserDefaults = .standard,
-         cloud: (any SyncCloudCatalog)? = nil,
+         cloud: (any SyncCloudCatalog)? = nil, verifiesBlobs: Bool = false,
          onProgress: @escaping (WebDAVSyncProgress) -> Void) {
         self.remote = remote
+        self.verifiesBlobs = verifiesBlobs
         self.cloud = cloud
         self.local = local
         self.web = web
@@ -118,6 +127,14 @@ final class WebDAVSyncEngine {
         manifestLacksETag = existed && etag == nil
         var manifest = fetchedManifest
         knownBlobs = WebDAVSyncPlanner.referencedBlobs(in: fetchedManifest)
+        if verifiesBlobs, existed {
+            progress.detail = "正在核对云端文件…"
+            // 列目录失败或服务器不支持时照常同步，只是不补传。
+            if let present = try? await remote.listBlobs() {
+                missingBlobs = knownBlobs.subtracting(present)
+                knownBlobs.formIntersection(present)
+            }
+        }
         var imported = 0
         if options.books {
             manifest.webBooks = WebDAVSyncPlanner.uniqueBooks(manifest.webBooks)
@@ -147,9 +164,12 @@ final class WebDAVSyncEngine {
                 for asset in coverAssets where covers[asset.hash] == nil {
                     try Task.checkCancellation()
                     progress.detail = "正在取回封面…"
-                    let file = try await remote.downloadBlob(asset.hash)
-                    temporaryCovers.append(file)
-                    covers[asset.hash] = file
+                    // 封面缺失只影响显示，不让整次同步失败。
+                    do {
+                        let file = try await remote.downloadBlob(asset.hash)
+                        temporaryCovers.append(file)
+                        covers[asset.hash] = file
+                    } catch WebDAVSyncError.missingBlob {}
                     progress.completedUnits += 1
                 }
                 pendingCloud = (webCloud, wenkuCloud, covers)
@@ -217,6 +237,10 @@ final class WebDAVSyncEngine {
                 if let file = files[hash] { try await uploadIfNeeded(file, hash: hash) }
                 progress.completedUnits += 1
             }
+            // 清单已记录、服务器却缺少的本机字体文件一并补传。
+            for (hash, file) in files where missingBlobs.contains(hash) && !knownBlobs.contains(hash) {
+                try await uploadIfNeeded(file, hash: hash)
+            }
             for hash in plan.downloads {
                 let file = try await remote.downloadBlob(hash); temporaryFiles.append(file); resourceFiles[hash] = file
                 progress.completedUnits += 1
@@ -225,6 +249,10 @@ final class WebDAVSyncEngine {
         }
         progress.stage = "保存远端书目"
         progress.detail = "正在保存同步清单…"
+        if !missingBlobs.isEmpty {
+            unrepairedBlobCount = WebDAVSyncPlanner.referencedBlobs(in: manifest).intersection(missingBlobs)
+                .subtracting(repairedBlobs).count
+        }
         // 清单与读取时完全相同就不再写入：没有改动的同步只需读取一次清单。
         if !existed || !Self.sameContent(manifest, fetchedManifest) {
             try await remote.putManifest(manifest, etag: etag, existed: existed)
@@ -348,6 +376,7 @@ final class WebDAVSyncEngine {
 
     private func uploadIfNeeded(_ file: URL, hash: String) async throws {
         guard !knownBlobs.contains(hash) else { return }
+        defer { if missingBlobs.contains(hash), knownBlobs.contains(hash) { repairedBlobs.insert(hash) } }
         try await remote.uploadBlob(file, hash: hash)
         knownBlobs.insert(hash)
     }
@@ -385,15 +414,18 @@ extension WebDAVSyncEngine {
     /// 清单写入因其他设备刚写过而冲突（412）时，重新读取清单并完整再执行一次，最多 `maxAttempts` 次。
     /// 重跑是安全的：清单写入前只向本机追加/替换较新的书并按时间合并进度，重新规划不会重复导入；
     /// 删除本机副本、云端书目、系列、标签、背景与字体都只在清单写入成功后套用。
-    /// 返回各次新恢复书数之和（失败那次已恢复到本机的书不会在下一次再计数）与成功那次删除的本机书数。
+    /// 返回各次新恢复书数之和（失败那次已恢复到本机的书不会在下一次再计数），以及成功那次的其他结果。
     static func runRetryingConcurrentChange(maxAttempts: Int = 3, make: () -> WebDAVSyncEngine)
-        async throws -> (imported: Int, removedLocal: Int, lacksETag: Bool) {
+        async throws -> WebDAVSyncRunResult {
         var imported = 0
         for attempt in 1...max(1, maxAttempts) {
             let engine = make()
             do {
                 imported += try await engine.run()
-                return (imported, engine.removedLocalCount, engine.manifestLacksETag)
+                return WebDAVSyncRunResult(imported: imported, removedLocal: engine.removedLocalCount,
+                                           lacksETag: engine.manifestLacksETag,
+                                           repairedBlobs: engine.repairedBlobs.count,
+                                           unrepairedBlobs: engine.unrepairedBlobCount)
             } catch WebDAVSyncError.concurrentChange where attempt < maxAttempts {
                 imported += engine.restoredBeforeFailure
                 continue
@@ -401,6 +433,17 @@ extension WebDAVSyncEngine {
         }
         throw WebDAVSyncError.concurrentChange
     }
+}
+
+/// 一次内容同步的结果，用于完成提示与设置页状态。
+struct WebDAVSyncRunResult: Equatable {
+    var imported: Int
+    var removedLocal: Int
+    var lacksETag: Bool
+    /// 本次补传的、服务器缺失的文件数（仅手动同步核对）。
+    var repairedBlobs = 0
+    /// 服务器仍缺少、本机也没有的文件数。
+    var unrepairedBlobs = 0
 }
 
 /// 串行执行会写入 WebDAV 清单的操作（书籍等内容同步与云端删除），先到先执行。

@@ -176,8 +176,10 @@ final class WebDAVSyncStore: ObservableObject {
                 if manifestGate.isBusy { progressDetail = "正在等待云端删除完成…" }
                 let result = try await manifestGate.run {
                     try await WebDAVSyncEngine.runRetryingConcurrentChange {
+                        // 手动同步核对服务器 blobs/ 并补传缺失文件；自动同步为节省请求不核对。
                         WebDAVSyncEngine(remote: client, local: local, web: web, wenku: wenku,
-                                         options: options, cloud: cloudBooks) { [weak self] in self?.show($0) }
+                                         options: options, cloud: cloudBooks,
+                                         verifiesBlobs: trigger == nil) { [weak self] in self?.show($0) }
                     }
                 }
                 let imported = result.imported
@@ -191,6 +193,8 @@ final class WebDAVSyncStore: ObservableObject {
                     + (options.tags ? "已同步屏蔽标签。" : "") + (options.backgrounds ? "已同步阅读背景。" : "")
                     + (options.fonts ? "已同步导入字体。" : "")
                     + (result.removedLocal > 0 ? "其他设备已从云端删除 \(result.removedLocal) 本书，本机副本已一并删除。" : "")
+                    + (result.repairedBlobs > 0 ? "已补传 \(result.repairedBlobs) 个云端缺失的文件。" : "")
+                    + (result.unrepairedBlobs > 0 ? "云端仍缺少 \(result.unrepairedBlobs) 个文件，本机没有这些书，请在仍有它们的设备上手动同步。" : "")
             } catch {
                 if isCancellation(error) { cancelled(prefix) } else {
                     folderCache.clear()
