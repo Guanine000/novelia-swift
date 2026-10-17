@@ -333,7 +333,7 @@ struct LibraryView: View {
     /// 云端书籍先询问是否下载，下载完成后由 `downloadedBookKey` 回到这里打开。
     private func open(_ book: LibraryBook) {
         guard !book.isCloudOnly else {
-            bookActions.pendingCloudDownload = book
+            if book.cloudFileMissing { bookActions.missingCloudBook = book } else { bookActions.pendingCloudDownload = book }
             return
         }
         state.markOpened(book)
@@ -470,7 +470,7 @@ struct LibrarySeriesDetailView: View {
     /// 云端书籍先询问是否下载，下载完成后由 `downloadedBookKey` 回到这里打开。
     private func open(_ book: LibraryBook) {
         guard !book.isCloudOnly else {
-            bookActions.pendingCloudDownload = book
+            if book.cloudFileMissing { bookActions.missingCloudBook = book } else { bookActions.pendingCloudDownload = book }
             return
         }
         state.markOpened(book)
@@ -577,6 +577,8 @@ final class LibraryBookActions: ObservableObject {
     @Published var dissolvingSeries: LibrarySeriesTarget?
     /// 打开云端书籍时等待确认下载。
     @Published var pendingCloudDownload: LibraryBook?
+    /// 文件已不在服务器上的云端书籍：打开时或下载失败后提示，可从云端删除。
+    @Published var missingCloudBook: LibraryBook?
     /// 下载完成的书，页面据此打开阅读。
     @Published var downloadedBookKey: String?
     /// 多选：长按书籍进入，点击切换选择。
@@ -701,6 +703,19 @@ struct LibraryBookActionDialogs: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .alert("《\(actions.missingCloudBook?.title ?? "")》的云端文件缺失",
+                   isPresented: .init(get: { actions.missingCloudBook != nil },
+                                      set: { if !$0 { actions.missingCloudBook = nil } }),
+                   presenting: actions.missingCloudBook) { book in
+                Button("从云端删除", role: .destructive) {
+                    actions.missingCloudBook = nil
+                    delete([book], fromCloud: true)
+                }
+                Button("仍然尝试下载") { download(book) }
+                Button("取消", role: .cancel) { actions.missingCloudBook = nil }
+            } message: { _ in
+                Text("WebDAV 中已找不到这本书的文件，本机也没有。若其他设备仍有这本书，在那台设备上手动同步一次即可补传；不再需要时可从云端删除书目，阅读进度和统计会保留。")
+            }
             .alert("下载《\(actions.pendingCloudDownload?.title ?? "")》？",
                    isPresented: .init(get: { actions.pendingCloudDownload != nil },
                                       set: { if !$0 { actions.pendingCloudDownload = nil } }),
@@ -794,10 +809,13 @@ struct LibraryBookActionDialogs: ViewModifier {
 
     private func download(_ book: LibraryBook) {
         actions.pendingCloudDownload = nil
+        actions.missingCloudBook = nil
         Task {
             do {
                 try await syncStore.downloadCloudBook(key: book.key, web: webDownloads, wenku: wenkuDownloads)
                 actions.downloadedBookKey = book.key
+            } catch WebDAVSyncError.missingBlob {
+                actions.missingCloudBook = book
             } catch {
                 actions.actionError = "下载失败：\(error.localizedDescription)"
             }
@@ -984,7 +1002,11 @@ private struct LibraryBookRowContent: View {
                     .foregroundStyle(NoveliaStyle.muted)
                     .lineLimit(1)
                 HStack(spacing: 6) {
-                    if book.isCloudOnly {
+                    if book.cloudFileMissing {
+                        Image(systemName: "exclamationmark.icloud")
+                            .foregroundStyle(.orange)
+                            .accessibilityLabel("云端文件缺失")
+                    } else if book.isCloudOnly {
                         Image(systemName: "icloud")
                             .foregroundStyle(NoveliaStyle.muted)
                             .accessibilityLabel("未下载")

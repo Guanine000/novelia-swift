@@ -25,9 +25,13 @@ struct LibraryBook: Identifiable, Hashable {
     var isCloudOnly: Bool { cloudFileHash != nil }
     /// 云端书籍全部文件的大小；清单中有文件缺少大小时为 nil。
     let cloudDownloadSize: Int64?
+    /// 云端书籍的文件已不在服务器上（手动同步核对或下载时发现），无法下载。
+    let cloudFileMissing: Bool
 
-    init(origin: Origin, fileURL: URL, coverURL: URL?, cloudFileHash: String? = nil, cloudDownloadSize: Int64? = nil) {
+    init(origin: Origin, fileURL: URL, coverURL: URL?, cloudFileHash: String? = nil, cloudDownloadSize: Int64? = nil,
+         cloudFileMissing: Bool = false) {
         self.origin = origin
+        self.cloudFileMissing = cloudFileMissing
         self.fileURL = fileURL
         self.coverURL = coverURL
         self.cloudFileHash = cloudFileHash
@@ -70,6 +74,7 @@ struct LibraryBook: Identifiable, Hashable {
             && lhs.format == rhs.format && lhs.importedAt == rhs.importedAt
             && lhs.fileURL == rhs.fileURL && lhs.coverURL == rhs.coverURL
             && lhs.cloudFileHash == rhs.cloudFileHash && lhs.cloudDownloadSize == rhs.cloudDownloadSize
+            && lhs.cloudFileMissing == rhs.cloudFileMissing
     }
 
     /// 例如“2.3 MB”；大小未知时为 nil。
@@ -149,13 +154,15 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
         let cloudWeb = cloud.webBooks.compactMap { book -> LibraryBook? in
             guard let hash = book.assets.first(where: { $0.filename == book.record.fileFilename })?.hash else { return nil }
             return LibraryBook(origin: .webNovel(book.record), fileURL: placeholder.appendingPathComponent(book.record.fileFilename),
-                               coverURL: nil, cloudFileHash: hash, cloudDownloadSize: LibraryBook.totalSize(book.assets))
+                               coverURL: nil, cloudFileHash: hash, cloudDownloadSize: LibraryBook.totalSize(book.assets),
+                               cloudFileMissing: cloud.missingFileKeys.contains(book.libraryKey))
         }
         let cloudWenku = cloud.wenkuBooks.compactMap { book -> LibraryBook? in
             guard let hash = book.assets.first(where: { $0.filename == book.record.filename })?.hash else { return nil }
             return LibraryBook(origin: .wenku(book.record), fileURL: placeholder.appendingPathComponent(book.record.filename),
                                coverURL: cloud.coverURL(for: book), cloudFileHash: hash,
-                               cloudDownloadSize: LibraryBook.totalSize(book.assets))
+                               cloudDownloadSize: LibraryBook.totalSize(book.assets),
+                               cloudFileMissing: cloud.missingFileKeys.contains(book.libraryKey))
         }
         return local + (cloudWeb + cloudWenku).filter { !localKeys.contains($0.key) }
     }
@@ -172,7 +179,8 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
     func status(for book: LibraryBook) -> LibraryReadingStatus {
         let status = readingStatus(for: book)
         guard book.isCloudOnly else { return status }
-        return LibraryReadingStatus(lastReadAt: status.lastReadAt, detail: "未下载 · \(status.detail)", fraction: status.fraction)
+        let label = book.cloudFileMissing ? "云端文件缺失" : "未下载"
+        return LibraryReadingStatus(lastReadAt: status.lastReadAt, detail: "\(label) · \(status.detail)", fraction: status.fraction)
     }
 
     private func readingStatus(for book: LibraryBook) -> LibraryReadingStatus {

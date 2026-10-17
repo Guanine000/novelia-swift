@@ -211,6 +211,8 @@ private final class FakeCloud: SyncCloudCatalog {
     var web: [WebDAVBook<DownloadedWebNovel>] = []
     var wenku: [WebDAVBook<LocalWenkuEPUB>] = []
     var covers: [String: Data] = [:]
+    var missingKeys: Set<String>?
+    func setMissingFileKeys(_ keys: Set<String>) { missingKeys = keys }
     var cloudBookKeys: Set<String> {
         Set(web.map { "web:\($0.record.id)" } + wenku.map { "wenku:\($0.record.id.uuidString)" })
     }
@@ -477,6 +479,11 @@ final class WebDAVSyncEngineTests: XCTestCase {
         let result = try await runRetrying(cloud, verifiesBlobs: true)
         XCTAssertEqual(result.unrepairedBlobs, 2)
         XCTAssertEqual(cloud.wenku.map(\.record.id), [cover.id], "the book still appears as a cloud book")
+        XCTAssertEqual(cloud.missingKeys, ["wenku:\(cover.id.uuidString)"], "the library can mark the book")
+        XCTAssertEqual(result.missingCloudBookTitles, ["封面书"])
+        let unverified = FakeCloud()
+        _ = try await runRetrying(unverified)
+        XCTAssertNil(unverified.missingKeys, "automatic sync leaves existing marks alone")
 
         remote.listsBlobs = false
         let unsupported = try await runRetrying(FakeCloud(), verifiesBlobs: true)

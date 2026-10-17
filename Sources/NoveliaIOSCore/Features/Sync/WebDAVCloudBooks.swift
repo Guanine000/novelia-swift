@@ -13,6 +13,23 @@ protocol SyncCloudCatalog: AnyObject {
     /// 以本次同步的结果整体替换云端书籍：只含本机没有的书。`covers` 为本次新下载的封面临时文件，键为哈希。
     func replaceCloudBooks(web: [WebDAVBook<DownloadedWebNovel>], wenku: [WebDAVBook<LocalWenkuEPUB>],
                            covers: [String: URL]) throws
+    /// 手动同步核对后：书籍文件已不在服务器上、本机也没有的云端书籍（书库键）。
+    func setMissingFileKeys(_ keys: Set<String>)
+}
+
+extension SyncCloudCatalog {
+    func setMissingFileKeys(_ keys: Set<String>) {}
+}
+
+extension WebDAVBook where Record == DownloadedWebNovel {
+    var libraryKey: String { "web:\(record.id)" }
+    /// 书籍主文件（不含封面等附加文件）。
+    var mainAsset: WebDAVAsset? { assets.first { $0.filename == record.fileFilename } }
+}
+
+extension WebDAVBook where Record == LocalWenkuEPUB {
+    var libraryKey: String { "wenku:\(record.id.uuidString)" }
+    var mainAsset: WebDAVAsset? { assets.first { $0.filename == record.filename } }
 }
 
 /// 云端书籍的本机记录与封面缓存，由 `LocalAppServices` 持有，书库与同步共用同一实例。
@@ -23,10 +40,15 @@ final class CloudBookStore: ObservableObject, SyncCloudCatalog {
     private struct Index: Codable {
         var web: [WebDAVBook<DownloadedWebNovel>] = []
         var wenku: [WebDAVBook<LocalWenkuEPUB>] = []
+        /// 可选字段，旧缓存没有。
+        var missing: [String]? = nil
     }
 
     @Published private(set) var webBooks: [WebDAVBook<DownloadedWebNovel>] = []
     @Published private(set) var wenkuBooks: [WebDAVBook<LocalWenkuEPUB>] = []
+    /// 书籍文件已不在服务器上的云端书籍（书库键）：手动同步核对或下载遇到缺失时标记，
+    /// 书库据此显示“云端文件缺失”；书目不会自动删除，文件补传后由下次手动同步清除标记。
+    @Published private(set) var missingFileKeys: Set<String> = []
     private let directory: URL
     private let fileManager = FileManager.default
 
@@ -36,6 +58,7 @@ final class CloudBookStore: ObservableObject, SyncCloudCatalog {
         if let data = try? Data(contentsOf: indexURL), let index = try? JSONDecoder().decode(Index.self, from: data) {
             webBooks = index.web
             wenkuBooks = index.wenku
+            missingFileKeys = Set(index.missing ?? []).intersection(cloudBookKeys)
         }
     }
 
@@ -74,6 +97,18 @@ final class CloudBookStore: ObservableObject, SyncCloudCatalog {
         removeUnusedCovers()
     }
 
+    func setMissingFileKeys(_ keys: Set<String>) {
+        let value = keys.intersection(cloudBookKeys)
+        guard value != missingFileKeys else { return }
+        missingFileKeys = value
+        try? save(web: webBooks, wenku: wenkuBooks)
+    }
+
+    /// 下载时发现书籍文件不在服务器上。
+    func markMissingFile(key: String) {
+        setMissingFileKeys(missingFileKeys.union([key]))
+    }
+
     /// 按书库键移除云端记录（从云端删除后调用）。
     func remove(keys: Set<String>) {
         try? save(web: webBooks.filter { !keys.contains("web:\($0.record.id)") },
@@ -93,9 +128,13 @@ final class CloudBookStore: ObservableObject, SyncCloudCatalog {
 
     private func save(web: [WebDAVBook<DownloadedWebNovel>], wenku: [WebDAVBook<LocalWenkuEPUB>]) throws {
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        try JSONEncoder().encode(Index(web: web, wenku: wenku)).write(to: indexURL, options: .atomic)
+        let keys = Set(web.map(\.libraryKey) + wenku.map(\.libraryKey))
+        let missing = missingFileKeys.intersection(keys)
+        try JSONEncoder().encode(Index(web: web, wenku: wenku, missing: missing.isEmpty ? nil : missing.sorted()))
+            .write(to: indexURL, options: .atomic)
         if webBooks != web { webBooks = web }
         if wenkuBooks != wenku { wenkuBooks = wenku }
+        if missingFileKeys != missing { missingFileKeys = missing }
     }
 
     private func removeUnusedCovers() {
@@ -135,7 +174,8 @@ enum WebDAVCloudBookDeleter {
 /// 打开云端书籍时下载它的全部文件。与同步引擎相同：只接受单级文件名，blob 下载时校验哈希，
 /// 任何一个文件失败都删除已下载的临时文件。返回的临时文件由调用方在导入书库后删除。
 enum WebDAVCloudBookDownloader {
-    static func download(_ assets: [WebDAVAsset], from remote: any WebDAVRemote,
+    /// `optionalFilenames` 中的文件（例如封面）在服务器上缺失时跳过，不让整本书下载失败。
+    static func download(_ assets: [WebDAVAsset], from remote: any WebDAVRemote, optionalFilenames: Set<String> = [],
                          onProgress: (Int, Int) -> Void = { _, _ in }) async throws -> [String: URL] {
         var files: [String: URL] = [:]
         do {
@@ -144,7 +184,9 @@ enum WebDAVCloudBookDownloader {
                 guard WebDAVAsset.isSafeFilename(asset.filename), files[asset.filename] == nil else {
                     throw WebDAVSyncError.invalidAsset
                 }
-                files[asset.filename] = try await remote.downloadBlob(asset.hash)
+                do {
+                    files[asset.filename] = try await remote.downloadBlob(asset.hash)
+                } catch WebDAVSyncError.missingBlob where optionalFilenames.contains(asset.filename) {}
                 onProgress(index + 1, assets.count)
             }
             return files
