@@ -19,6 +19,13 @@ protocol WebDAVRemote {
     func downloadBlob(_ hash: String) async throws -> URL
     /// 删除不再被清单引用的 blob；不存在也视为成功。
     func deleteBlob(_ hash: String) async throws
+    /// 列出服务器 blobs/ 中已有的文件（内容哈希）；服务器不支持列目录时返回 nil。
+    /// 手动同步用它找出清单引用却已不在服务器上的文件（例如被手动删除），以便补传。
+    func listBlobs() async throws -> Set<String>?
+}
+
+extension WebDAVRemote {
+    func listBlobs() async throws -> Set<String>? { nil }
 }
 
 // Compatibility name for existing sync tests and callers.
@@ -260,6 +267,21 @@ final class WebDAVClient: WebDAVRemote, ReadingStatisticsRemote {
         guard (200...299).contains(code) || code == 412 else { throw WebDAVSyncError.unexpectedResponse(code) }
     }
 
+    func listBlobs() async throws -> Set<String>? {
+        var list = request(root.appendingPathComponent("blobs", isDirectory: true), method: "PROPFIND")
+        list.setValue("1", forHTTPHeaderField: "Depth")
+        list.setValue("application/xml", forHTTPHeaderField: "Content-Type")
+        list.httpBody = Data(#"<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>"#.utf8)
+        let (data, response) = try await read(list)
+        let code = try status(response)
+        if code == 404 { return [] }
+        guard code == 207 else { return nil }
+        return Set(WebDAVMultistatus.hrefs(in: data).compactMap { href in
+            let name = (href.removingPercentEncoding ?? href).split(separator: "/").last.map(String.init) ?? ""
+            return WebDAVAsset.isValidHash(name) ? name : nil
+        })
+    }
+
     func downloadBlob(_ hash: String) async throws -> URL {
         let get = request(try blobURL(hash), method: "GET")
         let result: (URL, URLResponse)
@@ -270,6 +292,8 @@ final class WebDAVClient: WebDAVRemote, ReadingStatisticsRemote {
         }
         let (temporary, response) = result
         let code = try status(response)
+        // 清单引用的文件不在服务器上（例如被手动删除）：给出可操作的提示，而不是“路径不存在”。
+        if code == 404 { throw WebDAVSyncError.missingBlob }
         guard code == 200 else { throw WebDAVSyncError.unexpectedResponse(code) }
         let actualHash = try await Task.detached(priority: .utility) {
             try WebDAVFileHash.sha256(temporary)

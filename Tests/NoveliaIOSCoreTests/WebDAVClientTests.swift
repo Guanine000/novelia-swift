@@ -237,7 +237,27 @@ final class WebDAVClientTests: XCTestCase {
         let other = sha256(Data("other".utf8))
         WebDAVMock.on("GET \(root)/blobs/\(other)", Reply(status: 200, body: data))
         await assertSyncError(.invalidAsset) { try await self.client().downloadBlob(other) }
-        await assertSyncError(.unexpectedResponse(404)) { try await self.client().downloadBlob(self.sha256(Data())) }
+        await assertSyncError(.missingBlob) { try await self.client().downloadBlob(self.sha256(Data())) }
+    }
+
+    func testListBlobsReadsHashesAndToleratesUnsupportedServers() async throws {
+        let a = sha256(Data("a".utf8)), b = sha256(Data("b".utf8))
+        let body = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <d:multistatus xmlns:d="DAV:">
+          <d:response><d:href>/dav/NoveliaSync/v1/blobs/</d:href></d:response>
+          <d:response><d:href>/dav/NoveliaSync/v1/blobs/\(a)</d:href></d:response>
+          <d:response><d:href>https://dav.example/dav/NoveliaSync/v1/blobs/\(b)</d:href></d:response>
+          <d:response><d:href>/dav/NoveliaSync/v1/blobs/.DS_Store</d:href></d:response>
+        </d:multistatus>
+        """
+        WebDAVMock.on("PROPFIND \(root)/blobs", Reply(status: 207, body: Data(body.utf8)))
+        let listed = try await client().listBlobs()
+        XCTAssertEqual(listed, [a, b])
+        XCTAssertEqual(WebDAVMock.requests.last?.value(forHTTPHeaderField: "Depth"), "1")
+        WebDAVMock.on("PROPFIND \(root)/blobs", Reply(status: 405))
+        let unsupported = try await client().listBlobs()
+        XCTAssertNil(unsupported, "servers that cannot list keep syncing without repair")
     }
 
     // MARK: 生命周期

@@ -40,6 +40,8 @@ private final class FakeRemote: WebDAVRemote {
     var putErrors: [WebDAVSyncError] = []
     /// 模拟不返回 ETag 的服务器。
     var omitsETag = false
+    /// 为 false 时模拟不支持列目录的服务器。
+    var listsBlobs = true
     var onDownload: (() -> Void)?
     /// 交给引擎的临时文件；引擎负责删除。
     var handedOut: [URL] = []
@@ -79,6 +81,11 @@ private final class FakeRemote: WebDAVRemote {
         blobs[hash] = data
     }
 
+    func listBlobs() async throws -> Set<String>? {
+        log.events.append("remote.list")
+        return listsBlobs ? Set(blobs.keys) : nil
+    }
+
     func deleteBlob(_ hash: String) async throws {
         log.events.append("remote.deleteBlob")
         blobs[hash] = nil
@@ -86,7 +93,7 @@ private final class FakeRemote: WebDAVRemote {
 
     func downloadBlob(_ hash: String) async throws -> URL {
         log.events.append("remote.download")
-        guard let data = blobs[hash] else { throw WebDAVSyncError.unexpectedResponse(404) }
+        guard let data = blobs[hash] else { throw WebDAVSyncError.missingBlob }
         let url = directory.appendingPathComponent("download-\(UUID())")
         try data.write(to: url)
         handedOut.append(url)
@@ -432,11 +439,48 @@ final class WebDAVSyncEngineTests: XCTestCase {
         XCTAssertEqual(remote.puts.last?.etag, "\"v0\"", "manifest write is conditional")
     }
 
-    private func runRetrying(_ cloud: FakeCloud? = nil) async throws -> (imported: Int, removedLocal: Int, lacksETag: Bool) {
+    private func runRetrying(_ cloud: FakeCloud? = nil, verifiesBlobs: Bool = false) async throws -> WebDAVSyncRunResult {
         try await WebDAVSyncEngine.runRetryingConcurrentChange {
             WebDAVSyncEngine(remote: remote, local: local, web: web, wenku: wenku, options: booksAndTags,
-                             defaults: defaults, cloud: cloud) { [weak self] in self?.progress.append($0) }
+                             defaults: defaults, cloud: cloud, verifiesBlobs: verifiesBlobs) { [weak self] in self?.progress.append($0) }
         }
+    }
+
+    /// 服务器上被手动删除的 blob：手动同步核对后由本机补传；自动同步不核对、不多发请求。
+    func testManualSyncReuploadsBlobsMissingFromServer() async throws {
+        addLocal(webBook("a", at: 10), text: "local a")
+        _ = try await runRetrying(FakeCloud())
+        let hash = try XCTUnwrap(remote.manifest?.webBooks.first?.assets.first?.hash)
+        remote.blobs[hash] = nil
+
+        let automatic = try await runRetrying(FakeCloud())
+        XCTAssertNil(remote.blobs[hash], "automatic sync trusts the manifest")
+        XCTAssertEqual(automatic.repairedBlobs, 0)
+        XCTAssertEqual(log.count("remote.list"), 0)
+
+        let manual = try await runRetrying(FakeCloud(), verifiesBlobs: true)
+        XCTAssertEqual(remote.blobs[hash], Data("local a".utf8), "the local copy is uploaded again")
+        XCTAssertEqual(manual.repairedBlobs, 1)
+        XCTAssertEqual(manual.unrepairedBlobs, 0)
+        let again = try await runRetrying(FakeCloud(), verifiesBlobs: true)
+        XCTAssertEqual(again.repairedBlobs, 0, "nothing left to repair")
+    }
+
+    /// 本机没有的书缺文件时无法补传：同步照常完成并报告数量；缺失的封面不让同步失败。
+    func testMissingBlobsWithoutLocalCopiesAreReportedNotFatal() async throws {
+        let cover = LocalWenkuEPUB(id: UUID(), title: "封面书", filename: "c.epub", addedAt: date(10), coverFilename: "c.jpg")
+        let book = remote.seed("cloud only", as: "c.epub"), image = remote.seed("cover", as: "c.jpg")
+        remoteManifest { $0.wenkuBooks = [WebDAVBook(record: cover, assets: [book, image])] }
+        remote.blobs[book.hash] = nil
+        remote.blobs[image.hash] = nil
+        let cloud = FakeCloud()
+        let result = try await runRetrying(cloud, verifiesBlobs: true)
+        XCTAssertEqual(result.unrepairedBlobs, 2)
+        XCTAssertEqual(cloud.wenku.map(\.record.id), [cover.id], "the book still appears as a cloud book")
+
+        remote.listsBlobs = false
+        let unsupported = try await runRetrying(FakeCloud(), verifiesBlobs: true)
+        XCTAssertEqual(unsupported.unrepairedBlobs, 0, "without a listing nothing is assumed missing")
     }
 
     /// 清单写入冲突时重新读取并重跑：另一台设备在两次读取之间写入的书与本机上传都保留，已恢复的书不重复导入。
