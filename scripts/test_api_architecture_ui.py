@@ -16,7 +16,7 @@ parser.add_argument('--performance', action='store_true', help='Record simulator
 parser.add_argument('--library-count', type=int, choices=[0, 300, 3000], default=300)
 parser.add_argument('--iterations', type=int, choices=range(2, 11), default=3)
 parser.add_argument('--result-json', type=Path)
-parser.add_argument('--epub-failure', choices=['archive', 'chapter'], help='Exercise a synthetic broken EPUB in the dedicated App only')
+parser.add_argument('--epub-failure', choices=['archive', 'chapter', 'spine'], help='Exercise a synthetic broken EPUB in the dedicated App only')
 args = parser.parse_args()
 if args.epub_failure and args.performance:
     parser.error('--epub-failure cannot be combined with --performance')
@@ -224,24 +224,44 @@ if args.epub_failure:
     previous_sample = sample.read_bytes() if sample.exists() else None
     if args.epub_failure == 'archive':
         sample.write_bytes(b'PK invalid synthetic EPUB')
+    elif args.epub_failure == 'spine':
+        with zipfile.ZipFile(sample, 'w') as archive:
+            archive.writestr('META-INF/container.xml', '<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>')
+            archive.writestr('book.opf', '<package><manifest><item id="a" href="c1.xhtml" media-type="application/xhtml+xml"/></manifest><spine></spine></package>')
+            archive.writestr('c1.xhtml', '<html><body><p>不会被读取的章节。</p></body></html>')
     else:
         with zipfile.ZipFile(sample, 'w') as archive:
             archive.writestr('META-INF/container.xml', '<container><rootfiles><rootfile full-path="book.opf"/></rootfiles></container>')
             archive.writestr('book.opf', '<package><manifest><item id="a" href="missing.xhtml" media-type="application/xhtml+xml"/><item id="b" href="readable.xhtml" media-type="application/xhtml+xml"/><item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="a"/><itemref idref="b"/></spine></package>')
             archive.writestr('nav.xhtml', '<nav><a href="missing.xhtml">缺失章节</a><a href="readable.xhtml">可读章节</a></nav>')
             archive.writestr('readable.xhtml', '<html><body>' + '<p>异常章节之后仍能阅读的合成正文。</p>' * 120 + '</body></html>')
-    body = r'''
+    if args.epub_failure == 'archive':
+        body = r'''
   XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "无法打开 EPUB 压缩包")).firstMatch.waitForExistence(timeout: 20))
   app.buttons["复制错误说明"].tap()
   app.buttons["重新打开"].tap()
   XCTAssertTrue(app.buttons["重新打开"].waitForExistence(timeout: 20))
-''' if args.epub_failure == 'archive' else r'''
+'''
+    elif args.epub_failure == 'spine':
+        body = r'''
+  XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "spine 为空")).firstMatch.waitForExistence(timeout: 30), "空 spine 必须在 Readium 下显示可读错误而不是闪退")
+  XCTAssertTrue(app.buttons["复制错误说明"].exists)
+  app.buttons["复制错误说明"].tap()
+  XCTAssertTrue(app.buttons["重新打开"].exists, "EPUB 失败页必须有重新打开入口")
+  app.buttons["关闭阅读器"].tap()
+  XCTAssertTrue(app.tabBars.buttons["书库"].waitForExistence(timeout: 15))
+  return
+'''
+    else:
+        body = r'''
   XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "章节文件缺失：missing.xhtml")).firstMatch.waitForExistence(timeout: 20))
   app.buttons["复制错误说明"].tap()
   app.buttons["重试"].tap()
   XCTAssertTrue(app.buttons["选择其他章节"].waitForExistence(timeout: 20))
   app.buttons["选择其他章节"].tap()
   app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "可读章节")).firstMatch.tap()
+  XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "无法读取或排版")).firstMatch.waitForExistence(timeout: 5), "跳到可读章节后失败页必须消失")
+  XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "相邻章节加载失败")).firstMatch.exists, "永久缺失的相邻章节不应弹重试横幅")
   let next = app.buttons["下一页"]
   XCTAssertTrue(next.waitForExistence(timeout: 30))
   expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: next)
@@ -249,12 +269,14 @@ if args.epub_failure:
   XCTAssertFalse(app.buttons["关闭阅读器"].exists)
   next.tap()
 '''
+    launch_args = ('["-architectureValidation", "-resetArchitectureValidation", "-openEPUBPrototype"'
+                   + (', "-architectureReadium"' if args.epub_failure == 'spine' else '') + ']')
     (r/'TapTests.swift').write_text(r'''import XCTest
 final class TapTests: XCTestCase {
  func testBrokenEPUBRecovery() {
   continueAfterFailure = false
   let app = XCUIApplication(bundleIdentifier: "cc.novelia.ios.architecture-validation")
-  app.launchArguments = ["-architectureValidation", "-resetArchitectureValidation", "-openEPUBPrototype"]
+  app.launchArguments = ''' + launch_args + r'''
   app.launch(); defer { app.terminate() }
 ''' + body + r'''
   let back = app.buttons["关闭阅读器"].exists ? app.buttons["关闭阅读器"] : app.buttons["返回"]

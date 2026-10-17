@@ -91,6 +91,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         status = .opening
         isDarkMode = settings.isDark(systemIsDark: systemIsDark)
         do {
+            // 打开前先走原生容器：空 spine 会让 Readium streamer 崩溃，
+            // 缺失／损坏章节会让导航器一直停在加载态，预检把它们变成可读错误。
+            let container = try await EPUBContainer.open(fileURL: url)
+            try await container.validateForReadium()
             let hash = try await Task.detached(priority: .utility) {
                 try FileContentHash.sha256(url)
             }.value
@@ -124,6 +128,13 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             Self.logger.error("Readium EPUB open failed: \(String(describing: error), privacy: .public)")
             status = .failed(Self.describe(error))
         }
+    }
+
+    /// 失败页的「重新打开」：仅用于打开 EPUB 文件失败（文本章节失败走 retryTextLoad）。
+    func retryOpening(url: URL) {
+        guard case .failed = status, textBook == nil else { return }
+        status = .idle
+        Task { await open(url: url, systemIsDark: isDarkMode) }
     }
 
     /// 惰性 Publication 不走 EPUB 文件解析，也不写入 EPUB 的进度命名空间。
@@ -653,6 +664,11 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         if textBook != nil {
             failedTextHref = href
             textLoadFailure = "章节加载失败：\(String(describing: error))"
+        } else if status == .ready,
+                  publication?.readingOrder.contains(where: { $0.url().string.hasSuffix(href.string) }) == true {
+            // 预检之后仍可能遇到读取失败，不能让导航器停在加载态：
+            // 转成失败页，提供重新打开／复制错误说明／关闭阅读器。
+            status = .failed("章节加载失败：\(href.string)。\(Self.diagnosticReason(error))")
         }
         Self.logger.error("Readium failed to load \(href.string, privacy: .private): \(String(describing: error), privacy: .public)")
     }

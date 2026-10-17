@@ -202,7 +202,7 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 
 阅读内容与排版引擎分开处理。在线内容通过 `NovelContentService` 获取，本地 TXT 由 Core 的 `TXTChapterParser` 和 `TXTBookCache` 处理；EPUB 由 `EPUBContainer` 读取容器、章节和资源。不要把下载或网站认证逻辑放进排版模型。
 
-默认 EPUB 容器的章节读取保留缺失文件、解压／CRC 失败和条目大小上限错误，不统一转换为 OPF 缺失。用户错误说明包含包内路径，日志只记录固定分类。容器打开失败通过模型持有的可取消任务重试；章节失败保留来源以允许重试或从目录跳过。容器只读，不修补原 EPUB。异常合成包回归在 `EPUBFailureTests`；独立验证 App 的 UI 脚本支持 `--epub-failure archive` 和 `--epub-failure chapter`，分别验证打开失败和缺失首章后的恢复入口。脚本仅改写专用验证 App 的样例文件，结束后恢复。
+默认 EPUB 容器的章节读取保留缺失文件、解压／CRC 失败和条目大小上限错误，不统一转换为 OPF 缺失。用户错误说明包含包内路径，日志只记录固定分类。容器打开失败通过模型持有的可取消任务重试；章节失败保留来源以允许重试或从目录跳过。章节图片缺失或解码失败时以 1×1 透明占位继续排版（`EPUBContainer.missingImagePlaceholder`），避免排版引擎因缺资源让整章失败。目录、书签或书内链接跳章成功而状态仍停在失败页时，`markReadyAfterRecovery` 恢复 `.ready`；永久性内容错误（`chapterMissing`／`entryRead`／`chapterIndex`）不写入 `failedChapters`，避免出现重试也无法消除的「相邻章节加载失败」提示。容器只读，不修补原 EPUB。异常合成包回归在 `EPUBFailureTests`；独立验证 App 的 UI 脚本支持 `--epub-failure archive` 和 `--epub-failure chapter`，分别验证打开失败和缺失首章后的恢复入口。脚本仅改写专用验证 App 的样例文件，结束后恢复。
 
 | 实现 | 主要职责 |
 |---|---|
@@ -230,7 +230,7 @@ EPUB 默认采用 YueduCoreText 分页；实验性 Readium 开关可用于 EPUB�
 
 在线阅读沿用原文、译文、双语及译源选择，保留段落顺序、次要文字样式与缺译提示。进度、书签和服务端历史仍为章节级；显示模式或译源改变时从该章开头恢复，不能把一份译文的字符偏移直接套用到其他正文。正文 HTTP/HTTPS 链接通过既有打开方式处理，EPUB 包内链接另行解析。
 
-Resource 每次请求重新创建，避免将一次加载失败固化为缓存结果。重试可以重建 Readium 导航器并恢复失败位置；章节请求、位置换算和预取保持取消检查，不能让旧请求覆盖当前章节，也不能为翻页阻塞主线程。
+Resource 每次请求重新创建，避免将一次加载失败固化为缓存结果。EPUB 文件在创建 Readium Publication 前必须先走 `EPUBContainer.open` 与 `validateForReadium()`（校验 spine 完整性、章节条目 CRC 与解压长度），失败直接进入 `.failed`；Readium navigator 在加载期或运行期报资源失败时用 `didFailToLoadResourceAt` 转失败页并保留「重新打开 / 复制错误说明 / 关闭阅读器」，不能停在加载态。`EPUBContainer.chapterHTML(at:)` 与 `validateForReadium()` 都不能解压图片，避免打开变慢。重试可以重建 Readium 导航器并恢复失败位置；章节请求、位置换算和预取保持取消检查，不能让旧请求覆盖当前章节，也不能为翻页阻塞主线程。
 
 ### 书签与书内搜索
 

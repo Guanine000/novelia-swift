@@ -257,6 +257,19 @@ final class EPUBContainer {
         return Self.rewriteEightDigitColors(in: stripped)
     }
 
+    /// Readium 实验引擎打开前的容器预检：确认容器结构、spine 各章节都存在，
+    /// 且解压数据与中央目录的 CRC／长度一致。只读 spine 文档，不解压图片等资源；
+    /// Readium 的 streamer 对空 spine 会崩溃、对缺失或损坏的章节会一直停在加载态，
+    /// 先用原生容器把这些情况变成可读的错误说明。
+    func validateForReadium() async throws {
+        for index in spine.indices {
+            guard let entry = await resolveEntry(spine[index].href) else {
+                throw EPUBError.missingChapter(path: spine[index].href)
+            }
+            _ = try await Self.entryData(entry, from: archive)
+        }
+    }
+
     /// `opacity:X` → `color:rgba(r,g,b,X)`（颜色取当前主题正文色）。
     /// 引擎 parseColor 支持 rgba 第 4 分量，但不支持 opacity 属性与 8 位 hex。
     static func rewriteOpacity(in html: String, counter: inout Int,
@@ -550,8 +563,17 @@ final class EPUBContainer {
         return abs(actual - target) < 0.001
     }
 
+    /// 缺图占位：1×1 透明图。YueduCoreText 遇到非空 src 却没有对应资源时会让
+    /// 整章排版失败；机翻书缺图很常见，因此用透明占位保证章节仍可阅读。
+    static let missingImagePlaceholder: UIImage = {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1), format: format).image { _ in }
+    }()
+
     /// 章节引用的位图图片：以 HTML 中的原始 src 为键（引擎按字面 src 查表）。
     /// 相对 src 一律相对**章节文件所在目录**解析；另支持包内绝对路径、百分号编码、data: URI。
+    /// 解析不到或无法解码的图片返回透明占位图，避免整章排版失败。
     func images(forChapterHTML html: String, chapterHref: String) async -> [String: UIImage] {
         let chapterDirectory = Self.directory(of: chapterHref)
         var images: [String: UIImage] = [:]
@@ -571,19 +593,23 @@ final class EPUBContainer {
 
                 // data: URI（引擎把非空 src 一律视为待装载资源）。
                 if src.lowercased().hasPrefix("data:") {
-                    if let image = Self.image(fromDataURI: src) {
-                        images[src] = image
-                    }
+                    images[src] = Self.image(fromDataURI: src) ?? Self.missingImagePlaceholder
                     continue
                 }
 
-                guard Self.isRelative(src) || Self.isAbsoluteInPackage(src) else { continue }
+                guard Self.isRelative(src) || Self.isAbsoluteInPackage(src) else {
+                    // 包外资源（http/file 等）本应用不加载，但引擎仍需要资源占位。
+                    images[src] = Self.missingImagePlaceholder
+                    continue
+                }
                 // 相对路径拼章节文件目录；包内绝对路径去掉开头 / 后从包根解析。
                 let joined = Self.isAbsoluteInPackage(src)
                     ? String(src.dropFirst())
                     : Self.normalizePath(chapterDirectory + src)
                 if let data = await entryData(atPath: joined), let image = UIImage(data: data) {
                     images[src] = image
+                } else {
+                    images[src] = Self.missingImagePlaceholder
                 }
             }
         }

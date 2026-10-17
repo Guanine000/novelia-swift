@@ -115,8 +115,43 @@ final class EPUBFailureTests: XCTestCase {
         let content = try await publication.chapterHTML(at: 1)
         let images = await publication.images(forChapterHTML: content, chapterHref: publication.spine[1].href)
         XCTAssertNotNil(images["../images/my%20image.png"])
-        XCTAssertNil(images["../images/missing.png"])
-        XCTAssertEqual(images.count, 1)
+        // 缺失图片占位存在，避免排版引擎因缺少资源让整章失败。
+        XCTAssertNotNil(images["../images/missing.png"])
+        XCTAssertEqual(images.count, 2)
+    }
+
+    func testMissingImageFallsBackToPlaceholderSoChapterStaysReadable() async throws {
+        let html = "<html><body><p>正文</p><img src='Images/absent.png'/><img src='https://example.com/remote.png'/></body></html>"
+        let url = try await book(chapter: html)
+        let publication = try await EPUBContainer.open(fileURL: url)
+        let content = try await publication.chapterHTML(at: 1)
+        let images = await publication.images(forChapterHTML: content, chapterHref: publication.spine[1].href)
+        let missing = try XCTUnwrap(images["Images/absent.png"], "缺图必须回退占位图，否则整章排版失败")
+        XCTAssertEqual(missing.size, CGSize(width: 1, height: 1))
+        XCTAssertNotNil(images["https://example.com/remote.png"], "包外资源同样需要占位")
+    }
+
+    func testReadiumPreflightRejectsMissingChapterBeforeOpening() async throws {
+        let url = try await book()
+        let publication = try await EPUBContainer.open(fileURL: url)
+        do {
+            try await publication.validateForReadium()
+            XCTFail("preflight must reject missing chapter")
+        } catch EPUBError.missingChapter(let path) {
+            XCTAssertEqual(path, "Book/Text/one.xhtml")
+        } catch { XCTFail("unexpected: \(error)") }
+    }
+
+    func testReadiumPreflightAcceptsReadableBook() async throws {
+        let url = try await archive([
+            ("META-INF/container.xml", Data(containerXML.utf8)),
+            ("Book/content.opf", Data(opf.utf8)),
+            ("Book/Text/one.xhtml", Data("<html><body><p>第一章</p></body></html>".utf8)),
+            ("Book/Text/two.xhtml", Data("<html><body><p>第二章</p></body></html>".utf8)),
+        ])
+        let publication = try await EPUBContainer.open(fileURL: url)
+        try await publication.validateForReadium()
+        XCTAssertEqual(publication.spine.count, 2)
     }
 
     func testCorruptChapterIsReportedAsUnreadableEntry() async throws {
