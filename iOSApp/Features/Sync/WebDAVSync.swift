@@ -39,7 +39,7 @@ final class WebDAVSyncStore: ObservableObject {
     @Published private(set) var completedUnits = 0
     @Published private(set) var totalUnits = 1
     @Published var message: String?
-    /// 当前服务器上次同步时没有返回清单 ETag，设置页据此提示避免多设备同时同步。
+    /// 旧版留下的服务器版本缺失记录，设置页提示新版会停止不可靠的内容同步。
     @Published private(set) var serverLacksETag = false
 
     private let local: any WebDAVSyncLocalState
@@ -178,18 +178,32 @@ final class WebDAVSyncStore: ObservableObject {
         }
 
         var summary = ""
+        var cleanup = WebDAVBlobCleanupResult()
         if content, let web, let wenku {
             autoState.content.lastAttempt = Date()
             let before = WebDAVAutoSyncPolicy.fingerprint(local: local, web: web, wenku: wenku, options: options)
             do {
                 if manifestGate.isBusy { progressDetail = "正在等待云端删除完成…" }
                 let result = try await manifestGate.run {
-                    try await WebDAVSyncEngine.runRetryingConcurrentChange {
+                    let contentResult = try await WebDAVSyncEngine.runRetryingConcurrentChange {
                         // 手动同步核对服务器 blobs/ 并补传缺失文件；自动同步为节省请求不核对。
                         WebDAVSyncEngine(remote: client, local: local, web: web, wenku: wenku,
                                          options: options, defaults: defaults, cloud: cloudBooks,
                                          verifiesBlobs: trigger == nil) { [weak self] in self?.show($0) }
                     }
+                    // 延迟回收只在手动内容同步成功后执行，仍持有本机清单门；自动同步不扫描或清理。
+                    if trigger == nil {
+                        progressDetail = "正在核对云端闲置文件…"
+                        cleanup = await WebDAVBlobCleaner.clean(remote: client, defaults: defaults, server: client.serverKey) { hashes in
+                            try await WebDAVBlobCleaner.localRepairFiles(hashes, local: self.local, web: web, wenku: wenku, cloud: self.cloudBooks)
+                        }
+                        if !cleanup.missingHashes.isEmpty {
+                            let webMissing = cloudBooks.webBooks.filter { $0.mainAsset.map { cleanup.missingHashes.contains($0.hash) } ?? false }
+                            let wenkuMissing = cloudBooks.wenkuBooks.filter { $0.mainAsset.map { cleanup.missingHashes.contains($0.hash) } ?? false }
+                            cloudBooks.setMissingFileKeys(cloudBooks.missingFileKeys.union(webMissing.map(\.libraryKey)).union(wenkuMissing.map(\.libraryKey)))
+                        }
+                    }
+                    return contentResult
                 }
                 let imported = result.imported
                 recordETagSupport(lacking: result.lacksETag)
@@ -203,7 +217,7 @@ final class WebDAVSyncStore: ObservableObject {
                     + (options.fonts ? "已同步导入字体。" : "")
                     + (result.removedLocal > 0 ? "其他设备已从云端删除 \(result.removedLocal) 本书，本机副本已一并删除。" : "")
                     + (result.repairedBlobs > 0 ? "已补传 \(result.repairedBlobs) 个云端缺失的文件。" : "")
-                    + Self.missingSummary(result)
+                    + Self.missingSummary(result) + cleanup.summary
             } catch {
                 if isCancellation(error) { cancelled(prefix) } else {
                     folderCache.clear()
@@ -273,7 +287,7 @@ final class WebDAVSyncStore: ObservableObject {
 
     // MARK: 云端书籍
 
-    /// 从云端删除书籍（书库键）：移除书目与不再引用的文件并记下删除时间，其他设备之后不会再上传或恢复它们。
+    /// 从云端删除书籍（书库键）：移除书目并记下删除时间，底层文件留待手动同步观察后延迟回收。
     /// 正在同步时等同步写完清单后再执行，避免同步写回旧清单使删除的书重新出现。返回实际从云端清单移除的书数。
     @discardableResult
     func deleteFromCloud(keys: Set<String>) async throws -> Int {
@@ -580,7 +594,7 @@ struct WebDAVSyncView: View {
                 SecureField("密码或应用密码", text: $syncStore.password)
                 if syncStore.serverLacksETag {
                     Label {
-                        Text("此服务器不提供 ETag，无法发现多台设备同时同步造成的冲突，后同步的设备会覆盖先同步的书目改动。请避免多台设备同时同步。")
+                        Text("此服务器此前未返回清单 ETag。新版会尝试查询可靠版本；无法确认时停止内容同步，请检查 WebDAV 服务兼容性。")
                             .font(.footnote)
                     } icon: {
                         Image(systemName: "exclamationmark.triangle.fill")

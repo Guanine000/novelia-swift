@@ -139,6 +139,21 @@ enum WebDAVSyncPlanner {
 
 /// 云端删除记录：书籍从云端删除时记下时间，晚于该时间下载或导入的同一本书才会再次同步。
 enum WebDAVDeletedBooks {
+    static let retentionInterval: TimeInterval = 30 * 24 * 60 * 60
+
+    /// 仅保留最近三十天的书籍删除记录；恰好三十天的边界保留。过期后离线旧设备可能重新上传书籍。
+    /// 不以此清理正文文件，其他类型（例如书签）的删除记录也不在此裁剪。
+    static func prune(_ deleted: [String: Date], at now: Date) -> [String: Date] {
+        guard now.timeIntervalSinceReferenceDate.isFinite else { return deleted }
+        let cutoff = now.addingTimeInterval(-retentionInterval)
+        return deleted.filter { $0.value >= cutoff }
+    }
+
+    static func prune(in manifest: inout WebDAVManifest, at now: Date) {
+        guard let deleted = manifest.deletedBooks else { return }
+        manifest.deletedBooks = prune(deleted, at: now)
+    }
+
     /// 去掉已删除的书：远端条目不再恢复，本机副本不再上传。比删除时间更新的书视为重新添加，同时清除删除记录。
     static func apply<Record: SyncableBook>(local: [Record], remote: [WebDAVBook<Record>], deleted: inout [String: Date])
         -> (local: [Record], remote: [WebDAVBook<Record>]) {
@@ -158,7 +173,7 @@ enum WebDAVDeletedBooks {
             + manifest.wenkuBooks.filter { keys.contains($0.record.syncKey) }.flatMap(\.assets)
         manifest.webBooks.removeAll { keys.contains($0.record.syncKey) }
         manifest.wenkuBooks.removeAll { keys.contains($0.record.syncKey) }
-        var deleted = manifest.deletedBooks ?? [:]
+        var deleted = prune(manifest.deletedBooks ?? [:], at: date)
         for key in keys { deleted[key] = max(deleted[key] ?? .distantPast, date) }
         manifest.deletedBooks = deleted
         manifest.positions = WebDAVSyncPlanner.positionsToSync(manifest.positions, in: manifest)

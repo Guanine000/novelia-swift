@@ -80,6 +80,8 @@ final class WebDAVSyncEngine {
     private let onProgress: (WebDAVSyncProgress) -> Void
     private(set) var progress = WebDAVSyncProgress() { didSet { onProgress(progress) } }
     private let defaults: UserDefaults
+    /// 本轮同步的删除记录保留边界，测试可注入固定时间。
+    private let now: Date
     /// 上次同步保存的文件哈希，键为 `WebDAVFileHash.identity`。
     private let cachedHashes: [String: String]
     /// 本次同步用到的文件哈希，结束时写回缓存。
@@ -116,9 +118,10 @@ final class WebDAVSyncEngine {
     init(remote: any WebDAVRemote, local: any WebDAVSyncLocalState,
          web: any SyncBookLibrary<DownloadedWebNovel>, wenku: any SyncBookLibrary<LocalWenkuEPUB>,
          options: WebDAVSyncOptions, defaults: UserDefaults = .standard,
-         cloud: (any SyncCloudCatalog)? = nil, verifiesBlobs: Bool = false,
+         cloud: (any SyncCloudCatalog)? = nil, verifiesBlobs: Bool = false, now: Date = Date(),
          onProgress: @escaping (WebDAVSyncProgress) -> Void) {
         self.remote = remote
+        self.now = now
         self.verifiesBlobs = verifiesBlobs
         self.cloud = cloud
         self.local = local
@@ -150,6 +153,7 @@ final class WebDAVSyncEngine {
         let (fetchedManifest, etag, existed) = try await remote.fetchManifest()
         manifestLacksETag = existed && etag == nil
         var manifest = fetchedManifest
+        WebDAVDeletedBooks.prune(in: &manifest, at: now)
         knownBlobs = WebDAVSyncPlanner.referencedBlobs(in: fetchedManifest)
         if verifiesBlobs, existed {
             progress.detail = "正在核对云端文件…"

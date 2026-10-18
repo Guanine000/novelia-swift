@@ -38,7 +38,7 @@ struct WebDAVManifest: Codable {
     var fonts: [String: SyncedImportedFont]? = nil
     /// 书库系列与书籍归属；随书籍同步，旧版应用解码时忽略。
     var librarySeries: LibrarySeriesState? = nil
-    /// 已从云端删除的书 `[书库键: 删除时间]`，见 `WebDAVDeletedBooks`。旧版应用不识别，可能再次上传这些书。
+    /// 最近三十天从云端删除的书 `[书库键: 删除时间]`，见 `WebDAVDeletedBooks`。过期后旧设备可能再次上传这些书。
     var deletedBooks: [String: Date]? = nil
     /// 阅读器书签 `[书签 ID: 书签]`，含删除墓碑；随书籍同步。0.22.0 之前的版本不识别，写回清单时会丢弃。
     var bookmarks: [String: ReaderBookmark]? = nil
@@ -48,6 +48,7 @@ enum WebDAVSyncError: LocalizedError, Equatable {
     case invalidURL
     case missingCredentials
     case unexpectedResponse(Int)
+    case unsupportedConditions
     case unsupportedManifest
     case invalidAsset
     case invalidStatistics
@@ -65,6 +66,7 @@ enum WebDAVSyncError: LocalizedError, Equatable {
         case .unexpectedResponse(429): "WebDAV 请求过于频繁（HTTP 429），请稍后再试。"
         case .unexpectedResponse(507): "WebDAV 空间不足（HTTP 507）。"
         case .unexpectedResponse(let status): "WebDAV 请求失败（HTTP \(status)）。"
+        case .unsupportedConditions: "此 WebDAV 服务未提供可靠的文件版本或条件请求，已停止内容同步以保护现有数据。"
         case .unsupportedManifest: "远端同步数据版本不受支持，未修改本地书籍。"
         case .invalidAsset: "远端书籍文件校验失败，未导入该文件。"
         case .invalidStatistics: "阅读统计数据格式无效或版本不受支持，未覆盖本机或云端统计。"

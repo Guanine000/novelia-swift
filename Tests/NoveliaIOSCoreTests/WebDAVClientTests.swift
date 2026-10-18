@@ -16,7 +16,10 @@ private final class WebDAVMock: URLProtocol {
     nonisolated(unsafe) static var requests: [URLRequest] = []
     nonisolated(unsafe) static var bodies: [String: Data] = [:]
 
-    static func reset() { replies = [:]; requests = []; bodies = [:] }
+    static let lock = NSRecursiveLock()
+    nonisolated(unsafe) static var handler: ((URLRequest, Data) -> Reply)?
+
+    static func reset() { replies = [:]; requests = []; bodies = [:]; handler = nil }
     /// 同一请求可排队多次回应，最后一个回应会一直重复使用。
     static func on(_ key: String, _ replies: Reply...) { self.replies[key] = replies }
     static var keys: [String] { requests.map(key) }
@@ -25,11 +28,13 @@ private final class WebDAVMock: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        Self.lock.lock(); defer { Self.lock.unlock() }
         let key = Self.key(request)
         Self.requests.append(request)
         if let stream = request.httpBodyStream { Self.bodies[key] = Self.read(stream) }
         var queue = Self.replies[key] ?? [Reply(status: 404)]
-        let reply = queue.count > 1 ? queue.removeFirst() : queue[0]
+        let reply = Self.handler?(request, Self.bodies[key] ?? request.httpBody ?? Data())
+            ?? (queue.count > 1 ? queue.removeFirst() : queue[0])
         Self.replies[key] = queue
         if let failure = reply.failure {
             client?.urlProtocol(self, didFailWithError: URLError(failure))
@@ -162,7 +167,7 @@ final class WebDAVClientTests: XCTestCase {
     }
 
     func testFetchManifestRejectsUnknownVersionAndServerErrors() async throws {
-        WebDAVMock.on("GET \(root)/index.json", Reply(status: 200, body: Data(#"{"version":2,"webBooks":[],"wenkuBooks":[],"positions":{}}"#.utf8)))
+        WebDAVMock.on("GET \(root)/index.json", Reply(status: 200, headers: ["ETag": "\"v2\""], body: Data(#"{"version":2,"webBooks":[],"wenkuBooks":[],"positions":{}}"#.utf8)))
         await assertSyncError(.unsupportedManifest) { try await self.client().fetchManifest() }
         WebDAVMock.on("GET \(root)/index.json", Reply(status: 500))
         await assertSyncError(.unexpectedResponse(500)) { try await self.client().fetchManifest() }
@@ -170,18 +175,18 @@ final class WebDAVClientTests: XCTestCase {
 
     func testPutManifestUsesConditionalHeaders() async throws {
         let key = "PUT \(root)/index.json"
-        WebDAVMock.on(key, Reply(status: 201))
+        WebDAVMock.on(key, Reply(status: 201, headers: ["ETag": "\"saved\""]))
         var manifest = WebDAVManifest()
         manifest.blockedTags = ["标签": SyncedBlockedTag(blocked: true, updatedAt: Date(timeIntervalSince1970: 1))]
 
         try await client().putManifest(manifest, etag: "\"v7\"", existed: true)
         try await client().putManifest(manifest, etag: nil, existed: false)
-        try await client().putManifest(manifest, etag: nil, existed: true)
+        await assertSyncError(.unsupportedConditions) { try await self.client().putManifest(manifest, etag: nil, existed: true) }
         let headers = WebDAVMock.requests.map {
             [$0.value(forHTTPHeaderField: "If-Match"), $0.value(forHTTPHeaderField: "If-None-Match")]
         }
-        XCTAssertEqual(headers, [["\"v7\"", nil], [nil, "*"], [nil, nil]],
-                       "update with ETag, create only when absent, unconditional when the server sent no ETag")
+        XCTAssertEqual(headers, [["\"v7\"", nil], [nil, "*"]],
+                       "existing files without a version must never be overwritten")
         XCTAssertEqual(WebDAVMock.requests.first?.value(forHTTPHeaderField: "Content-Type"), "application/json")
         let sent = try JSONDecoder().decode(WebDAVManifest.self, from: XCTUnwrap(WebDAVMock.bodies[key]))
         XCTAssertEqual(sent.blockedTags, manifest.blockedTags)
@@ -558,5 +563,201 @@ extension WebDAVClientTests {
         await assertSyncError(.invalidStatistics) {
             try await ReadingStatisticsSynchronizer(remote: StatisticsMemoryRemote()).sync(ReadingStatisticsSync(), deviceID: "../x")
         }
+    }
+}
+extension WebDAVClientTests {
+    func testStrongETagNormalizationRejectsWeakOrMalformedValues() {
+        XCTAssertEqual(WebDAVClient.strongETag("bare"), "\"bare\"")
+        XCTAssertEqual(WebDAVClient.strongETag(" \"quoted\" "), "\"quoted\"")
+        for bad in ["W/\"weak\"", "*", "", "\"broken", "a b", "a\nb", "\"a\",\"b\""] {
+            XCTAssertNil(WebDAVClient.strongETag(bad), bad)
+        }
+    }
+
+    func testMissingStrongVersionCannotFallBackToUnconditionalWrite() async throws {
+        for value in [nil, "W/\"weak\"", "*"] as [String?] {
+            await assertSyncError(.unsupportedConditions) {
+                try await self.client().putManifest(WebDAVManifest(), etag: value, existed: true)
+            }
+        }
+        XCTAssertTrue(WebDAVMock.requests.isEmpty)
+    }
+
+    func testOnlyOfficialNutcloudEndpointSendsBareConditionalVersion() async throws {
+        for host in ["dav.jianguoyun.com", "dav.jianguoyun.com.example", "dav.example"] {
+            WebDAVMock.reset()
+            WebDAVMock.on("PUT \(root)/index.json", Reply(status: 204, headers: ["ETag": "\"saved\""]))
+            try await client("https://\(host)/dav/").putManifest(WebDAVManifest(), etag: "\"abc\"", existed: true)
+            XCTAssertEqual(WebDAVMock.requests.last?.value(forHTTPHeaderField: "If-Match"),
+                           host == "dav.jianguoyun.com" ? "abc" : "\"abc\"")
+            XCTAssertEqual(WebDAVMock.requests.last?.value(forHTTPHeaderField: "Accept-Encoding"), "identity")
+        }
+    }
+
+    private func property(_ href: String? = nil, etag: String = "new", status: String = "200 OK", namespace: String = "DAV:") -> Data {
+        Data("""
+        <d:multistatus xmlns:d="\(namespace)"><d:response><d:href>\(href ?? root + "/index.json")</d:href>
+        <d:propstat><d:prop><d:getetag>\(etag)</d:getetag></d:prop><d:status>HTTP/1.1 \(status)</d:status></d:propstat>
+        </d:response></d:multistatus>
+        """.utf8)
+    }
+
+    func testPropertyVersionReadsFreshBodyAndChecksReadCondition() async throws {
+        var old = WebDAVManifest(), fresh = WebDAVManifest()
+        old.blockedTags = ["old": SyncedBlockedTag(blocked: true, updatedAt: Date())]
+        fresh.blockedTags = ["fresh": SyncedBlockedTag(blocked: true, updatedAt: Date())]
+        WebDAVMock.on("GET \(root)/index.json", Reply(body: try JSONEncoder().encode(old)),
+                      Reply(body: try JSONEncoder().encode(fresh)), Reply(status: 412))
+        WebDAVMock.on("PROPFIND \(root)/index.json", Reply(status: 207, body: property()))
+        let (manifest, version, existed) = try await client().fetchManifest()
+        XCTAssertTrue(existed)
+        XCTAssertEqual(version, "\"new\"")
+        XCTAssertEqual(manifest.blockedTags, fresh.blockedTags)
+        XCTAssertEqual(WebDAVMock.requests[2].value(forHTTPHeaderField: "If-Match"), "\"new\"")
+        XCTAssertEqual(WebDAVMock.requests[1].value(forHTTPHeaderField: "Depth"), "0")
+    }
+
+    func testPropertyFallbackRejectsWrongResourceFailedPropertyAndForeignNamespace() async throws {
+        for body in [property("https://other.example\(root)/index.json"), property(root + "/wrong.json"),
+                     property(status: "404 Not Found"), property(namespace: "urn:fake"),
+                     property(etag: "W/\"weak\""), Data("<invalid".utf8)] {
+            WebDAVMock.reset()
+            WebDAVMock.on("GET \(root)/index.json", Reply(body: try JSONEncoder().encode(WebDAVManifest())))
+            WebDAVMock.on("PROPFIND \(root)/index.json", Reply(status: 207, body: body))
+            await assertSyncError(.unsupportedConditions) { try await self.client().fetchManifest() }
+            XCTAssertFalse(WebDAVMock.keys.contains { $0.hasPrefix("PUT") })
+        }
+    }
+
+    func testPropertyFallbackRejectsIgnoredReadConditionOrChangingVersion() async throws {
+        for response in [Reply(status: 200), Reply(status: 304)] {
+            WebDAVMock.reset()
+            WebDAVMock.on("GET \(root)/index.json", Reply(body: Data()), Reply(body: Data()), response)
+            WebDAVMock.on("PROPFIND \(root)/index.json", Reply(status: 207, body: property()))
+            await assertSyncError(.unsupportedConditions) { try await self.client().fetchManifest() }
+        }
+        WebDAVMock.reset()
+        WebDAVMock.on("GET \(root)/index.json", Reply(), Reply(headers: ["ETag": "changed"]))
+        WebDAVMock.on("PROPFIND \(root)/index.json", Reply(status: 207, body: property()))
+        await assertSyncError(.concurrentChange) { try await self.client().fetchManifest() }
+    }
+
+    /// 模拟同一坚果云目录；忽略临时文件 PUT 的 If-None-Match，MOVE 的 Overwrite:F 才保护共享目标。
+    private func nutcloudServer(moveReplies: [Int] = [], changedSource: Bool = false, ignoresOverwrite: Bool = false) {
+        var files: [String: Data] = [:]
+        var statuses = moveReplies
+        WebDAVMock.handler = { request, body in
+            let path = request.url!.path
+            switch request.httpMethod {
+            case "PUT":
+                if let condition = request.value(forHTTPHeaderField: "If-Match"),
+                   files[path].map({ FileContentHash.sha256($0) }) != condition { return Reply(status: 412) }
+                files[path] = body; return Reply(status: 201)
+            case "GET":
+                guard let data = files[path] else { return Reply(status: 404) }
+                return Reply(headers: ["ETag": FileContentHash.sha256(data)], body: changedSource && path.hasSuffix(".cache") ? Data("changed".utf8) : data)
+            case "MOVE":
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Overwrite"), "F")
+                if !statuses.isEmpty { return Reply(status: statuses.removeFirst()) }
+                let destination = URL(string: request.value(forHTTPHeaderField: "Destination")!, relativeTo: request.url)!.path
+                if files[destination] != nil && !ignoresOverwrite { return Reply(status: 409) }
+                files[destination] = files.removeValue(forKey: path)
+                return Reply(status: 201)
+            case "DELETE": files.removeValue(forKey: path); return Reply(status: 204)
+            case "MKCOL": return Reply(status: 405)
+            default: return Reply(status: 404)
+            }
+        }
+    }
+
+    func testNutcloudInitialCreationUsesMoveAndSecondDeviceCannotOverwrite() async throws {
+        nutcloudServer()
+        let first = try client("https://dav.jianguoyun.com/dav/")
+        let second = try client("https://dav.jianguoyun.com/dav/")
+        var original = WebDAVManifest(), replacement = WebDAVManifest()
+        original.blockedTags = ["first": SyncedBlockedTag(blocked: true, updatedAt: Date())]
+        replacement.blockedTags = ["second": SyncedBlockedTag(blocked: true, updatedAt: Date())]
+        try await first.putManifest(original, etag: nil, existed: false)
+        await assertSyncError(.concurrentChange) { try await second.putManifest(replacement, etag: nil, existed: false) }
+        let (saved, _, _) = try await first.fetchManifest()
+        XCTAssertEqual(saved.blockedTags, original.blockedTags)
+        XCTAssertFalse(WebDAVMock.keys.contains("PUT \(root)/index.json"))
+        XCTAssertFalse(WebDAVMock.keys.contains("DELETE \(root)/index.json"))
+        let sources = WebDAVMock.requests.filter { $0.httpMethod == "PUT" && $0.url!.lastPathComponent.hasPrefix("novelia-upload-") }.map { $0.url!.path }
+        XCTAssertEqual(Set(sources).count, 6)
+        for source in sources { XCTAssertTrue(WebDAVMock.keys.contains("DELETE \(source)")) }
+    }
+
+    func testNutcloudMoveUsesBoundedRetryThenSameTargetPath() async throws {
+        nutcloudServer(moveReplies: [409, 404])
+        try await client("https://dav.jianguoyun.com/dav/").putManifest(WebDAVManifest(), etag: nil, existed: false)
+        let moves = WebDAVMock.requests.filter { $0.httpMethod == "MOVE" }
+        XCTAssertEqual(moves.count, 5, "three probe creation attempts, duplicate rejection, then real creation")
+        let target = try XCTUnwrap(moves.first?.value(forHTTPHeaderField: "Destination"))
+        XCTAssertEqual(Array(moves.prefix(3)).map { $0.value(forHTTPHeaderField: "Destination") },
+                       [target, target, URL(string: target)!.path])
+        XCTAssertEqual(Set(moves.prefix(3).map { $0.url!.path }).count, 1)
+    }
+
+    func testNutcloudMoveFailureNeverDeletesOrPutsTarget() async throws {
+        for status in [403, 412, 500] {
+            WebDAVMock.reset()
+            nutcloudServer(moveReplies: [status])
+            await assertSyncError(status == 412 ? .concurrentChange : .unexpectedResponse(status)) {
+                try await self.client("https://dav.jianguoyun.com/dav/").putManifest(WebDAVManifest(), etag: nil, existed: false)
+            }
+            XCTAssertTrue(WebDAVMock.keys.contains { $0.hasPrefix("DELETE \(root)/novelia-upload-") })
+            XCTAssertFalse(WebDAVMock.keys.contains("PUT \(root)/index.json"))
+            XCTAssertFalse(WebDAVMock.keys.contains("DELETE \(root)/index.json"))
+        }
+    }
+
+    func testNutcloudMoveStopsIfTemporarySourceChanges() async throws {
+        nutcloudServer(moveReplies: [409], changedSource: true)
+        await assertSyncError(.concurrentChange) {
+            try await self.client("https://dav.jianguoyun.com/dav/").putManifest(WebDAVManifest(), etag: nil, existed: false)
+        }
+        XCTAssertEqual(WebDAVMock.requests.filter { $0.httpMethod == "MOVE" }.count, 1)
+    }
+}
+
+extension WebDAVClientTests {
+    func testIgnoredMoveOverwriteStopsBeforeTouchingRealManifest() async throws {
+        nutcloudServer(ignoresOverwrite: true)
+        await assertSyncError(.unsupportedConditions) {
+            try await self.client("https://dav.jianguoyun.com/dav/").putManifest(WebDAVManifest(), etag: nil, existed: false)
+        }
+        XCTAssertFalse(WebDAVMock.requests.contains { $0.url?.path == root + "/index.json" })
+        XCTAssertFalse(WebDAVMock.requests.contains { $0.value(forHTTPHeaderField: "Destination")?.hasSuffix("/index.json") == true })
+    }
+
+    func testTwoDevicesCreateAtTheSameTimeHaveOneWinner() async throws {
+        nutcloudServer()
+        let a = try client("https://dav.jianguoyun.com/dav/"), b = try client("https://dav.jianguoyun.com/dav/")
+        func attempt(_ client: WebDAVClient) async throws -> Bool {
+            do { try await client.putManifest(WebDAVManifest(), etag: nil, existed: false); return true }
+            catch WebDAVSyncError.concurrentChange { return false }
+        }
+        async let first = attempt(a)
+        async let second = attempt(b)
+        let outcomes = try await [first, second]
+        XCTAssertEqual(outcomes.filter { $0 }.count, 1)
+        XCTAssertFalse(WebDAVMock.keys.contains("DELETE \(root)/index.json"))
+    }
+}
+
+extension WebDAVClientTests {
+    func testUpdateWithoutReturnedVersionVerifiesSavedBody() async throws {
+        let manifest = WebDAVManifest()
+        var saved = Data()
+        WebDAVMock.handler = { request, body in
+            if request.httpMethod == "PUT" { saved = body; return Reply(status: 204) }
+            return Reply(headers: ["ETag": "new"], body: saved)
+        }
+        try await client().putManifest(manifest, etag: "old", existed: true)
+        WebDAVMock.handler = nil
+        WebDAVMock.on("PUT \(root)/index.json", Reply(status: 204))
+        WebDAVMock.on("GET \(root)/index.json", Reply(headers: ["ETag": "other"], body: Data("another writer".utf8)))
+        await assertSyncError(.concurrentChange) { try await self.client().putManifest(manifest, etag: "old", existed: true) }
     }
 }
