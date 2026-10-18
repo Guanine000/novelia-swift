@@ -11,7 +11,7 @@ protocol WebDAVRemote {
     func prepareFolders() async throws
     /// 返回清单、ETag，以及远端是否已有清单；没有清单时返回空清单。
     func fetchManifest() async throws -> (WebDAVManifest, String?, Bool)
-    /// 条件写入清单：有 ETag 用 If-Match，首次写入用 If-None-Match；冲突时抛出 `concurrentChange`。
+    /// 条件写入清单：已有清单必须有强 ETag；坚果云首次创建使用禁止覆盖的 MOVE。
     func putManifest(_ manifest: WebDAVManifest, etag: String?, existed: Bool) async throws
     /// 上传以内容哈希命名的文件；远端已有时跳过。
     func uploadBlob(_ file: URL, hash: String) async throws
@@ -106,6 +106,7 @@ final class WebDAVClient: WebDAVRemote, ReadingStatisticsRemote {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         request.timeoutInterval = 120
         return request
     }
@@ -148,28 +149,189 @@ final class WebDAVClient: WebDAVRemote, ReadingStatisticsRemote {
         folderCache?.markPrepared(folderCacheKey)
     }
 
-    func fetchManifest() async throws -> (WebDAVManifest, String?, Bool) {
-        let (data, response) = try await read(request(root.appendingPathComponent("index.json"), method: "GET"))
+    // 参考 GPL-3.0-only：Copyright (C) 2026 Novelia Android contributors.
+    // 2026-10-17 修改：WebDavClient.kt @ 44be26d 的 Swift 适配，含强版本读取、坚果云条件头与禁止覆盖创建。
+    private var verifiedCreationProtection = false
+    private var isNutcloud: Bool { base.host?.lowercased() == "dav.jianguoyun.com" && (base.port ?? 443) == 443 }
+
+    /// 内部保持带引号的强版本；不能去掉 W/ 将弱版本伪装为强版本。
+    static func strongETag(_ value: String?) -> String? {
+        guard let value else { return nil }
+        guard !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { return nil }
+        let token = value.trimmingCharacters(in: .whitespaces)
+        guard !token.isEmpty, token.utf8.count <= 1024, !token.uppercased().hasPrefix("W/"), token != "*" else { return nil }
+        let quoted = token.hasPrefix("\"") && token.hasSuffix("\"") && token.count >= 2
+        if !quoted && !token.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || Array("._:=+-/".utf8).contains($0) }) { return nil }
+        let opaque = quoted ? String(token.dropFirst().dropLast()) : token
+        guard !opaque.isEmpty, opaque.utf8.allSatisfy({ $0 == 0x21 || (0x23...0x7e).contains($0) || $0 >= 0x80 }) else { return nil }
+        return "\"\(opaque)\""
+    }
+
+    private func conditionalETag(_ value: String) throws -> String {
+        guard let strong = Self.strongETag(value) else { throw WebDAVSyncError.unsupportedConditions }
+        return isNutcloud ? String(strong.dropFirst().dropLast()) : strong
+    }
+
+    /// GET 无版本时按属性版本重新读取，并确认服务确实执行读取条件；不配对旧正文与新版本。
+    private func versionedRead(_ url: URL) async throws -> (Data, String)? {
+        let (data, response) = try await read(request(url, method: "GET"))
         let code = try status(response)
-        if code == 404 { return (WebDAVManifest(), nil, false) }
+        if code == 404 { return nil }
         guard code == 200 else { throw WebDAVSyncError.unexpectedResponse(code) }
+        if let etag = Self.strongETag((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag")) { return (data, etag) }
+        var prop = request(url, method: "PROPFIND")
+        prop.setValue("0", forHTTPHeaderField: "Depth")
+        prop.setValue("application/xml", forHTTPHeaderField: "Content-Type")
+        prop.httpBody = Data(#"<d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>"#.utf8)
+        let (properties, propertyResponse) = try await read(prop)
+        let propertyCode = try status(propertyResponse)
+        if propertyCode == 404 { throw WebDAVSyncError.concurrentChange }
+        guard propertyCode == 207 || propertyCode == 200 else { throw WebDAVSyncError.unexpectedResponse(propertyCode) }
+        guard let etag = WebDAVVersionProperty.etag(in: properties, target: url).flatMap(Self.strongETag) else {
+            throw WebDAVSyncError.unsupportedConditions
+        }
+        var checked = request(url, method: "GET")
+        checked.setValue(try conditionalETag(etag), forHTTPHeaderField: "If-Match")
+        let (freshData, freshResponse) = try await read(checked)
+        let freshCode = try status(freshResponse)
+        if freshCode == 404 || freshCode == 412 { throw WebDAVSyncError.concurrentChange }
+        guard freshCode == 200 else { throw WebDAVSyncError.unexpectedResponse(freshCode) }
+        if let returned = (freshResponse as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag"),
+           Self.strongETag(returned) != etag { throw WebDAVSyncError.concurrentChange }
+        var invalid = request(url, method: "GET")
+        invalid.setValue(try conditionalETag("\"novelia-absent-\(UUID().uuidString)\""), forHTTPHeaderField: "If-Match")
+        let (_, rejection) = try await read(invalid)
+        let rejectedCode = try status(rejection)
+        if rejectedCode == 404 { throw WebDAVSyncError.concurrentChange }
+        guard rejectedCode == 412 else {
+            if rejectedCode != 200 && rejectedCode != 304 { throw WebDAVSyncError.unexpectedResponse(rejectedCode) }
+            throw WebDAVSyncError.unsupportedConditions
+        }
+        return (freshData, etag)
+    }
+
+    func fetchManifest() async throws -> (WebDAVManifest, String?, Bool) {
+        guard let (data, etag) = try await versionedRead(root.appendingPathComponent("index.json")) else {
+            return (WebDAVManifest(), nil, false)
+        }
         let manifest = try JSONDecoder().decode(WebDAVManifest.self, from: data)
         guard manifest.version == 1 else { throw WebDAVSyncError.unsupportedManifest }
-        return (manifest, (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag"), true)
+        return (manifest, etag, true)
     }
 
     func putManifest(_ manifest: WebDAVManifest, etag: String?, existed: Bool) async throws {
-        var request = request(root.appendingPathComponent("index.json"), method: "PUT")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let etag {
-            request.setValue(etag, forHTTPHeaderField: "If-Match")
-        } else if !existed {
-            request.setValue("*", forHTTPHeaderField: "If-None-Match")
-        }
-        let (_, response) = try await session.upload(for: request, from: JSONEncoder().encode(manifest))
+        let url = root.appendingPathComponent("index.json")
+        let data = try JSONEncoder().encode(manifest)
+        if !existed {
+            guard etag == nil else { throw WebDAVSyncError.concurrentChange }
+            if isNutcloud {
+                try await verifyCreationProtection()
+                try await createByMove(data, to: url)
+                return
+            }
+        } else if etag == nil { throw WebDAVSyncError.unsupportedConditions }
+        var put = request(url, method: "PUT")
+        put.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let etag { put.setValue(try conditionalETag(etag), forHTTPHeaderField: "If-Match") }
+        else { put.setValue("*", forHTTPHeaderField: "If-None-Match") }
+        let (_, response) = try await session.upload(for: put, from: data)
         let code = try status(response)
         if code == 412 { throw WebDAVSyncError.concurrentChange }
         guard (200...299).contains(code) else { throw WebDAVSyncError.unexpectedResponse(code) }
+        // PUT 不回传强版本时，读回本次正文后才确认成功；有其他写者则重新合并。
+        if Self.strongETag((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag")) == nil {
+            guard let (saved, _) = try await versionedRead(url), saved == data else { throw WebDAVSyncError.concurrentChange }
+        }
+    }
+
+    /// 首次建立共享清单前，在独立随机目标验证禁止覆盖；不拿真实 index.json 试错。
+    private func verifyCreationProtection() async throws {
+        guard !verifiedCreationProtection else { return }
+        let target = root.appendingPathComponent("novelia-probe-\(UUID().uuidString).cache")
+        let first = Data("novelia-probe-\(UUID().uuidString)".utf8)
+        let second = Data("novelia-probe-\(UUID().uuidString)".utf8)
+        do {
+            try await createByMove(first, to: target)
+            guard let (saved, version) = try await versionedRead(target), saved == first else { throw WebDAVSyncError.unsupportedConditions }
+            do {
+                try await createByMove(second, to: target)
+                throw WebDAVSyncError.unsupportedConditions
+            } catch WebDAVSyncError.concurrentChange {
+                // 冲突状态不足以证明没有覆盖，还要核验原正文和版本。
+            }
+            guard let (unchanged, currentVersion) = try await versionedRead(target), unchanged == first, currentVersion == version else {
+                throw WebDAVSyncError.unsupportedConditions
+            }
+            var update = request(target, method: "PUT")
+            update.setValue(try conditionalETag(version), forHTTPHeaderField: "If-Match")
+            let (_, updatedResponse) = try await session.upload(for: update, from: second)
+            let updatedCode = try status(updatedResponse)
+            guard (200...299).contains(updatedCode) else { throw WebDAVSyncError.unexpectedResponse(updatedCode) }
+            guard let (updated, updatedVersion) = try await versionedRead(target), updated == second, updatedVersion != version else {
+                throw WebDAVSyncError.unsupportedConditions
+            }
+            let (_, staleResponse) = try await session.upload(for: update, from: first)
+            let staleCode = try status(staleResponse)
+            guard staleCode == 412 else {
+                if !(200...299).contains(staleCode) { throw WebDAVSyncError.unexpectedResponse(staleCode) }
+                throw WebDAVSyncError.unsupportedConditions
+            }
+            guard let (preserved, preservedVersion) = try await versionedRead(target), preserved == second, preservedVersion == updatedVersion else {
+                throw WebDAVSyncError.unsupportedConditions
+            }
+            try await removeTemporary(target)
+            verifiedCreationProtection = true
+        } catch {
+            try? await removeTemporary(target)
+            throw error
+        }
+    }
+
+    /// 随机源只属于本次操作；目标从不删除，失败也不回退到覆盖 PUT。
+    private func createByMove(_ data: Data, to target: URL) async throws {
+        let source = root.appendingPathComponent("novelia-upload-\(UUID().uuidString).cache")
+        do {
+            var put = request(source, method: "PUT")
+            put.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            let (_, uploaded) = try await session.upload(for: put, from: data)
+            let uploadCode = try status(uploaded)
+            guard (200...299).contains(uploadCode) else { throw WebDAVSyncError.unexpectedResponse(uploadCode) }
+            for attempt in 0..<3 {
+                try Task.checkCancellation()
+                var move = request(source, method: "MOVE")
+                let path = URLComponents(url: target, resolvingAgainstBaseURL: false)!.percentEncodedPath
+                move.setValue(attempt == 2 ? path : target.absoluteString, forHTTPHeaderField: "Destination")
+                move.setValue("F", forHTTPHeaderField: "Overwrite")
+                let (_, response) = try await session.data(for: move)
+                let code = try status(response)
+                if (200...299).contains(code) {
+                    guard let (saved, _) = try await versionedRead(target), saved == data else { throw WebDAVSyncError.concurrentChange }
+                    try? await removeTemporary(source)
+                    return
+                }
+                if code == 412 { throw WebDAVSyncError.concurrentChange }
+                guard code == 409 || code == 404 else { throw WebDAVSyncError.unexpectedResponse(code) }
+                // 坚果云已有目标也可能返回 409；只有确切目标不存在时才重试。
+                let (_, existing) = try await read(request(target, method: "GET"))
+                let existingCode = try status(existing)
+                if existingCode == 200 { throw WebDAVSyncError.concurrentChange }
+                guard existingCode == 404 else { throw WebDAVSyncError.unexpectedResponse(existingCode) }
+                guard attempt < 2 else { throw WebDAVSyncError.unexpectedResponse(code) }
+                let (currentSource, sourceResponse) = try await read(request(source, method: "GET"))
+                guard try status(sourceResponse) == 200, currentSource == data else { throw WebDAVSyncError.concurrentChange }
+                if attempt == 0 { try await createFolder(root) }
+            }
+        } catch {
+            // 响应丢失也可能留下源；只清理本次随机地址，不触碰正式目标。
+            try? await removeTemporary(source)
+            throw error
+        }
+    }
+
+    private func removeTemporary(_ url: URL) async throws {
+        let (_, response) = try await session.data(for: request(url, method: "DELETE"))
+        let code = try status(response)
+        guard (200...299).contains(code) || code == 404 else { throw WebDAVSyncError.unexpectedResponse(code) }
     }
 
     func deleteBlob(_ hash: String) async throws {
@@ -302,6 +464,59 @@ final class WebDAVClient: WebDAVRemote, ReadingStatisticsRemote {
         let destination = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.moveItem(at: temporary, to: destination)
         return destination
+    }
+}
+
+/// 版本属性只接受确切目标、DAV 命名空间和成功 propstat；拒绝畸形或过大的 XML。
+private final class WebDAVVersionProperty: NSObject, XMLParserDelegate {
+    private var stack: [String] = []
+    private var text = ""
+    private var href = ""
+    private var pendingETag: String?
+    private var propertyStatus = ""
+    private var versions: [String] = []
+    private var matches: [String] = []
+    private let target: URL
+    private init(target: URL) { self.target = target }
+
+    static func etag(in data: Data, target: URL) -> String? {
+        guard data.count <= 1_048_576, data.range(of: Data("<!DOCTYPE".utf8)) == nil else { return nil }
+        let reader = WebDAVVersionProperty(target: target)
+        let parser = XMLParser(data: data)
+        parser.shouldProcessNamespaces = true
+        parser.shouldResolveExternalEntities = false
+        parser.delegate = reader
+        guard parser.parse(), reader.matches.count == 1 else { return nil }
+        return reader.matches[0]
+    }
+
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?,
+                qualifiedName: String?, attributes: [String: String]) {
+        let name = namespaceURI == "DAV:" ? elementName : ""
+        stack.append(name)
+        text = ""
+        if name == "response" { href = ""; versions = [] }
+        if name == "propstat" { pendingETag = nil; propertyStatus = "" }
+    }
+    func parser(_ parser: XMLParser, foundCharacters string: String) { text += string }
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName: String?) {
+        defer { if !stack.isEmpty { stack.removeLast() }; text = "" }
+        guard namespaceURI == "DAV:" else { return }
+        let parent = stack.dropLast().last
+        switch elementName {
+        case "href" where parent == "response": href = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        case "getetag" where parent == "prop": pendingETag = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        case "status" where parent == "propstat": propertyStatus = text
+        case "propstat":
+            if propertyStatus.split(separator: " ").dropFirst().first == "200", let pendingETag { versions.append(pendingETag) }
+        case "response":
+            guard let url = URL(string: href, relativeTo: target)?.absoluteURL,
+                  url.scheme == target.scheme, url.host == target.host,
+                  (url.port ?? 443) == (target.port ?? 443), url.path == target.path,
+                  url.query == nil, url.fragment == nil, url.user == nil, url.password == nil else { return }
+            matches += versions
+        default: break
+        }
     }
 }
 
