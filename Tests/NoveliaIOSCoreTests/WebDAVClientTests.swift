@@ -751,6 +751,8 @@ extension WebDAVClientTests {
         let manifest = WebDAVManifest()
         var saved = Data()
         WebDAVMock.handler = { request, body in
+            XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Cache-Control"), "no-cache, no-store")
             if request.httpMethod == "PUT" { saved = body; return Reply(status: 204) }
             return Reply(headers: ["ETag": "new"], body: saved)
         }

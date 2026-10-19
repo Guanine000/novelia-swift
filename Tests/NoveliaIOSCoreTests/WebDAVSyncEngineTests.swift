@@ -48,6 +48,7 @@ private final class FakeRemote: WebDAVRemote {
     var onDownload: (() -> Void)?
     var onPut: (() -> Void)?
     var onDidPut: (() -> Void)?
+    var errorAfterPut: WebDAVSyncError?
     /// 交给引擎的临时文件；引擎负责删除。
     var handedOut: [URL] = []
 
@@ -80,6 +81,7 @@ private final class FakeRemote: WebDAVRemote {
         onPut?()
         self.manifest = try roundTrip(manifest)
         onDidPut?()
+        if let errorAfterPut { throw errorAfterPut }
     }
 
     func uploadBlob(_ file: URL, hash: String) async throws {
@@ -758,6 +760,26 @@ final class WebDAVSyncEngineTests: XCTestCase {
         XCTAssertEqual(removed, 1)
         XCTAssertEqual(remote.puts.count, 2)
         XCTAssertTrue(remote.manifest?.webBooks.isEmpty ?? false)
+    }
+
+    func testDeleterRecognizesCommittedDeletionAfterReadbackConflict() async throws {
+        remoteManifest { $0.webBooks = [WebDAVBook(record: webBook("a", at: 10), assets: [remote.seed("a", as: "a.epub")])] }
+        remote.errorAfterPut = .concurrentChange
+        let removed = try await WebDAVCloudBookDeleter.delete(["web:a"], from: remote, at: date(100))
+        XCTAssertEqual(removed, 1)
+        XCTAssertEqual(remote.puts.count, 1, "fresh committed tombstone is enough; do not write again")
+        XCTAssertEqual(remote.manifest?.deletedBooks?["web:a"], date(100))
+        XCTAssertEqual(remote.blobs.count, 1, "logical deletion never deletes the file")
+    }
+
+    func testDeleterDoesNotTreatReaddedBookAsCommittedDeletion() async throws {
+        remoteManifest {
+            $0.webBooks = [WebDAVBook(record: webBook("a", at: 110), assets: [remote.seed("a", as: "a.epub")])]
+            $0.deletedBooks = ["web:a": date(100)]
+        }
+        let removed = try await WebDAVCloudBookDeleter.delete(["web:a"], from: remote, at: date(100))
+        XCTAssertEqual(removed, 1)
+        XCTAssertEqual(remote.puts.count, 1, "present books still require conditional deletion")
     }
 
     /// 云端删除后：其他设备的本机副本被删除且不再上传，云端旧条目不再恢复；之后重新下载的新版本照常同步并清除删除记录。

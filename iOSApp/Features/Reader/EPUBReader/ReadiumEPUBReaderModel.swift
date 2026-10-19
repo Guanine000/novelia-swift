@@ -52,6 +52,33 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published private(set) var navigatorRevision = 0
     @Published var activeNote: EPUBNote?
 
+#if DEBUG
+    /// 仅独立验证 App 的合成 EPUB 回归使用。WebKit 无障碍树可能包含已翻过的段落，
+    /// 因此从 DOM 的实际可见矩形采集编号，不能用无障碍元素“存在”判断正文连续性。
+    @Published private(set) var validationVisibleParagraphs = ""
+    var validatesPagination: Bool {
+        Bundle.main.bundleIdentifier == "cc.novelia.ios.architecture-validation"
+            && ProcessInfo.processInfo.arguments.contains("-architecturePagination")
+    }
+
+    private func refreshPaginationValidation() {
+        guard validatesPagination, let navigator else { return }
+        let location = locator
+        Task { [weak self, weak navigator] in
+            guard let navigator else { return }
+            let result = await navigator.evaluateJavaScript("""
+                JSON.stringify(Array.from(document.querySelectorAll('p[data-pagination-marker]'))
+                  .filter(p => { const r = p.getBoundingClientRect();
+                    return r.right > 0 && r.left < window.innerWidth && r.bottom > 0 && r.top < window.innerHeight; })
+                  .map(p => Number(p.dataset.paginationMarker)))
+                """)
+            guard let self, self.navigator === navigator, self.locator == location,
+                  case .success(let value) = result, let text = value as? String else { return }
+            self.validationVisibleParagraphs = text
+        }
+    }
+#endif
+
     private(set) var navigator: EPUBNavigatorViewController?
     private var publication: Publication?
     private var navigationIndex: ReadiumNavigationIndex?
@@ -641,6 +668,9 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
             save(locator)
         }
         makeWebViewsTransparent()
+#if DEBUG
+        refreshPaginationValidation()
+#endif
     }
 
     /// 上下边距从安全区边缘起算，与 YueduCoreText 阅读器一致，章节名与正文不再重叠。

@@ -620,11 +620,20 @@ private struct LibrarySeriesMenuItems: View {
 @MainActor
 final class LibraryBookActions: ObservableObject {
     /// 等待确认删除的书；单本删除与多选批量删除共用。
-    @Published var pendingDelete: [LibraryBook] = []
+    @Published var pendingDelete: [LibraryBook] = [] {
+        didSet { isShowingDeleteConfirmation = !pendingDelete.isEmpty }
+    }
+    /// 确认框收起只改变呈现状态，不能先清空按钮还需要读取的删除对象。
+    @Published var isShowingDeleteConfirmation = false
+    @Published var deletionProgress: String?
     /// 新建系列后要移入的书。
     @Published var newSeriesBooks: [LibraryBook] = []
     @Published var newSeriesName = ""
     @Published var actionError: String?
+    /// 云端删除失败以非阻断提示保留重试入口；多次失败合并书籍键，避免丢掉较早的重试。
+    @Published var cloudDeleteError: String?
+    @Published var failedCloudDeleteKeys: Set<String> = []
+    @Published var isRetryingCloudDelete = false
     @Published var renamingSeries: LibrarySeriesTarget?
     @Published var renameName = ""
     @Published var dissolvingSeries: LibrarySeriesTarget?
@@ -868,7 +877,7 @@ struct LibraryBookActionDialogs: ViewModifier {
             }
             .confirmationDialog(
                 deleteTitle,
-                isPresented: .init(get: { !actions.pendingDelete.isEmpty }, set: { if !$0 { actions.pendingDelete = [] } }),
+                isPresented: $actions.isShowingDeleteConfirmation,
                 titleVisibility: .visible,
                 presenting: actions.pendingDelete
             ) { books in
@@ -891,6 +900,11 @@ struct LibraryBookActionDialogs: ViewModifier {
                          : "仅删除本机时，WebDAV 中的副本会保留，之后显示为未下载。同时删除云端副本后，其他设备同步时也会删除各自已下载的这些书。")
                 } else {
                     Text("将从本机删除书籍文件。")
+                }
+                let targets = state.booksForDeletion(books, from: state.books(web: webDownloads, wenku: wenkuDownloads, cloud: syncStore.cloudBooks))
+                let hiddenCount = targets.count - books.count
+                if hiddenCount > 0 {
+                    Text("另有 \(hiddenCount) 个合并显示的同内容副本，将一并删除。")
                 }
             }
             .alert("新建系列", isPresented: .init(get: { !actions.newSeriesBooks.isEmpty }, set: { if !$0 { actions.newSeriesBooks = [] } })) {
@@ -926,6 +940,41 @@ struct LibraryBookActionDialogs: ViewModifier {
             } message: { _ in
                 Text("系列中的书会移出系列，书籍文件和阅读进度都会保留。")
             }
+            .safeAreaInset(edge: .bottom) {
+                if let progress = actions.deletionProgress {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text(progress).font(.subheadline)
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(.regularMaterial)
+                } else if let message = actions.cloudDeleteError {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("云端尚未删除").font(.subheadline.bold())
+                            Text(message).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        Button("重试") {
+                            let keys = actions.failedCloudDeleteKeys
+                            actions.isRetryingCloudDelete = true
+                            actions.deletionProgress = "正在删除云端书目…"
+                            Task {
+                                defer { actions.deletionProgress = nil; actions.isRetryingCloudDelete = false }
+                                await deleteCloudCopies(keys)
+                            }
+                        }
+                        .disabled(actions.isRetryingCloudDelete)
+                        Button {
+                            actions.cloudDeleteError = nil
+                        } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel("关闭云端删除提示")
+                    }
+                    .padding(12)
+                    .background(.regularMaterial)
+                }
+            }
             .alert("操作失败", isPresented: .init(get: { actions.actionError != nil }, set: { if !$0 { actions.actionError = nil } })) {
                 Button("好", role: .cancel) { actions.actionError = nil }
             } message: {
@@ -956,11 +1005,19 @@ struct LibraryBookActionDialogs: ViewModifier {
     /// 先删除本机文件，再按需删除云端副本；云端失败时本机删除不回滚，书会显示为云端书籍，可在其菜单中重试。
     /// 云端也删除成功后，书不会再出现，才清理系列归属与最近打开时间。
     private func delete(_ books: [LibraryBook], fromCloud: Bool) {
+        guard actions.deletionProgress == nil else { return }
+        guard !books.isEmpty else {
+            actions.actionError = "未能取得待删除的书籍，请重新选择。"
+            return
+        }
+        let targets = state.booksForDeletion(books, from: state.books(web: webDownloads, wenku: wenkuDownloads, cloud: syncStore.cloudBooks))
+        actions.deletionProgress = "正在删除本机书籍…"
         actions.pendingDelete = []
         actions.endSelection()
         Task {
+            defer { actions.deletionProgress = nil }
             do {
-                for book in books where !book.isCloudOnly {
+                for book in targets where !book.isCloudOnly {
                     switch book.origin {
                     case .webNovel(let record): try await webDownloads.remove(record)
                     case .wenku(let record): try await wenkuDownloads.remove(record)
@@ -971,13 +1028,21 @@ struct LibraryBookActionDialogs: ViewModifier {
                 return
             }
             guard fromCloud else { return }
-            do {
-                let keys = Set(books.map(\.key))
-                try await syncStore.deleteFromCloud(keys: keys)
-                state.forget(keys: keys)
-            } catch {
-                actions.actionError = "云端删除失败：\(error.localizedDescription)。这些书会显示为未下载的云端书籍，可在其菜单中再次“从云端删除”。"
-            }
+            actions.deletionProgress = "正在删除云端书目…"
+            await deleteCloudCopies(Set(targets.map(\.key)))
+        }
+    }
+
+    private func deleteCloudCopies(_ keys: Set<String>) async {
+        guard !keys.isEmpty else { return }
+        do {
+            try await syncStore.deleteFromCloud(keys: keys)
+            state.forget(keys: keys)
+            actions.failedCloudDeleteKeys.subtract(keys)
+            if actions.failedCloudDeleteKeys.isEmpty { actions.cloudDeleteError = nil }
+        } catch {
+            actions.failedCloudDeleteKeys.formUnion(keys)
+            actions.cloudDeleteError = "\(error.localizedDescription) 云端书目仍保留，可重试或稍后在书籍菜单中删除。"
         }
     }
 }

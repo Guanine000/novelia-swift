@@ -8,7 +8,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('executable', type=Path)
 args = parser.parse_args()
 data = args.executable.read_bytes()
-for marker in [b'-architectureValidation', b'-resetArchitectureValidation', b'-architectureReadium',
+for marker in [b'-architectureValidation', b'-resetArchitectureValidation', b'-architectureReadium', b'-architecturePagination',
                b'-architectureFailFirstSearch', b'-seedPerformanceLibrary', b'-performanceLibraryCount', b'-performanceLargeTXT', b'-architectureTXT', b'ArchitectureNetworkTrap', b'architecture-user']:
     if marker in data:
         raise SystemExit('Unexpected validation runtime marker: ' + marker.decode())

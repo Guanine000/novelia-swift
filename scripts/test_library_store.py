@@ -75,11 +75,28 @@ fixture += r'''
   let duplicate = LibraryBook(key: "different-id", fileURL: targets[0].fileURL)
   await displayStore.refreshHashes(for: targets + [duplicate])
   precondition(displayStore.displayBooks(from: targets + [duplicate]).count == 30, "identical content in same category appears once")
+  let selected = displayStore.displayBooks(from: targets + [duplicate]).first { $0.key == targets[0].key }!
+  let onlyOneRemoved = (targets + [duplicate]).filter { $0.key != selected.key }
+  precondition(displayStore.displayBooks(from: onlyOneRemoved).count == 30, "reproduces hidden duplicate replacing the deleted row")
+  let deleteGroup = displayStore.booksForDeletion([selected], from: targets + [duplicate])
+  precondition(Set(deleteGroup.map(\.key)) == [targets[0].key, duplicate.key])
+  let removedKeys = Set(deleteGroup.map(\.key))
+  precondition(displayStore.displayBooks(from: (targets + [duplicate]).filter { !removedKeys.contains($0.key) }).count == 29,
+               "deleting a displayed book removes its hidden identical copies")
+  let noHash = HashStore()
+  precondition(noHash.booksForDeletion([targets[0]], from: targets + [duplicate]).count == 1,
+               "unknown content never broadens deletion")
+  var cloudDuplicate = LibraryBook(key: "cloud-duplicate", fileURL: targets[0].fileURL)
+  cloudDuplicate.cloudFileHash = displayStore.hashByBook[targets[0].key]
+  precondition(Set(displayStore.booksForDeletion([selected], from: targets + [cloudDuplicate]).map(\.key)) == [selected.key, cloudDuplicate.key],
+               "the same displayed group includes hidden cloud copies for cloud deletion")
   var differentCategory = duplicate; differentCategory.categoryTitle = "网络小说"
   precondition(displayStore.displayBooks(from: targets + [differentCategory]).count == 31, "same bytes across categories remain distinct")
+  precondition(displayStore.booksForDeletion([targets[0]], from: targets + [differentCategory]).count == 1)
   let series = displayStore.series.createSeries(named: "Different series")
   displayStore.series.assign(book: duplicate.key, to: series.id)
   precondition(displayStore.displayBooks(from: targets + [duplicate]).count == 31, "different series remain distinct")
+  precondition(displayStore.booksForDeletion([targets[0]], from: targets + [duplicate]).count == 1)
   let cancelledStore = HashStore()
   let cancellationCalls = FileContentHash.calls
   let old = Task { await cancelledStore.refreshHashes(for: targets) }

@@ -103,8 +103,11 @@ final class WebDAVClient: WebDAVRemote, ReadingStatisticsRemote {
     }
 
     private func request(_ url: URL, method: String) -> URLRequest {
-        var request = URLRequest(url: url)
+        // 清单正文与版本必须来自同一次服务器读取；旧缓存会使条件写入持续冲突，
+        // 也会把写入后的读回误判为其他设备覆盖。统计与目录同样不使用 HTTP 缓存。
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         request.httpMethod = method
+        request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         request.timeoutInterval = 120

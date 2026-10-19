@@ -20,8 +20,14 @@ parser.add_argument('--library-count', type=int, choices=[0, 300, 3000], default
 parser.add_argument('--iterations', type=int, choices=range(2, 11), default=3)
 parser.add_argument('--result-json', type=Path)
 parser.add_argument('--epub-failure', choices=['archive', 'chapter', 'spine'], help='Exercise a synthetic broken EPUB in the dedicated App only')
+parser.add_argument('--library-delete', action='store_true', help='Verify deletion of collapsed duplicates and nonblocking cloud failure')
+parser.add_argument('--epub-pagination', action='store_true', help='Check actual visible paragraph continuity with Readium in a synthetic EPUB')
 parser.add_argument('--library-archive', action='store_true', help='Exercise library/series multi-select archive sharing in the dedicated App only')
 args = parser.parse_args()
+if args.library_delete and (args.library_archive or args.epub_pagination or args.epub_failure or args.performance):
+    parser.error('--library-delete must run independently')
+if args.epub_pagination and (args.epub_failure or args.performance or args.library_archive):
+    parser.error('--epub-pagination must run independently')
 if args.epub_failure and args.performance:
     parser.error('--epub-failure cannot be combined with --performance')
 if args.library_archive and (args.epub_failure or args.performance):
@@ -125,7 +131,7 @@ final class TapTests: XCTestCase {
  }
 }
 ''', encoding='utf-8')
-if args.library_archive:
+if args.library_archive or args.library_delete:
     subprocess.run(['xcrun','simctl','terminate',args.device,'cc.novelia.ios.architecture-validation'],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     data_root = Path(subprocess.check_output(['xcrun','simctl','get_app_container',args.device,
@@ -134,9 +140,17 @@ if args.library_archive:
     shutil.rmtree(support, ignore_errors=True)
     library_dir = support/'WenkuEPUB'
     library_dir.mkdir(parents=True, exist_ok=True)
-    samples = Path(__file__).resolve().parents[1]/'build/acceptance/1.0.0/samples'
-    for filename, sample in (('sample-a.epub', '01-正常-三章-带封面.epub'), ('sample-b.epub', '03-长章节-单章约五万字.epub')):
-        shutil.copyfile(samples/sample, library_dir/filename)
+    if args.library_delete:
+        for filename, title in [('sample-a.epub', '验收样本甲'), ('sample-b.epub', '验收样本乙')]:
+            with zipfile.ZipFile(library_dir/filename, 'w') as archive:
+                archive.writestr('mimetype', 'application/epub+zip')
+                archive.writestr('META-INF/container.xml', '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
+                archive.writestr('book.opf', f'<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">{filename}</dc:identifier><dc:title>{title}</dc:title><dc:language>zh</dc:language></metadata><manifest><item id="c" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c"/></spine></package>')
+                archive.writestr('chapter.xhtml', f'<html xmlns="http://www.w3.org/1999/xhtml"><head><title>{title}</title></head><body><h1>{title}</h1><p>用于删除回归的合成正文。</p></body></html>')
+    else:
+        samples = Path(__file__).resolve().parents[1]/'build/acceptance/1.0.0/samples'
+        for filename, sample in (('sample-a.epub', '01-正常-三章-带封面.epub'), ('sample-b.epub', '03-长章节-单章约五万字.epub')):
+            shutil.copyfile(samples/sample, library_dir/filename)
     reference = time.time() - 978307200.0
     records = [
         {'id': str(uuid.uuid4()).upper(), 'title': '验收样本甲', 'filename': 'sample-a.epub',
@@ -423,6 +437,106 @@ final class TapTests: XCTestCase {
  }
 }
 ''')
+if args.library_delete:
+    subprocess.run(['xcrun','simctl','spawn',args.device,'defaults','write','cc.novelia.ios.architecture-validation','webdav.enabled','-bool','YES'],check=True)
+    duplicate=dict(records[0]); duplicate['id']=str(uuid.uuid4()).upper(); duplicate['filename']='duplicate-a.epub'; duplicate['addedAt']-=120
+    shutil.copyfile(library_dir/records[0]['filename'],library_dir/duplicate['filename'])
+    records.append(duplicate)
+    (library_dir/'library.json').write_text(json.dumps(records))
+    cloud_dir=support/'WebDAVCloudBooks'
+    cloud_dir.mkdir(parents=True,exist_ok=True)
+    asset={'filename':records[0]['filename'],'hash':hashlib.sha256((library_dir/records[0]['filename']).read_bytes()).hexdigest()}
+    (cloud_dir/'index.json').write_text(json.dumps({'web':[],'wenku':[{'record':records[0],'assets':[asset]}]}))
+    (r/'TapTests.swift').write_text(r"""import XCTest
+final class TapTests:XCTestCase {
+ func testLibraryDuplicateDeletionAndCloudFailure() {
+  continueAfterFailure=false
+  let app=XCUIApplication(bundleIdentifier:"cc.novelia.ios.architecture-validation")
+  app.launchArguments=["-architectureValidation"]
+  app.launch(); defer { app.terminate() }
+  let row=app.staticTexts["验收样本甲"].firstMatch
+  XCTAssertTrue(row.waitForExistence(timeout:20)); row.press(forDuration:0.8)
+  let delete=app.buttons["删除"].firstMatch
+  XCTAssertTrue(delete.waitForExistence(timeout:10)); delete.tap()
+  let confirm=app.buttons["删除本机和云端副本"]
+  XCTAssertTrue(confirm.waitForExistence(timeout:10)); confirm.tap()
+  let banner=app.staticTexts["云端尚未删除"]
+  XCTAssertTrue(banner.waitForExistence(timeout:15),"Cloud failure must remain visible")
+  XCTAssertFalse(app.alerts["操作失败"].exists)
+  XCTAssertTrue(app.buttons["重试"].firstMatch.isHittable)
+  let menu=app.buttons["更多操作：验收样本甲"].firstMatch
+  XCTAssertTrue(menu.waitForExistence(timeout:10)); menu.tap()
+  XCTAssertTrue(app.buttons["下载"].firstMatch.waitForExistence(timeout:10), "All hidden local copies must be gone; no local reading action")
+  XCTAssertFalse(app.buttons["阅读"].exists)
+ }
+}
+""")
+
+if args.epub_pagination:
+    subprocess.run(['xcrun','simctl','terminate',args.device,'cc.novelia.ios.architecture-validation'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    data_root = Path(subprocess.check_output(['xcrun','simctl','get_app_container',args.device,'cc.novelia.ios.architecture-validation','data'], text=True).strip())
+    support = data_root/'Library/Application Support'
+    shutil.rmtree(support, ignore_errors=True)
+    library_dir = support/'WenkuEPUB'
+    library_dir.mkdir(parents=True)
+    with zipfile.ZipFile(library_dir/'pagination.epub', 'w') as z:
+     z.writestr('mimetype','application/epub+zip')
+     z.writestr('META-INF/container.xml','<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
+     z.writestr('book.opf', '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">pagination-regression</dc:identifier><dc:title>分页连续性</dc:title><dc:language>zh</dc:language><meta property="dcterms:modified">2026-10-19T00:00:00Z</meta></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'+''.join(f'<item id="c{i}" href="c{i}.xhtml" media-type="application/xhtml+xml"/>' for i in range(3))+'</manifest><spine>'+''.join(f'<itemref idref="c{i}"/>' for i in range(3))+'</spine></package>')
+     z.writestr('nav.xhtml','<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>目录</title></head><body><nav epub:type="toc"><ol>'+''.join(f'<li><a href="c{i}.xhtml">第{i+1}章</a></li>' for i in range(3))+'</ol></nav></body></html>')
+     for chapter in range(3):
+      pages=''.join(f'<section><p data-pagination-marker="{chapter*20+i+1}">PAGE_{chapter*20+i+1:03d}</p><p>这是连续性验证正文。每次翻页必须依次显示编号，不能跳过。</p></section>' for i in range(20))
+      z.writestr(f'c{chapter}.xhtml','<html xmlns="http://www.w3.org/1999/xhtml"><head><title>分页</title><style>section { break-after: column; -webkit-column-break-after: always; page-break-after: always; }</style></head><body>'+pages+'</body></html>')
+    (library_dir/'library.json').write_text(json.dumps([{'id':str(uuid.uuid4()).upper(),'title':'分页连续性','filename':'pagination.epub','addedAt':time.time()-978307200,'metadataLoaded':True,'fileFormat':'epub'}]))
+    (r/'TapTests.swift').write_text(r"""import XCTest
+    final class TapTests: XCTestCase {
+     func testReadiumEPUBPageContinuity() {
+      continueAfterFailure = false
+      let app=XCUIApplication(bundleIdentifier:"cc.novelia.ios.architecture-validation")
+      app.launchArguments=["-architectureValidation","-architectureReadium","-architecturePagination"]
+      app.launch(); defer { app.terminate() }
+      let book=app.staticTexts["分页连续性"].firstMatch
+      XCTAssertTrue(book.waitForExistence(timeout:20)); book.tap()
+      XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout:30))
+      XCTAssertTrue(app.webViews.staticTexts["PAGE_001"].firstMatch.waitForExistence(timeout:30))
+      sleep(3)
+      let probe=app.staticTexts["readium-validation-visible-paragraphs"]
+      XCTAssertTrue(probe.waitForExistence(timeout:20))
+      func visible() -> [Int] {
+       guard let data=probe.label.data(using:.utf8), let values=try? JSONSerialization.jsonObject(with:data) as? [Int] else { return [] }
+       return values.sorted()
+      }
+      let ready=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in !visible().isEmpty },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[ready],timeout:20),.completed)
+      var previous=visible()
+      XCTAssertEqual(previous.first,1)
+      for backwards in [false,true] {
+       for turn in 0..<32 {
+        if backwards ? previous.first==1 : previous.last==60 { break }
+        let before=probe.label
+        let right=app.coordinate(withNormalizedOffset:CGVector(dx:0.85,dy:0.5))
+        let left=app.coordinate(withNormalizedOffset:CGVector(dx:0.15,dy:0.5))
+        if turn % 2 == 0 { (backwards ? left : right).tap() }
+        else { (backwards ? left : right).press(forDuration:0.05,thenDragTo:backwards ? right : left) }
+        let changed=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in probe.label != before && !visible().isEmpty },object:nil)
+        XCTAssertEqual(XCTWaiter.wait(for:[changed],timeout:15),.completed,"Page turn did not settle")
+        let current=visible()
+        print("CONTINUITY backwards=\(backwards) turn=\(turn) before=\(previous) after=\(current)")
+        guard let first=current.first, let last=current.last, let oldFirst=previous.first, let oldLast=previous.last else { return }
+        if backwards {
+         XCTAssertGreaterThanOrEqual(last,oldFirst-1,"Skipped paragraphs going backward")
+         XCTAssertLessThan(first,oldFirst)
+        } else {
+         XCTAssertLessThanOrEqual(first,oldLast+1,"Skipped paragraphs going forward")
+         XCTAssertGreaterThan(last,oldLast)
+        }
+        previous=current
+       }
+       XCTAssertEqual(backwards ? previous.first : previous.last,backwards ? 1 : 60)
+      }
+     }
+    }
+    """)
 print(f'UI test artifacts: {r}', flush=True)
 with (r / 'test.log').open('w') as log:
  try:
@@ -434,6 +548,15 @@ with (r / 'test.log').open('w') as log:
     sample.unlink(missing_ok=True)
    else:
     sample.write_bytes(previous_sample)
+if args.library_delete:
+    data_root = Path(subprocess.check_output(['xcrun','simctl','get_app_container',args.device,
+                                            'cc.novelia.ios.architecture-validation','data'], text=True).strip())
+    directory = data_root/'Library/Application Support/WenkuEPUB'
+    remaining = json.loads((directory/'library.json').read_text())
+    if len(remaining) != 1 or remaining[0]['title'] != '验收样本乙':
+        raise SystemExit('Deletion left a hidden local duplicate; UI alone can hide it behind a cloud record')
+    if (directory/'sample-a.epub').exists() or (directory/'duplicate-a.epub').exists():
+        raise SystemExit('Deletion left a selected local file')
 if args.library_archive:
     data_root = Path(subprocess.check_output(['xcrun','simctl','get_app_container',args.device,
                                             'cc.novelia.ios.architecture-validation','data'], text=True).strip())
