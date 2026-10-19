@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run production reader background storage checks on an iOS simulator."""
+"""在 iOS 模拟器上检查生产代码的阅读背景存储。"""
 import argparse
 import subprocess
 import tempfile

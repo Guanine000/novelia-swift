@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test the production online chapter directory with synthetic chapters in an iOS simulator."""
+"""在 iOS 模拟器中用合成章节测试生产代码的在线章节目录。"""
 from pathlib import Path
 import argparse
 import subprocess

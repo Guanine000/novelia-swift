@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test the production editor with synthetic posts and a local mock; never writes to a forum."""
+"""用合成帖子和本地模拟后台测试生产编辑器；绝不写入论坛。"""
 from pathlib import Path
 import re
 import argparse
@@ -27,8 +27,8 @@ support = s[s.index('private struct ForumComposeNotice'):s.index('struct ForumCo
 core = (Path(__file__).resolve().parents[1] / 'Sources/NoveliaIOSCore/Features/Community/ForumMarkdown.swift').read_text()
 support += core[core.index('enum ForumNoticeDestination'):core.index('struct ForumMarkdownBlock')]
 editor = s[s.index('private struct ForumMarkdownEditor'):s.index('struct ForumComposeView')]
-# One-file test app: drop top-level `private` so the stubs above and the shipped
-# views (some internal since the forum files were split) agree on access levels.
+# 单文件测试 App：去掉顶层 `private`，让上方桩代码与实际发布的视图
+#（论坛文件拆分后部分为 internal）访问级别一致。
 source = re.sub(r'(?m)^private (struct|enum|final class|class|func|extension) ', r'\1 ', fixture + support + editor + component)
 (r / "TapRegression.swift").write_text(source)
 (r / "TapTests.swift").write_text('import XCTest\nfinal class TapTests: XCTestCase {\n func testPrefillCancelAndSave() {\n  let app = XCUIApplication(); app.launch(); app.buttons["编辑"].tap()\n  let title = app.textFields.firstMatch\n  XCTAssertTrue(title.waitForExistence(timeout: 5)); XCTAssertEqual(title.value as? String, "Original")\n  XCTAssertEqual(app.textViews.firstMatch.value as? String, "first\\nlast\\n")\n  XCTAssertEqual(app.switches["测试标签"].value as? String, "1")\n  app.buttons["取消"].tap(); XCTAssertTrue(app.staticTexts["Saved: Original"].waitForExistence(timeout: 5))\n  app.buttons["编辑"].tap(); title.tap(); title.typeText("X")\n  let draft = title.value as! String; XCTAssertNotEqual(draft, "Original")\n  app.buttons["保存修改"].tap()\n  XCTAssertTrue(app.staticTexts["Saved: \(draft)"].waitForExistence(timeout: 5))\n }\n func testErrorKeepsDraft() {\n  let app = XCUIApplication(); app.launch(); app.buttons["错误测试"].tap()\n  let title = app.textFields.firstMatch; XCTAssertTrue(title.waitForExistence(timeout: 5))\n  title.tap(); title.typeText("X"); let draft = title.value as! String; app.buttons["保存修改"].tap()\n  XCTAssertTrue(app.staticTexts["保存失败测试"].waitForExistence(timeout: 5))\n  app.buttons["关闭"].tap(); XCTAssertEqual(title.value as? String, draft)\n  XCTAssertTrue(app.buttons["保存修改"].isEnabled)\n }\n}\n')

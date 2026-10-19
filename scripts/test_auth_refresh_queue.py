@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the production novel/forum session refresh coordination with a fake auth server; no network or Keychain."""
+"""用模拟认证服务器测试生产代码中小说／论坛会话续期的协调逻辑；不访问网络或 Keychain。"""
 from pathlib import Path
 import subprocess
 import tempfile

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Compile shipped library stores with platform adapters; use only temporary synthetic data.
+"""用平台适配层编译实际发布的书库 Store；只使用临时合成数据。
 
-Persistence, model decoding, file I/O and mover coordination are production code.
-UIKit image conversion, EPUB metadata and remote downloads are local test adapters.
---benchmark records host microbenchmarks, never physical-device qualification.
+持久化、模型解码、文件 I/O 与移动协调均为生产代码；
+UIKit 图片转换、EPUB 元数据与远程下载为本地测试适配层。
+--benchmark 只记录主机上的微基准，不代表实体设备达标。
 """
 from pathlib import Path
 import argparse
@@ -126,7 +126,7 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   try fm.createDirectory(at: root, withIntermediateDirectories: true)
   defer { try? fm.removeItem(at: root) }
   if CommandLine.arguments.contains("--benchmark") { try await benchmark(root); return }
-  // Legacy optional fields remain decodable; initialization does no eager index I/O.
+  // 旧版可选字段仍可解码；初始化时不提前读写索引。
   let legacyDir = root.appendingPathComponent("legacy")
   let old = try createBook(legacyDir)[0]
   let index = legacyDir.appendingPathComponent("library.json")
@@ -137,7 +137,7 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   precondition(legacy.books.isEmpty && legacy.isLoading && !legacy.isReady)
   try await legacy.loadIfNeeded()
   precondition(legacy.books.count == 1 && legacy.books[0].id == old.id && legacy.books[0].resolvedFileFormat == .txt)
-  // Download records from before format/mode fields were introduced remain readable.
+  // 引入格式／模式字段之前的下载记录仍可读取。
   let webLegacyDir = root.appendingPathComponent("legacy-web")
   try fm.createDirectory(at: webLegacyDir, withIntermediateDirectories: true)
   try Data("legacy text".utf8).write(to: webLegacyDir.appendingPathComponent("legacy.txt"))
@@ -148,7 +148,7 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   let webLegacy = WebNovelDownloadStore(api: FakeAPI(), directory: webLegacyDir)
   try await webLegacy.loadIfNeeded()
   precondition(webLegacy.books.first?.resolvedFileFormat == .txt && webLegacy.books.first?.resolvedDownloadMode == .original)
-  // A corrupt index cannot silently become an empty library and be overwritten.
+  // 损坏的索引不能悄悄变成空书库并被覆盖。
   let corruptDir = root.appendingPathComponent("corrupt")
   try fm.createDirectory(at: corruptDir, withIntermediateDirectories: true)
   let corruptURL = corruptDir.appendingPathComponent("library.json")
@@ -159,7 +159,7 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   let keptCorrupt = try Data(contentsOf: corruptURL); precondition(keptCorrupt == damaged)
   _ = try createBook(corruptDir)
   try await corrupt.loadIfNeeded(); precondition(corrupt.books.count == 1 && corrupt.storageError == nil && corrupt.isReady)
-  // Failed edits/deletes do not publish or remove files; retry persists successfully.
+  // 编辑／删除失败时不发布状态也不删除文件；重试后能成功持久化。
   let editDir = root.appendingPathComponent("edit"); let original = try createBook(editDir)[0]
   let faults = Faults(); faults.failWrites = [1, 2]
   let edits = WenkuLocalLibraryStore(directory: editDir, indexWriter: LocalLibraryIndexWriter(persist: { try faults.persist($0, $1) }))
@@ -203,7 +203,7 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   precondition(syncEdits.books[0].title == remoteSnapshot.title && syncEdits.books[0].coverFilename == nil)
   let persistedRemote = try disk(syncEditDir)
   precondition(persistedRemote == syncEdits.books && !fm.fileExists(atPath: newCover.path))
-  // Background metadata failures remain retryable and do not leave a stale error after success.
+  // 后台元数据失败可重试，成功后不残留过期的错误。
   let metadataDir = root.appendingPathComponent("metadata")
   var incomplete = try createBook(metadataDir)[0]; incomplete.metadataLoaded = nil
   try JSONEncoder().encode([incomplete]).write(to: metadataDir.appendingPathComponent("library.json"))
@@ -214,7 +214,7 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   precondition(metadataStore.storageError != nil && metadataStore.books == [incomplete])
   await metadataStore.refreshMissingMetadata()
   precondition(metadataStore.storageError == nil && metadataStore.books.first?.metadataLoaded == true)
-  // Simultaneous imports of identical bytes keep exactly one copy and do not delete it.
+  // 同时导入内容完全相同的文件只保留一份，且不会把它删掉。
   let duplicateDir = root.appendingPathComponent("duplicates")
   let duplicateStore = WenkuLocalLibraryStore(directory: duplicateDir)
   try await duplicateStore.loadIfNeeded()
@@ -231,7 +231,7 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   let importResults = try await [firstImport.value, secondImport.value]
   precondition(importResults.filter { $0 }.count == 1 && duplicateStore.books.count == 1)
   precondition(fm.fileExists(atPath: duplicateStore.fileURL(for: duplicateStore.books[0]).path))
-  // A source commit failure rolls back the destination; the original remains readable.
+  // 源端提交失败时回滚目标端；原书仍可读取。
   let sourceDir = root.appendingPathComponent("source"); let sourceBook = try createBook(sourceDir)[0]
   let sourceFaults = Faults(); sourceFaults.failWrites = [1]
   let source = WenkuLocalLibraryStore(directory: sourceDir, indexWriter: LocalLibraryIndexWriter(persist: { try sourceFaults.persist($0, $1) }))
@@ -252,7 +252,7 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   } catch WebNovelMoveError.alreadyExists {}
   let targetFilesAfter = try fm.contentsOfDirectory(atPath: targetDir.path).sorted()
   precondition(target.books == [existingTarget] && targetFilesBefore == targetFilesAfter)
-  // Destination rollback failure is explicit; neither source data nor progress is discarded.
+  // 目标端回滚失败会明确报告；源数据与进度都不丢弃。
   let rollbackDir = root.appendingPathComponent("rollback-source"); let rollbackBook = try createBook(rollbackDir)[0]
   let sourceFail = Faults(); sourceFail.failWrites = [1]
   let targetFail = Faults(); targetFail.failWrites = [2]
@@ -262,7 +262,7 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   do { try await LibraryMover.moveToNetwork(rollbackBook, web: rt, wenku: rs, state: rstate); preconditionFailure("must surface rollback failure") }
   catch { precondition(error.localizedDescription.contains("副本清理失败")) }
   precondition(rs.books.count == 1 && rt.books.count == 1 && rstate.transfers.isEmpty)
-  // If the destination was edited while source deletion failed, rollback must preserve that edit and report the duplicate explicitly.
+  // 若源端删除失败期间目标端被编辑，回滚须保留该编辑并明确报告重复。
   let protectedSourceDir = root.appendingPathComponent("protected-web")
   try fm.createDirectory(at: protectedSourceDir, withIntermediateDirectories: true)
   try Data("original".utf8).write(to: protectedSourceDir.appendingPathComponent(legacyWeb.fileFilename))
@@ -280,7 +280,7 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   do { try await protectedMove.value; preconditionFailure("must preserve a modified destination") }
   catch { precondition(error.localizedDescription.contains("副本清理失败")) }
   precondition(protectedSource.books == [legacyWeb] && protectedTarget.books.first?.title == "Edited destination" && protectedState.transfers.isEmpty)
-  // During an in-flight index write the old visible snapshot remains; a following insert uses the committed edit.
+  // 索引写入进行中时仍显示旧快照；随后的插入基于已提交的编辑。
   let concurrentDir = root.appendingPathComponent("concurrent"); let base = try createBook(concurrentDir)[0]
   let delayed = Faults(); delayed.pauseOnWrite = 1
   let concurrent = WenkuLocalLibraryStore(directory: concurrentDir, indexWriter: LocalLibraryIndexWriter(persist: { try delayed.persist($0, $1) }))
@@ -294,7 +294,7 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   delayed.resume.signal(); try await edit.value; try await insert.value
   precondition(concurrent.books.count == 2 && concurrent.books.contains { $0.title == "Edited" })
   let savedConcurrent = try disk(concurrentDir); precondition(savedConcurrent == concurrent.books)
-  // Cancellation after a destination write has started still publishes committed state, then rolls it back in an uncancelled cleanup task.
+  // 目标端写入开始后取消，仍会发布已提交的状态，再由不受取消影响的清理任务回滚。
   let cancelDir = root.appendingPathComponent("cancel-source"); let cancelBook = try createBook(cancelDir)[0]
   let cs = WenkuLocalLibraryStore(directory: cancelDir)
   let paused = Faults(); paused.pauseOnWrite = 1
@@ -305,7 +305,7 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   do { try await moving.value; preconditionFailure("cancelled move must fail") } catch {}
   precondition(cs.books.count == 1 && ct.books.isEmpty && cancelState.transfers.isEmpty)
   precondition(fm.fileExists(atPath: cs.fileURL(for: cancelBook).path))
-  // A replacement copy completing after deletion cannot resurrect the old book.
+  // 删除后才完成的替换副本不能让旧书复活。
   let raceDir = root.appendingPathComponent("race"); let raceBook = try createBook(raceDir)[0]
   let copyEntered = DispatchSemaphore(value: 0); let copyResume = DispatchSemaphore(value: 0)
   let copier = LocalLibraryFileCopier { input, output in
@@ -410,7 +410,7 @@ if baseline_commit:
 ''').replace('BASELINE_COMMIT', baseline_commit)
 else:
     code = code.replace('BASELINE_COMMIT', 'none').replace('var baselineLoad: [Double] = []; var baselineEdit: [Double] = []', 'let baselineLoad: [Double] = []; let baselineEdit: [Double] = []')
-# Swift assertion autoclosures cannot contain throwing operations.
+# Swift 断言的自动闭包中不能包含会抛错的操作。
 code = code.replace('require(!(try fm.contentsOfDirectory(atPath: editDir.path)).contains { $0.hasPrefix("cover-") })',
                     'let editFiles = try fm.contentsOfDirectory(atPath: editDir.path); require(!editFiles.contains { $0.hasPrefix("cover-") })')
 with tempfile.TemporaryDirectory(prefix='NoveliaLibraryTransactions-') as temporary:

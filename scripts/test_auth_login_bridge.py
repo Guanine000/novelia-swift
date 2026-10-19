@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Test the actual injected bridge without contacting an authentication server."""
+"""测试实际注入的登录桥接脚本，不连接认证服务器。"""
 from pathlib import Path
 import json
 import subprocess
 import tempfile
-# Generate the production JavaScript through the actual Swift configuration.
-# Keep origin/path escaping and generation under test, rather than substituting
-# Swift interpolation in a copied script.
+# 通过实际的 Swift 配置生成生产环境 JavaScript，
+# 让 origin／路径转义与生成过程都处于测试之下，
+# 而不是在复制的脚本里替换 Swift 插值。
 with tempfile.TemporaryDirectory(prefix='novelia-auth-script-') as directory:
     root = Path(directory)
     (root/'main.swift').write_text('''import Foundation

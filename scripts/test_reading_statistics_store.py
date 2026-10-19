@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the production statistics store with isolated preferences and files; no user data or network."""
+"""用隔离的偏好与文件测试生产统计 Store；不使用用户数据，也不访问网络。"""
 from pathlib import Path
 import subprocess
 import tempfile

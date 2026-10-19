@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run real RootView/features against a complete replacement in a dedicated App bundle."""
+"""在独立的 App 包中，让真实 RootView 与各功能运行在完整的替代后台上。"""
 from pathlib import Path
 import argparse
 import subprocess
@@ -35,7 +35,7 @@ if args.library_archive and (args.epub_failure or args.performance):
 if plistlib.loads((Path(args.app)/'Info.plist').read_bytes()).get('CFBundleIdentifier') != 'cc.novelia.ios.architecture-validation':
     parser.error('Requires the dedicated architecture-validation App bundle')
 r = Path(tempfile.mkdtemp(prefix='NoveliaArchitectureUI-'))
-# Boot only the selected simulator; the installed App has its own bundle/data.
+# 只启动所选模拟器；安装的 App 使用独立的包标识与数据。
 subprocess.run(['xcrun','simctl','boot',args.device], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 subprocess.run(['xcrun','simctl','bootstatus',args.device,'-b'], check=True)
 subprocess.run(['xcrun','simctl','install',args.device,args.app], check=True)

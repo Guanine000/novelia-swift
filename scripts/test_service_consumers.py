@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Exercise production feature stores and chapter cache using injected services.
+"""通过注入的服务测试生产功能 Store 与章节缓存。
 
-Uses isolated defaults and synthetic data; no account, library or network access.
+使用隔离的偏好设置与合成数据；不访问账号、书库或网络。
 """
 from pathlib import Path
 import re
@@ -25,8 +25,8 @@ code += '\n' + wenku[wenku.index('@MainActor\nfinal class WenkuStore'):]
 reader = (root / layout['ReaderView.swift']).read_text()
 code += '\n' + reader[reader.index('@MainActor\nprivate final class OnlineChapterCache'):]
 
-# Generate the unexercised protocol methods as explicit failures, not production
-# fallbacks. The exercised methods below implement synthetic backend behavior.
+# 未覆盖的协议方法生成为显式失败，而不是回退到生产实现。
+# 下方被覆盖的方法实现合成后台行为。
 protocols = (root / layout['APIServices.swift']).read_text().split('@MainActor\nprotocol AccountSessionProviding')[0]
 methods = re.findall(r'    func [\s\S]*?(?:async throws(?: -> [^\n]+)?)\n', protocols)
 custom = {'searchNovels', 'siteRankedNovels', 'chapter', 'searchWenku',

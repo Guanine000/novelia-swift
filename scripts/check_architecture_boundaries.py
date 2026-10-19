@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Check forbidden source dependencies without building or accessing user data."""
+"""检查被禁止的源码依赖，不构建项目，也不访问用户数据。"""
 from pathlib import Path
 import re
 import sys
@@ -21,8 +21,8 @@ def violations(root=ROOT):
     ]
     for folder, pattern, reason in rules:
         for path in sorted((root / folder).rglob("*.swift")):
-            # Keep line numbers while ignoring comments and string literals. This is a
-            # narrow regression guard, not a Swift parser or a compiler module boundary.
+            # 忽略注释与字符串字面量，同时保留行号。这只是范围有限的回归守卫，
+            # 不是 Swift 解析器，也不等同于编译器的模块边界。
             source = re.sub(r'/\*[\s\S]*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"',
                             lambda match: "\n" * match[0].count("\n"), path.read_text())
             for match in re.finditer(pattern, source):

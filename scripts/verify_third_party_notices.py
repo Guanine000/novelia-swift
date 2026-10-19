@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RESOLVED = ROOT / "NoveliaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
 NOTICES = ROOT / "iOSApp/Resources/ThirdPartyLicenses"
-# identity -> (notice name, license, license file in the SwiftPM checkout)
+# 依赖标识 -> (声明名称, 许可证, SwiftPM 检出目录中的许可证文件)
 PACKAGES = {
     "swiftsoup": ("SwiftSoup", "MIT", "LICENSE"),
     "yueducoretext": ("YueduCoreText", "MPL-2.0", "LICENSE"),
@@ -24,7 +24,7 @@ PACKAGES = {
     "zip": ("Zip", "MIT", "LICENSE"),
 }
 READIUM_FONTS = "Sources/Navigator/EPUB/Assets/Static/readium-css/fonts"
-# Bundled by swift-toolkit's resource bundles: notice file -> license file in the checkout
+# 由 swift-toolkit 资源包附带：声明文件 -> 检出目录中的许可证文件
 READIUM_ASSET_NOTICES = {
     "ReadiumCSS-AccessibleDfA-LICENSE.txt": f"{READIUM_FONTS}/LICENSE-AccessibleDfa",
     "ReadiumCSS-iAWriterDuospace-LICENSE.txt": f"{READIUM_FONTS}/LICENSE-IaWriterDuospace.md",

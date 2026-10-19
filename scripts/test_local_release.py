@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline checks for the local release script's safety gates."""
+"""离线检查本地发布脚本的安全关卡。"""
 import importlib.util
 from pathlib import Path
 import sys

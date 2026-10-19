@@ -8,7 +8,7 @@ let package = Package(
         .library(name: "NoveliaIOSCore", targets: ["NoveliaIOSCore"])
     ],
     dependencies: [
-        // Same pins as the Xcode project (NoveliaIOS.xcodeproj Package.resolved).
+        // 版本固定与 Xcode 项目一致（NoveliaIOS.xcodeproj 的 Package.resolved）。
         .package(url: "https://github.com/CHANG-JUI-LIN/YueduCoreText.git", exact: "0.8.0"),
         .package(url: "https://github.com/readium/ZIPFoundation.git", exact: "3.0.1"),
         .package(url: "https://github.com/readium/swift-toolkit.git", exact: "3.11.0"),
@@ -17,16 +17,16 @@ let package = Package(
         .target(
             name: "NoveliaIOSCore",
             path: "Sources/NoveliaIOSCore",
-            // The app target compiles these files with Xcode's default of bare `/regex/` literals.
+            // App 目标按 Xcode 默认设置编译这些文件，启用裸 `/regex/` 字面量。
             swiftSettings: [.enableUpcomingFeature("BareSlashRegexLiterals")]
         ),
-        // The app's EPUB container and page book, compiled from their app sources so
-        // tests exercise the shipped code rather than a copy.
+        // App 的 EPUB 容器与分页书，直接编译 App 源码，
+        // 让测试覆盖实际发布的代码，而不是一份副本。
         .target(
             name: "NoveliaEPUB",
             dependencies: [
-                // Shared diagnostics and LRU; the app compiles both directories into one module,
-                // so EPUB files import it only under `#if canImport(NoveliaIOSCore)`.
+                // 共享诊断与 LRU；App 把两个目录编译进同一模块，
+                // 因此 EPUB 文件只在 `#if canImport(NoveliaIOSCore)` 下导入它。
                 "NoveliaIOSCore",
                 .product(name: "YueduCoreText", package: "YueduCoreText"),
                 .product(name: "ReadiumZIPFoundation", package: "ZIPFoundation"),

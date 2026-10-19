@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Requires Xcode and a booted iOS simulator; uses no account or network data."""
+"""需要 Xcode 与已启动的 iOS 模拟器；不使用账号或网络数据。"""
 from pathlib import Path
 import subprocess
 import argparse
