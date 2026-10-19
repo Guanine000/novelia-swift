@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Generate the synthetic EPUB fixtures used by Tests/NoveliaEPUBTests.
+"""生成 Tests/NoveliaEPUBTests 使用的合成 EPUB 测试样本。
 
-All text and images are produced here, so the fixtures carry no third-party content.
-Run again after changing this script; the output is deterministic.
+全部文字与图片都在此生成，样本不含任何第三方内容。
+修改本脚本后重新运行即可；输出是确定性的。
 """
 from pathlib import Path
 import struct
@@ -59,13 +59,13 @@ def simple_chapter():
 
 
 def metadata_fixtures():
-    # EPUB2: <meta name="cover">, opf:role filtering, entities in the title.
+    # EPUB2：<meta name="cover">、opf:role 过滤、标题中的实体。
     write("epub2_meta_cover", opf("2.0", '''<dc:title>文庫 &amp; 測試</dc:title>
 <dc:creator opf:role="aut">作者甲</dc:creator><dc:creator opf:role="ill">畫師乙</dc:creator><dc:creator>作者丙</dc:creator>
 <dc:description>&lt;p&gt;簡介 第一行&lt;/p&gt;</dc:description>
 <meta name="cover" content="cover-img"/>''', '<item id="cover-img" href="Images/cover.png" media-type="image/png"/>', ns_opf=True),
           {"OEBPS/Text/c1.xhtml": simple_chapter(), "OEBPS/Images/cover.png": png(600, 900)})
-    # EPUB3: cover-image property, refines roles, title-type main listed second, CDATA, encoded href.
+    # EPUB3：cover-image 属性、refines 角色、title-type 为 main 的标题排在第二、CDATA、编码过的 href。
     write("epub3_refines", opf("3.0", '''<dc:title id="t1">Subtitle Here</dc:title><dc:title id="t2">Main Title</dc:title>
 <meta refines="#t1" property="title-type">subtitle</meta><meta refines="#t2" property="title-type">main</meta>
 <dc:creator id="a1">Author One</dc:creator><meta refines="#a1" property="role" scheme="marc:relators">aut</meta>
@@ -73,14 +73,14 @@ def metadata_fixtures():
 <dc:creator id="a3">Odd Role</dc:creator><meta refines="#a3" property="role" scheme="marc:relators">xyz</meta>
 <dc:description><![CDATA[<b>Bold</b> desc]]></dc:description>''', '<item id="cv" href="Images/c%20over.png" media-type="image/png" properties="cover-image"/>'),
           {"OEBPS/Text/c1.xhtml": simple_chapter(), "OEBPS/Images/c over.png": png(100, 120)})
-    # OPF at the archive root, no cover, padded title.
+    # OPF 位于压缩包根目录、无封面、标题带首尾空白。
     write("root_opf_nocover", opf("2.0", "<dc:title>  Spaced   Title  </dc:title><dc:creator>Solo</dc:creator>", "", chapter_href="c1.xhtml"),
           {"c1.xhtml": simple_chapter()}, root="content.opf")
-    # A cover smaller than the thumbnail is not upscaled; nested tags in the description.
+    # 小于缩略图尺寸的封面不放大；简介中含嵌套标签。
     write("small_cover", opf("3.0", "<dc:title>Small</dc:title><dc:description>Line <i>one</i>\n line two</dc:description>",
                              '<item id="x" href="../cover.png" media-type="image/png" properties="nav cover-image"/>'),
           {"OEBPS/Text/c1.xhtml": simple_chapter(), "cover.png": png(80, 60)})
-    # A wide cover is limited by width.
+    # 宽封面按宽度限制缩放。
     write("wide_cover", opf("2.0", '<dc:title>Wide</dc:title><meta content="w" name="cover"/>', '<item id="w" href="w.png" media-type="image/png"/>'),
           {"OEBPS/Text/c1.xhtml": simple_chapter(), "OEBPS/w.png": png(1000, 300)})
 
@@ -94,7 +94,7 @@ LINES = ["「真的吗？」", "「这样就好了！」", "「等一下……�
 
 
 def justified_fixture():
-    """Paragraphs of original Chinese prose under the CSS that triggered the gap bug."""
+    """在触发间隙问题的 CSS 下排版的原创中文段落。"""
     paragraphs = []
     state = 7
     for index in range(60):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Production API and feed-state tests using synthetic responses, without network."""
+"""使用合成响应测试生产 API 与列表状态，不访问网络。"""
 from pathlib import Path
 import subprocess
 import tempfile

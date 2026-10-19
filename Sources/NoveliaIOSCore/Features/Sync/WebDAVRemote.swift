@@ -28,7 +28,7 @@ extension WebDAVRemote {
     func listBlobs() async throws -> Set<String>? { nil }
 }
 
-// Compatibility name for existing sync tests and callers.
+// 兼容名称，供现有同步测试与调用方使用。
 typealias WebDAVFileHash = FileContentHash
 
 

@@ -1,9 +1,9 @@
 #!/bin/sh
-# Run the Swift package tests (NoveliaIOSCoreTests, NoveliaEPUBTests) on an iOS simulator.
-# Usage: scripts/run_package_tests.sh [simulator name or UDID] [extra xcodebuild arguments...]
-# The package targets iOS 17 and uses UIKit, so tests run on a simulator rather than `swift test`.
-# xcodebuild prefers NoveliaIOS.xcodeproj when both exist, so the package is opened from a
-# temporary directory that links only the package files.
+# 在 iOS 模拟器上运行 Swift 包测试（NoveliaIOSCoreTests、NoveliaEPUBTests）。
+# 用法：scripts/run_package_tests.sh [模拟器名称或 UDID] [额外的 xcodebuild 参数...]
+# 包以 iOS 17 为目标且依赖 UIKit，因此在模拟器上运行，而不是用 `swift test`。
+# 两者并存时 xcodebuild 优先打开 NoveliaIOS.xcodeproj，所以从一个只链接包文件的
+# 临时目录打开 Swift 包。
 set -eu
 root="$(cd "$(dirname "$0")/.." && pwd)"
 device="${1:-iPhone 18 Pro}"

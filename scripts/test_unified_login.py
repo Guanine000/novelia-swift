@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the actual unified-login orchestration with fake authentication stores."""
+"""用模拟认证存储测试实际的统一登录编排流程。"""
 from pathlib import Path
 import subprocess
 import tempfile

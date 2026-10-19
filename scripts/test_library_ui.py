@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test production library rows in an isolated 300-book simulator fixture."""
+"""在隔离的 300 本书模拟器样本中测试生产书库列表行。"""
 from pathlib import Path
 import argparse
 import subprocess

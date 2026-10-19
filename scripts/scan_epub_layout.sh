@@ -1,8 +1,8 @@
 #!/bin/sh
-# Lay out a local EPUB with the reader's default settings and report justified-text
-# gaps and lines drawn wider than laid out, with and without the engine workaround.
-# Usage: scripts/scan_epub_layout.sh /path/to/book.epub [simulator name or UDID]
-# The book is read in place and never copied into the repository.
+# 用阅读器默认设置排版本地 EPUB，分别在启用与不启用引擎规避方案时，
+# 报告两端对齐产生的间隙，以及绘制宽度超出排版宽度的行。
+# 用法：scripts/scan_epub_layout.sh /path/to/book.epub [模拟器名称或 UDID]
+# 书籍在原位置读取，绝不复制到仓库中。
 set -eu
 [ "$#" -ge 1 ] || { echo "usage: $0 book.epub [simulator]" >&2; exit 64; }
 book="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise production display/hash methods with isolated files; never touches a user's library."""
+"""用隔离文件测试生产代码的显示与哈希方法；绝不触碰用户书库。"""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -124,7 +124,7 @@ fixture += r'''
  }
 }
 '''
-# Throwing expressions cannot be evaluated inside Swift's precondition autoclosure.
+# Swift 的 precondition 自动闭包中不能求值会抛错的表达式。
 fixture = fixture.replace('precondition(try fm.contentsOfDirectory(atPath: directory.path) == before)', 'let files = try fm.contentsOfDirectory(atPath: directory.path); precondition(files == before)', 1)
 fixture = fixture.replace('precondition(try fm.contentsOfDirectory(atPath: directory.path) == before)', 'let afterRollback = try fm.contentsOfDirectory(atPath: directory.path); precondition(afterRollback == before)', 1)
 with tempfile.TemporaryDirectory(prefix='NoveliaLibraryStoreRegression-') as temporary:

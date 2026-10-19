@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build a local unsigned iPhoneOS distribution with matching source and notices.
+"""构建本地未签名的 iPhoneOS 分发包，并附上对应源码与许可声明。
 
-Does not change versions, commit, push or publish. Update the project version first.
-Existing output directories are rejected so previously delivered builds stay immutable.
+不修改版本号，不提交、推送或发布；请先更新项目版本。
+输出目录已存在时拒绝执行，确保已交付的构建保持不变。
 """
 import argparse
 import base64
@@ -25,7 +25,7 @@ PREFERRED_SOURCES = Path("scripts/vendor-npm-sources")
 
 
 def verify_preferred_sources(directory, packages):
-    """Check exact upstream source archives supplementing generated npm distributions."""
+    """核对补充生成型 npm 发行包的上游源码归档是否完全一致。"""
     locked = {(name, version) for name, version, _ in packages}
     entries = json.loads((directory / "INDEX.json").read_text())
     expected = {("@juggle/resize-observer", "3.4.0"), ("approx-string-match", "1.1.0")}
@@ -47,7 +47,7 @@ def verify_preferred_sources(directory, packages):
 
 
 def public_source_note(version, build, ipa_name, source_name, dependencies_name):
-    """Directions for the specific public release, suitable for sharing beside its IPA."""
+    """指定公开版本的源码获取说明，可与其 IPA 一同分享。"""
     return (
         f"Novelia {version}（构建 {build}）源码与许可说明\n\n"
         f"对应安装包：{ipa_name}\n\n"
@@ -78,7 +78,7 @@ MODIFIED_DATE = re.compile(r'static let modifiedDate = "(\d{4}-\d{2}-\d{2})"')
 
 
 def modified_date(settings_source: str) -> str:
-    """The GPL modification date shown in the app's licence screen."""
+    """App 许可页面显示的 GPL 修改日期。"""
     match = MODIFIED_DATE.search(settings_source)
     if not match:
         raise RuntimeError("SettingsViews.swift has no modifiedDate")
@@ -86,7 +86,7 @@ def modified_date(settings_source: str) -> str:
 
 
 def npm_packages(lockfile: str) -> list[tuple[str, str, str]]:
-    """(name, version, integrity) of every non-dev package in a pnpm v6 lockfile."""
+    """pnpm v6 锁文件中每个非开发依赖包的 (名称, 版本, 完整性校验值)。"""
     packages = lockfile[lockfile.index("\npackages:"):]
     result = []
     for entry in re.split(r"\n  (?=/)", packages)[1:]:
@@ -104,7 +104,7 @@ def matches_integrity(data: bytes, integrity: str) -> bool:
 
 
 def npm_tarball(name: str, version: str, integrity: str, cache: Path) -> Path:
-    """The published npm tarball, downloaded once and accepted only if it matches the lockfile."""
+    """已发布的 npm 压缩包：只下载一次，且仅在与锁文件一致时接受。"""
     cache.mkdir(parents=True, exist_ok=True)
     path = cache / (hashlib.sha256(integrity.encode()).hexdigest()[:24] + ".tgz")
     if path.exists() and matches_integrity(path.read_bytes(), integrity):
@@ -130,7 +130,7 @@ def source_files():
         if file.is_symlink():
             raise RuntimeError(f"Source symlinks require review: {name}")
         if not file.is_file():
-            continue  # staged/unstaged deleted files are not shipped
+            continue  # 已暂存或未暂存的删除文件不随包分发
         if file.name.startswith(".env") or file.suffix in {".p12", ".p8", ".mobileprovision"}:
             raise RuntimeError(f"Credential-like source file requires review: {name}")
         result.append((name, file))
@@ -152,8 +152,8 @@ def project_version(text):
 
 
 def check_derived_data(path):
-    # The unstripped Release binary records object-file paths under derived data (debug map),
-    # so a derived data directory under a home folder fails the IPA privacy check.
+    # 未剥离符号的 Release 二进制会记录 DerivedData 下的目标文件路径（调试映射），
+    # 因此 DerivedData 放在用户主目录下会导致 IPA 隐私检查失败。
     if re.match(r"/(?:Users|home)/[^/]+/", str(path) + "/"):
         raise RuntimeError("Derived data must be outside home folders (Release binary records its object-file paths)")
     return path
@@ -248,7 +248,7 @@ def main():
         pins = json.loads((ROOT / PIN_FILE).read_text())["pins"]
         with tarfile.open(dependencies, "w:gz") as archive:
             for pin in pins:
-                # SwiftPM checks a package out under its repository name.
+                # SwiftPM 以仓库名作为依赖包的检出目录名。
                 name = pin["location"].rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
                 checkout = checkouts / name
                 if git("rev-parse", "HEAD", cwd=checkout) != pin["state"]["revision"]:
@@ -256,12 +256,12 @@ def main():
                 names = subprocess.check_output(["git", "ls-files", "-z"], cwd=checkout).decode().split("\0")
                 for relative in filter(None, names):
                     archive.add(checkout / relative, arcname=name + "/" + relative, recursive=False)
-            # Readium's navigator scripts are minified bundles; ship the npm packages they were built
-            # from (the lockfile's production set, integrity-checked) as their corresponding source.
+            # Readium 的 navigator 脚本是压缩打包产物；将构建它们所用的 npm 包
+            # （锁文件中的生产依赖集合，已校验完整性）作为对应源码一并分发。
             toolkit_pins = [pin for pin in pins if pin["identity"] == "swift-toolkit"]
             if toolkit_pins:
                 toolkit = checkouts / toolkit_pins[0]["location"].rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
-                # Distinct names: `version` is the app version written to BUILD.json below.
+                # 命名区分：`version` 是下方写入 BUILD.json 的 App 版本。
                 script_packages = npm_packages((toolkit / READIUM_SCRIPTS_LOCK).read_text())
                 verify_preferred_sources(ROOT / PREFERRED_SOURCES, script_packages)
                 for package, package_version, integrity in script_packages:
@@ -277,7 +277,7 @@ def main():
                         archive.extractfile(member).read()
         if before != fingerprint(source_files()):
             raise RuntimeError("Source changed during packaging; do not distribute this output")
-        # Re-check against the IPA so BUILD.json cannot record a version other than the one built.
+        # 再对照 IPA 核对，避免 BUILD.json 记录的版本与实际构建不一致。
         validate_ipa(ipa, version, build)
         metadata = out / "BUILD.json"
         metadata.write_text(json.dumps({"version": version, "build": build, "configuration": "iPhoneOS Release unsigned",

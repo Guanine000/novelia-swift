@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject developer home paths and credential signatures in a distribution IPA."""
+"""拒绝分发 IPA 中出现开发者主目录路径和凭据特征。"""
 import argparse
 import plistlib
 import re
@@ -21,7 +21,7 @@ with zipfile.ZipFile(args.ipa) as archive:
         if name.endswith("/"):
             continue
         data = archive.read(name)
-        # Inspect both raw binary strings and decoded binary plist values.
+        # 同时检查原始二进制字符串与解码后的二进制 plist 值。
         candidates = [data]
         if name.endswith(".plist"):
             candidates.append(repr(plistlib.loads(data)).encode())
