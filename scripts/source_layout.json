@@ -53,7 +53,6 @@
   "WebDAVSyncEngine.swift": "Sources/NoveliaIOSCore/Features/Sync/WebDAVSyncEngine.swift",
   "WebDAVRemote.swift": "Sources/NoveliaIOSCore/Features/Sync/WebDAVRemote.swift",
   "WebDAVAutoSyncPolicy.swift": "Sources/NoveliaIOSCore/Features/Sync/WebDAVAutoSyncPolicy.swift",
-  "WebDAVBlobCleanup.swift": "Sources/NoveliaIOSCore/Features/Sync/WebDAVBlobCleanup.swift",
   "WebDAVCloudBooks.swift": "Sources/NoveliaIOSCore/Features/Sync/WebDAVCloudBooks.swift",
   "ForumMarkdown.swift": "Sources/NoveliaIOSCore/Features/Community/ForumMarkdown.swift",
   "SettingsKeys.swift": "Sources/NoveliaIOSCore/Support/SettingsKeys.swift",

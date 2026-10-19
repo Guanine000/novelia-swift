@@ -45,8 +45,6 @@ enum SettingsKey {
         static let statisticsCache = "webdav.statistics.cache.v1"
         /// 本机文件的内容哈希缓存 `[文件身份: SHA-256]`，见 `WebDAVFileHash.identity`。
         static let fileHashes = "webdav.fileHashes.v1"
-        /// 无引用文件的本机观察记录，实际键另附服务器／账号摘要。
-        static let blobCleanup = "webdav.blobCleanup.v1"
         /// 最近一次内容同步发现不提供 ETag 的服务器地址；用于在设置页提示，换用支持的服务器后清除。
         static let manifestWithoutETag = "webdav.manifestWithoutETag"
     }

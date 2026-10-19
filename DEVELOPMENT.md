@@ -310,7 +310,6 @@ WebDAV 是独立传输能力，不使用小说 API 服务集合。`WebDAVSyncSto
 | `WebDAVSyncEngine.swift` | 按计划传输文件、更新书库并写清单 |
 | `WebDAVRemote.swift` | `WebDAVRemote`、HTTP 客户端、重定向约束与统计远端接口 |
 | `SyncMerge.swift` | 同步数据合并规则 |
-| `WebDAVBlobCleanup.swift` | 服务器／账号隔离的闲置文件观察、延迟复核与清理后补传 |
 | `WebDAVCloudBooks.swift` | 云端书籍记录与封面缓存（`CloudBookStore`）、按需下载 |
 | `WebDAVAutoSyncPolicy.swift` | 自动同步的触发判断、失败退避与本机状态指纹（纯计算） |
 | `App/Integrations/SyncLocalStateAdapter.swift` | 连接实际进度、书签、系列、背景、标签与字体状态；`WebDAVAutoSyncTriggers` 转交前后台与书库／系列／书签／标签变化 |
@@ -323,7 +322,7 @@ WebDAV 请求使用 `reloadIgnoringLocalCacheData` 与 `Cache-Control: no-cache,
 
 清单传输参考 Novelia 安卓端 `WebDavClient.kt`（`44be26d`，GPL-3.0-only）。内部将强 ETag 规范化为带引号值，拒绝弱版本、多个裸值与控制字符；只有官方 `dav.jianguoyun.com:443` 在条件头中发送裸值，请求使用 identity 编码。GET 没有强版本时，PROPFIND Depth 0 只接受确切目标、DAV 命名空间与成功属性；再用该版本重新读取正文，并用随机错误版本验证读取条件确实生效。无法证明版本可靠时抛出 `unsupportedConditions`，已有清单绝不无条件覆盖。坚果云首次创建前，在随机目标验证 MOVE 禁止覆盖、正确版本更新和拒绝旧版本覆盖，并读回确认拒绝后内容未变；正式创建 PUT UUID `.cache` 暂存，再 MOVE Overwrite:F，409 必须先读取确切目标判断是否冲突。真正缺目标才验证暂存源、尝试创建父目录、有限重试及同源绝对路径 Destination，总计最多三次 MOVE，不删目标、不降级覆盖 PUT。成功创建后读回校验正文与强版本，PUT 不回传强版本时也读回确认正文；清理只针对本次随机源／探测目标。该传输改动不改变 v1 清单及 blob 布局。
 
-`WebDAVBlobCleaner` 在成功手动内容同步后、同一本机 `WebDAVManifestWriteGate` 内运行，自动同步不执行。观察缓存按用户名与服务器地址的 SHA-256 隔离，保存在 `webdav.blobCleanup.v1.<摘要>`；不改远端格式。读取有强版本的完整清单、列出 blob 后再次核对版本，按全部书籍／封面／背景／有效字体引用筛选闲置文件。至少两次成功扫描，首次无引用观察的墙钟和连续开机计时均满 24 小时才候选；观察到引用、异常、时钟跳变或重启则推迟／重新等待。每次最多十个候选，逐个复核最新清单，任意版本变化停止本批；清理失败不把已成功的内容同步改判失败。DELETE 响应丢失也按可能已删除处理，之后读最新清单，针对本批被重新引用的文件用确切下载核实；缺失时按实际哈希验证本机书籍、封面、背景与字体副本后补传并再次校验。缺少副本明确报告，云端书目主文件标为缺失，不自动删除书目。本地时表直接使用书籍 `addedAt`／`downloadedAt`，与 `deletedBooks` 比较，不另建重复导入表；同步恢复保留原时间，修改书名和阅读进度不代表重新导入。延迟与复核只降低竞争概率，不构成跨设备锁，不能保证零误删。
+本地时表直接使用书籍 `addedAt`／`downloadedAt`，与 `deletedBooks` 比较，不另建重复导入表；同步恢复保留原时间，修改书名和阅读进度不代表重新导入。
 
 为适应有请求频率限制的服务器，同步尽量少发请求：`WebDAVFolderCache` 记录已确认的目录，自动同步跳过 `verifyConnection`/`prepareFolders` 的请求，手动同步先清空再完整检查，任何同步失败都清空；引擎在清单与读取时内容相同时不写入；`ReadingStatisticsSyncCache` 记录已合并的设备文件版本（ETag，或修改时间与大小）、本机文件上传哈希和旧文件检查时间，只在统计套用到本机后保存，手动同步不使用；`format` 与当前格式不符时丢弃设备版本，重新读取一次全部设备文件。缓存丢失只会多发请求，不能影响合并结果。
 
@@ -332,7 +331,7 @@ WebDAV 请求使用 `reloadIgnoringLocalCacheData` 与 `Cache-Control: no-cache,
 - 同步先等本地书库读取完成，读取失败不得将默认空数组上传；Store 在等待读取前占用同步状态，避免加载期间重复启动同步。本地删除提交失败向上传播，后续同步可以重试。
 
 - 清单文件条目带可选 `size`；上传时写入，`fillMissingSizes` 只在本机同一版本且哈希一致时补齐旧条目，不产生网络请求。
-- 云端删除写入 `deletedBooks`（`WebDAVDeletedBooks`）：仅保留最近三十天；`WebDAVSyncEngine` 在合并前按本轮注入的 `now` 裁剪，`remove` 在新增删除时也裁剪，精确三十天边界保留。裁剪变化经原 ETag 条件写回，即使未开启书籍同步也可随其他内容同步收敛；统计独立同步不触碰书籍清单。过期记录不再阻止离线旧设备重新上传。有效期内同步不恢复、不上传删除时间及之前的版本，本机的这类副本在清单写入成功后经 `SyncBookLibrary.removeFromSync` 删除；更新版本清除记录。`WebDAVCloudBookDeleter` 以条件写入清单（并发冲突重试三次），只提交书目移除与墓碑，不调用 `deleteBlob`。重试读取的最新清单若已无目标书目，且每个目标都有不早于本次请求的删除记录，则确认上一轮已提交，不再重复写入；仍存在的书目必须继续条件写入。清单提交后的跨设备重新引用无法受本机串行门或清单 ETag 保护；物理回收由下述方案二延迟维护，不在删除书目当下执行，仍保留最后一刻重新引用的风险。
+- 云端删除写入 `deletedBooks`（`WebDAVDeletedBooks`）：仅保留最近三十天；`WebDAVSyncEngine` 在合并前按本轮注入的 `now` 裁剪，`remove` 在新增删除时也裁剪，精确三十天边界保留。裁剪变化经原 ETag 条件写回，即使未开启书籍同步也可随其他内容同步收敛；统计独立同步不触碰书籍清单。过期记录不再阻止离线旧设备重新上传。有效期内同步不恢复、不上传删除时间及之前的版本，本机的这类副本在清单写入成功后经 `SyncBookLibrary.removeFromSync` 删除；更新版本清除记录。`WebDAVCloudBookDeleter` 以条件写入清单（并发冲突重试三次），提交书目移除与墓碑；写入成功后对 `remove` 返回、清单中已无引用的 blob 逐个 `deleteBlob`，失败忽略。重试读取的最新清单若已无目标书目，且每个目标都有不早于本次请求的删除记录，则确认上一轮已提交，不再重复写入；仍存在的书目必须继续条件写入。清单提交与随后删除 blob 之间，另一设备重新引用同一内容不受本机串行门或清单 ETag 保护，该文件可能缺失；由手动同步的 `verifiesBlobs` 补传与 `missingFileKeys` 提示兜底。确认上一轮已提交时不再删除 blob，最多留下无用文件。
 - 书籍同步不自动下载书籍文件：App 给引擎传入 `CloudBookStore`（`SyncCloudCatalog`），本机没有的书只记为云端书籍并下载 EPUB 封面，本机已有的书不被远端较新版本替换；上传不变。云端书籍在清单写入成功后才更新，记录与封面保存在 Application Support/WebDAVCloudBooks，属于可重建缓存。书库把它们并入 `LibraryBook`（`cloudFileHash` 为主文件哈希，用于阅读位置与去重），打开前经 `WebDAVSyncStore.downloadCloudBook` 用 `WebDAVCloudBookDownloader` 下载并 `restoreFromSync`。引擎不传 `cloud` 时保持下载全部文件的旧行为（测试使用）。
 - 同步由用户手动触发，或在开启自动同步后由前台、背景、本机改动和网络恢复触发；两者走同一执行路径，同一时间只跑一个。是否自动执行只由 `WebDAVAutoSyncPolicy` 判断，指纹只读已有本地接口，不读文件内容；书签变化与书库／标签一样接入延迟推送。成功后只在执行前后指纹一致时确认已覆盖；在途编辑或远端合并导致状态变化时清空成功指纹，保守保留待同步状态，下次触发可补跑。统计同样使用上传前快照与合并后的本机状态比较，不能把新累计时长误记已上传。本地删除不传播到云端。
 - 自动同步状态（`webdav.autoSync.state.v1`）分清单内容与阅读时长两部分，各自记录指纹、成功时间与失败退避，成功后记录时间，但指纹仅按上述确认规则更新；内容失败时不再同步统计，统计失败不影响已完成的内容同步；进入背景时用后台时间完成，到期取消，依赖“清单最后写入”保证中断安全。
