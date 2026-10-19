@@ -170,10 +170,23 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
     /// 相同来源、系列和文件内容只显示一条；保留所有文件和原始记录。
     /// 哈希未就绪时仍按持久标识显示，避免把同名但内容不同的书合并。
     func displayBooks(from books: [LibraryBook]) -> [LibraryBook] {
-        LibraryOrganizer.uniqueRecords(books, id: { book in
-            guard let hash = hashByBook[book.key] ?? book.cloudFileHash else { return book.key }
-            return "\(book.categoryTitle)|\(series.seriesID(forBook: book.key) ?? "")|\(book.positionPrefix)\(hash)"
-        }, date: { $0.importedAt })
+        LibraryOrganizer.uniqueRecords(books, id: { displayIdentity(for: $0) }, date: { $0.importedAt })
+    }
+
+    /// 删除与显示使用同一分组：否则只删掉代表记录，隐藏的同内容副本马上补位，
+    /// 看起来便像“闪了一下没有删除”。不同来源、系列、格式及未知哈希不扩大删除范围。
+    func booksForDeletion(_ selected: [LibraryBook], from books: [LibraryBook]) -> [LibraryBook] {
+        let groups = Set(selected.map { displayIdentity(for: $0) })
+        let keys = Set(selected.map(\.key))
+        var included = Set<String>()
+        return (selected + books).filter { book in
+            (keys.contains(book.key) || groups.contains(displayIdentity(for: book))) && included.insert(book.key).inserted
+        }
+    }
+
+    private func displayIdentity(for book: LibraryBook) -> String {
+        guard let hash = hashByBook[book.key] ?? book.cloudFileHash else { return book.key }
+        return "\(book.categoryTitle)|\(series.seriesID(forBook: book.key) ?? "")|\(book.positionPrefix)\(hash)"
     }
 
     func status(for book: LibraryBook) -> LibraryReadingStatus {

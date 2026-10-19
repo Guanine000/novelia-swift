@@ -70,7 +70,7 @@ enum WebDAVSyncError: LocalizedError, Equatable {
         case .unsupportedManifest: "远端同步数据版本不受支持，未修改本地书籍。"
         case .invalidAsset: "远端书籍文件校验失败，未导入该文件。"
         case .invalidStatistics: "阅读统计数据格式无效或版本不受支持，未覆盖本机或云端统计。"
-        case .concurrentChange: "另一台设备刚更新了同步数据，请重新同步。"
+        case .concurrentChange: "同步数据的版本发生变化，请稍后重试。"
         case .missingBlob: "云端缺少这本书的文件。请在仍有这本书的设备上手动同步一次，会自动补传缺失的文件。"
         }
     }

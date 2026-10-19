@@ -317,6 +317,10 @@ WebDAV 是独立传输能力，不使用小说 API 服务集合。`WebDAVSyncSto
 
 同步通过 `SyncBookLibrary` 读写两类书籍（包含异步 `prepareForSync` 与可抛错的 `removeFromSync`），通过 `WebDAVSyncLocalState` 访问其他本地状态。远端资源使用内容哈希引用，验证资源名和哈希后才导入。清单写入使用对应并发条件；`WebDAVSyncStore` 经 `WebDAVSyncEngine.runRetryingConcurrentChange` 在 `concurrentChange`（412）时重新读取清单、以新引擎完整重跑（最多三次），重跑安全依赖“清单写入前只追加较新书籍与按时间合并、删除与设置在写入成功后套用”，修改引擎时须保持这一顺序。手动同步传入 `verifiesBlobs`：引擎先用 `WebDAVRemote.listBlobs`（PROPFIND Depth 1）找出清单引用却不在服务器上的 blob，从已知集合中移除，使上传流程补传本机仍有的文件，并在 `WebDAVSyncRunResult` 报告补传与仍缺失的数量；列目录失败或不支持时不补传、不让同步失败。下载遇到 404 抛出 `missingBlob`，同步中缺失的封面跳过，按需下载时封面列为可选文件。成功列目录后，主文件缺失的云端书籍经 `SyncCloudCatalog.setMissingFileKeys` 记入 `CloudBookStore.missingFileKeys`（随本机缓存保存，只保留仍存在的记录），下载遇到缺失也会标记；书库据此显示“云端文件缺失”并提供从云端删除，书目不自动删除。内容同步与 `deleteFromCloud` 经同一 `WebDAVManifestWriteGate` 先到先执行，不交错读写清单；统计同步和按需下载不写清单，不经过它。阅读统计独立同步：每台设备只写 `statistics/<设备 ID>.json`（`ReadingDeviceStatisticsFile`），读取全部设备文件与旧版 `reading-statistics.json` 后按设备取最大值合并，因此不需要条件写入；不得把其他设备的时长写进本机文件，也不得再写旧版文件。设备 ID 用作文件名，须通过 `isValidDeviceID` 校验。设备 ID 由 `ReadingDeviceIdentity` 决定：以 Keychain（`ThisDeviceOnly`，经 `ReadingDeviceIDStoring` 注入）为准；偏好中有 ID 但未绑定 Keychain 视为旧版升级并沿用该 ID；偏好已绑定但 Keychain 没有，视为从备份复制，生成新 ID，并把复制来的本机记录与名称归还原设备。测试必须注入内存实现，不读写真实 Keychain。设备名称（`ReadingDeviceInfo`）随统计同步，本机名称只由本机修改。
 
+书库删除通过 `LibraryStateStore.booksForDeletion` 与显示去重共用 `displayIdentity`，在异步操作前固定完整目标，避免只删代表记录后隐藏副本补位；未知哈希仍只按持久键处理，不跨来源、系列和格式。确认框的显示状态独立于待删除对象，收起不提前清空目标；删除期间显示阶段，防止重复提交。`scripts/test_api_architecture_ui.py --library-delete` 使用独立合成书库验证隐藏副本删除及云端失败反馈，并在 UI 后复核实际索引和文件，不能只依赖“下载／阅读”菜单判断本机是否还残留被去重隐藏的副本。
+
+WebDAV 请求使用 `reloadIgnoringLocalCacheData` 与 `Cache-Control: no-cache, no-store`，避免清单条件写入重试及提交后的读回确认使用旧缓存。云端删除失败由 `LibraryBookActions` 合并失败书籍键，以书库底部提示提供重试；本机删除失败仍使用错误弹窗。
+
 清单传输参考 Novelia 安卓端 `WebDavClient.kt`（`44be26d`，GPL-3.0-only）。内部将强 ETag 规范化为带引号值，拒绝弱版本、多个裸值与控制字符；只有官方 `dav.jianguoyun.com:443` 在条件头中发送裸值，请求使用 identity 编码。GET 没有强版本时，PROPFIND Depth 0 只接受确切目标、DAV 命名空间与成功属性；再用该版本重新读取正文，并用随机错误版本验证读取条件确实生效。无法证明版本可靠时抛出 `unsupportedConditions`，已有清单绝不无条件覆盖。坚果云首次创建前，在随机目标验证 MOVE 禁止覆盖、正确版本更新和拒绝旧版本覆盖，并读回确认拒绝后内容未变；正式创建 PUT UUID `.cache` 暂存，再 MOVE Overwrite:F，409 必须先读取确切目标判断是否冲突。真正缺目标才验证暂存源、尝试创建父目录、有限重试及同源绝对路径 Destination，总计最多三次 MOVE，不删目标、不降级覆盖 PUT。成功创建后读回校验正文与强版本，PUT 不回传强版本时也读回确认正文；清理只针对本次随机源／探测目标。该传输改动不改变 v1 清单及 blob 布局。
 
 `WebDAVBlobCleaner` 在成功手动内容同步后、同一本机 `WebDAVManifestWriteGate` 内运行，自动同步不执行。观察缓存按用户名与服务器地址的 SHA-256 隔离，保存在 `webdav.blobCleanup.v1.<摘要>`；不改远端格式。读取有强版本的完整清单、列出 blob 后再次核对版本，按全部书籍／封面／背景／有效字体引用筛选闲置文件。至少两次成功扫描，首次无引用观察的墙钟和连续开机计时均满 24 小时才候选；观察到引用、异常、时钟跳变或重启则推迟／重新等待。每次最多十个候选，逐个复核最新清单，任意版本变化停止本批；清理失败不把已成功的内容同步改判失败。DELETE 响应丢失也按可能已删除处理，之后读最新清单，针对本批被重新引用的文件用确切下载核实；缺失时按实际哈希验证本机书籍、封面、背景与字体副本后补传并再次校验。缺少副本明确报告，云端书目主文件标为缺失，不自动删除书目。本地时表直接使用书籍 `addedAt`／`downloadedAt`，与 `deletedBooks` 比较，不另建重复导入表；同步恢复保留原时间，修改书名和阅读进度不代表重新导入。延迟与复核只降低竞争概率，不构成跨设备锁，不能保证零误删。
@@ -328,7 +332,7 @@ WebDAV 是独立传输能力，不使用小说 API 服务集合。`WebDAVSyncSto
 - 同步先等本地书库读取完成，读取失败不得将默认空数组上传；Store 在等待读取前占用同步状态，避免加载期间重复启动同步。本地删除提交失败向上传播，后续同步可以重试。
 
 - 清单文件条目带可选 `size`；上传时写入，`fillMissingSizes` 只在本机同一版本且哈希一致时补齐旧条目，不产生网络请求。
-- 云端删除写入 `deletedBooks`（`WebDAVDeletedBooks`）：仅保留最近三十天；`WebDAVSyncEngine` 在合并前按本轮注入的 `now` 裁剪，`remove` 在新增删除时也裁剪，精确三十天边界保留。裁剪变化经原 ETag 条件写回，即使未开启书籍同步也可随其他内容同步收敛；统计独立同步不触碰书籍清单。过期记录不再阻止离线旧设备重新上传。有效期内同步不恢复、不上传删除时间及之前的版本，本机的这类副本在清单写入成功后经 `SyncBookLibrary.removeFromSync` 删除；更新版本清除记录。`WebDAVCloudBookDeleter` 以条件写入清单（并发冲突重试三次），只提交书目移除与墓碑，不调用 `deleteBlob`。清单提交后的跨设备重新引用无法受本机串行门或清单 ETag 保护；物理回收由下述方案二延迟维护，不在删除书目当下执行，仍保留最后一刻重新引用的风险。
+- 云端删除写入 `deletedBooks`（`WebDAVDeletedBooks`）：仅保留最近三十天；`WebDAVSyncEngine` 在合并前按本轮注入的 `now` 裁剪，`remove` 在新增删除时也裁剪，精确三十天边界保留。裁剪变化经原 ETag 条件写回，即使未开启书籍同步也可随其他内容同步收敛；统计独立同步不触碰书籍清单。过期记录不再阻止离线旧设备重新上传。有效期内同步不恢复、不上传删除时间及之前的版本，本机的这类副本在清单写入成功后经 `SyncBookLibrary.removeFromSync` 删除；更新版本清除记录。`WebDAVCloudBookDeleter` 以条件写入清单（并发冲突重试三次），只提交书目移除与墓碑，不调用 `deleteBlob`。重试读取的最新清单若已无目标书目，且每个目标都有不早于本次请求的删除记录，则确认上一轮已提交，不再重复写入；仍存在的书目必须继续条件写入。清单提交后的跨设备重新引用无法受本机串行门或清单 ETag 保护；物理回收由下述方案二延迟维护，不在删除书目当下执行，仍保留最后一刻重新引用的风险。
 - 书籍同步不自动下载书籍文件：App 给引擎传入 `CloudBookStore`（`SyncCloudCatalog`），本机没有的书只记为云端书籍并下载 EPUB 封面，本机已有的书不被远端较新版本替换；上传不变。云端书籍在清单写入成功后才更新，记录与封面保存在 Application Support/WebDAVCloudBooks，属于可重建缓存。书库把它们并入 `LibraryBook`（`cloudFileHash` 为主文件哈希，用于阅读位置与去重），打开前经 `WebDAVSyncStore.downloadCloudBook` 用 `WebDAVCloudBookDownloader` 下载并 `restoreFromSync`。引擎不传 `cloud` 时保持下载全部文件的旧行为（测试使用）。
 - 同步由用户手动触发，或在开启自动同步后由前台、背景、本机改动和网络恢复触发；两者走同一执行路径，同一时间只跑一个。是否自动执行只由 `WebDAVAutoSyncPolicy` 判断，指纹只读已有本地接口，不读文件内容；书签变化与书库／标签一样接入延迟推送。成功后只在执行前后指纹一致时确认已覆盖；在途编辑或远端合并导致状态变化时清空成功指纹，保守保留待同步状态，下次触发可补跑。统计同样使用上传前快照与合并后的本机状态比较，不能把新累计时长误记已上传。本地删除不传播到云端。
 - 自动同步状态（`webdav.autoSync.state.v1`）分清单内容与阅读时长两部分，各自记录指纹、成功时间与失败退避，成功后记录时间，但指纹仅按上述确认规则更新；内容失败时不再同步统计，统计失败不影响已完成的内容同步；进入背景时用后台时间完成，到期取消，依赖“清单最后写入”保证中断安全。
@@ -469,7 +473,7 @@ python3 scripts/test_api_architecture_ui.py \
   --app /tmp/novelia-validation-build/Build/Products/Debug-iphonesimulator/Novelia.app
 ```
 
-脚本支持 `--only-testing TapTests/TapTests/<方法名>`。验证启动参数包括 `-architectureValidation`、`-resetArchitectureValidation`、`-architectureReadium`、`-architectureFailFirstSearch` 和 `-architectureTXT`，分别选择替代服务、清理验证数据、选择 Readium、注入首次搜索失败和生成合成 TXT。测试使用本地样例 EPUB/TXT，不读取用户书籍。
+脚本支持 `--only-testing TapTests/TapTests/<方法名>`。`--epub-pagination` 在独立验证 App 中生成三章编号 EPUB，交替点按／滑动检查正反向跨章连续性；仅 Debug 且独立应用标识及 `-architecturePagination` 同时满足时启用 DOM 可见段落探针，无障碍树中的段落存在不代表屏幕可见。验证启动参数包括 `-architectureValidation`、`-resetArchitectureValidation`、`-architectureReadium`、`-architectureFailFirstSearch` 和 `-architectureTXT`，分别选择替代服务、清理验证数据、选择 Readium、注入首次搜索失败和生成合成 TXT。测试使用本地样例 EPUB/TXT，不读取用户书籍。
 
 验证 App 必须保持 `#if DEBUG` 与独立标识 `cc.novelia.ios.architecture-validation`，使用内存凭据和独立数据目录。重置只能影响验证 App。生产 Release 排除验证参数、账号与运行时实现；检查方式：
 

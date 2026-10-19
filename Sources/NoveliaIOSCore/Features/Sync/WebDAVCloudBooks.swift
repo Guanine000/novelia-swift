@@ -152,19 +152,27 @@ final class CloudBookStore: ObservableObject, SyncCloudCatalog {
 enum WebDAVCloudBookDeleter {
     static func delete(_ keys: Set<String>, from remote: any WebDAVRemote, at date: Date = Date()) async throws -> Int {
         guard !keys.isEmpty else { return 0 }
+        var removedCount = 0
         for attempt in 0..<3 {
             try Task.checkCancellation()
             let (fetched, etag, existed) = try await remote.fetchManifest()
             guard existed else { return 0 }
+            let present = Set(fetched.webBooks.map { $0.record.syncKey } + fetched.wenkuBooks.map { $0.record.syncKey })
+            // 上一轮可能已提交，只在读回确认时遇到版本变化。最新清单已经移除书目，
+            // 且包含本次或更晚的删除记录，就无需再写一次；有重新添加的书仍按原流程处理。
+            if keys.isDisjoint(with: present), keys.allSatisfy({ (fetched.deletedBooks?[$0] ?? .distantPast) >= date }) {
+                return removedCount
+            }
             var manifest = fetched
             let before = manifest.webBooks.count + manifest.wenkuBooks.count
             _ = WebDAVDeletedBooks.remove(keys, from: &manifest, at: date)
+            removedCount = max(removedCount, before - manifest.webBooks.count - manifest.wenkuBooks.count)
             do {
                 try await remote.putManifest(manifest, etag: etag, existed: true)
             } catch WebDAVSyncError.concurrentChange where attempt < 2 {
                 continue
             }
-            return before - manifest.webBooks.count - manifest.wenkuBooks.count
+            return removedCount
         }
         throw WebDAVSyncError.concurrentChange
     }

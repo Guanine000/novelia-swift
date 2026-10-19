@@ -108,6 +108,16 @@ private struct ReadiumEPUBReaderViewContent: View {
         }
         // 书签／搜索面板弹出键盘时不缩小阅读视口，避免整书重新分页并跳页。
         .ignoresSafeArea(.keyboard)
+#if DEBUG
+        .overlay(alignment: .topLeading) {
+            if model.validatesPagination {
+                Text(model.validationVisibleParagraphs)
+                    .font(.system(size: 1)).opacity(0.01)
+                    .accessibilityIdentifier("readium-validation-visible-paragraphs")
+                    .allowsHitTesting(false)
+            }
+        }
+#endif
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .statusBarHidden(true)
