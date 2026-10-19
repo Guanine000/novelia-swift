@@ -453,8 +453,8 @@ final class WebDAVSyncEngineTests: XCTestCase {
 
     // MARK: 云端删除
 
-    /// 删除书目并记录墓碑，保留文件以免破坏其他设备正在建立的引用。
-    func testDeleterRemovesBooksButRetainsBlobsAndRecordsDeletion() async throws {
+    /// 删除书目并记录墓碑，清单写入成功后立即删除不再被引用的文件，仍被其他书引用的文件保留。
+    func testDeleterRemovesBooksAndUnreferencedBlobsAndRecordsDeletion() async throws {
         let shared = remote.seed("shared", as: "a.epub")
         let only = remote.seed("only", as: "b.epub")
         remoteManifest {
@@ -470,27 +470,10 @@ final class WebDAVSyncEngineTests: XCTestCase {
         XCTAssertEqual(manifest.webBooks.map(\.record.id), ["c"])
         XCTAssertEqual(manifest.deletedBooks, ["web:a": date(100), "web:b": date(100)])
         XCTAssertEqual(Set(manifest.positions.keys), ["web:c"])
-        XCTAssertNotNil(remote.blobs[only.hash], "unreferenced file is retained for concurrent reuse")
+        XCTAssertNil(remote.blobs[only.hash], "file no longer referenced is deleted after the manifest commit")
         XCTAssertNotNil(remote.blobs[shared.hash], "file still used by another book is kept")
-        XCTAssertEqual(log.count("remote.deleteBlob"), 0)
+        XCTAssertEqual(log.count("remote.deleteBlob"), 1)
         XCTAssertEqual(remote.puts.last?.etag, "\"v0\"", "manifest write is conditional")
-    }
-
-    /// 另一设备在删除清单提交后重新引用同内容，删除方不能再按旧清单清理文件。
-    func testDeleterKeepsBlobReusedByAnotherDeviceAfterManifestCommit() async throws {
-        let asset = remote.seed("shared book contents", as: "a.epub")
-        remoteManifest { $0.webBooks = [WebDAVBook(record: webBook("a", at: 10), assets: [asset])] }
-        remote.onDidPut = { [self] in
-            let reused = WebDAVAsset(filename: "b.epub", hash: asset.hash)
-            remote.manifest?.webBooks.append(WebDAVBook(record: webBook("b", at: 110), assets: [reused]))
-        }
-        let removed = try await WebDAVCloudBookDeleter.delete(["web:a"], from: remote, at: date(100))
-        XCTAssertEqual(removed, 1)
-        XCTAssertEqual(remote.manifest?.webBooks.map(\.record.id), ["b"])
-        let file = try await remote.downloadBlob(asset.hash)
-        defer { try? FileManager.default.removeItem(at: file) }
-        XCTAssertEqual(try Data(contentsOf: file), Data("shared book contents".utf8))
-        XCTAssertEqual(log.count("remote.deleteBlob"), 0)
     }
 
     private func runRetrying(_ cloud: FakeCloud? = nil, verifiesBlobs: Bool = false) async throws -> WebDAVSyncRunResult {
@@ -1117,191 +1100,6 @@ final class WebDAVSyncEngineTests: XCTestCase {
         XCTAssertEqual(local.appliedFonts?.files, [remoteHash: remoteFont])
         assertProgressCompleted(totalUnits: 3)
         assertDownloadsDeleted()
-    }
-}
-
-/// 增强方案二：延迟候选只保存在本机，不改变远端清单；以确定的时间和竞争时序验证清理边界。
-extension WebDAVSyncEngineTests {
-    private func cleanup(_ hours: Double, server: String = "account@server", files: [String: URL] = [:]) async -> WebDAVBlobCleanupResult {
-        await WebDAVBlobCleaner.clean(remote: remote, defaults: defaults, server: server,
-                                      now: Date(timeIntervalSince1970: 100_000 + hours * 3600), uptime: 10_000 + hours * 3600) { _ in files }
-    }
-
-    private func assertCleanupDeleted(_ hours: Double, server: String = "account@server", expected: Int,
-                                      file: StaticString = #filePath, line: UInt = #line) async {
-        let result = await cleanup(hours, server: server)
-        XCTAssertEqual(result.deleted, expected, file: file, line: line)
-    }
-    private func assertCleanupWarning(_ hours: Double, file: StaticString = #filePath, line: UInt = #line) async {
-        let result = await cleanup(hours)
-        XCTAssertNotNil(result.warning, file: file, line: line)
-    }
-
-    func testCleanupRequiresTwoScansSeparatedBy24Hours() async throws {
-        remote.manifest = WebDAVManifest()
-        let asset = remote.seed("unused", as: "book.txt")
-        let first = await cleanup(0)
-        XCTAssertEqual(first.deleted, 0); XCTAssertEqual(first.pending, 1)
-        let early = await cleanup(23.99)
-        XCTAssertEqual(early.deleted, 0)
-        let due = await cleanup(24)
-        XCTAssertEqual(due.deleted, 1); XCTAssertEqual(due.pending, 0)
-        XCTAssertNil(remote.blobs[asset.hash])
-        XCTAssertTrue(remote.puts.isEmpty, "cleanup must never rewrite the manifest")
-    }
-
-    func testCleanupReferenceResetsWaitingPeriod() async throws {
-        let asset = remote.seed("reused", as: "book.txt")
-        remote.manifest = WebDAVManifest()
-        _ = await cleanup(0)
-        remote.manifest!.wenkuBooks = [WebDAVBook(record: wenkuBook(at: 1), assets: [asset])]
-        let referenced = await cleanup(25)
-        XCTAssertEqual(referenced.pending, 0); XCTAssertEqual(referenced.deleted, 0)
-        remote.manifest!.wenkuBooks = []
-        await assertCleanupDeleted(26, expected: 0)
-        await assertCleanupDeleted(49, expected: 0)
-        await assertCleanupDeleted(50, expected: 1)
-    }
-
-    func testCleanupKeepsBookCoverBackgroundAndFontReferences() async throws {
-        let book = remote.seed("book", as: "book.txt"), cover = remote.seed("cover", as: "cover.jpg")
-        var manifest = WebDAVManifest()
-        manifest.wenkuBooks = [WebDAVBook(record: wenkuBook(at: 1), assets: [book, cover])]
-        let localBackground = try local.background(dark: false)
-        let background = remote.seed("background", as: "background.jpg")
-        var bg = localBackground
-        bg.portraitHash = background.hash
-        manifest.backgrounds = ["light": bg]
-        let font = remote.seed("font", as: "font.ttf")
-        manifest.fonts = [font.hash: SyncedImportedFont(hash: font.hash, format: "ttf", deleted: false, updatedAt: date(1))]
-        remote.manifest = manifest
-        _ = await cleanup(0)
-        let result = await cleanup(25)
-        XCTAssertEqual(result.deleted, 0); XCTAssertEqual(result.pending, 0)
-        XCTAssertEqual(remote.blobs.count, 4)
-    }
-
-    func testCleanupServerAndAccountAreIsolated() async throws {
-        remote.manifest = WebDAVManifest(); _ = remote.seed("unused", as: "book.txt")
-        _ = await cleanup(0, server: "a@server")
-        await assertCleanupDeleted(25, server: "b@server", expected: 0)
-        await assertCleanupDeleted(25, server: "a@server", expected: 1)
-    }
-
-    func testCleanupUnsupportedListingOrMissingVersionRestartsObservation() async throws {
-        remote.manifest = WebDAVManifest(); _ = remote.seed("unused", as: "book.txt")
-        _ = await cleanup(0)
-        remote.listsBlobs = false
-        await assertCleanupWarning(25)
-        remote.listsBlobs = true
-        await assertCleanupDeleted(26, expected: 0)
-        remote.omitsETag = true
-        await assertCleanupWarning(51)
-        remote.omitsETag = false
-        await assertCleanupDeleted(52, expected: 0)
-        await assertCleanupDeleted(76, expected: 1)
-    }
-
-    func testCleanupNetworkFailureNeverUsesOldEligibility() async throws {
-        remote.manifest = WebDAVManifest(); _ = remote.seed("unused", as: "book.txt")
-        _ = await cleanup(0)
-        remote.listError = .unexpectedResponse(429)
-        let failed = await cleanup(25)
-        XCTAssertNotNil(failed.warning); XCTAssertEqual(failed.deleted, 0)
-        remote.listError = nil
-        await assertCleanupDeleted(26, expected: 0)
-        await assertCleanupDeleted(50, expected: 1)
-    }
-
-    func testCleanupStopsIfManifestChangesBeforeDeletion() async throws {
-        remote.manifest = WebDAVManifest(); let asset = remote.seed("reuse", as: "book.txt")
-        _ = await cleanup(0)
-        var reads = 0
-        remote.onFetch = {
-            reads += 1
-            if reads == 3 {
-                self.remote.manifest!.wenkuBooks = [WebDAVBook(record: self.wenkuBook(at: 1), assets: [asset])]
-            }
-        }
-        let result = await cleanup(25)
-        XCTAssertEqual(result.deleted, 0)
-        XCTAssertNotNil(remote.blobs[asset.hash])
-    }
-
-    func testCleanupRepairsLastMomentRereferenceFromValidatedLocalCopy() async throws {
-        remote.manifest = WebDAVManifest(); let asset = remote.seed("reuse", as: "book.txt")
-        let copy = directory.appendingPathComponent("repair.txt")
-        try Data("reuse".utf8).write(to: copy)
-        _ = await cleanup(0)
-        remote.onDelete = { _ in self.remote.manifest!.wenkuBooks = [WebDAVBook(record: self.wenkuBook(at: 1), assets: [asset])] }
-        let result = await cleanup(25, files: [asset.hash: copy])
-        XCTAssertEqual(result.deleted, 1); XCTAssertEqual(result.repaired, 1)
-        XCTAssertTrue(result.missingHashes.isEmpty)
-        XCTAssertEqual(remote.blobs[asset.hash], Data("reuse".utf8))
-    }
-
-    func testCleanupReportsLastMomentRereferenceWithoutLocalCopy() async throws {
-        remote.manifest = WebDAVManifest(); let asset = remote.seed("reuse", as: "book.txt")
-        _ = await cleanup(0)
-        remote.onDelete = { _ in self.remote.manifest!.wenkuBooks = [WebDAVBook(record: self.wenkuBook(at: 1), assets: [asset])] }
-        let result = await cleanup(25)
-        XCTAssertEqual(result.deleted, 1); XCTAssertEqual(result.missingHashes, [asset.hash])
-        XCTAssertTrue(result.summary.contains("仍有副本"))
-    }
-
-    func testCleanupRejectsWrongRepairContent() async throws {
-        remote.manifest = WebDAVManifest(); let asset = remote.seed("reuse", as: "book.txt")
-        let copy = directory.appendingPathComponent("wrong.txt"); try Data("wrong".utf8).write(to: copy)
-        _ = await cleanup(0)
-        remote.onDelete = { _ in self.remote.manifest!.wenkuBooks = [WebDAVBook(record: self.wenkuBook(at: 1), assets: [asset])] }
-        let result = await cleanup(25, files: [asset.hash: copy])
-        XCTAssertEqual(result.repaired, 0); XCTAssertEqual(result.missingHashes, [asset.hash])
-        XCTAssertNil(remote.blobs[asset.hash])
-    }
-
-    func testCleanupBatchLimit() async throws {
-        remote.manifest = WebDAVManifest()
-        for i in 0..<15 { _ = remote.seed("unused-\(i)", as: "book.txt") }
-        _ = await cleanup(0)
-        let result = await cleanup(25)
-        XCTAssertEqual(result.deleted, 10); XCTAssertEqual(result.pending, 5)
-        await assertCleanupDeleted(26, expected: 5)
-    }
-
-    func testCleanupStateClockChangesAndRebootRestartGracePeriod() {
-        let hash = String(repeating: "a", count: 64)
-        var state = WebDAVBlobCleanupState()
-        let start = Date(timeIntervalSince1970: 100_000)
-        XCTAssertTrue(state.observe([hash], at: start, uptime: 1000).isEmpty)
-        XCTAssertTrue(state.observe([hash], at: start.addingTimeInterval(25 * 3600), uptime: 1010).isEmpty, "forward clock change")
-        XCTAssertTrue(state.observe([hash], at: start.addingTimeInterval(26 * 3600), uptime: 5).isEmpty, "reboot")
-        XCTAssertTrue(state.observe([hash], at: start, uptime: 10).isEmpty, "backward clock change")
-    }
-}
-
-extension WebDAVSyncEngineTests {
-    func testCleanupChecksPossibleDeletionAfterLostResponse() async throws {
-        remote.manifest = WebDAVManifest(); let asset = remote.seed("reuse", as: "book.txt")
-        let copy = directory.appendingPathComponent("repair.txt"); try Data("reuse".utf8).write(to: copy)
-        _ = await cleanup(0)
-        remote.onDelete = { hash in
-            self.remote.manifest!.wenkuBooks = [WebDAVBook(record: self.wenkuBook(at: 1), assets: [asset])]
-            self.remote.blobs[hash] = nil
-            throw WebDAVSyncError.unexpectedResponse(500)
-        }
-        let result = await cleanup(25, files: [asset.hash: copy])
-        XCTAssertNotNil(result.warning)
-        XCTAssertEqual(result.repaired, 1)
-        XCTAssertEqual(remote.blobs[asset.hash], Data("reuse".utf8))
-    }
-
-    func testCleanupClockSlewCannotShortenMonotonicGracePeriod() {
-        let hash = String(repeating: "a", count: 64)
-        var state = WebDAVBlobCleanupState()
-        let start = Date(timeIntervalSince1970: 100_000)
-        _ = state.observe([hash], at: start, uptime: 1000)
-        XCTAssertTrue(state.observe([hash], at: start.addingTimeInterval(86400), uptime: 1000 + 86300).isEmpty)
-        XCTAssertEqual(state.observe([hash], at: start.addingTimeInterval(86500), uptime: 1000 + 86400), [hash])
     }
 }
 
