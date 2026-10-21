@@ -11,6 +11,8 @@ import shutil
 import time
 import uuid
 import zipfile
+import struct
+import zlib
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--device', required=True)
 parser.add_argument('--app', required=True, help='Built dedicated architecture-validation Novelia.app')
@@ -442,11 +444,18 @@ if args.library_delete:
     duplicate=dict(records[0]); duplicate['id']=str(uuid.uuid4()).upper(); duplicate['filename']='duplicate-a.epub'; duplicate['addedAt']-=120
     shutil.copyfile(library_dir/records[0]['filename'],library_dir/duplicate['filename'])
     records.append(duplicate)
+    # 每条记录各有一张封面（含隐藏副本），删除后核对封面文件随书一并清除。
+    png=b'\x89PNG\r\n\x1a\n'+b''.join(struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)) for t,d in
+        [(b'IHDR',struct.pack('>IIBBBBB',1,1,8,2,0,0,0)),(b'IDAT',zlib.compress(b'\x00\xff\xff\xff')),(b'IEND',b'')])
+    for record in records:
+        record['coverFilename']=f"cover-{record['id']}.png"
+        (library_dir/record['coverFilename']).write_bytes(png)
     (library_dir/'library.json').write_text(json.dumps(records))
     cloud_dir=support/'WebDAVCloudBooks'
     cloud_dir.mkdir(parents=True,exist_ok=True)
     asset={'filename':records[0]['filename'],'hash':hashlib.sha256((library_dir/records[0]['filename']).read_bytes()).hexdigest()}
-    (cloud_dir/'index.json').write_text(json.dumps({'web':[],'wenku':[{'record':records[0],'assets':[asset]}]}))
+    cloud_record={k:v for k,v in records[0].items() if k!='coverFilename'}
+    (cloud_dir/'index.json').write_text(json.dumps({'web':[],'wenku':[{'record':cloud_record,'assets':[asset]}]}))
     (r/'TapTests.swift').write_text(r"""import XCTest
 final class TapTests:XCTestCase {
  func testLibraryDuplicateDeletionAndCloudFailure() {
@@ -557,6 +566,9 @@ if args.library_delete:
         raise SystemExit('Deletion left a hidden local duplicate; UI alone can hide it behind a cloud record')
     if (directory/'sample-a.epub').exists() or (directory/'duplicate-a.epub').exists():
         raise SystemExit('Deletion left a selected local file')
+    covers = sorted(p.name for p in directory.glob('cover-*'))
+    if covers != [remaining[0]['coverFilename']]:
+        raise SystemExit(f'Deletion left or removed the wrong cover files: {covers}')
 if args.library_archive:
     data_root = Path(subprocess.check_output(['xcrun','simctl','get_app_container',args.device,
                                             'cc.novelia.ios.architecture-validation','data'], text=True).strip())
