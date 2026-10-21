@@ -184,6 +184,7 @@ final class EPUBReaderModel: ObservableObject {
     @Published private(set) var location = EPUBReadingLocation(spineIndex: 0, pageIndex: 0) {
         didSet {
             trimPageCaches()
+            logLocationChange(from: oldValue)
             guard !isRestoringPosition, activeRelayouts == 0, status == .ready else { return }
             if let positionHandler {
                 positionHandler(location.spineIndex, pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex))
@@ -205,7 +206,10 @@ final class EPUBReaderModel: ObservableObject {
     /// 尚未完成的保位重排所要回到的位置。重排开始时会把位置归零并换成空的分页结果，
     /// 若它被下一次重排取消（例如切到后台时系统截图导致深浅色或尺寸来回切换），
     /// 后一次必须沿用这里的锚点，不能从已归零的状态重新计算，否则会落到本章第一页。
-    private var pendingRelayoutAnchor: (spine: Int, offset: Int?, fraction: CGFloat)?
+    /// `page`／`pages` 是重排前实际显示的页码与本章页数，只用于诊断日志。
+    private var pendingRelayoutAnchor: (spine: Int, offset: Int?, fraction: CGFloat, page: Int, pages: Int)?
+    /// 当前这次位置写入的来源（翻页、目录跳转、进度条等），只用于诊断日志，写入后立即清空。
+    private var locationCause: String?
     @Published private(set) var generation = 0
     @Published private(set) var style = EPUBReaderStyle()
     @Published private(set) var isAnimating = false
@@ -230,6 +234,8 @@ final class EPUBReaderModel: ObservableObject {
     var viewportSize: CGSize = .zero {
         didSet {
             if oldValue != viewportSize, oldValue != .zero, status == .ready {
+                // 尺寸变化会整章重排；记录前后尺寸，判断是旋转、分屏还是界面元素改变了阅读区。
+                EPUBLayoutLog.shareable.notice(ReaderDiagnosticMessage.viewportChanged(trace: traceID, fromWidth: Int(oldValue.width.rounded()), fromHeight: Int(oldValue.height.rounded()), toWidth: Int(viewportSize.width.rounded()), toHeight: Int(viewportSize.height.rounded())))
                 let rotated = (oldValue.width > oldValue.height) != (viewportSize.width > viewportSize.height)
                 scheduleRelayout(rotated ? .rotate : .resize)
             }
@@ -440,7 +446,7 @@ final class EPUBReaderModel: ObservableObject {
             self.openTask = nil
         }
         if status == .opening { status = .idle }
-        EPUBLayoutLog.logger.info("EPUB reader closed; trace=\(self.traceID, privacy: .public), gen=\(self.generation, privacy: .public), cancelledTasks=\(cancelled, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+        EPUBLayoutLog.shareable.notice(ReaderDiagnosticMessage.readerClosed(trace: traceID, generation: generation, cancelledTasks: cancelled))
     }
 
     /// 取消等待中的重排、预取和导航排版任务；返回已运行的任务数。
@@ -472,7 +478,7 @@ final class EPUBReaderModel: ObservableObject {
     private func scheduleRelayout(_ reason: EPUBLayoutReason) {
         guard source != nil, status != .idle, status != .opening else { return }
         let cancelled = cancelLayoutTasks()
-        EPUBLayoutLog.logger.info("EPUB relayout scheduled; trace=\(self.traceID, privacy: .public), gen=\(self.generation, privacy: .public), reason=\(reason.rawValue, privacy: .public), cancelledTasks=\(cancelled, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+        EPUBLayoutLog.shareable.notice(ReaderDiagnosticMessage.relayoutScheduled(trace: traceID, generation: generation, reason: reason.rawValue, cancelledTasks: cancelled))
         relayoutTask = Task { [weak self] in
             await self?.relayout(keepingCurrentSpine: true, reason: reason)
             // 替换操作总会先取消此任务，因此未被取消的完成结果仍属于当前任务。
@@ -606,7 +612,7 @@ final class EPUBReaderModel: ObservableObject {
             let spine = source?.chapterCount ?? 0
             let toc = source?.toc.count ?? 0
             let pages = pageCount(spineIndex: location.spineIndex)
-            EPUBLayoutLog.logger.info("\(EPUBLayoutLog.label(kind: self.bookKind), privacy: .public) open succeeded; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), book=\(book, privacy: .public), totalSpine=\(spine, privacy: .public), toc=\(toc, privacy: .public), currentSpine=\(self.location.spineIndex, privacy: .public), currentChapterPages=\(pages, privacy: .public), restored=\(restored, privacy: .public), elapsedMs=\(elapsed, privacy: .public), mono=\(mono, privacy: .public)")
+            EPUBLayoutLog.shareable.notice(ReaderDiagnosticMessage.openSucceeded(label: EPUBLayoutLog.label(kind: bookKind), kind: bookKind, trace: traceID, book: book, totalSpine: spine, toc: toc, currentSpine: location.spineIndex, currentChapterPages: pages, restored: restored, elapsedMs: elapsed, mono: mono))
         }
     }
 
@@ -710,23 +716,28 @@ final class EPUBReaderModel: ObservableObject {
         prefetchTasks.removeAll()
         for task in layoutTasks.values { task.cancel() }
         layoutTasks.removeAll()
-        let anchor: (spine: Int, offset: Int?, fraction: CGFloat)
+        let anchor: (spine: Int, offset: Int?, fraction: CGFloat, page: Int, pages: Int)
+        let resumed: Bool
         if target == nil, keepingCurrentSpine, let pending = pendingRelayoutAnchor {
             anchor = pending
         } else {
             let spine = target?.spine ?? (keepingCurrentSpine ? location.spineIndex : 0)
             let previousCount = max(pageCount(spineIndex: spine), 1)
+            resumed = true
             // 重新分页时保持屏幕上显示同一段文本；比例仅用于
             // 没有文本的页面作为回退。
             anchor = (
                 spine,
                 target != nil ? target?.offset
                     : (keepingCurrentSpine ? pageBook?.sourceOffset(spineIndex: spine, pageIndex: location.pageIndex) : nil),
-                keepingCurrentSpine && target == nil ? CGFloat(location.pageIndex) / CGFloat(previousCount) : 0
+                keepingCurrentSpine && target == nil ? CGFloat(location.pageIndex) / CGFloat(previousCount) : 0,
+                location.pageIndex,
+                pageCount(spineIndex: spine)
             )
         }
         pendingRelayoutAnchor = anchor
         let spineIndex = anchor.spine
+            resumed = false
         let previousFraction = anchor.fraction
         let previousOffset = anchor.offset
         spreadCache.removeAll()
@@ -756,13 +767,19 @@ final class EPUBReaderModel: ObservableObject {
                 if let restoreOffset, let page = book.pageIndex(spineIndex: spineIndex, containingSourceOffset: restoreOffset) {
                     location.pageIndex = page
                 } else {
+                let anchorKind: String
                     location.pageIndex = min(Int(previousFraction * CGFloat(max(pageCount(spineIndex: spineIndex), 1))),
                                              max(pageCount(spineIndex: spineIndex) - 1, 0))
+                    anchorKind = previousOffset != nil ? "offset" : "progression"
                 }
                 if usesDoublePage { location.pageIndex = (location.pageIndex / 2) * 2 }
                 prefetchNeighbors(of: spineIndex)
+                    anchorKind = "fraction"
                 applyDebugJumpIfNeeded()
             }
+                // 重排是阅读中唯一会在用户不操作时移动位置的路径；记录前后页码与定位方式，
+                // fraction 表示没找到原文本、按比例落页，最容易产生跳页。
+                EPUBLayoutLog.shareable.notice(ReaderDiagnosticMessage.relayoutPositioned(label: EPUBLayoutLog.label(kind: bookKind), trace: traceID, generation: generation, reason: reason.rawValue, spine: spineIndex, fromPage: anchor.page, fromPages: anchor.pages, toPage: location.pageIndex, toPages: pageCount(spineIndex: spineIndex), anchor: anchorKind, resumed: resumed))
         } catch {
             if book.generation == generation {
                 lastLayoutFailure = EPUBLayoutLog.failure(error)
@@ -934,10 +951,10 @@ final class EPUBReaderModel: ObservableObject {
             let count = max(pageCount(spineIndex: spineIndex), 1)
             let wasRestoringPosition = isRestoringPosition
             if restoring { isRestoringPosition = true }
-            location = EPUBReadingLocation(
+            moveLocation(to: EPUBReadingLocation(
                 spineIndex: spineIndex,
                 pageIndex: min(Int(pageFraction * Double(count)), count - 1)
-            )
+            ), cause: restoring ? "restore" : "seek")
             isRestoringPosition = wasRestoringPosition
             prefetchNeighbors(of: spineIndex)
         }
@@ -1067,13 +1084,36 @@ final class EPUBReaderModel: ObservableObject {
 
     func commitTurn(forward: Bool) {
         guard canTurn(forward: forward), let target = turnLocation(forward: forward) else { return }
-        location = target
+        moveLocation(to: target, cause: forward ? "turnForward" : "turnBackward")
         prefetchNeighbors(of: location.spineIndex)
     }
 
     // MARK: 目录跳转与字号
 
     /// 翻页动画期间冻结：字号、代次重排都会被拒绝，避免动画中途切换分页代次。
+    /// 写入位置并标明来源，供 `logLocationChange` 区分用户操作与无人操作的移动。
+    private func moveLocation(to target: EPUBReadingLocation, cause: String) {
+        locationCause = cause
+        location = target
+        locationCause = nil
+    }
+
+    /// 用户点了「标记问题」：记录标记与当前位置，便于在分享日志中找到问题发生的时刻。
+    func markIssue() {
+        EPUBLayoutLog.shareable.notice(ReaderDiagnosticMessage.issueMarked(engine: "native"))
+        EPUBLayoutLog.shareable.notice(ReaderDiagnosticMessage.positionChanged(
+            label: EPUBLayoutLog.label(kind: bookKind), trace: traceID, generation: generation, cause: "other",
+            fromSpine: location.spineIndex, fromPage: location.pageIndex, fromPages: pageCount(spineIndex: location.spineIndex),
+            toSpine: location.spineIndex, toPage: location.pageIndex, toPages: pageCount(spineIndex: location.spineIndex)))
+    }
+
+    /// 记录重排以外的每次位置变化（包括普通翻页），使分享日志能还原跳页前后的操作顺序。
+    /// 重排中的临时归零不记录，其落点由 `relayout` 单独记录。只含序号，不含正文。
+    private func logLocationChange(from old: EPUBReadingLocation) {
+        guard old != location, activeRelayouts == 0, status == .ready else { return }
+        EPUBLayoutLog.shareable.notice(ReaderDiagnosticMessage.positionChanged(label: EPUBLayoutLog.label(kind: bookKind), trace: traceID, generation: generation, cause: locationCause ?? "other", fromSpine: old.spineIndex, fromPage: old.pageIndex, fromPages: pageCount(spineIndex: old.spineIndex), toSpine: location.spineIndex, toPage: location.pageIndex, toPages: pageCount(spineIndex: location.spineIndex)))
+    }
+
     func setAnimating(_ animating: Bool) {
         isAnimating = animating
     }
@@ -1098,8 +1138,7 @@ final class EPUBReaderModel: ObservableObject {
 
     /// 跳到指定章首页；目标章未排版时先排版（增量，首页即现）。
     private func navigateToSpine(_ spineIndex: Int) {
-        location.spineIndex = spineIndex
-        location.pageIndex = 0
+        moveLocation(to: EPUBReadingLocation(spineIndex: spineIndex, pageIndex: 0), cause: "navigate")
         // 新跳转替代尚未完成的旧跳转。
         if let navigateTaskID, let previous = layoutTasks.removeValue(forKey: navigateTaskID) { previous.cancel() }
         navigateTaskID = track { [weak self] in
@@ -1197,7 +1236,7 @@ final class EPUBReaderModel: ObservableObject {
                 var page = offset.flatMap { book.pageIndex(spineIndex: spineIndex, containingSourceOffset: $0) } ?? 0
                 if usesDoublePage { page = (page / 2) * 2 }
                 markReadyAfterRecovery(spineIndex: spineIndex)
-                location = EPUBReadingLocation(spineIndex: spineIndex, pageIndex: page)
+                moveLocation(to: EPUBReadingLocation(spineIndex: spineIndex, pageIndex: page), cause: "navigate")
                 prefetchNeighbors(of: spineIndex)
             } catch {
                 guard pageBook === book, EPUBLayoutLog.failure(error).kind != "cancelled" else { return }
@@ -1228,7 +1267,7 @@ final class EPUBReaderModel: ObservableObject {
                                           chapterHref: container.chapterHref(at: spineIndex)) ?? 0
                 if usesDoublePage { page = (page / 2) * 2 }
                 markReadyAfterRecovery(spineIndex: spineIndex)
-                location = EPUBReadingLocation(spineIndex: spineIndex, pageIndex: page)
+                moveLocation(to: EPUBReadingLocation(spineIndex: spineIndex, pageIndex: page), cause: "navigate")
                 prefetchNeighbors(of: spineIndex)
             } catch {
                 guard pageBook === book, EPUBLayoutLog.failure(error).kind != "cancelled" else { return }

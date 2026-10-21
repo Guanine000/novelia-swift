@@ -1,11 +1,16 @@
 import Foundation
+import OSLog
 
 /// 仅导出经过检查的消息格式。未知的自由文本不会复制到分享文件中。
 /// OSLog 隐私设置保护日志记录；此白名单也保护旧版或公开的日志条目。
 public enum ShareableLogPolicy {
     public static let subsystem = "cc.novelia.ios.port"
     private static let patterns: [String: [String]] = [
-        "lifecycle": [#"Application launched, version [0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3} \([0-9]{1,8}\)"#],
+        "lifecycle": [
+            #"Application launched, version [0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3} \([0-9]{1,8}\)"#,
+            #"Scene phase changed; phase=(?:active|inactive|background|unknown)"#,
+            #"Memory warning received; mono=[0-9]{1,12}"#,
+        ],
         "txt": [
             #"TXT decode failed; bytes=[0-9]{1,12}, elapsedMs=[0-9]{1,12}, attempted=UTF-8/BOM-Unicode/GB18030/GBK/Big5/Shift_JIS"#,
             #"TXT decode succeeded; bytes=[0-9]{1,12}, elapsedMs=[0-9]{1,12}"#,
@@ -51,10 +56,24 @@ public enum ShareableLogPolicy {
             #"(?:EPUB|TXT|Online) open cancelled; kind=\#(bookKind), trace=\#(hex8), elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
             #"EPUB reader closed; trace=\#(hex8), gen=[0-9]{1,8}, cancelledTasks=[0-9]{1,6}, mono=[0-9]{1,12}"#,
             #"EPUB relayout scheduled; trace=\#(hex8), gen=[0-9]{1,8}, reason=\#(layoutReason), cancelledTasks=[0-9]{1,6}, mono=[0-9]{1,12}"#,
+            // 跳页诊断（1.0.0 构建 92 及以后）：重排落点、重排以外的位置变化和阅读区尺寸变化。
+            #"(?:EPUB|TXT|Online) relayout positioned; trace=\#(hex8), gen=[0-9]{1,8}, reason=\#(layoutReason), spine=[0-9]{1,8}, fromPage=[0-9]{1,8}, fromPages=[0-9]{1,8}, toPage=[0-9]{1,8}, toPages=[0-9]{1,8}, anchor=(?:offset|progression|fraction), resumed=(?:true|false), mono=[0-9]{1,12}"#,
+            #"(?:EPUB|TXT|Online) position changed; trace=\#(hex8), gen=[0-9]{1,8}, cause=\#(positionCause), fromSpine=[0-9]{1,8}, fromPage=[0-9]{1,8}, fromPages=[0-9]{1,8}, toSpine=[0-9]{1,8}, toPage=[0-9]{1,8}, toPages=[0-9]{1,8}, mono=[0-9]{1,12}"#,
+            #"EPUB viewport changed; trace=\#(hex8), from=[0-9]{1,5}x[0-9]{1,5}, to=[0-9]{1,5}x[0-9]{1,5}, mono=[0-9]{1,12}"#,
+            #"User marked reading issue; engine=native, mono=[0-9]{1,12}"#,
             #"(?:EPUB|TXT|Online) chapter laid out; \#(layoutFields), pages=[0-9]{1,8}, cacheHit=false, elapsedMs=[0-9]{1,12}\#(tail)"#,
             #"(?:EPUB|TXT|Online) chapter layout reused; \#(layoutFields), pages=[0-9]{1,8}, cacheHit=true, level=(?:memory|inflight|book), elapsedMs=[0-9]{1,12}\#(tail)"#,
             #"(?:EPUB|TXT|Online) chapter layout cancelled; \#(layoutFields), elapsedMs=[0-9]{1,12}\#(tail)"#,
             #"(?:EPUB|TXT|Online) chapter layout failed; \#(layoutFields), error=\#(errorKindPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}\#(tail)"#,
+        ],
+        "readium": [
+            #"Readium EPUB opened: [0-9]{1,8} resources, [0-9]{1,8} positions"#,
+            #"User marked reading issue; engine=readium, mono=[0-9]{1,12}"#,
+            // 1.0.0 构建 93 及以后：翻页时与停稳后的章节分页状态、WebView 重建与资源读取失败。
+            #"Readium page state; when=(?:tap|swipe|settled), resource=-?[0-9]{1,8}, offset=-?[0-9]{1,9}, width=[0-9]{1,6}, content=[0-9]{1,9}, mono=[0-9]{1,12}"#,
+            #"Readium web view created; count=[0-9]{1,8}, mono=[0-9]{1,12}"#,
+            #"Readium resource load failed; resource=-?[0-9]{1,8}, mono=[0-9]{1,12}"#,
+            #"Readium position changed; kind=\#(bookKind), cause=\#(positionCause), fromResource=-?[0-9]{1,8}, fromProgress=-?[0-9]{1,4}, toResource=-?[0-9]{1,8}, toProgress=-?[0-9]{1,4}, total=-?[0-9]{1,4}, mono=[0-9]{1,12}"#,
         ],
         "enginediag": [
             #"EPUB layout trace summary; spine=[0-9]{1,8}, events=[0-9]{1,12}, html=[0-9]{1,12}, css=[0-9]{1,12}, selector=[0-9]{1,12}, style=[0-9]{1,12}, ingestion=[0-9]{1,12}, adapter=[0-9]{1,12}, allocation=[0-9]{1,12}"#,
@@ -70,6 +89,9 @@ public enum ShareableLogPolicy {
     private static let txtReason = "(?:" + txtReasons.joined(separator: "|") + ")"
     private static let layoutReason = "(?:" + layoutReasons.joined(separator: "|") + ")"
     private static let bookKind = "(?:epub|txt|online)"
+    /// 阅读位置变化的来源：两种阅读引擎共用。`other`／`unattributed` 表示没有对应的用户操作。
+    public static let positionCauses = ["turnForward", "turnBackward", "tap", "swipe", "navigate", "seek", "restore", "open", "rebuild", "preferences", "other", "unattributed"]
+    private static let positionCause = "(?:" + positionCauses.joined(separator: "|") + ")"
     private static let layoutFields = "book=\(hex8), trace=\(hex8), gen=[0-9]{1,8}, spine=[0-9]{1,8}, totalSpine=[0-9]{1,8}, currentSpine=[0-9]{1,8}, reason=\(layoutReason)"
 
     /// EPUB 阅读器记录的错误类型：使用固定名称，不包含错误描述。
@@ -139,5 +161,215 @@ public enum ShareableLogAggregator {
             index = end
         }
         return output
+    }
+}
+
+// MARK: - 跨启动诊断记录
+
+/// 一条跨启动诊断记录。`launch` 标识写入它的那次启动。
+public struct DiagnosticJournalEntry: Equatable {
+    public let date: Date
+    public let launch: String
+    public let level: String
+    public let category: String
+    public let message: String
+}
+
+/// 把通过 `ShareableLogPolicy` 审查的诊断事件追加到 App 自己的文件，使 App 重启或被系统结束后
+/// 仍能导出之前的记录（`OSLogStore` 在 iOS 上只能读当前进程）。
+///
+/// 只保存允许清单内的格式，写入与读取都再经过审查，因此文件中不会出现书名、正文、路径或账号。
+/// 文件超过 `maxBytes` 时轮换为一个旧文件，最多占用约两倍空间；读取时只取最近 7 天。
+/// 所有文件操作在私有串行队列上执行，调用方不阻塞主线程。
+public final class DiagnosticJournal: @unchecked Sendable {
+    /// App 使用的实例，位于 Application Support/Diagnostics，不随 iCloud 备份。
+    public static let shared: DiagnosticJournal = {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return DiagnosticJournal(directory: base.appendingPathComponent("Diagnostics", isDirectory: true))
+    }()
+
+    /// 本次启动的标识，用于导出时区分「以前的启动」与当前进程（当前进程的记录改从系统日志读取）。
+    public let launch: String
+    private let directory: URL
+    private let maxBytes: Int
+    private let queue = DispatchQueue(label: "cc.novelia.ios.port.diagnostic-journal")
+    private var currentURL: URL { directory.appendingPathComponent("journal.log") }
+    private var rotatedURL: URL { directory.appendingPathComponent("journal.1.log") }
+
+    public init(directory: URL, launch: String = DiagnosticContext.newTraceID(), maxBytes: Int = 1_500_000) {
+        self.directory = directory
+        self.launch = launch
+        self.maxBytes = max(maxBytes, 1_024)
+    }
+
+    /// 追加一条记录；未通过审查的消息直接丢弃。
+    public func append(level: String, category: String, message: String, date: Date = Date()) {
+        queue.async { [self] in
+            guard ShareableLogPolicy.message(subsystem: ShareableLogPolicy.subsystem, category: category, text: message) != nil,
+                  ["debug", "info", "notice", "error", "fault"].contains(level) else { return }
+            let line = "\(Int((date.timeIntervalSince1970 * 1_000).rounded()))\t\(launch)\t\(level)\t\(category)\t\(message)\n"
+            write(Data(line.utf8))
+        }
+    }
+
+    /// 读取 `since` 之后的记录（旧到新），可排除指定启动；损坏或未通过审查的行被跳过。
+    public func entries(since: Date, excludingLaunch: String? = nil) -> [DiagnosticJournalEntry] {
+        queue.sync {
+            [rotatedURL, currentURL].flatMap { url -> [DiagnosticJournalEntry] in
+                guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+                return text.split(separator: "\n").compactMap { Self.parse($0) }
+            }
+            .filter { $0.date >= since && $0.launch != excludingLaunch }
+            .sorted { $0.date < $1.date }
+        }
+    }
+
+    /// 等待已排队的写入完成（测试与导出前使用）。
+    public func flush() {
+        queue.sync {}
+    }
+
+    private func write(_ data: Data) {
+        let manager = FileManager.default
+        if !manager.fileExists(atPath: directory.path) {
+            try? manager.createDirectory(at: directory, withIntermediateDirectories: true)
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            var url = directory
+            try? url.setResourceValues(values)
+        }
+        let size = (try? manager.attributesOfItem(atPath: currentURL.path)[.size] as? Int) ?? 0
+        if size + data.count > maxBytes, size > 0 {
+            try? manager.removeItem(at: rotatedURL)
+            try? manager.moveItem(at: currentURL, to: rotatedURL)
+        }
+        if !manager.fileExists(atPath: currentURL.path) {
+            manager.createFile(atPath: currentURL.path, contents: nil)
+        }
+        guard let handle = try? FileHandle(forWritingTo: currentURL) else { return }
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: data)
+    }
+
+    private static func parse(_ line: Substring) -> DiagnosticJournalEntry? {
+        let fields = line.split(separator: "\t", maxSplits: 4, omittingEmptySubsequences: false).map(String.init)
+        guard fields.count == 5, let millis = Int(fields[0]),
+              fields[1].range(of: "\\A[0-9a-f]{8}\\z", options: .regularExpression) != nil,
+              ["debug", "info", "notice", "error", "fault"].contains(fields[2]),
+              let message = ShareableLogPolicy.message(subsystem: ShareableLogPolicy.subsystem, category: fields[3], text: fields[4])
+        else { return nil }
+        return DiagnosticJournalEntry(date: Date(timeIntervalSince1970: Double(millis) / 1_000), launch: fields[1],
+                                      level: fields[2], category: fields[3], message: message)
+    }
+}
+
+/// 同时写入系统日志与跨启动诊断记录的日志器，用于需要出现在分享日志中的事件。
+/// 只有通过 `ShareableLogPolicy` 审查的消息才以公开形式写入系统日志，其余按私有处理。
+public struct ShareableLogger: Sendable {
+    public let category: String
+    private let logger: Logger
+    private let journal: DiagnosticJournal
+
+    public init(category: String, journal: DiagnosticJournal = .shared) {
+        self.category = category
+        self.logger = Logger(subsystem: ShareableLogPolicy.subsystem, category: category)
+        self.journal = journal
+    }
+
+    public func notice(_ message: String) {
+        record(.default, level: "notice", message)
+    }
+
+    public func error(_ message: String) {
+        record(.error, level: "error", message)
+    }
+
+    private func record(_ type: OSLogType, level: String, _ message: String) {
+        if ShareableLogPolicy.message(subsystem: ShareableLogPolicy.subsystem, category: category, text: message) != nil {
+            logger.log(level: type, "\(message, privacy: .public)")
+        } else {
+            logger.log(level: type, "\(message, privacy: .private)")
+        }
+        journal.append(level: level, category: category, message: message)
+    }
+}
+
+/// 阅读位置与运行环境诊断的消息格式。集中在 Core 中生成，回归测试逐一确认它们能通过
+/// `ShareableLogPolicy`，避免调用处的拼写差异让事件在导出时被静默丢弃。只接受数字与固定标签。
+public enum ReaderDiagnosticMessage {
+    public static func relayoutScheduled(trace: String, generation: Int, reason: String, cancelledTasks: Int,
+                                         mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "EPUB relayout scheduled; trace=\(trace), gen=\(generation), reason=\(reason), cancelledTasks=\(cancelledTasks), mono=\(mono)"
+    }
+
+    public static func readerClosed(trace: String, generation: Int, cancelledTasks: Int,
+                                    mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "EPUB reader closed; trace=\(trace), gen=\(generation), cancelledTasks=\(cancelledTasks), mono=\(mono)"
+    }
+
+    /// `label` 为 EPUB、TXT 或 Online，`kind` 为对应的 epub、txt、online。
+    public static func openSucceeded(label: String, kind: String, trace: String, book: String, totalSpine: Int, toc: Int,
+                                     currentSpine: Int, currentChapterPages: Int, restored: Bool, elapsedMs: Int,
+                                     mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "\(label) open succeeded; kind=\(kind), trace=\(trace), book=\(book), totalSpine=\(totalSpine), toc=\(toc), currentSpine=\(currentSpine), currentChapterPages=\(currentChapterPages), restored=\(restored), elapsedMs=\(elapsedMs), mono=\(mono)"
+    }
+
+    public static func relayoutPositioned(label: String, trace: String, generation: Int, reason: String, spine: Int,
+                                          fromPage: Int, fromPages: Int, toPage: Int, toPages: Int, anchor: String, resumed: Bool,
+                                          mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "\(label) relayout positioned; trace=\(trace), gen=\(generation), reason=\(reason), spine=\(spine), fromPage=\(fromPage), fromPages=\(fromPages), toPage=\(toPage), toPages=\(toPages), anchor=\(anchor), resumed=\(resumed), mono=\(mono)"
+    }
+
+    public static func positionChanged(label: String, trace: String, generation: Int, cause: String,
+                                       fromSpine: Int, fromPage: Int, fromPages: Int, toSpine: Int, toPage: Int, toPages: Int,
+                                       mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "\(label) position changed; trace=\(trace), gen=\(generation), cause=\(cause), fromSpine=\(fromSpine), fromPage=\(fromPage), fromPages=\(fromPages), toSpine=\(toSpine), toPage=\(toPage), toPages=\(toPages), mono=\(mono)"
+    }
+
+    public static func viewportChanged(trace: String, fromWidth: Int, fromHeight: Int, toWidth: Int, toHeight: Int,
+                                       mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "EPUB viewport changed; trace=\(trace), from=\(fromWidth)x\(fromHeight), to=\(toWidth)x\(toHeight), mono=\(mono)"
+    }
+
+    /// 用户在阅读器中点了「标记问题」。`engine` 为 native 或 readium。
+    public static func issueMarked(engine: String, mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "User marked reading issue; engine=\(engine), mono=\(mono)"
+    }
+
+    public static func readiumOpened(resources: Int, positions: Int) -> String {
+        "Readium EPUB opened: \(resources) resources, \(positions) positions"
+    }
+
+    /// 进度为千分比；未知时为 -1。
+    public static func readiumPositionChanged(kind: String, cause: String, fromResource: Int, fromProgress: Int,
+                                              toResource: Int, toProgress: Int, total: Int,
+                                              mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "Readium position changed; kind=\(kind), cause=\(cause), fromResource=\(fromResource), fromProgress=\(fromProgress), toResource=\(toResource), toProgress=\(toProgress), total=\(total), mono=\(mono)"
+    }
+
+    /// 当前章节 WebView 的横向分页状态（单位 pt）：页码约为 offset/width，页数约为 content/width。
+    /// Readium 翻页时若 offset + width 超出 content 就认为已到章末并进入下一章。
+    public static func readiumPageState(when: String, resource: Int, offset: Int, width: Int, content: Int,
+                                        mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "Readium page state; when=\(when), resource=\(resource), offset=\(offset), width=\(width), content=\(content), mono=\(mono)"
+    }
+
+    /// Readium 新建章节 WebView；WebContent 进程终止后 Readium 会重建全部章节，表现为短时间内连续出现。
+    public static func readiumWebViewCreated(count: Int, mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "Readium web view created; count=\(count), mono=\(mono)"
+    }
+
+    public static func readiumResourceLoadFailed(resource: Int, mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "Readium resource load failed; resource=\(resource), mono=\(mono)"
+    }
+
+    public static func scenePhase(_ phase: String) -> String {
+        "Scene phase changed; phase=\(phase)"
+    }
+
+    public static func memoryWarning(mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "Memory warning received; mono=\(mono)"
     }
 }

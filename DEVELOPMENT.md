@@ -355,6 +355,16 @@ WebDAV 请求使用 `reloadIgnoringLocalCacheData` 与 `Cache-Control: no-cache,
 
 ## 新增、修改与删除功能
 
+导出通过 `OSLogStore` 读取，在 iOS 上只能读到当前进程，并且实际只读回 `notice` 及以上级别；`info`／`debug` 只用于连接 Xcode 时的本机排障。需要出现在分享日志中的事件使用 Core 的 `ShareableLogger`：它写入系统日志（只有通过审查的消息标为公开），同时追加到 `DiagnosticJournal`（Application Support/Diagnostics，不备份，单文件约 1.5 MB、轮换保留一个旧文件，导出时取最近 7 天）。写入与读取都再经过 `ShareableLogPolicy` 审查。导出时，以前启动的记录来自该文件，本次启动的记录来自系统日志，两者按启动标识去重，因此 App 重启或被系统结束后仍可导出之前的记录。阅读诊断消息统一由 `ReaderDiagnosticMessage` 生成，不在调用处手写格式；新增事件时同时增加格式化函数、允许清单和 `ReaderDiagnosticMessageTests` 用例。
+
+跳页相关诊断：
+- 前后台切换与内存警告（`lifecycle`）。
+- 默认引擎（`epub`）：阅读区尺寸变化、重排计划、重排落点（前后页码，以及 `offset`／`progression`／`fraction` 定位方式），以及重排以外的每次位置变化（来源 `cause`，包括普通翻页）。
+- Readium（`readium`）：每次位置变化（资源序号、章内与全书千分比）。翻页前注册一个不消费事件的点按观察者，并给内部滚动视图的拖动手势追加只读目标，从而把点按、滑动记为 `tap`／`swipe`；只有无法对应到任何操作的移动才记为 `unattributed`。点按、滑动时与位置停稳后各记录一次当前章节 WebView 的分页状态（`offset`／`width`／`content`，单位 pt）：Readium 翻页时若 `offset + width` 超出 `content` 就进入下一章，对照这些值即可判断是否因章节宽度暂时变小而跨章。`setupUserScripts` 回调记录 WebView 新建次数，WebContent 进程终止后 Readium 会重建全部章节，表现为短时间内连续出现。资源读取失败只记录资源序号。
+- 阅读器顶栏的「标记问题」按钮写入标记行；默认引擎同时记录当前位置，Readium 同时记录分页状态。
+
+普通翻页也会记录，每次翻页约一到三行；导出上限为 10000 行。修改来源名称时同步更新 `ShareableLogPolicy.positionCauses`。
+
 ### 新增功能
 
 1. 选择所属 Feature，页面与 Store 放在该目录，可测试逻辑放在 Core 对应 Feature。

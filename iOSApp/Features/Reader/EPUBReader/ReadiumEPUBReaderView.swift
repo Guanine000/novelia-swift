@@ -220,6 +220,7 @@ private struct ReadiumEPUBReaderViewContent: View {
             }
             .accessibilityLabel("阅读样式")
             .disabled(model.status != .ready)
+            ReaderIssueMarkButton { model.markIssue() }
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 10)

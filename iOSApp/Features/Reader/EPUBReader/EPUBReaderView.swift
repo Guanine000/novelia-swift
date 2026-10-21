@@ -251,6 +251,7 @@ private struct EPUBReaderViewContent: View {
                 }
                 .accessibilityLabel("书签与搜索")
             }
+            ReaderIssueMarkButton { model.markIssue() }
             Button {
                 isShowingTOC = true
             } label: {
