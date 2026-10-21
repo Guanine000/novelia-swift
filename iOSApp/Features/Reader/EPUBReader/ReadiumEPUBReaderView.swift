@@ -220,7 +220,6 @@ private struct ReadiumEPUBReaderViewContent: View {
                 }
                 .accessibilityLabel("书签与搜索")
             }
-            ReaderIssueMarkButton { model.markIssue() }
             Button {
                 model.isTOCDiagnosticsExpanded = false
                 isShowingTOC = true
@@ -488,6 +487,7 @@ private struct ReadiumEPUBReaderViewContent: View {
                     Text("行间距、段落间距、首行缩进设为非默认值时会覆盖书籍原有的段落样式；全部保持默认则沿用书籍排版。左右边距取两者平均值。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
+                ReaderIssueMarkSection { model.markIssue() }
             }
             .navigationTitle("阅读样式")
             .navigationBarTitleDisplayMode(.inline)
