@@ -107,3 +107,37 @@ final class ReaderSettings: ObservableObject {
         ["light", "dark", "system"].contains(value) ? value : "system"
     }
 }
+
+/// Readium：书籍给页面指定了不透明底色时，阅读器四周（边距、安全区）何时跟随它。
+/// 只影响四周，WebView 内的书页底色始终按书籍显示。
+enum ReaderBookBackgroundFollow: String, CaseIterable, Identifiable {
+    /// 忽略纯白或接近白色的书籍底色（默认）：白底书保留阅读背景，彩色页面仍铺满。
+    case ignoreNearWhite
+    /// 当前深浅色与横竖屏设有阅读背景图片时不跟随，保留图片。
+    case keepBackgroundImage
+
+    static let `default` = ignoreNearWhite
+    /// 三个分量都不低于该值（0–1，约 #F0F0F0）视为接近白色，米白纸色也包括在内。
+    static let nearWhiteThreshold = 240.0 / 255
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .ignoreNearWhite: "忽略白色底色"
+        case .keepBackgroundImage: "保留背景图片"
+        }
+    }
+
+    /// 已保存值无法识别或缺失时使用默认规则。
+    init(storedValue: String?) {
+        self = storedValue.flatMap(Self.init(rawValue:)) ?? .default
+    }
+
+    func follows(red: Double, green: Double, blue: Double, hasBackgroundImage: Bool) -> Bool {
+        switch self {
+        case .ignoreNearWhite: min(red, green, blue) < Self.nearWhiteThreshold
+        case .keepBackgroundImage: !hasBackgroundImage
+        }
+    }
+}

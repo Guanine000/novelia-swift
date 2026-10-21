@@ -359,6 +359,9 @@ final class EPUBReaderModel: ObservableObject {
         if container.flexGridRewriteCount > 0 {
             messages.append("本书包含 \(container.flexGridRewriteCount) 处 Flex/Grid 布局声明，已回退为普通块布局以显示内容；相关内容的专属对齐和间距效果可能不同。")
         }
+        if container.positionRewriteCount > 0 {
+            messages.append("本书包含 \(container.positionRewriteCount) 处绝对／固定定位（position: absolute/fixed/sticky），当前排版引擎不支持，已改为按文档顺序显示；相关内容不再固定在原位置。")
+        }
         if container.textShadowRewriteCount > 0 {
             messages.append("本书包含 \(container.textShadowRewriteCount) 处文字阴影（text-shadow），当前排版引擎不支持阴影，已改用阴影颜色作为文字颜色以保证可读。")
         }
@@ -720,10 +723,10 @@ final class EPUBReaderModel: ObservableObject {
         let resumed: Bool
         if target == nil, keepingCurrentSpine, let pending = pendingRelayoutAnchor {
             anchor = pending
+            resumed = true
         } else {
             let spine = target?.spine ?? (keepingCurrentSpine ? location.spineIndex : 0)
             let previousCount = max(pageCount(spineIndex: spine), 1)
-            resumed = true
             // 重新分页时保持屏幕上显示同一段文本；比例仅用于
             // 没有文本的页面作为回退。
             anchor = (
@@ -734,10 +737,10 @@ final class EPUBReaderModel: ObservableObject {
                 location.pageIndex,
                 pageCount(spineIndex: spine)
             )
+            resumed = false
         }
         pendingRelayoutAnchor = anchor
         let spineIndex = anchor.spine
-            resumed = false
         let previousFraction = anchor.fraction
         let previousOffset = anchor.offset
         spreadCache.removeAll()
@@ -764,22 +767,22 @@ final class EPUBReaderModel: ObservableObject {
                 let restoreOffset = previousOffset ?? targetProgression.flatMap { progression in
                     book.sourceLength(spineIndex: spineIndex).map { EPUBChapterProgress.offset(progression: progression, length: $0) }
                 }
+                let anchorKind: String
                 if let restoreOffset, let page = book.pageIndex(spineIndex: spineIndex, containingSourceOffset: restoreOffset) {
                     location.pageIndex = page
+                    anchorKind = previousOffset != nil ? "offset" : "progression"
                 } else {
-                let anchorKind: String
                     location.pageIndex = min(Int(previousFraction * CGFloat(max(pageCount(spineIndex: spineIndex), 1))),
                                              max(pageCount(spineIndex: spineIndex) - 1, 0))
-                    anchorKind = previousOffset != nil ? "offset" : "progression"
+                    anchorKind = "fraction"
                 }
                 if usesDoublePage { location.pageIndex = (location.pageIndex / 2) * 2 }
-                prefetchNeighbors(of: spineIndex)
-                    anchorKind = "fraction"
-                applyDebugJumpIfNeeded()
-            }
                 // 重排是阅读中唯一会在用户不操作时移动位置的路径；记录前后页码与定位方式，
                 // fraction 表示没找到原文本、按比例落页，最容易产生跳页。
                 EPUBLayoutLog.shareable.notice(ReaderDiagnosticMessage.relayoutPositioned(label: EPUBLayoutLog.label(kind: bookKind), trace: traceID, generation: generation, reason: reason.rawValue, spine: spineIndex, fromPage: anchor.page, fromPages: anchor.pages, toPage: location.pageIndex, toPages: pageCount(spineIndex: spineIndex), anchor: anchorKind, resumed: resumed))
+                prefetchNeighbors(of: spineIndex)
+                applyDebugJumpIfNeeded()
+            }
         } catch {
             if book.generation == generation {
                 lastLayoutFailure = EPUBLayoutLog.failure(error)
@@ -1088,9 +1091,6 @@ final class EPUBReaderModel: ObservableObject {
         prefetchNeighbors(of: location.spineIndex)
     }
 
-    // MARK: 目录跳转与字号
-
-    /// 翻页动画期间冻结：字号、代次重排都会被拒绝，避免动画中途切换分页代次。
     /// 写入位置并标明来源，供 `logLocationChange` 区分用户操作与无人操作的移动。
     private func moveLocation(to target: EPUBReadingLocation, cause: String) {
         locationCause = cause
@@ -1114,6 +1114,9 @@ final class EPUBReaderModel: ObservableObject {
         EPUBLayoutLog.shareable.notice(ReaderDiagnosticMessage.positionChanged(label: EPUBLayoutLog.label(kind: bookKind), trace: traceID, generation: generation, cause: locationCause ?? "other", fromSpine: old.spineIndex, fromPage: old.pageIndex, fromPages: pageCount(spineIndex: old.spineIndex), toSpine: location.spineIndex, toPage: location.pageIndex, toPages: pageCount(spineIndex: location.spineIndex)))
     }
 
+    // MARK: 目录跳转与字号
+
+    /// 翻页动画期间冻结：字号、代次重排都会被拒绝，避免动画中途切换分页代次。
     func setAnimating(_ animating: Bool) {
         isAnimating = animating
     }

@@ -37,6 +37,7 @@ private struct ReadiumEPUBReaderViewContent: View {
     @State private var draftStyle = EPUBReaderStyle()
     @State private var batteryLevel: Float = -1
     @State private var wasBatteryMonitoringEnabled = false
+    @AppStorage(SettingsKey.readerBookBackgroundFollow) private var bookBackgroundFollow = ReaderBookBackgroundFollow.default.rawValue
     let bookURL: URL?
     var textBook: PagedTextBook? = nil
     var accessory: AnyView? = nil
@@ -44,6 +45,16 @@ private struct ReadiumEPUBReaderViewContent: View {
 
     private var pageBackground: Color {
         settings.appearance.background(system: model.isDarkMode ? .dark : .light)
+    }
+
+    /// 当前页需要铺满四周的书籍底色；规则在“我的 → 阅读体验”中选择，不跟随时为 nil。
+    private func followedBookBackground(landscape: Bool) -> UIColor? {
+        guard model.status == .ready, let color = model.bookBackgroundColor else { return nil }
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        let hasImage = backgrounds.image(dark: model.isDarkMode, landscape: landscape) != nil
+        return ReaderBookBackgroundFollow(storedValue: bookBackgroundFollow)
+            .follows(red: red, green: green, blue: blue, hasBackgroundImage: hasImage) ? color : nil
     }
 
     init(bookURL: URL?, textBook: PagedTextBook?, accessory: AnyView?, statisticsBook: ReadingBook?, settings: ReaderSettings) {
@@ -57,7 +68,12 @@ private struct ReadiumEPUBReaderViewContent: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                ReaderBackgroundView(dark: model.isDarkMode, fallback: pageBackground).ignoresSafeArea()
+                if let bookBackground = followedBookBackground(landscape: geometry.size.width > geometry.size.height) {
+                    // 书籍指定了页面底色：铺满整屏，与 WebView 内的书页连成一片。
+                    Color(bookBackground).ignoresSafeArea()
+                } else {
+                    ReaderBackgroundView(dark: model.isDarkMode, fallback: pageBackground).ignoresSafeArea()
+                }
                 switch model.status {
                 case .idle, .opening:
                     ProgressView(textBook == nil ? "正在解析 EPUB…" : "正在打开章节…")
@@ -204,6 +220,7 @@ private struct ReadiumEPUBReaderViewContent: View {
                 }
                 .accessibilityLabel("书签与搜索")
             }
+            ReaderIssueMarkButton { model.markIssue() }
             Button {
                 model.isTOCDiagnosticsExpanded = false
                 isShowingTOC = true
@@ -220,7 +237,6 @@ private struct ReadiumEPUBReaderViewContent: View {
             }
             .accessibilityLabel("阅读样式")
             .disabled(model.status != .ready)
-            ReaderIssueMarkButton { model.markIssue() }
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 10)
