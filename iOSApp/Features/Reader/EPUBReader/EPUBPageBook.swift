@@ -269,6 +269,35 @@ final class EPUBPageBook {
     // MARK: 链接与注脚命中
 
     /// 页面本地点的链接命中；点为视图坐标（当前页槽位与视口重合，故直接同页本地坐标）。
+    /// 页本地坐标处的正文图片 src（不含背景图；边长不足 32pt 的注释标记等小图不算）。
+    /// 多张重叠时取面积最小的一张。
+    func imageSource(at point: CGPoint, for id: EPUBPageID) -> String? {
+        guard let chapter = chapters[id.spineIndex],
+              chapter.displayLists.indices.contains(id.pageIndex) else { return nil }
+        var match: (source: String, area: CGFloat)?
+        for case .image(let item) in chapter.displayLists[id.pageIndex].items where !item.isBackgroundPaint {
+            let rect = item.rect.rawValue
+            guard min(rect.width, rect.height) >= 32, rect.insetBy(dx: -4, dy: -4).contains(point) else { continue }
+            let area = rect.width * rect.height
+            if match == nil || area < match!.area { match = (item.source, area) }
+        }
+        return match?.source
+    }
+
+    /// 已排版章节中第一张解析为 `path` 的正文图片所在页（图片查看器“跳到原文位置”）。
+    func pageIndex(spineIndex: Int, containingImagePath path: String, chapterHref: String) -> Int? {
+        guard let chapter = chapters[spineIndex] else { return nil }
+        for (page, list) in chapter.displayLists.enumerated() {
+            for case .image(let item) in list.items where !item.isBackgroundPaint {
+                if let resolved = EPUBContainer.resolveImagePath(src: item.source, chapterHref: chapterHref),
+                   resolved.caseInsensitiveCompare(path) == .orderedSame {
+                    return page
+                }
+            }
+        }
+        return nil
+    }
+
     func linkRegion(at point: CGPoint, for id: EPUBPageID) -> LinkInteractionRegion? {
         guard let chapter = chapters[id.spineIndex],
               chapter.linkRegions.indices.contains(id.pageIndex) else { return nil }

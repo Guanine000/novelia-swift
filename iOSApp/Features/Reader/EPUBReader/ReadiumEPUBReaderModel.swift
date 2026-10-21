@@ -51,6 +51,9 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     /// 每次重建导航器递增，让宿主视图换上新的控制器。
     @Published private(set) var navigatorRevision = 0
     @Published var activeNote: EPUBNote?
+    /// 书内图片（点图查看与目录页“图片”）；EPUB 复用打开前预检的原生容器读取图片。
+    let imageLibrary = ReaderImageLibrary()
+    private var imageContainer: EPUBContainer?
 
 #if DEBUG
     /// 仅独立验证 App 的合成 EPUB 回归使用。WebKit 无障碍树可能包含已翻过的段落，
@@ -122,6 +125,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             // 缺失／损坏章节会让导航器一直停在加载态，预检把它们变成可读错误。
             let container = try await EPUBContainer.open(fileURL: url)
             try await container.validateForReadium()
+            imageContainer = container
+            imageLibrary.attach(container)
             let hash = try await Task.detached(priority: .utility) {
                 try FileContentHash.sha256(url)
             }.value
@@ -389,14 +394,63 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         let adapter = DirectionalNavigationAdapter(animatedTransition: true)
         adapter.bind(to: navigator)
         navigationAdapter = adapter
-        // 翻页区域之外（中部）的点按显隐工具栏；适配器已处理的边缘点按不会到这里。
-        tapToken = navigator.addObserver(.tap { [weak self] _ in
-            self?.onCenterTap()
+        // 翻页区域之外（中部）的点按：点到正文图片时打开查看器，否则显隐工具栏；
+        // 适配器已处理的边缘点按不会到这里。
+        tapToken = navigator.addObserver(.tap { [weak self] event in
+            guard let self else { return false }
+            if await self.openImage(at: event.location) { return true }
+            self.onCenterTap()
             return true
         })
 
         self.navigator = navigator
         navigatorRevision += 1
+    }
+
+    /// 在导航器视图坐标处查找正文图片（`<img>` 或 SVG `<image>`，边长不足 32pt 的小图不算），
+    /// 找到则按包内路径打开查看器。
+    private func openImage(at point: CGPoint) async -> Bool {
+        guard let container = imageContainer, let root = navigator?.view,
+              let (webView, local) = Self.visibleWebView(containing: point, in: root) else { return false }
+        let script = """
+        (function(x, y) {
+          var el = document.elementFromPoint(x, y);
+          if (el && el.tagName && el.tagName.toLowerCase() === 'svg') { el = el.querySelector('image') || el; }
+          if (!el || !el.tagName) { return ''; }
+          var tag = el.tagName.toLowerCase();
+          var r = el.getBoundingClientRect();
+          if (Math.min(r.width, r.height) < 32) { return ''; }
+          if (tag === 'img') { return el.currentSrc || el.src || ''; }
+          if (tag === 'image') {
+            var h = el.getAttribute('xlink:href') || el.getAttributeNS('http://www.w3.org/1999/xlink', 'href') || el.getAttribute('href');
+            return h ? new URL(h, document.baseURI).href : '';
+          }
+          return '';
+        })(\(local.x), \(local.y))
+        """
+        // 用回调版本：异步版本在脚本返回空值时可能出错。
+        let source: String? = await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(script) { result, _ in
+                continuation.resume(returning: result as? String)
+            }
+        }
+        guard let source, !source.isEmpty, let url = URL(string: source),
+              let path = await container.packagePath(forImageURL: url) else { return false }
+        imageLibrary.presentTapped(path: path)
+        return true
+    }
+
+    /// 包含该点、当前正显示在屏幕上的章节 WebView，以及该点在 WebView 内的坐标。
+    private static func visibleWebView(containing point: CGPoint, in root: UIView) -> (WKWebView, CGPoint)? {
+        var stack: [UIView] = [root]
+        while let view = stack.popLast() {
+            if let webView = view as? WKWebView, webView.window != nil, !webView.isHidden {
+                let local = webView.convert(point, from: root)
+                if webView.bounds.contains(local) { return (webView, local) }
+            }
+            stack.append(contentsOf: view.subviews)
+        }
+        return nil
     }
 
     /// 样式中只有边距和导入字体需要重建导航器；其余偏好可直接提交。
@@ -543,6 +597,73 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             }
         }
         return String((locator?.text.highlight ?? locator?.text.after ?? "").prefix(ReaderBookmark.maxSnippetLength))
+    }
+
+    /// 图片列表记录的是原生容器的 spine 序号；Readium 的 readingOrder 可能不含非线性条目，按文件路径换算。
+    private func readingOrderIndex(forSpine spine: Int) -> Int? {
+        guard let container = imageContainer, let publication, container.spine.indices.contains(spine) else { return nil }
+        let href = container.spine[spine].href
+        return publication.readingOrder.firstIndex { link in
+            let string = link.url().string
+            let path = string.removingPercentEncoding ?? string
+            return EPUBContainer.normalizePath(path) == href || path.hasSuffix("/" + href)
+        }
+    }
+
+    /// 图片所在章节的标题（spine 序号）。
+    func imageChapterTitle(_ spine: Int) -> String? {
+        readingOrderIndex(forSpine: spine).flatMap(chapterTitle)
+    }
+
+    /// 跳到图片所在页：先打开所在章节，再在页面中找到该图片并用 Readium 的定位脚本翻到它所在的页；
+    /// 章节内容可能尚未就绪，找不到时稍后重试，仍找不到则停在章首。
+    func jump(toImage entry: EPUBImageEntry) {
+        guard let spine = entry.spineIndex, let index = readingOrderIndex(forSpine: spine),
+              let publication else { return }
+        Task { [weak self] in
+            guard let base = await publication.locate(publication.readingOrder[index]) else { return }
+            _ = await self?.navigator?.go(to: base.copy(locations: { $0.progression = 0 }))
+            for _ in 0..<10 {
+                guard let self else { return }
+                if await scrollToImage(path: entry.path) { return }
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+        }
+    }
+
+    /// 在当前章节页面中查找包内路径为 `path` 的图片，并翻到它所在的页；找到返回 true。
+    private func scrollToImage(path: String) async -> Bool {
+        guard let navigator, let pathLiteral = Self.javaScriptStringLiteral(path) else { return false }
+        let script = """
+        (function(path) {
+          path = path.toLowerCase();
+          var elements = document.querySelectorAll('img, image');
+          for (var i = 0; i < elements.length; i++) {
+            var el = elements[i];
+            var src = el.tagName.toLowerCase() === 'img'
+              ? (el.currentSrc || el.src)
+              : (el.getAttribute('xlink:href') || el.getAttributeNS('http://www.w3.org/1999/xlink', 'href') || el.getAttribute('href') || '');
+            var resolved;
+            try { resolved = decodeURIComponent(new URL(src, document.baseURI).pathname).toLowerCase(); } catch (e) { continue; }
+            if (resolved === '/' + path || resolved.endsWith('/' + path)) {
+              el.setAttribute('data-novelia-image-target', '1');
+              var done = readium.scrollToLocator({ href: '#', locations: { cssSelector: '[data-novelia-image-target="1"]' } }, false);
+              el.removeAttribute('data-novelia-image-target');
+              return done === true;
+            }
+          }
+          return false;
+        })(\(pathLiteral))
+        """
+        if case .success(let value) = await navigator.evaluateJavaScript(script) { return (value as? Bool) == true }
+        return false
+    }
+
+    /// 把字符串编码为 JavaScript 字符串字面量（经 JSON 转义）。
+    private static func javaScriptStringLiteral(_ string: String) -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject: [string]),
+              let array = String(data: data, encoding: .utf8) else { return nil }
+        return String(array.dropFirst().dropLast())
     }
 
     func chapterTitle(_ index: Int) -> String? {

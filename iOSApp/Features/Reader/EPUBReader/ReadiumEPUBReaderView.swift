@@ -29,6 +29,7 @@ private struct ReadiumEPUBReaderViewContent: View {
     @State private var isShowingTOC = false
     /// 目录中已展开的分组（条目序号）；每次打开目录时重置为只展开当前章节所在分组。
     @State private var tocExpanded = Set<Int>()
+    @State private var tocTab = ReaderTOCTab.contents
     @State private var isShowingStyle = false
     @State private var isShowingBookmarks = false
     @State private var isScrubbing = false
@@ -160,6 +161,8 @@ private struct ReadiumEPUBReaderViewContent: View {
             if model.status == .ready { await model.scanBookDiagnostics() }
         }
         .sheet(isPresented: $isShowingTOC) { tocSheet }
+        .modifier(ReaderImagePresenter(library: model.imageLibrary, chapterTitle: { model.imageChapterTitle($0) },
+                                       onJump: { model.jump(toImage: $0) }))
         .sheet(isPresented: $isShowingBookmarks) {
             if let key = model.bookmarkKey {
                 ReaderBookmarksSearchSheet(store: settings.bookmarks, bookKey: key, chapterCount: model.chapterCount,
@@ -313,59 +316,14 @@ private struct ReadiumEPUBReaderViewContent: View {
 
     private var tocSheet: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                List {
-                    if !model.tocDiagnosticMessages.isEmpty {
-                    Section {
-                        DisclosureGroup(isExpanded: $model.isTOCDiagnosticsExpanded) {
-                            VStack(alignment: .leading, spacing: 12) {
-                                ForEach(Array(model.tocDiagnosticMessages.enumerated()), id: \.offset) { _, message in
-                                    Text(message)
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                        .textSelection(.enabled)
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        } label: {
-                            Label("目录诊断说明（\(model.tocDiagnosticMessages.count)）", systemImage: "info.circle")
-                                .font(.footnote)
-                        }
+            Group {
+                if tocTab == .images, model.imageLibrary.isAvailable {
+                    ReaderImageGallery(library: model.imageLibrary, chapterTitle: { model.imageChapterTitle($0) }) { entry in
+                        isShowingTOC = false
+                        model.jump(toImage: entry)
                     }
-                    }
-                    if model.toc.isEmpty {
-                        ContentUnavailableView("没有目录", systemImage: "list.bullet.rectangle",
-                                               description: Text(model.tocNotice ?? "本书未提供目录。"))
-                    }
-                    let levels = model.toc.map(\.level)
-                    let hasChildren = TOCOutline.hasChildren(levels: levels)
-                    ForEach(TOCOutline.visibleIndices(levels: levels, expanded: tocExpanded), id: \.self) { index in
-                        let item = model.toc[index]
-                        ReaderTOCRow(title: item.title, level: item.level,
-                                     isCurrent: model.currentTOCIndex == item.id,
-                                     hasChildren: hasChildren[index],
-                                     isExpanded: tocExpanded.contains(index),
-                                     showsDisclosureColumn: hasChildren.contains(true),
-                                     toggle: {
-                                         withAnimation(.easeInOut(duration: 0.2)) {
-                                             if tocExpanded.contains(index) { tocExpanded.remove(index) } else { tocExpanded.insert(index) }
-                                         }
-                                     }) {
-                            isShowingTOC = false
-                            model.jump(to: item)
-                        }
-                        .id(item.id)
-                    }
-                }
-                .onAppear {
-                    if let current = model.currentTOCIndex,
-                       let index = model.toc.firstIndex(where: { $0.id == current }) {
-                        tocExpanded = Set(TOCOutline.ancestors(of: index, levels: model.toc.map(\.level)))
-                        // 等展开后的行进入列表再定位。
-                        DispatchQueue.main.async { proxy.scrollTo(current, anchor: .center) }
-                    } else {
-                        tocExpanded = []
-                    }
+                } else {
+                    tocList
                 }
             }
             .navigationTitle("目录")
@@ -374,7 +332,12 @@ private struct ReadiumEPUBReaderViewContent: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("关闭") { isShowingTOC = false }
                 }
-                if model.toc.contains(where: { $0.level > 0 }) {
+                if model.imageLibrary.isAvailable {
+                    ToolbarItem(placement: .principal) {
+                        ReaderTOCTabPicker(selection: $tocTab)
+                    }
+                }
+                if tocTab == .contents || !model.imageLibrary.isAvailable, model.toc.contains(where: { $0.level > 0 }) {
                     ToolbarItem(placement: .topBarTrailing) {
                         ReaderTOCExpandAllButton(levels: model.toc.map(\.level), expanded: $tocExpanded)
                     }
@@ -382,6 +345,64 @@ private struct ReadiumEPUBReaderViewContent: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private var tocList: some View {
+        ScrollViewReader { proxy in
+            List {
+                if !model.tocDiagnosticMessages.isEmpty {
+                Section {
+                    DisclosureGroup(isExpanded: $model.isTOCDiagnosticsExpanded) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(Array(model.tocDiagnosticMessages.enumerated()), id: \.offset) { _, message in
+                                Text(message)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    } label: {
+                        Label("目录诊断说明（\(model.tocDiagnosticMessages.count)）", systemImage: "info.circle")
+                            .font(.footnote)
+                    }
+                }
+                }
+                if model.toc.isEmpty {
+                    ContentUnavailableView("没有目录", systemImage: "list.bullet.rectangle",
+                                           description: Text(model.tocNotice ?? "本书未提供目录。"))
+                }
+                let levels = model.toc.map(\.level)
+                let hasChildren = TOCOutline.hasChildren(levels: levels)
+                ForEach(TOCOutline.visibleIndices(levels: levels, expanded: tocExpanded), id: \.self) { index in
+                    let item = model.toc[index]
+                    ReaderTOCRow(title: item.title, level: item.level,
+                                 isCurrent: model.currentTOCIndex == item.id,
+                                 hasChildren: hasChildren[index],
+                                 isExpanded: tocExpanded.contains(index),
+                                 showsDisclosureColumn: hasChildren.contains(true),
+                                 toggle: {
+                                     withAnimation(.easeInOut(duration: 0.2)) {
+                                         if tocExpanded.contains(index) { tocExpanded.remove(index) } else { tocExpanded.insert(index) }
+                                     }
+                                 }) {
+                        isShowingTOC = false
+                        model.jump(to: item)
+                    }
+                    .id(item.id)
+                }
+            }
+            .onAppear {
+                if let current = model.currentTOCIndex,
+                   let index = model.toc.firstIndex(where: { $0.id == current }) {
+                    tocExpanded = Set(TOCOutline.ancestors(of: index, levels: model.toc.map(\.level)))
+                    // 等展开后的行进入列表再定位。
+                    DispatchQueue.main.async { proxy.scrollTo(current, anchor: .center) }
+                } else {
+                    tocExpanded = []
+                }
+            }
+        }
     }
 
     // MARK: 阅读样式

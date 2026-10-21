@@ -47,6 +47,7 @@ private struct EPUBReaderViewContent: View {
     @State private var isShowingTOC = false
     /// 目录中已展开的分组（条目序号）；每次打开目录时重置为只展开当前章节所在分组。
     @State private var tocExpanded = Set<Int>()
+    @State private var tocTab = ReaderTOCTab.contents
     @State private var isShowingStyle = false
     @State private var isShowingBookmarks = false
     @State private var didCopyDiagnostics = false
@@ -189,6 +190,8 @@ private struct EPUBReaderViewContent: View {
                                                        title: bookURL?.deletingPathExtension().lastPathComponent ?? "样例书", kind: .epub),
                           ready: model.status == .ready)
         .sheet(isPresented: $isShowingTOC) { tocSheet }
+        .modifier(ReaderImagePresenter(library: model.imageLibrary, chapterTitle: { model.chapterTitle($0) },
+                                       onJump: { model.jump(toImage: $0) }))
         .sheet(isPresented: $isShowingBookmarks) {
             if let key = model.bookmarkKey {
                 ReaderBookmarksSearchSheet(store: settings.bookmarks, bookKey: key, chapterCount: model.chapterCount,
@@ -371,7 +374,12 @@ private struct EPUBReaderViewContent: View {
     private var tocSheet: some View {
         NavigationStack {
             Group {
-                if let diagnostic = model.tocDiagnosticText {
+                if tocTab == .images, model.imageLibrary.isAvailable {
+                    ReaderImageGallery(library: model.imageLibrary, chapterTitle: { model.chapterTitle($0) }) { entry in
+                        isShowingTOC = false
+                        model.jump(toImage: entry)
+                    }
+                } else if let diagnostic = model.tocDiagnosticText {
                     ContentUnavailableView {
                         Label("没有目录", systemImage: "list.bullet.rectangle")
                     } description: {
@@ -436,8 +444,13 @@ private struct EPUBReaderViewContent: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("关闭") { isShowingTOC = false }
                 }
+                if model.imageLibrary.isAvailable {
+                    ToolbarItem(placement: .principal) {
+                        ReaderTOCTabPicker(selection: $tocTab)
+                    }
+                }
                 let levels = (model.source?.toc ?? []).map(\.level)
-                if levels.contains(where: { $0 > 0 }) {
+                if tocTab == .contents || !model.imageLibrary.isAvailable, levels.contains(where: { $0 > 0 }) {
                     ToolbarItem(placement: .topBarTrailing) {
                         ReaderTOCExpandAllButton(levels: levels, expanded: $tocExpanded)
                     }
@@ -897,6 +910,7 @@ private struct EPUBReaderPageSurface: View, Equatable {
             },
             onAnimatingChange: { animating in model.setAnimating(animating) },
             linkHitTest: { point in model.linkHit(at: point) },
+            onImageTap: { point in model.openImage(at: point) },
             onNoteTap: { text in model.activeNote = EPUBNote(text: text) },
             onPlainLinkTap: { href in
                 // 生成的在线章节包含网页链接，按滚动阅读器的方式打开；
