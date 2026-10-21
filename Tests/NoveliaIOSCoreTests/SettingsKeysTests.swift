@@ -11,6 +11,7 @@ final class SettingsKeysTests: XCTestCase {
         XCTAssertEqual(SettingsKey.readerMode, "readerMode")
         XCTAssertEqual(SettingsKey.readerTranslationSource, "readerTranslationSource")
         XCTAssertEqual(SettingsKey.readerPagedText, "readerPagedText")
+        XCTAssertEqual(SettingsKey.readerEPUBDisablesScripts, "readerEPUBDisablesScripts")
         XCTAssertEqual(SettingsKey.appThemeColor, "appThemeColor")
         XCTAssertEqual(SettingsKey.appThemeCustomHex, "appThemeCustomHex")
         XCTAssertEqual(SettingsKey.tabBarOrder, "tabBar.order")

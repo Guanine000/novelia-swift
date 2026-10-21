@@ -377,6 +377,12 @@ final class EPUBReaderModel: ObservableObject {
             // noteref 但找不到注脚正文：不翻页，给出提示而不是静默。
             return .plain("未找到注脚正文（\(region.href)）")
         case .plain:
+            // 多看／Sigil 注释插件的 `<a class="duokan-footnote" href="#note_1">` 不带 noteref，
+            // 引擎仍把 `li.duokan-footnote-item` 收集为注脚正文；指向本章注脚的普通链接同样弹层，
+            // 否则同章锚点跳转不定位，点击看起来毫无反应。
+            if region.href.hasPrefix("#"), let text = pageBook.footnoteText(forHref: region.href, id: id), !text.isEmpty {
+                return .footnote(text)
+            }
             return .plain(region.href)
         }
     }
