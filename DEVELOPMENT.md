@@ -242,7 +242,7 @@ TXT 的共享位置使用 `txt:<内容哈希>`，保存章节、单元、偏移�
 
 TXT 的 Readium 精确 Locator 使用内容哈希和分章规则指纹作为身份。仅当 Locator 时间不早于共享进度、且资源属于当前单元时优先使用；否则由共享单元/偏移换算为章内比例。打开恢复不刷新同步时间戳；翻页后的异步偏移换算只应用于仍有效的当前位置。跨引擎、跨设备恢复是近似位置，不能承诺落在完全相同的页面。
 
-所有阅读方式都遵守“打开或恢复不写入同步位置”：同步前打开书若用当前时间写入，会让本机旧进度在下次同步时盖过其他设备较新的进度。Yuedu 用 `isRestoringPosition` 包住打开、重排与旧版整书比例的 `seek(restoring:)`；Readium EPUB 跳过导航器报告的第一个位置及重复位置；在线小说用 `ReaderSettings.isRestoringWebPosition` 判断打开所在章节是否只是恢复，明确选择其他章节才记录。新增阅读入口时保持这一规则。
+所有阅读方式都遵守“打开或恢复不写入同步位置”：同步前打开书若用当前时间写入，会让本机旧进度在下次同步时盖过其他设备较新的进度。Yuedu 用 `isRestoringPosition` 包住打开与旧版整书比例的 `seek(restoring:)`，重排期间由计数 `activeRelayouts` 屏蔽位置写入（新重排取消旧重排时不能用保存/恢复布尔值，否则旧任务收尾会把状态写乱）；Readium EPUB 跳过导航器报告的第一个位置及重复位置；在线小说用 `ReaderSettings.isRestoringWebPosition` 判断打开所在章节是否只是恢复，明确选择其他章节才记录。新增阅读入口时保持这一规则。
 
 EPUB 本机 Readium Locator 与共享 spine/章内比例分别保存；共享进度较新时按其恢复。Yuedu 使用源文本偏移，旧记录仍可按整书比例回退。不同来源的时间判断和偏移规则以各实现为准，不为了统一模型而删除兼容字段。
 
@@ -254,7 +254,9 @@ Yuedu 分页的页面身份是 `(generation, spineIndex, pageIndex)`。拖动预
 
 点击先判断链接与注脚命中，再判断翻页。保持跨章预取、渐进排版、任务失效与取消，缓存保留可见页及有限邻页；内存警告时收缩缓存，不能随预取无限累计位图。布局协调器合并相同请求并缓存结果，修改缓存键时纳入实际影响排版的参数。
 
-`EPUBContainer` 负责 ZIP、OPF、spine 和目录及资源读取。CSS/图片相对引用按章节文件目录解析，目录链接按 nav/NCX 文档位置解析；不要把所有相对路径都拼到 OPF 所在目录。资源查找保留已有的编码和路径回退，CSS 导入保留递归上限。
+`EPUBContainer` 负责 ZIP、OPF、spine 和目录及资源读取。CSS/图片相对引用按章节文件目录解析，目录链接按 nav/NCX 文档位置解析；不要把所有相对路径都拼到 OPF 所在目录。Readium 只对 `epub:type="noteref"` 链接调用注释回调；其他带锚点的书内链接经 `shouldNavigateToLink` 先拦下，读取目标文档，由 `EPUBFootnoteTarget` 按 YueduCoreText `collectFootnotes` 的同一规则（class 含 footnote 的 `<li>`，或 `epub:type` 为 footnote／endnote／note／rearnote）判断，命中则弹层，否则照常 `go(to:)`。目录按先序展平并带 `level`：nav 以外层带链接的 `<li>` 计层级（无链接的分组标题不计），NCX 嵌套 navPoint 的父项先于子项输出；`TOCOutline` 负责目录面板的分组折叠，Yuedu 与 Readium 共用 `ReaderTOCRow`，打开目录时只展开当前章节所在分组。
+
+Yuedu 重排开始时会把位置归零并换成空分页结果，`pendingRelayoutAnchor` 记住要回到的章内偏移；重排被下一次取消时沿用该锚点，成功或非取消失败后清除。进入后台后系统会以浅色/深色及其他尺寸截取快照，阅读视图在 `scenePhase == .background` 时忽略外观与尺寸变化，回到前台再按实际值同步一次；Readium 同样不在后台重建导航器。修改重排或生命周期处理时，验证切到其他 App 再返回仍停在原页。资源查找保留已有的编码和路径回退，CSS 导入保留递归上限。
 
 Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒体查询、转换带 alpha 的十六进制颜色、改写文字透明度、处理特定 table 布局、以颜色近似 text-shadow。相关计数和限制不能静默消失；这些处理不代表完整浏览器 CSS 支持，也不能直接套到 Readium 路径。`EPUBPageBook.applyEngineWorkarounds` 的极小字距是排版权宜处理；调整或移除时运行对齐、宽度与字符相关回归及整书扫描，不依据旧报告的测试结果作决定。
 

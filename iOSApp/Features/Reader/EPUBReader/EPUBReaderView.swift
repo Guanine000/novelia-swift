@@ -43,7 +43,10 @@ private struct EPUBReaderViewContent: View {
     @StateObject private var model: EPUBReaderModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isShowingTOC = false
+    /// 目录中已展开的分组（条目序号）；每次打开目录时重置为只展开当前章节所在分组。
+    @State private var tocExpanded = Set<Int>()
     @State private var isShowingStyle = false
     @State private var isShowingBookmarks = false
     @State private var didCopyDiagnostics = false
@@ -134,10 +137,20 @@ private struct EPUBReaderViewContent: View {
                     .ignoresSafeArea(edges: .bottom)
             }
             .onChange(of: geometry.size) { _, newSize in
+                // 进入后台后系统会按其他方向/尺寸截取快照，这些临时尺寸不触发重排。
+                guard scenePhase != .background else { return }
                 model.viewportSize = newSize
             }
             .onChange(of: colorScheme) { _, newScheme in
                 synchronizeSettings(systemIsDark: newScheme == .dark)
+            }
+            .onChange(of: scenePhase) { _, phase in
+                // 回到前台后按当时的真实外观与尺寸补一次同步；没有变化时不会重排。
+                guard phase != .background else { return }
+                synchronizeSettings(systemIsDark: colorScheme == .dark)
+                if model.viewportSize != geometry.size {
+                    model.viewportSize = geometry.size
+                }
             }
             .onAppear {
                 wasBatteryMonitoringEnabled = UIDevice.current.isBatteryMonitoringEnabled
@@ -388,38 +401,30 @@ private struct EPUBReaderViewContent: View {
                             let tocEntries = model.source?.toc ?? []
                             // 每次渲染只计算一次：列表行是惰性加载的，但之前每行都会重新扫描整个目录。
                             let currentIndex = model.currentTOCIndex
-                            ForEach(tocEntries.indices, id: \.self) { index in
+                            let levels = tocEntries.map(\.level)
+                            let hasChildren = TOCOutline.hasChildren(levels: levels)
+                            ForEach(TOCOutline.visibleIndices(levels: levels, expanded: tocExpanded), id: \.self) { index in
                                 let entry = tocEntries[index]
-                                let isCurrent = currentIndex == index
-                                Button {
+                                ReaderTOCRow(title: entry.title, level: entry.level,
+                                             subtitle: model.container != nil ? entry.spineIndex.map { "spine \($0 + 1)" } : nil,
+                                             isCurrent: currentIndex == index,
+                                             hasChildren: hasChildren[index],
+                                             isExpanded: tocExpanded.contains(index),
+                                             showsDisclosureColumn: hasChildren.contains(true),
+                                             toggle: { toggleTOCGroup(index) }) {
                                     isShowingTOC = false
                                     model.jump(to: entry)
-                                } label: {
-                                    HStack {
-                                        VStack(alignment: .leading, spacing: 3) {
-                                            Text(entry.title)
-                                                .foregroundStyle(isCurrent
-                                                    ? NoveliaStyle.brandGreen : .primary)
-                                                .fontWeight(isCurrent ? .semibold : .regular)
-                                            if model.container != nil, let spineIndex = entry.spineIndex {
-                                                Text("spine \(spineIndex + 1)")
-                                                    .font(.caption2).foregroundStyle(.secondary)
-                                            }
-                                        }
-                                        Spacer()
-                                        if isCurrent {
-                                            Image(systemName: "book.fill")
-                                                .font(.caption)
-                                                .foregroundStyle(NoveliaStyle.brandGreen)
-                                        }
-                                    }
                                 }
                                 .id(index)
                             }
                         }
                         .onAppear {
                             if let current = model.currentTOCIndex {
-                                proxy.scrollTo(current, anchor: .center)
+                                tocExpanded = Set(TOCOutline.ancestors(of: current, levels: (model.source?.toc ?? []).map(\.level)))
+                                // 等展开后的行进入列表再定位。
+                                DispatchQueue.main.async { proxy.scrollTo(current, anchor: .center) }
+                            } else {
+                                tocExpanded = []
                             }
                         }
                     }
@@ -431,9 +436,21 @@ private struct EPUBReaderViewContent: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("关闭") { isShowingTOC = false }
                 }
+                let levels = (model.source?.toc ?? []).map(\.level)
+                if levels.contains(where: { $0 > 0 }) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ReaderTOCExpandAllButton(levels: levels, expanded: $tocExpanded)
+                    }
+                }
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private func toggleTOCGroup(_ index: Int) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            if tocExpanded.contains(index) { tocExpanded.remove(index) } else { tocExpanded.insert(index) }
+        }
     }
 
     private var tocDiagnosticsPrompt: some View {
@@ -485,6 +502,9 @@ private struct EPUBReaderViewContent: View {
     // MARK: 阅读样式（二级面板；点击应用后一次性重排）
 
     private func synchronizeSettings(systemIsDark: Bool) {
+        // 进入后台后系统会分别以浅色和深色截取快照，环境外观会短暂来回切换；
+        // 这时重排既浪费又可能被挂起打断，等回到前台再按实际外观同步。
+        guard scenePhase != .background else { return }
         model.synchronizeSharedSettings(systemIsDark: systemIsDark)
     }
 
@@ -895,5 +915,79 @@ private struct EPUBReaderPageSurface: View, Equatable {
             images: model.pagerImages()
         )
         .frame(width: size.width, height: size.height)
+    }
+}
+
+// MARK: - 可折叠目录（YueduCoreText 与 Readium 阅读器共用）
+
+/// 目录中的一行：按层级缩进；有子项的分组左侧显示展开/折叠按钮，点标题仍跳到该章。
+struct ReaderTOCRow: View {
+    let title: String
+    let level: Int
+    var subtitle: String? = nil
+    let isCurrent: Bool
+    let hasChildren: Bool
+    let isExpanded: Bool
+    /// 目录没有任何分组时不留出展开按钮的位置（TXT、在线小说等扁平目录）。
+    var showsDisclosureColumn = true
+    let toggle: () -> Void
+    let select: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Group {
+                if hasChildren {
+                    Button(action: toggle) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel(isExpanded ? "折叠\(title)" : "展开\(title)")
+                } else if showsDisclosureColumn {
+                    Color.clear.frame(width: 28, height: 1)
+                }
+            }
+            .padding(.leading, CGFloat(min(level, 6)) * 14)
+            Button(action: select) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title)
+                            .foregroundStyle(isCurrent ? NoveliaStyle.brandGreen : .primary)
+                            .fontWeight(isCurrent ? .semibold : .regular)
+                        if let subtitle {
+                            Text(subtitle).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    if isCurrent {
+                        Image(systemName: "book.fill")
+                            .font(.caption)
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .tint(.primary)
+        }
+    }
+}
+
+/// 目录右上角的「全部展开／全部折叠」。
+struct ReaderTOCExpandAllButton: View {
+    let levels: [Int]
+    @Binding var expanded: Set<Int>
+
+    var body: some View {
+        let flags = TOCOutline.hasChildren(levels: levels)
+        let groups = Set(levels.indices.filter { flags[$0] })
+        let allExpanded = !groups.isEmpty && groups.isSubset(of: expanded)
+        Button(allExpanded ? "全部折叠" : "全部展开") {
+            withAnimation(.easeInOut(duration: 0.2)) { expanded = allExpanded ? [] : groups }
+        }
     }
 }
