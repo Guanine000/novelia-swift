@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the distributed Swift Package notices against Package.resolved."""
+"""核对随包分发的 Swift Package 许可声明与 Package.resolved 是否一致。"""
 
 import argparse
 import json
@@ -34,7 +34,7 @@ OPENDYSLEXIC_FONTS = ["Sources/Navigator/EPUB/Assets/Static/fonts", "Sources/Str
 
 
 def font_names(path: Path) -> dict[int, str]:
-    """Windows-platform name records of an OpenType font (copyright = 0, license = 13)."""
+    """读取 OpenType 字体中 Windows 平台的 name 记录（版权 = 0，许可 = 13）。"""
     data = path.read_bytes()
     tables = struct.unpack(">H", data[4:6])[0]
     base = next(offset for tag, _, offset, _ in
@@ -50,12 +50,12 @@ def font_names(path: Path) -> dict[int, str]:
 
 
 def checkout_name(pin: dict) -> str:
-    """SwiftPM checks a package out under its repository name."""
+    """SwiftPM 以仓库名作为依赖的检出目录名。"""
     return pin["location"].rstrip("/").removesuffix(".git").rsplit("/", 1)[-1]
 
 
 def production_scripts(lockfile: Path) -> list[str]:
-    """name@version of every non-dev package in the navigator scripts' pnpm lockfile."""
+    """导航器脚本 pnpm 锁定文件中全部非开发依赖的 name@version。"""
     text = lockfile.read_text()
     packages = text[text.index("\npackages:"):]
     result = []
