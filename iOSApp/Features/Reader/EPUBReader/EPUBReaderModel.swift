@@ -212,6 +212,8 @@ final class EPUBReaderModel: ObservableObject {
     @Published private(set) var isLayingOut = false
     /// 当前展示的注脚弹窗；nil = 无弹窗。关闭弹层不改变阅读位置。
     @Published var activeNote: EPUBNote?
+    /// 书内图片（点图查看与目录页“图片”）；仅 EPUB 挂上容器。
+    let imageLibrary = ReaderImageLibrary()
     /// 普通链接点击提示（本轮不导航）。
     @Published var plainLinkMessage: String?
     @Published var isShowingTOCDiagnosticsPrompt = false
@@ -363,6 +365,19 @@ final class EPUBReaderModel: ObservableObject {
     // MARK: 链接 / 注脚命中
 
     /// 视图点击点 → 链接语义。注脚返回其文本；普通链接返回 href（本轮不导航）。
+    /// 点按位置是正文图片时打开查看器并返回 true（只用于页面中部，左右两侧仍翻页）。
+    func openImage(at point: CGPoint) -> Bool {
+        guard let pageBook, let container else { return false }
+        let leaf = usesDoublePage && point.x >= leafWidth ? 1 : 0
+        let id = pageID(location.spineIndex, location.pageIndex + leaf)
+        let localPoint = CGPoint(x: point.x - CGFloat(leaf) * leafWidth, y: point.y)
+        guard let source = pageBook.imageSource(at: localPoint, for: id),
+              let path = EPUBContainer.resolveImagePath(src: source, chapterHref: container.chapterHref(at: id.spineIndex))
+        else { return false }
+        imageLibrary.presentTapped(path: path)
+        return true
+    }
+
     func linkHit(at point: CGPoint) -> EPUBLinkHit? {
         guard let pageBook else { return nil }
         let leaf = usesDoublePage && point.x >= leafWidth ? 1 : 0
@@ -488,6 +503,7 @@ final class EPUBReaderModel: ObservableObject {
             let container = try await EPUBContainer.open(fileURL: url)
             try Task.checkCancellation()
             self.source = container
+            imageLibrary.attach(container)
             openedBookHash = bookHash
             layoutBookID = "epub|" + bookHash
             stage = "layout"
@@ -1179,6 +1195,37 @@ final class EPUBReaderModel: ObservableObject {
                     EPUBChapterProgress.offset(progression: progression, length: $0)
                 }
                 var page = offset.flatMap { book.pageIndex(spineIndex: spineIndex, containingSourceOffset: $0) } ?? 0
+                if usesDoublePage { page = (page / 2) * 2 }
+                markReadyAfterRecovery(spineIndex: spineIndex)
+                location = EPUBReadingLocation(spineIndex: spineIndex, pageIndex: page)
+                prefetchNeighbors(of: spineIndex)
+            } catch {
+                guard pageBook === book, EPUBLayoutLog.failure(error).kind != "cancelled" else { return }
+                lastLayoutFailure = EPUBLayoutLog.failure(error)
+                status = .failed(describeLayoutError(error))
+            }
+        }
+    }
+
+    /// 跳到图片所在页：目标章未排版完时先排完，找不到图片时落在章首。属于用户操作，会记录阅读位置。
+    func jump(toImage entry: EPUBImageEntry) {
+        guard let spineIndex = entry.spineIndex, !isAnimating, !isLayingOut,
+              let container = source, let book = pageBook,
+              (0..<container.chapterCount).contains(spineIndex) else { return }
+        if let navigateTaskID, let previous = layoutTasks.removeValue(forKey: navigateTaskID) { previous.cancel() }
+        navigateTaskID = track { [weak self] in
+            guard let self else { return }
+            isLayingOut = true
+            defer { isLayingOut = false }
+            do {
+                if !book.isChapterComplete(spineIndex) {
+                    try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
+                                                 aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                                 context: layoutContext(.navigate))
+                }
+                guard pageBook === book else { return }
+                var page = book.pageIndex(spineIndex: spineIndex, containingImagePath: entry.path,
+                                          chapterHref: container.chapterHref(at: spineIndex)) ?? 0
                 if usesDoublePage { page = (page / 2) * 2 }
                 markReadyAfterRecovery(spineIndex: spineIndex)
                 location = EPUBReadingLocation(spineIndex: spineIndex, pageIndex: page)

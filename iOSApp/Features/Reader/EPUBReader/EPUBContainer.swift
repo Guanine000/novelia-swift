@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import OSLog
 import ReadiumZIPFoundation
 import UIKit
@@ -624,45 +625,99 @@ final class EPUBContainer {
     /// 相对 src 一律相对**章节文件所在目录**解析；另支持包内绝对路径、百分号编码、data: URI。
     /// 解析不到或无法解码的图片返回透明占位图，避免整章排版失败。
     func images(forChapterHTML html: String, chapterHref: String) async -> [String: UIImage] {
-        let chapterDirectory = Self.directory(of: chapterHref)
         var images: [String: UIImage] = [:]
+        for src in Self.imageSources(inChapterHTML: html) {
+            // data: URI（引擎把非空 src 一律视为待装载资源）。
+            if src.lowercased().hasPrefix("data:") {
+                images[src] = Self.image(fromDataURI: src) ?? Self.missingImagePlaceholder
+                continue
+            }
+            // 包外资源（http/file 等）本应用不加载，但引擎仍需要资源占位。
+            guard let path = Self.resolveImagePath(src: src, chapterHref: chapterHref),
+                  let data = await entryData(atPath: path), let image = UIImage(data: data) else {
+                images[src] = Self.missingImagePlaceholder
+                continue
+            }
+            images[src] = image
+        }
+        return images
+    }
+
+    /// 章节 HTML 中 `<img>`／SVG `<image>` 的原始 src（解码实体、按出现顺序去重）。
+    static func imageSources(inChapterHTML html: String) -> [String] {
         guard let tagRegex = try? NSRegularExpression(
                   pattern: "<(?:img|image)\\b[^>]*>", options: [.caseInsensitive]),
               let srcRegex = try? NSRegularExpression(
                   pattern: "(?:\\bsrc|xlink:href|\\bhref)\\s*=\\s*[\"']([^\"']+)[\"']", options: [.caseInsensitive]) else {
-            return images
+            return []
         }
+        var seen = Set<String>()
+        var sources: [String] = []
         let nsHTML = html as NSString
         for tagMatch in tagRegex.matches(in: html, range: NSRange(location: 0, length: nsHTML.length)) {
             let tag = nsHTML.substring(with: tagMatch.range)
             let nsTag = tag as NSString
             for srcMatch in srcRegex.matches(in: tag, range: NSRange(location: 0, length: nsTag.length)) {
                 let src = XMLValueParser.decodeEntities(nsTag.substring(with: srcMatch.range(at: 1)))
-                guard images[src] == nil else { continue }
-
-                // data: URI（引擎把非空 src 一律视为待装载资源）。
-                if src.lowercased().hasPrefix("data:") {
-                    images[src] = Self.image(fromDataURI: src) ?? Self.missingImagePlaceholder
-                    continue
-                }
-
-                guard Self.isRelative(src) || Self.isAbsoluteInPackage(src) else {
-                    // 包外资源（http/file 等）本应用不加载，但引擎仍需要资源占位。
-                    images[src] = Self.missingImagePlaceholder
-                    continue
-                }
-                // 相对路径拼章节文件目录；包内绝对路径去掉开头 / 后从包根解析。
-                let joined = Self.isAbsoluteInPackage(src)
-                    ? String(src.dropFirst())
-                    : Self.normalizePath(chapterDirectory + src)
-                if let data = await entryData(atPath: joined), let image = UIImage(data: data) {
-                    images[src] = image
-                } else {
-                    images[src] = Self.missingImagePlaceholder
-                }
+                if seen.insert(src).inserted { sources.append(src) }
             }
         }
-        return images
+        return sources
+    }
+
+    /// 把章节中的图片 src 解析为 ZIP 内路径：相对路径拼章节文件目录，包内绝对路径去掉开头 /。
+    /// data: URI 与包外地址返回 nil。
+    static func resolveImagePath(src: String, chapterHref: String) -> String? {
+        guard !src.lowercased().hasPrefix("data:"), isRelative(src) || isAbsoluteInPackage(src) else { return nil }
+        let path = stripFragment(src)
+        return isAbsoluteInPackage(path)
+            ? normalizePath(String(path.dropFirst()))
+            : normalizePath(directory(of: chapterHref) + path)
+    }
+
+    // MARK: 书内图片（目录页“图片”与图片查看器）
+
+    /// 全书插图：按 spine 顺序收集各章引用的图片，再补上 manifest 中未被章节引用的图片。
+    /// 长边小于 `minimumPixelLength` 的小图（注释标记、外字、装饰线等）不列入。
+    func allImages(minimumPixelLength: CGFloat = 120) async -> [EPUBImageEntry] {
+        var seen = Set<String>()
+        var entries: [EPUBImageEntry] = []
+        func consider(_ path: String, spineIndex: Int?) async {
+            let key = path.lowercased()
+            guard seen.insert(key).inserted, let data = await entryData(atPath: path),
+                  let size = EPUBImageDecoding.pixelSize(of: data),
+                  max(size.width, size.height) >= minimumPixelLength else { return }
+            entries.append(EPUBImageEntry(path: path, spineIndex: spineIndex))
+        }
+        for (index, item) in spine.enumerated() {
+            if Task.isCancelled { return entries }
+            guard let html = try? await chapterHTML(at: index) else { continue }
+            for src in Self.imageSources(inChapterHTML: html) {
+                guard let path = Self.resolveImagePath(src: src, chapterHref: item.href) else { continue }
+                await consider(path, spineIndex: index)
+            }
+        }
+        let leftovers = manifestByID.values
+            .filter { $0.mediaType.lowercased().hasPrefix("image/") }
+            .map(\.href)
+            .sorted()
+        for path in leftovers {
+            if Task.isCancelled { break }
+            await consider(path, spineIndex: nil)
+        }
+        return entries
+    }
+
+    /// 由阅读器中的图片地址（例如 Readium 页面里的绝对 URL）找到 ZIP 内路径：
+    /// 逐个去掉 URL 路径开头的部分，直到包内存在该条目。
+    func packagePath(forImageURL url: URL) async -> String? {
+        let decoded = url.path.removingPercentEncoding ?? url.path
+        let components = decoded.split(separator: "/").map(String.init)
+        for start in components.indices {
+            let candidate = components[start...].joined(separator: "/")
+            if await entryData(atPath: candidate) != nil { return candidate }
+        }
+        return nil
     }
 
     /// 解析 data:image/...;base64,xxx 形式的内嵌图片。
@@ -1101,6 +1156,46 @@ extension EPUBContainer {
 
 private extension Array {
     var nonEmpty: Self? { isEmpty ? nil : self }
+}
+
+// MARK: - 书内图片
+
+/// 书内一张图片：`path` 为 ZIP 内路径，`spineIndex` 为首次出现的章节（manifest 中未被引用的图片为 nil）。
+struct EPUBImageEntry: Identifiable, Hashable {
+    var id: String { path }
+    let path: String
+    let spineIndex: Int?
+}
+
+/// 图片尺寸读取与按需缩小解码（缩略图、查看器共用），不在主线程以外持有 UIKit 对象。
+enum EPUBImageDecoding {
+    /// 不解码像素，只读取图片的像素尺寸。
+    static func pixelSize(of data: Data) -> CGSize? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
+              let height = properties[kCGImagePropertyPixelHeight] as? CGFloat else { return nil }
+        return CGSize(width: width, height: height)
+    }
+
+    /// 长边不超过 `maxPixelLength` 的图片（保持方向）；`nil` 表示按原尺寸解码。
+    static func image(from data: Data, maxPixelLength: CGFloat?) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return UIImage(data: data) }
+        var options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        if let maxPixelLength {
+            options[kCGImageSourceThumbnailMaxPixelSize] = maxPixelLength
+        } else if let size = pixelSize(of: data) {
+            options[kCGImageSourceThumbnailMaxPixelSize] = max(size.width, size.height)
+        }
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return UIImage(data: data)
+        }
+        return UIImage(cgImage: cgImage)
+    }
 }
 
 // MARK: - 书内脚本禁用（Readium 可选）

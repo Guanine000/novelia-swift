@@ -39,6 +39,8 @@ struct EPUBPagerView: UIViewRepresentable {
     var onAnimatingChange: (Bool) -> Void = { _ in }
     /// 点击本地点（当前页本地坐标）的链接/注脚命中测试。
     var linkHitTest: (CGPoint) -> EPUBLinkHit? = { _ in nil }
+    /// 页面中部点到图片时打开查看器并返回 true；否则照常显隐工具栏。
+    var onImageTap: (CGPoint) -> Bool = { _ in false }
     /// 命中注脚。
     var onNoteTap: (String) -> Void = { _ in }
     /// 命中普通链接（本轮仅提示，不导航）。
@@ -61,6 +63,7 @@ struct EPUBPagerView: UIViewRepresentable {
         view.commitHandler = onCommit
         view.animatingChangeHandler = onAnimatingChange
         view.linkHitTestProvider = linkHitTest
+        view.imageTapProvider = onImageTap
         view.noteTapHandler = onNoteTap
         view.plainLinkTapHandler = onPlainLinkTap
         view.centerTapHandler = onCenterTap
@@ -76,6 +79,7 @@ struct EPUBPagerView: UIViewRepresentable {
         view.commitHandler = onCommit
         view.animatingChangeHandler = onAnimatingChange
         view.linkHitTestProvider = linkHitTest
+        view.imageTapProvider = onImageTap
         view.noteTapHandler = onNoteTap
         view.plainLinkTapHandler = onPlainLinkTap
         view.centerTapHandler = onCenterTap
@@ -91,6 +95,7 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
     var commitHandler: ((Bool) -> Void)?
     var animatingChangeHandler: ((Bool) -> Void)?
     var linkHitTestProvider: ((CGPoint) -> EPUBLinkHit?)?
+    var imageTapProvider: ((CGPoint) -> Bool)?
     var noteTapHandler: ((String) -> Void)?
     var plainLinkTapHandler: ((String) -> Void)?
     var centerTapHandler: (() -> Void)?
@@ -318,8 +323,9 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
             return
         }
 
-        // 2) 中部三分之一：显隐工具栏。
+        // 2) 中部三分之一：点到图片时打开查看器，否则显隐工具栏。
         if location.x > width / 3, location.x < width * 2 / 3 {
+            if imageTapProvider?(location) == true { return }
             centerTapHandler?()
             return
         }
