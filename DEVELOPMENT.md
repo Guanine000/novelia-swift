@@ -218,6 +218,8 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 
 EPUB 默认采用 YueduCoreText 分页；实验性 Readium 开关可用于 EPUB、TXT 和在线分页，开关默认关闭，已有选择继续保留。TXT 和在线内容也支持滚动模式。引擎选择属于 Reader 内部，API 消费方不根据引擎切换后台实现。
 
+Readium 的 HTML 根背景设为透明，阅读背景由宿主绘制在导航器之下。导航器根视图在 viewDidLoad 时会涂成主题底色，而首次打开不会触发 `presentationDidChange`，因此 `makeWebViewsTransparent` 在每次位置变化时一并清空根视图，否则 WebView 四周的边距会露出白底。WebView 只占去掉上下边距后的区域；书籍给 html/body 设了不透明底色（例如标题页的整页配色）时，每次位置变化后读取计算底色（`bookBackgroundColor`），由宿主铺满整屏，翻到没有底色的页面时恢复阅读背景。是否铺满由 `ReaderBookBackgroundFollow`（`SettingsKey.readerBookBackgroundFollow`，“我的 → 阅读体验 → 书页底色铺满四周”）决定：默认 `ignoreNearWhite` 忽略三个分量都不低于 240 的白色／米白底色；`keepBackgroundImage` 在当前深浅色与横竖屏设有阅读背景图片时不铺满。该设置只存本机，不参与同步。
+
 在线章节缓存需要保持相同请求的合并、成功内容复用和失败后的重试。长 TXT/章节采用拆分与导航索引，修改时关注首屏耗时、索引构建次数和内存，避免每次翻页重复扫描全书。
 
 阅读位置有内容身份与引擎位置两个层次。持久化模型位于 Domain，进度由 `ReadingPositionStore` 管理；TXT 分页单元、EPUB spine/offset 和 Readium locator 的转换留在阅读实现。改变拆分策略或 locator 映射时检查旧进度、字号变化、旋转、目录跳转和引擎切换后的定位。
@@ -262,7 +264,7 @@ Yuedu 分页的页面身份是 `(generation, spineIndex, pageIndex)`。拖动预
 
 Yuedu 重排开始时会把位置归零并换成空分页结果，`pendingRelayoutAnchor` 记住要回到的章内偏移；重排被下一次取消时沿用该锚点，成功或非取消失败后清除。进入后台后系统会以浅色/深色及其他尺寸截取快照，阅读视图在 `scenePhase == .background` 时忽略外观与尺寸变化，回到前台再按实际值同步一次；Readium 同样不在后台重建导航器。修改重排或生命周期处理时，验证切到其他 App 再返回仍停在原页。资源查找保留已有的编码和路径回退，CSS 导入保留递归上限。
 
-Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒体查询、转换带 alpha 的十六进制颜色、改写文字透明度、处理特定 table 布局、以颜色近似 text-shadow。相关计数和限制不能静默消失；这些处理不代表完整浏览器 CSS 支持，也不能直接套到 Readium 路径。`EPUBPageBook.applyEngineWorkarounds` 的极小字距是排版权宜处理；调整或移除时运行对齐、宽度与字符相关回归及整书扫描，不依据旧报告的测试结果作决定。
+Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒体查询、转换带 alpha 的十六进制颜色、改写文字透明度、处理特定 table 布局、以颜色近似 text-shadow、把 `position: absolute/fixed/sticky` 降级为普通流（引擎遇到这类定位会整章拒绝排版，降级后内容按文档顺序显示，`positionRewriteCount` 计入目录诊断）。相关计数和限制不能静默消失；这些处理不代表完整浏览器 CSS 支持，也不能直接套到 Readium 路径。`EPUBPageBook.applyEngineWorkarounds` 的极小字距是排版权宜处理；调整或移除时运行对齐、宽度与字符相关回归及整书扫描，不依据旧报告的测试结果作决定。
 
 目录诊断和内容诊断验证资源读取、解码与目录补全，不证明 WebKit 排版、脚本执行或图片/字体显示正确。需要变更引擎、依赖或兼容处理时，同时检查本地 EPUB、TXT、在线内容以及实际交互。
 
@@ -353,8 +355,6 @@ WebDAV 请求使用 `reloadIgnoringLocalCacheData` 与 `Cache-Control: no-cache,
 
 分享日志使用 `ShareableLogPolicy` 的事件允许清单，只导出 App 子系统的受控记录。新增诊断需同时定义可分享格式和回归；自由文本、用户书名/正文、路径、URL、账号和凭据不能直接进入分享文件。系统/框架日志与未知事件不透传，内部完整诊断的动态敏感字段继续使用私有日志标记。构建日志属于本机排障材料，不作为发布附件。
 
-## 新增、修改与删除功能
-
 导出通过 `OSLogStore` 读取，在 iOS 上只能读到当前进程，并且实际只读回 `notice` 及以上级别；`info`／`debug` 只用于连接 Xcode 时的本机排障。需要出现在分享日志中的事件使用 Core 的 `ShareableLogger`：它写入系统日志（只有通过审查的消息标为公开），同时追加到 `DiagnosticJournal`（Application Support/Diagnostics，不备份，单文件约 1.5 MB、轮换保留一个旧文件，导出时取最近 7 天）。写入与读取都再经过 `ShareableLogPolicy` 审查。导出时，以前启动的记录来自该文件，本次启动的记录来自系统日志，两者按启动标识去重，因此 App 重启或被系统结束后仍可导出之前的记录。阅读诊断消息统一由 `ReaderDiagnosticMessage` 生成，不在调用处手写格式；新增事件时同时增加格式化函数、允许清单和 `ReaderDiagnosticMessageTests` 用例。
 
 跳页相关诊断：
@@ -364,6 +364,8 @@ WebDAV 请求使用 `reloadIgnoringLocalCacheData` 与 `Cache-Control: no-cache,
 - 阅读器顶栏的「标记问题」按钮写入标记行；默认引擎同时记录当前位置，Readium 同时记录分页状态。
 
 普通翻页也会记录，每次翻页约一到三行；导出上限为 10000 行。修改来源名称时同步更新 `ShareableLogPolicy.positionCauses`。
+
+## 新增、修改与删除功能
 
 ### 新增功能
 

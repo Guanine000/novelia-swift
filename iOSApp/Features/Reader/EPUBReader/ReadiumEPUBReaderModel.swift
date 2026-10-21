@@ -52,6 +52,9 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published private(set) var isDarkMode = false
     /// 每次重建导航器递增，让宿主视图换上新的控制器。
     @Published private(set) var navigatorRevision = 0
+    /// 当前章节为 html/body 指定的不透明底色；没有时为 nil。书籍底色只画在 WebView 内，
+    /// 宿主用它铺满导航器上下边距与安全区，避免书页四周露出阅读背景。
+    @Published private(set) var bookBackgroundColor: UIColor?
     @Published var activeNote: EPUBNote?
     /// 书内图片（点图查看与目录页“图片”）；EPUB 复用打开前预检的原生容器读取图片。
     let imageLibrary = ReaderImageLibrary()
@@ -100,10 +103,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     private var positionCount = 0
     private var navigationAdapter: DirectionalNavigationAdapter?
     private var tapToken: InputObservableToken?
+    private var gestureToken: InputObservableToken?
     /// 点按正文中部（非翻页区域）时调用。
     var onCenterTap: () -> Void = {}
 
-    private var gestureToken: InputObservableToken?
     private static let styleDefaultsKey = ReaderSettings.epubStyleKey
 
     private let settings: ReaderSettings
@@ -214,10 +217,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         let target = failedTextHref.map { Locator(href: $0, mediaType: .xhtml) }
             ?? navigator?.currentLocation ?? locator
         failedTextHref = nil
+        markNavigation("rebuild")
         do { try makeNavigator(initialLocation: target) }
         catch { textLoadFailure = Self.describe(error) }
     }
-        markNavigation("rebuild")
 
     /// 取消过期页面回调，避免慢章节的换算覆盖已经翻到的新位置。
     private func saveTextPosition(_ location: Locator) {
@@ -395,14 +398,14 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             publication: publication, initialLocation: initialLocation, config: config)
         navigator.delegate = self
 
-        let adapter = DirectionalNavigationAdapter(animatedTransition: true)
-        adapter.bind(to: navigator)
-        navigationAdapter = adapter
         // 先于翻页适配器注册且不消费事件：只记下点按，供位置日志区分用户翻页与 Readium 自行移动。
         gestureToken = navigator.addObserver(.tap { [weak self] _ in
             self?.noteGesture("tap")
             return false
         })
+        let adapter = DirectionalNavigationAdapter(animatedTransition: true)
+        adapter.bind(to: navigator)
+        navigationAdapter = adapter
         // 翻页区域之外（中部）的点按：点到正文图片时打开查看器，否则显隐工具栏；
         // 适配器已处理的边缘点按不会到这里。
         tapToken = navigator.addObserver(.tap { [weak self] event in
@@ -464,10 +467,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     /// 样式中只有边距和导入字体需要重建导航器；其余偏好可直接提交。
     private func rebuildNavigator() {
+        markNavigation("rebuild")
         let location = navigator?.currentLocation ?? locator
         do {
             try makeNavigator(initialLocation: location)
-        markNavigation("rebuild")
         } catch {
             status = .failed(Self.describe(error))
         }
@@ -531,17 +534,17 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         if themeChanged, navigator != nil {
             rebuildNavigator()
         } else {
+            markNavigation("preferences")
             navigator?.submitPreferences(preferences())
         }
     }
-            markNavigation("preferences")
 
     /// 背景颜色变化后重新提交偏好（背景图由宿主视图绘制在导航器之下）。
     func refreshBackground() {
+        markNavigation("preferences")
         navigator?.submitPreferences(preferences())
     }
 
-        markNavigation("preferences")
     func applyStyle(_ requested: EPUBReaderStyle) {
         var updated = requested
         updated.fontSize = min(36, max(12, requested.fontSize))
@@ -566,10 +569,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         if needsRebuild {
             rebuildNavigator()
         } else {
+            markNavigation("preferences")
             navigator?.submitPreferences(preferences())
         }
     }
-            markNavigation("preferences")
 
     // MARK: 导航
 
@@ -583,13 +586,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     }
 
     func jump(to item: ReadiumTOCItem) {
+        markNavigation("navigate")
         Task { _ = await navigator?.go(to: item.link) }
     }
 
-        markNavigation("navigate")
-    // MARK: 书签与书内搜索
-
-    /// 每个阅读顺序资源的位置数，用来估计当前页在章内的范围。
     // MARK: 位置诊断
 
     /// 最近一次由本模型发起的导航来源。导航器稍后才回报新位置，因此在下一次位置回报时取用并清空；
@@ -650,6 +650,9 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         logPageState(when: "settled")
     }
 
+    // MARK: 书签与书内搜索
+
+    /// 每个阅读顺序资源的位置数，用来估计当前页在章内的范围。
     private var positionsPerResource: [Int: Int] = [:]
 
     /// 书签与搜索使用的书籍身份：EPUB 为 `epub:<文件哈希>`，本地 TXT 为 `txt:<文件哈希>`；在线小说为 nil。
@@ -700,10 +703,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     func jump(toImage entry: EPUBImageEntry) {
         guard let spine = entry.spineIndex, let index = readingOrderIndex(forSpine: spine),
               let publication else { return }
+        markNavigation("navigate")
         Task { [weak self] in
             guard let base = await publication.locate(publication.readingOrder[index]) else { return }
             _ = await self?.navigator?.go(to: base.copy(locations: { $0.progression = 0 }))
-        markNavigation("navigate")
             for _ in 0..<10 {
                 guard let self else { return }
                 if await scrollToImage(path: entry.path) { return }
@@ -765,19 +768,19 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     /// 跳到书签或搜索结果；导航器报告新位置后照常记录阅读进度。
     func jump(toChapter index: Int, progression: Double) {
         guard let publication, publication.readingOrder.indices.contains(index) else { return }
+        markNavigation("navigate")
         Task {
             guard let base = await publication.locate(publication.readingOrder[index]) else { return }
             _ = await navigator?.go(to: base.copy(locations: { $0.progression = min(1, max(0, progression)) }))
-        markNavigation("navigate")
         }
     }
 
     func seek(to progression: Double) {
         guard let publication else { return }
+        markNavigation("seek")
         Task {
             if let target = await publication.locate(progression: min(max(progression, 0), 1)) {
                 _ = await navigator?.go(to: target)
-        markNavigation("seek")
             }
         }
     }
@@ -878,10 +881,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
         let previous = self.locator
+        logLocationChange(from: previous, to: locator)
         let current = navigationIndex?.tocIndex(for: locator.href)
         if currentTOCIndex != current { currentTOCIndex = current }
         self.locator = locator
-        logLocationChange(from: previous, to: locator)
         if textBook != nil {
             if previous != locator { saveTextPosition(locator) }
         } else if !receivedBookLocation {
@@ -891,6 +894,7 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
             save(locator)
         }
         makeWebViewsTransparent()
+        refreshBookBackground()
 #if DEBUG
         refreshPaginationValidation()
 #endif
@@ -924,12 +928,12 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
             status = .failed("章节加载失败：\(href.string)。\(Self.diagnosticReason(error))")
         }
         Self.logger.error("Readium failed to load \(href.string, privacy: .private): \(String(describing: error), privacy: .public)")
+        let resource = publication?.readingOrder.firstIndex { $0.url().string.hasSuffix(href.string) } ?? -1
+        Self.shareable.error(ReaderDiagnosticMessage.readiumResourceLoadFailed(resource: resource))
     }
 
     /// 注脚不跳转，改为底部弹层显示纯文本。
     func navigator(_ navigator: Navigator, shouldNavigateToNoteAt link: ReadiumShared.Link, content: String, referrer: String?) -> Bool {
-        let resource = publication?.readingOrder.firstIndex { $0.url().string.hasSuffix(href.string) } ?? -1
-        Self.shareable.error(ReaderDiagnosticMessage.readiumResourceLoadFailed(resource: resource))
         let text = Self.plainText(fromHTML: content)
         activeNote = EPUBNote(text: text.isEmpty ? "（注释内容为空）" : text)
         return false
@@ -959,21 +963,55 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     /// 所以根背景透明改由 RS__backgroundColor 在 HTML 注入阶段完成，见 makeNavigator）。
     func navigator(_ navigator: EPUBNavigatorViewController, setupUserScripts userContentController: WKUserContentController) {
         // 此回调在新章节的 WebView 创建时触发；待其加入视图层级后再设为透明。
+        createdWebViews += 1
+        Self.shareable.notice(ReaderDiagnosticMessage.readiumWebViewCreated(count: createdWebViews))
         DispatchQueue.main.async { [weak self] in self?.makeWebViewsTransparent() }
     }
 
+    /// 读取当前章节 html（ReadiumCSS 已设透明）或 body 的计算底色。翻到新位置后执行，
+    /// 结果过期（导航器已重建或位置已变）时丢弃。
+    private func refreshBookBackground() {
+        guard let navigator else { return }
+        let location = locator
+        Task { [weak self, weak navigator] in
+            guard let navigator else { return }
+            let result = await navigator.evaluateJavaScript("""
+                (function () {
+                  function bg(el) { return el ? getComputedStyle(el).backgroundColor : ''; }
+                  var root = bg(document.documentElement);
+                  return /^rgba?\\(/.test(root) && !/,\\s*0\\)$/.test(root) ? root : bg(document.body);
+                })()
+                """)
+            guard let self, self.navigator === navigator, self.locator == location else { return }
+            let color = ((try? result.get()) as? String).flatMap(Self.opaqueColor(fromCSS:))
+            if self.bookBackgroundColor != color { self.bookBackgroundColor = color }
+        }
+    }
+
+    /// 解析 `rgb(r, g, b)`／`rgba(r, g, b, a)`；透明或无法解析时返回 nil。
+    static func opaqueColor(fromCSS css: String) -> UIColor? {
+        guard let open = css.firstIndex(of: "("), let close = css.lastIndex(of: ")"), open < close else { return nil }
+        let parts = css[css.index(after: open)..<close].split(separator: ",")
+            .compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard parts.count >= 3 else { return nil }
+        let alpha = parts.count > 3 ? parts[3] : 1
+        guard alpha > 0 else { return nil }
+        return UIColor(red: parts[0] / 255, green: parts[1] / 255, blue: parts[2] / 255, alpha: alpha)
+    }
+
     /// Readium 只为固定版式书籍关闭 WebView 的不透明绘制；流式书籍的 WebView 会画出
-        createdWebViews += 1
-        Self.shareable.notice(ReaderDiagnosticMessage.readiumWebViewCreated(count: createdWebViews))
-    /// 自己的底色盖住阅读背景，因此逐个关闭。
+    /// 自己的底色盖住阅读背景，因此逐个关闭。导航器根视图在 viewDidLoad 时也会涂成主题底色，
+    /// 而首次打开不会触发 presentationDidChange，这里一并清空，否则 WebView 四周的边距露出白底。
     private func makeWebViewsTransparent() {
         guard let root = navigator?.view else { return }
+        if root.backgroundColor != .clear { root.backgroundColor = .clear }
         var stack: [UIView] = [root]
         while let view = stack.popLast() {
             if let webView = view as? WKWebView, webView.isOpaque {
                 webView.isOpaque = false
                 webView.underPageBackgroundColor = .clear
             }
+            if let scrollView = view as? UIScrollView { gestureProbe.attach(to: scrollView.panGestureRecognizer) }
             stack.append(contentsOf: view.subviews)
         }
     }
@@ -995,7 +1033,6 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
 private struct TransparentCSSColor: CSSColor {
     func css() -> String? { "transparent" }
 }
-            if let scrollView = view as? UIScrollView { gestureProbe.attach(to: scrollView.panGestureRecognizer) }
 
 
 /// 给 Readium 内部滚动视图的拖动手势追加观察目标。只在开始拖动时回调，不改变手势的识别与滚动行为；

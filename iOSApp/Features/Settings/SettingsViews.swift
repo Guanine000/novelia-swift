@@ -14,6 +14,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.appThemeCustomHex) private var themeCustomHex = "559775"
     @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = false
     @AppStorage(SettingsKey.readerEPUBDisablesScripts) private var epubDisablesScripts = false
+    @AppStorage(SettingsKey.readerBookBackgroundFollow) private var bookBackgroundFollow = ReaderBookBackgroundFollow.default.rawValue
     @EnvironmentObject private var readerSettings: ReaderSettings
     @AppStorage(SettingsKey.readerMode) private var modeRaw = ReaderMode.bilingual.rawValue
     @State private var isExportingLogs = false
@@ -83,6 +84,18 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("禁用书内脚本")
                             Text("Readium 打开 EPUB 时不执行书籍自带的脚本，例如自绘注释气泡，改用统一的注释弹层；依赖脚本的排版效果可能失效。原生分页引擎始终不执行书内脚本。下次打开书籍时生效。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Picker(selection: Binding(
+                        get: { ReaderBookBackgroundFollow(storedValue: bookBackgroundFollow) },
+                        set: { bookBackgroundFollow = $0.rawValue }
+                    )) {
+                        ForEach(ReaderBookBackgroundFollow.allCases) { Text($0.title).tag($0) }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("书页底色铺满四周")
+                            Text("书籍页面自带底色（如彩色标题页）时，边距也使用该颜色。“忽略白色底色”：白色或米白底色不铺满；“保留背景图片”：设置了阅读背景图片时不铺满。")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -483,6 +496,7 @@ private enum ApplicationLogExporter {
                                     level: levelName(entry.level), category: entry.category, message: message)
         }
         // 在限制行数之前合并重复记录，防止大量重复事件挤掉较早的事件。
+        let exported = earlier + current
         let collapsed = ShareableLogAggregator.collapse(exported)
         let messages = Array(collapsed.suffix(10_000))
         let txtDiagnosticCount = logEntries.filter { $0.category == "txt" }.count
@@ -498,7 +512,6 @@ private enum ApplicationLogExporter {
             "省略未经审查的应用事件：\(logEntries.count - current.count)",
             "不包含系统／框架日志；仅导出已审查的诊断格式，时间为距导出时的秒数。",
             "已读取的 TXT 导入 / 解码 / 分章事件数：\(txtDiagnosticCount)",
-        let exported = earlier + current
             ""
         ]
         lines.append(contentsOf: messages.isEmpty ? ["没有符合隐私过滤规则的应用诊断事件。"] : messages)

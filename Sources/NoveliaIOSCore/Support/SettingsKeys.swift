@@ -15,6 +15,8 @@ enum SettingsKey {
     static let readerEPUBReadium = "readerEPUBReadium"
     /// Readium 打开 EPUB 时去掉书内脚本（默认关闭，照常执行）；YueduCoreText 始终不执行书内脚本。
     static let readerEPUBDisablesScripts = "readerEPUBDisablesScripts"
+    /// Readium 页面四周何时跟随书籍底色，值为 `ReaderBookBackgroundFollow` 原始值。
+    static let readerBookBackgroundFollow = "readerBookBackgroundFollow"
     static let appThemeColor = "appThemeColor"
     static let appThemeCustomHex = "appThemeCustomHex"
     /// 底栏页面顺序，以逗号分隔的 `AppTab` 原始值保存。

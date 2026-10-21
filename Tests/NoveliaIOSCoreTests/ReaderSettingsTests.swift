@@ -68,4 +68,25 @@ final class ReaderSettingsTests: XCTestCase {
         settings.pagedTextReading = true
         XCTAssertTrue(ReaderSettings(defaults: defaults).pagedTextReading)
     }
+
+    func testBookBackgroundFollowDefaultsToIgnoringNearWhite() {
+        XCTAssertEqual(ReaderBookBackgroundFollow(storedValue: nil), .ignoreNearWhite)
+        XCTAssertEqual(ReaderBookBackgroundFollow(storedValue: "unknown"), .ignoreNearWhite)
+        XCTAssertEqual(ReaderBookBackgroundFollow(storedValue: "keepBackgroundImage"), .keepBackgroundImage)
+    }
+
+    func testIgnoreNearWhiteFollowsColoredPagesOnly() {
+        let rule = ReaderBookBackgroundFollow.ignoreNearWhite
+        // #88C1EC 标题页底色：跟随，即使设有背景图片。
+        XCTAssertTrue(rule.follows(red: 136.0 / 255, green: 193.0 / 255, blue: 236.0 / 255, hasBackgroundImage: true))
+        // 纯白与米白（#FAF7F0）：不跟随。
+        XCTAssertFalse(rule.follows(red: 1, green: 1, blue: 1, hasBackgroundImage: false))
+        XCTAssertFalse(rule.follows(red: 250.0 / 255, green: 247.0 / 255, blue: 240.0 / 255, hasBackgroundImage: false))
+    }
+
+    func testKeepBackgroundImageFollowsOnlyWithoutImage() {
+        let rule = ReaderBookBackgroundFollow.keepBackgroundImage
+        XCTAssertTrue(rule.follows(red: 1, green: 1, blue: 1, hasBackgroundImage: false))
+        XCTAssertFalse(rule.follows(red: 136.0 / 255, green: 193.0 / 255, blue: 236.0 / 255, hasBackgroundImage: true))
+    }
 }

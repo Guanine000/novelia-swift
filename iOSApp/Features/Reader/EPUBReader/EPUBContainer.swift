@@ -290,6 +290,10 @@ final class EPUBContainer {
     /// 已将 Flex/Grid 布局降级为普通块布局的声明数量。
     /// 内容仍会显示，但 Flex/Grid 专属的对齐与间距效果不保留。
     private(set) var flexGridRewriteCount = 0
+    /// 已将 `position: absolute/fixed/sticky` 降级为普通流的声明数量。
+    /// 引擎遇到这类定位会整章拒绝排版；降级后内容按文档顺序显示，只失去定位效果
+    /// （如固定在页面底部的标题页导语改为接在前文之后）。
+    private(set) var positionRewriteCount = 0
 
     func chapterHTML(at index: Int) async throws -> String {
         guard spine.indices.contains(index) else { throw EPUBError.invalidChapter(index: index) }
@@ -304,6 +308,7 @@ final class EPUBContainer {
         stripped = Self.rewriteOpacity(in: stripped, counter: &opacityRewriteCount,
                                        rgb: themeTextColor.rgbComponents)
         stripped = Self.rewriteUnsupportedFlexGrid(in: stripped, counter: &flexGridRewriteCount)
+        stripped = Self.rewriteUnsupportedPositioning(in: stripped, counter: &positionRewriteCount)
         return Self.rewriteEightDigitColors(in: stripped)
     }
 
@@ -393,6 +398,7 @@ final class EPUBContainer {
             cleaned = Self.rewriteOpacity(in: cleaned, counter: &opacityRewriteCount,
                                           rgb: themeTextColor.rgbComponents)
             cleaned = Self.rewriteUnsupportedFlexGrid(in: cleaned, counter: &flexGridRewriteCount)
+            cleaned = Self.rewriteUnsupportedPositioning(in: cleaned, counter: &positionRewriteCount)
             texts.append(Self.rewriteEightDigitColors(in: cleaned))
         }
         return texts
@@ -424,6 +430,7 @@ final class EPUBContainer {
                                      rgb: themeTextColor.rgbComponents)
         result = Self.stripTableDisplayRules(in: result, counter: &tableDisplayStripCount)
         result = Self.rewriteUnsupportedFlexGrid(in: result, counter: &flexGridRewriteCount)
+        result = Self.rewriteUnsupportedPositioning(in: result, counter: &positionRewriteCount)
         result = Self.rewriteTextShadow(in: result, counter: &textShadowRewriteCount)
         return Self.rewriteEightDigitColors(in: result)
     }
@@ -456,6 +463,20 @@ final class EPUBContainer {
         }
         counter += layoutMatches.count
         return result
+    }
+
+    /// 将 `position: absolute/fixed/sticky` 改为 `position: static`，元素回到普通流。
+    /// 偏移量（top/bottom 等）对 static 元素不生效，保留原样；`relative` 引擎可接受，不改动。
+    static func rewriteUnsupportedPositioning(in text: String, counter: inout Int) -> String {
+        guard let regex = try? NSRegularExpression(
+            pattern: #"(?<![\w-])position\s*:\s*(?:absolute|fixed|sticky|-webkit-sticky)\b"#,
+            options: [.caseInsensitive]) else { return text }
+        let ns = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return text }
+        counter += matches.count
+        return regex.stringByReplacingMatches(
+            in: text, range: NSRange(location: 0, length: ns.length), withTemplate: "position: static")
     }
 
     /// CSS4 #RGBA / #RRGGBBAA 转为引擎可解析的 rgba()。只匹配完整的颜色词，
