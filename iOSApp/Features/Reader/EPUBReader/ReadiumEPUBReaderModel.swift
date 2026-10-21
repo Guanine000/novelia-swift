@@ -52,9 +52,12 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published private(set) var isDarkMode = false
     /// 每次重建导航器递增，让宿主视图换上新的控制器。
     @Published private(set) var navigatorRevision = 0
-    /// 当前章节为 html/body 指定的不透明底色；没有时为 nil。书籍底色只画在 WebView 内，
-    /// 宿主用它铺满导航器上下边距与安全区，避免书页四周露出阅读背景。
-    @Published private(set) var bookBackgroundColor: UIColor?
+    /// 各章节 WebView 读到的书籍 html/body 底色（WebView 释放后自动移除）。
+    /// 书籍底色只画在 WebView 内；把它涂在包住 WebView 的整屏章节视图上，四周边距就随书页一起滑动，
+    /// 翻页时不必等位置回报后再换色。
+    private let pageBackgrounds = NSMapTable<WKWebView, UIColor>.weakToStrongObjects()
+    /// 观察各 WebView 的加载状态，每次加载完成后重新读取底色。
+    private let pageLoadObservations = NSMapTable<WKWebView, NSKeyValueObservation>.weakToStrongObjects()
     @Published var activeNote: EPUBNote?
     /// 书内图片（点图查看与目录页“图片”）；EPUB 复用打开前预检的原生容器读取图片。
     let imageLibrary = ReaderImageLibrary()
@@ -543,6 +546,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     func refreshBackground() {
         markNavigation("preferences")
         navigator?.submitPreferences(preferences())
+        reapplyPageBackgrounds()
     }
 
     func applyStyle(_ requested: EPUBReaderStyle) {
@@ -894,7 +898,8 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
             save(locator)
         }
         makeWebViewsTransparent()
-        refreshBookBackground()
+        // 旋转会改变横竖屏背景图片的取用，位置回报时顺带重新套用规则。
+        reapplyPageBackgrounds()
 #if DEBUG
         refreshPaginationValidation()
 #endif
@@ -968,23 +973,54 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         DispatchQueue.main.async { [weak self] in self?.makeWebViewsTransparent() }
     }
 
-    /// 读取当前章节 html（ReadiumCSS 已设透明）或 body 的计算底色。翻到新位置后执行，
-    /// 结果过期（导航器已重建或位置已变）时丢弃。
-    private func refreshBookBackground() {
-        guard let navigator else { return }
-        let location = locator
-        Task { [weak self, weak navigator] in
-            guard let navigator else { return }
-            let result = await navigator.evaluateJavaScript("""
-                (function () {
-                  function bg(el) { return el ? getComputedStyle(el).backgroundColor : ''; }
-                  var root = bg(document.documentElement);
-                  return /^rgba?\\(/.test(root) && !/,\\s*0\\)$/.test(root) ? root : bg(document.body);
-                })()
-                """)
-            guard let self, self.navigator === navigator, self.locator == location else { return }
-            let color = ((try? result.get()) as? String).flatMap(Self.opaqueColor(fromCSS:))
-            if self.bookBackgroundColor != color { self.bookBackgroundColor = color }
+    /// WebView 加载完成后读取 html（ReadiumCSS 已设透明）或 body 的计算底色。
+    /// 相邻章节预加载时就已读好，翻页滑入时边距颜色与书页同步出现。
+    private func observePageBackground(of webView: WKWebView) {
+        guard pageLoadObservations.object(forKey: webView) == nil else { return }
+        let observation = webView.observe(\.isLoading, options: [.initial, .new]) { [weak self] webView, _ in
+            DispatchQueue.main.async {
+                guard let self, !webView.isLoading, webView.url != nil else { return }
+                self.readPageBackground(of: webView)
+            }
+        }
+        pageLoadObservations.setObject(observation, forKey: webView)
+    }
+
+    private func readPageBackground(of webView: WKWebView) {
+        let script = """
+            (function () {
+              function bg(el) { return el ? getComputedStyle(el).backgroundColor : ''; }
+              var root = bg(document.documentElement);
+              return /^rgba?\\(/.test(root) && !/,\\s*0\\)$/.test(root) ? root : bg(document.body);
+            })()
+            """
+        webView.evaluateJavaScript(script) { [weak self, weak webView] result, _ in
+            guard let self, let webView else { return }
+            let color = (result as? String).flatMap(Self.opaqueColor(fromCSS:))
+            if let color { self.pageBackgrounds.setObject(color, forKey: webView) } else { self.pageBackgrounds.removeObject(forKey: webView) }
+            self.applyPageBackground(to: webView)
+        }
+    }
+
+    /// 按“书页底色铺满四周”规则给章节视图上色；不跟随时保持透明，露出宿主阅读背景。
+    private func applyPageBackground(to webView: WKWebView) {
+        guard let spreadView = webView.superview else { return }
+        var followed: UIColor?
+        if let color = pageBackgrounds.object(forKey: webView) {
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+            let bounds = navigator?.view.bounds ?? spreadView.bounds
+            let hasImage = settings.backgrounds.image(dark: isDarkMode, landscape: bounds.width > bounds.height) != nil
+            let rule = ReaderBookBackgroundFollow(storedValue: UserDefaults.standard.string(forKey: SettingsKey.readerBookBackgroundFollow))
+            if rule.follows(red: red, green: green, blue: blue, hasBackgroundImage: hasImage) { followed = color }
+        }
+        if spreadView.backgroundColor != (followed ?? .clear) { spreadView.backgroundColor = followed ?? .clear }
+    }
+
+    /// 阅读背景或深浅色变化后，按现有底色重新套用规则。
+    private func reapplyPageBackgrounds() {
+        for case let webView as WKWebView in pageBackgrounds.keyEnumerator().allObjects {
+            applyPageBackground(to: webView)
         }
     }
 
@@ -1007,6 +1043,7 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         if root.backgroundColor != .clear { root.backgroundColor = .clear }
         var stack: [UIView] = [root]
         while let view = stack.popLast() {
+            if let webView = view as? WKWebView { observePageBackground(of: webView) }
             if let webView = view as? WKWebView, webView.isOpaque {
                 webView.isOpaque = false
                 webView.underPageBackgroundColor = .clear
