@@ -134,6 +134,32 @@ final class StructuredDiagnosticsExportTests: XCTestCase {
         }
     }
 
+    /// 跳页诊断：重排落点、位置变化（含普通翻页）、阅读区尺寸、前后台切换与 Readium 位置。
+    func testPositionDiagnosticsPass() {
+        let lines = [
+            ("epub", "EPUB relayout positioned; trace=1a2b3c4d, gen=4, reason=themeChange, spine=3, fromPage=11, fromPages=27, toPage=11, toPages=27, anchor=offset, resumed=false, mono=81240000"),
+            ("epub", "TXT relayout positioned; trace=1a2b3c4d, gen=5, reason=resize, spine=3, fromPage=11, fromPages=27, toPage=0, toPages=28, anchor=fraction, resumed=true, mono=81240000"),
+            ("epub", "EPUB position changed; trace=1a2b3c4d, gen=4, cause=turnForward, fromSpine=3, fromPage=11, fromPages=27, toSpine=3, toPage=12, toPages=27, mono=81240000"),
+            ("epub", "Online position changed; trace=1a2b3c4d, gen=4, cause=other, fromSpine=3, fromPage=11, fromPages=27, toSpine=4, toPage=0, toPages=9, mono=81240000"),
+            ("epub", "EPUB viewport changed; trace=1a2b3c4d, from=402x780, to=402x812, mono=81240000"),
+            ("lifecycle", "Scene phase changed; phase=background"),
+            ("readium", "Readium EPUB opened: 48 resources, 1203 positions"),
+            ("readium", "Readium position changed; kind=epub, cause=unattributed, fromResource=3, fromProgress=412, toResource=4, toProgress=0, total=87, mono=81240000"),
+            ("readium", "Readium position changed; kind=txt, cause=open, fromResource=-1, fromProgress=-1, toResource=0, toProgress=1000, total=-1, mono=81240000"),
+        ]
+        for (category, line) in lines {
+            XCTAssertEqual(exported(category, line), line, line)
+        }
+        for line in [
+            "Readium position changed; kind=epub, cause=书名, fromResource=3, fromProgress=412, toResource=4, toProgress=0, total=87, mono=1",
+            "EPUB position changed; trace=1a2b3c4d, gen=4, cause=turnForward, fromSpine=3, fromPage=11, fromPages=27, toSpine=3, toPage=12, toPages=27, mono=1 href=OEBPS/a.xhtml",
+            "Readium EPUB opened: 48 resources, 1203 positions /Users/name/book.epub",
+            "Scene phase changed; phase=background\nsecret",
+        ] {
+            XCTAssertNil(exported(line.hasPrefix("Readium") ? "readium" : (line.hasPrefix("Scene") ? "lifecycle" : "epub"), line), line)
+        }
+    }
+
     func testStructuredFieldsRejectFreeText() {
         for line in [
             "TXT decode succeeded; trace=1a2b3c4d, book=/Users/a/b.txt, source=import, reason=first, cacheHit=false, bytes=1, elapsedMs=1, thread=background, mono=1",
@@ -144,5 +170,112 @@ final class StructuredDiagnosticsExportTests: XCTestCase {
             XCTAssertNil(exported("txt", line), line)
         }
         XCTAssertNil(exported("epub", "EPUB chapter laid out; book=0f0e0d0c, trace=1a2b3c4d, gen=2, spine=3, totalSpine=48, currentSpine=3, reason=第一章, pages=27, cacheHit=false, elapsedMs=383, thread=main, mono=1"))
+    }
+}
+
+/// 阅读诊断格式化函数的输出必须全部通过允许清单，否则事件会在导出时被静默丢弃。
+final class ReaderDiagnosticMessageTests: XCTestCase {
+    private func passes(_ category: String, _ text: String, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(ShareableLogPolicy.message(subsystem: ShareableLogPolicy.subsystem, category: category, text: text), text,
+                       text, file: file, line: line)
+    }
+
+    func testEveryFormatterPassesThePolicy() {
+        typealias M = ReaderDiagnosticMessage
+        for reason in ShareableLogPolicy.layoutReasons {
+            passes("epub", M.relayoutScheduled(trace: "1a2b3c4d", generation: 3, reason: reason, cancelledTasks: 2))
+            passes("epub", M.relayoutPositioned(label: "EPUB", trace: "1a2b3c4d", generation: 3, reason: reason, spine: 4,
+                                                fromPage: 7, fromPages: 20, toPage: 7, toPages: 21, anchor: "fraction", resumed: true))
+        }
+        passes("epub", M.readerClosed(trace: "1a2b3c4d", generation: 3, cancelledTasks: 0))
+        for (label, kind) in [("EPUB", "epub"), ("TXT", "txt"), ("Online", "online")] {
+            passes("epub", M.openSucceeded(label: label, kind: kind, trace: "1a2b3c4d", book: "0f0e0d0c", totalSpine: 48, toc: 45,
+                                           currentSpine: 3, currentChapterPages: 27, restored: false, elapsedMs: 812))
+        }
+        for cause in ShareableLogPolicy.positionCauses {
+            passes("epub", M.positionChanged(label: "TXT", trace: "1a2b3c4d", generation: 3, cause: cause, fromSpine: 1, fromPage: 5,
+                                             fromPages: 12, toSpine: 2, toPage: 0, toPages: 9))
+            passes("readium", M.readiumPositionChanged(kind: "epub", cause: cause, fromResource: 3, fromProgress: 412,
+                                                       toResource: 4, toProgress: 0, total: 87))
+        }
+        passes("epub", M.viewportChanged(trace: "1a2b3c4d", fromWidth: 402, fromHeight: 780, toWidth: 874, toHeight: 402))
+        passes("epub", M.issueMarked(engine: "native"))
+        passes("readium", M.issueMarked(engine: "readium"))
+        passes("readium", M.readiumOpened(resources: 48, positions: 1203))
+        for when in ["tap", "swipe", "settled"] {
+            passes("readium", M.readiumPageState(when: when, resource: -1, offset: 3216, width: 402, content: 4824))
+        }
+        passes("readium", M.readiumWebViewCreated(count: 3))
+        passes("readium", M.readiumResourceLoadFailed(resource: 7))
+        for phase in ["active", "inactive", "background", "unknown"] { passes("lifecycle", M.scenePhase(phase)) }
+        passes("lifecycle", M.memoryWarning())
+        passes("lifecycle", "Application launched, version 1.0.0 (93)")
+    }
+}
+
+final class DiagnosticJournalTests: XCTestCase {
+    private var directory: URL!
+
+    override func setUp() {
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent("journal-\(UUID().uuidString)")
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testEntriesSurviveANewLaunchAndUnreviewedTextIsDropped() {
+        let first = DiagnosticJournal(directory: directory, launch: "aaaaaaaa")
+        first.append(level: "notice", category: "lifecycle", message: "Application launched, version 1.0.0 (93)")
+        first.append(level: "notice", category: "lifecycle", message: "我的书名与正文")
+        first.append(level: "notice", category: "readium", message: ReaderDiagnosticMessage.readiumWebViewCreated(count: 1))
+        first.flush()
+
+        let second = DiagnosticJournal(directory: directory, launch: "bbbbbbbb")
+        second.append(level: "notice", category: "lifecycle", message: ReaderDiagnosticMessage.scenePhase("active"))
+        second.flush()
+
+        let earlier = second.entries(since: .distantPast, excludingLaunch: second.launch)
+        XCTAssertEqual(earlier.map(\.launch), ["aaaaaaaa", "aaaaaaaa"])
+        XCTAssertEqual(earlier.first?.message, "Application launched, version 1.0.0 (93)")
+        XCTAssertEqual(second.entries(since: .distantPast).count, 3)
+    }
+
+    func testOldEntriesAreFilteredByDate() {
+        let journal = DiagnosticJournal(directory: directory, launch: "aaaaaaaa")
+        journal.append(level: "notice", category: "lifecycle", message: ReaderDiagnosticMessage.memoryWarning(mono: 1),
+                       date: Date(timeIntervalSinceNow: -8 * 86_400))
+        journal.append(level: "notice", category: "lifecycle", message: ReaderDiagnosticMessage.memoryWarning(mono: 2))
+        journal.flush()
+        let recent = journal.entries(since: Date(timeIntervalSinceNow: -7 * 86_400))
+        XCTAssertEqual(recent.map(\.message), ["Memory warning received; mono=2"])
+    }
+
+    func testRotationKeepsSizeBoundedAndRecentEntries() throws {
+        let journal = DiagnosticJournal(directory: directory, launch: "aaaaaaaa", maxBytes: 2_048)
+        for index in 0..<200 {
+            journal.append(level: "notice", category: "readium", message: ReaderDiagnosticMessage.readiumWebViewCreated(count: index, mono: index))
+        }
+        journal.flush()
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.fileSizeKey])
+        XCTAssertLessThanOrEqual(files.count, 2)
+        for file in files {
+            XCTAssertLessThanOrEqual(try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0, 2_048)
+        }
+        let entries = journal.entries(since: .distantPast)
+        XCTAssertEqual(entries.last?.message, ReaderDiagnosticMessage.readiumWebViewCreated(count: 199, mono: 199))
+        XCTAssertLessThan(entries.count, 200)
+    }
+
+    func testTamperedLinesAreSkipped() throws {
+        let journal = DiagnosticJournal(directory: directory, launch: "aaaaaaaa")
+        journal.append(level: "notice", category: "lifecycle", message: ReaderDiagnosticMessage.scenePhase("active"))
+        journal.flush()
+        let url = directory.appendingPathComponent("journal.log")
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("1\taaaaaaaa\tnotice\tlifecycle\tAuthorization: Bearer secret\nnot a record\n".utf8))
+        try handle.close()
+        XCTAssertEqual(journal.entries(since: .distantPast).map(\.message), ["Scene phase changed; phase=active"])
     }
 }

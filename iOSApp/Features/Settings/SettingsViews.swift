@@ -468,7 +468,14 @@ private enum ApplicationLogExporter {
         let entries = try store.getEntries(at: store.position(date: startDate))
         let logEntries = entries.compactMap { $0 as? OSLogEntryLog }.filter { $0.subsystem == ShareableLogPolicy.subsystem }
         let now = Date()
-        let exported = logEntries.compactMap { entry -> ShareableLogLine? in
+        // 以前启动的记录来自 App 自己的诊断文件；当前进程的记录仍从系统日志读取，避免重复。
+        let journal = DiagnosticJournal.shared
+        journal.flush()
+        let earlier = journal.entries(since: startDate, excludingLaunch: journal.launch).map { entry in
+            ShareableLogLine(secondsAgo: max(0, Int(now.timeIntervalSince(entry.date))),
+                             level: entry.level, category: entry.category, message: entry.message)
+        }
+        let current = logEntries.compactMap { entry -> ShareableLogLine? in
             guard let message = ShareableLogPolicy.message(
                 subsystem: entry.subsystem, category: entry.category, text: entry.composedMessage
             ) else { return nil }
@@ -477,18 +484,21 @@ private enum ApplicationLogExporter {
         }
         // 在限制行数之前合并重复记录，防止大量重复事件挤掉较早的事件。
         let collapsed = ShareableLogAggregator.collapse(exported)
-        let messages = Array(collapsed.suffix(5_000))
+        let messages = Array(collapsed.suffix(10_000))
         let txtDiagnosticCount = logEntries.filter { $0.category == "txt" }.count
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "未知"
         var lines = [
             "Novelia iOS 应用诊断日志（隐私过滤版）",
             "版本：\(version) (\(build))",
-            "范围：最近 7 天当前进程日志，连续重复事件合并为一行并标注 (×次数)，最多 5000 行",
-            "读取的应用事件：\(logEntries.count)；通过隐私过滤：\(exported.count)；合并后行数：\(collapsed.count)",
-            "省略未经审查的应用事件：\(logEntries.count - exported.count)",
+            "系统：\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)（\(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone")）",
+            "范围：最近 7 天；以前启动的记录来自 App 诊断文件，本次启动来自系统日志；连续重复事件合并为一行并标注 (×次数)，最多 10000 行",
+            "以前启动的诊断记录：\(earlier.count)",
+            "本次启动读取的应用事件：\(logEntries.count)；通过隐私过滤：\(current.count)；合并后行数：\(collapsed.count)",
+            "省略未经审查的应用事件：\(logEntries.count - current.count)",
             "不包含系统／框架日志；仅导出已审查的诊断格式，时间为距导出时的秒数。",
             "已读取的 TXT 导入 / 解码 / 分章事件数：\(txtDiagnosticCount)",
+        let exported = earlier + current
             ""
         ]
         lines.append(contentsOf: messages.isEmpty ? ["没有符合隐私过滤规则的应用诊断事件。"] : messages)

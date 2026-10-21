@@ -387,6 +387,8 @@ struct EPUBReadingLocation: Equatable {
 enum EPUBLayoutLog {
     static let logger = Logger(subsystem: "cc.novelia.ios.port", category: "epub")
     static let trace = Logger(subsystem: "cc.novelia.ios.port", category: "enginediag")
+    /// 需要出现在分享日志中、并跨启动保留的阅读器事件（notice 级）。
+    static let shareable = ShareableLogger(category: "epub")
 
     static let traceEnabled: Bool = {
         #if DEBUG

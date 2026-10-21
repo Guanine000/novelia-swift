@@ -8,7 +8,6 @@ import ImageIO
 @main
 struct NoveliaApp: App {
     @StateObject private var services: AppServices
-    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "cc.novelia.ios.port", category: "lifecycle")
 
     init() {
         // 开发 API 选择集中在启动组装，功能页面只消费已注入的服务。
@@ -21,7 +20,8 @@ struct NoveliaApp: App {
         #endif
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
-        logger.notice("Application launched, version \(version, privacy: .public) (\(build, privacy: .public))")
+        // 同时写入跨启动诊断记录，导出时以此分隔各次启动。
+        ShareableLogger(category: "lifecycle").notice("Application launched, version \(version) (\(build))")
     }
 
     var body: some Scene {
@@ -155,6 +155,15 @@ enum NoveliaStyle {
 }
 
 struct RootView: View {
+    private static let lifecycleLogger = ShareableLogger(category: "lifecycle")
+    private static func phaseName(_ phase: ScenePhase) -> String {
+        switch phase {
+        case .active: "active"
+        case .inactive: "inactive"
+        case .background: "background"
+        @unknown default: "unknown"
+        }
+    }
     @ObservedObject private var services: AppServices
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(SettingsKey.appThemeColor) private var appThemeColorRaw = AppThemeColor.novelia.rawValue
@@ -275,7 +284,13 @@ struct RootView: View {
             }
             await restoreSessions()
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            // 内存紧张时系统可能结束 Readium 的 WebContent 进程，章节随之重建，是跳页的常见诱因。
+            Self.lifecycleLogger.notice(ReaderDiagnosticMessage.memoryWarning())
+        }
         .onChange(of: scenePhase) { _, phase in
+            // 切换前后台会触发阅读器截图与重排，记录时间点以便与阅读日志对照。
+            Self.lifecycleLogger.notice(ReaderDiagnosticMessage.scenePhase(Self.phaseName(phase)))
             if phase == .active { Task { await restoreSessions() } }
         }
         .sheet(isPresented: $auth.isLoginPresented) {
