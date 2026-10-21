@@ -1103,6 +1103,57 @@ private extension Array {
     var nonEmpty: Self? { isEmpty ? nil : self }
 }
 
+// MARK: - 书内脚本禁用（Readium 可选）
+
+/// 部分书籍自带脚本接管交互（如掌阅风格注释脚本删掉链接 href、按住时显示自绘气泡），
+/// 使 Readium 下的表现与 YueduCoreText（排版前总会剥离脚本）不同。用户开启
+/// “禁用书内脚本”后，Readium 打开 EPUB 时按此处规则改写资源；Readium 自身注入的脚本不受影响。
+enum EPUBScriptRemoval {
+    /// 是否为需要清空的脚本资源（按扩展名判断）。
+    static func isScriptResource(path: String) -> Bool {
+        let lower = path.lowercased()
+        return lower.hasSuffix(".js") || lower.hasSuffix(".mjs")
+    }
+
+    /// 是否为需要剔除脚本的章节文档。
+    static func isHTMLResource(path: String) -> Bool {
+        let lower = path.lowercased()
+        return lower.hasSuffix(".xhtml") || lower.hasSuffix(".html") || lower.hasSuffix(".htm")
+    }
+
+    /// 去掉 `<script>` 元素和标签上的 `on…=` 事件属性；不含脚本时原样返回。
+    static func removingScripts(fromHTML html: String) -> String {
+        var discarded = 0
+        var result = EPUBContainer.stripScripts(from: html, counter: &discarded)
+        guard let handler = try? NSRegularExpression(
+            pattern: "(<[A-Za-z][^>]*?)\\s+on[A-Za-z]+\\s*=\\s*(?:\"[^\"]*\"|'[^']*'|[^\\s>]+)",
+            options: [.caseInsensitive]) else { return result }
+        // 一个标签可能有多个事件属性，每轮去掉每个标签中的一个，直到没有为止。
+        while true {
+            let range = NSRange(location: 0, length: (result as NSString).length)
+            guard handler.firstMatch(in: result, range: range) != nil else { break }
+            result = handler.stringByReplacingMatches(in: result, range: range, withTemplate: "$1")
+        }
+        return result
+    }
+
+    /// 隐藏正文中设计为弹出显示的脚注正文（`epub:type` 含 footnote 或 note），点按注释仍由弹层显示。
+    /// 这类正文原本常由书内脚本藏起；禁用脚本后不处理会以方框留在正文中。章末尾注
+    /// （endnote／rearnote）和多看章末注释列表不隐藏，避免整段注释章节消失。
+    /// 只在已有 `<head>` 时注入，不改动其他结构。
+    static func hidingPopupNoteBodies(inHTML html: String) -> String {
+        guard let head = html.range(of: "</head>", options: .caseInsensitive) else { return html }
+        let style = """
+        <style>@namespace epub "http://www.idpf.org/2007/ops";
+        *[epub|type~="footnote"], *[epub|type~="note"] { display: none !important; }
+        *[epub\\:type~="footnote"], *[epub\\:type~="note"] { display: none !important; }</style>
+        """
+        var result = html
+        result.insert(contentsOf: style, at: head.lowerBound)
+        return result
+    }
+}
+
 // MARK: - 注释正文识别（Readium 未标 noteref 的注释链接）
 
 /// Readium 只对 `<a epub:type="noteref">` 弹出注释；多看及 Sigil 注释插件生成的

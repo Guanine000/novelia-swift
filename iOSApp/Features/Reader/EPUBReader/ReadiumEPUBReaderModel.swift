@@ -127,7 +127,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             }.value
             bookHash = hash
             isTOCDiagnosticsExpanded = false
-            let publication = try await Self.openPublication(url: url)
+            let publication = try await Self.openPublication(
+                url: url, disablesScripts: UserDefaults.standard.bool(forKey: SettingsKey.readerEPUBDisablesScripts))
             self.publication = publication
             bookTitle = publication.metadata.title ?? url.deletingPathExtension().lastPathComponent
             if case .success(let positions) = await publication.positions() {
@@ -293,7 +294,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         return messages
     }
 
-    private static func openPublication(url: URL) async throws -> Publication {
+    /// `disablesScripts` 为 true 时（“禁用书内脚本”）章节文档去掉脚本并隐藏弹出式脚注正文、脚本文件置空，见 `EPUBScriptRemoval`。
+    private static func openPublication(url: URL, disablesScripts: Bool) async throws -> Publication {
         guard let fileURL = FileURL(url: url) else { throw ReadiumOpenError.invalidURL }
         let retriever = AssetRetriever(httpClient: DefaultHTTPClient())
         let asset: Asset
@@ -302,7 +304,23 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         case .failure(let error): throw ReadiumOpenError.asset(String(describing: error))
         }
         let opener = PublicationOpener(parser: EPUBParser())
-        switch await opener.open(asset: asset, allowUserInteraction: false) {
+        let transform: Publication.Builder.Transform = { _, container, _ in
+            guard disablesScripts else { return }
+            container = container.map { href, resource in
+                let path = href.removingFragment().removingQuery().path
+                if EPUBScriptRemoval.isScriptResource(path: path) {
+                    return resource.map { _ in Data() }
+                }
+                guard EPUBScriptRemoval.isHTMLResource(path: path) else { return resource }
+                return resource.map { data in
+                    // 无法按 UTF-8 解码时保留原文，避免整章变空。
+                    guard let html = String(data: data, encoding: .utf8) else { return data }
+                    let cleaned = EPUBScriptRemoval.removingScripts(fromHTML: html)
+                    return Data(EPUBScriptRemoval.hidingPopupNoteBodies(inHTML: cleaned).utf8)
+                }
+            }
+        }
+        switch await opener.open(asset: asset, allowUserInteraction: false, onCreatePublication: transform) {
         case .success(let publication): return publication
         case .failure(let error): throw ReadiumOpenError.parse(String(describing: error))
         }

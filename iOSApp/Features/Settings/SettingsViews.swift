@@ -13,6 +13,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.appThemeColor) private var themeColorRaw = AppThemeColor.novelia.rawValue
     @AppStorage(SettingsKey.appThemeCustomHex) private var themeCustomHex = "559775"
     @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = false
+    @AppStorage(SettingsKey.readerEPUBDisablesScripts) private var epubDisablesScripts = false
     @EnvironmentObject private var readerSettings: ReaderSettings
     @AppStorage(SettingsKey.readerMode) private var modeRaw = ReaderMode.bilingual.rawValue
     @State private var isExportingLogs = false
@@ -75,6 +76,15 @@ struct SettingsView: View {
                         Text("分页使用 Readium 引擎（实验）")
                         Text("适用于 EPUB、TXT 和在线小说的分页阅读；关闭后使用原生分页引擎。下次打开阅读器时生效。")
                             .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if epubUsesReadium {
+                    Toggle(isOn: $epubDisablesScripts) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("禁用书内脚本")
+                            Text("Readium 打开 EPUB 时不执行书籍自带的脚本，例如自绘注释气泡，改用统一的注释弹层；依赖脚本的排版效果可能失效。原生分页引擎始终不执行书内脚本。下次打开书籍时生效。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 Picker(selection: $themeColorRaw) {

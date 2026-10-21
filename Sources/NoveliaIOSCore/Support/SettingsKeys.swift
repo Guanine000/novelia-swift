@@ -13,6 +13,8 @@ enum SettingsKey {
     static let readerPagedText = "readerPagedText"
     /// EPUB 使用实验性的 Readium（WKWebView）阅读器代替 YueduCoreText。
     static let readerEPUBReadium = "readerEPUBReadium"
+    /// Readium 打开 EPUB 时去掉书内脚本（默认关闭，照常执行）；YueduCoreText 始终不执行书内脚本。
+    static let readerEPUBDisablesScripts = "readerEPUBDisablesScripts"
     static let appThemeColor = "appThemeColor"
     static let appThemeCustomHex = "appThemeCustomHex"
     /// 底栏页面顺序，以逗号分隔的 `AppTab` 原始值保存。
