@@ -218,7 +218,7 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 
 EPUB 默认采用 YueduCoreText 分页；实验性 Readium 开关可用于 EPUB、TXT 和在线分页，开关默认关闭，已有选择继续保留。TXT 和在线内容也支持滚动模式。引擎选择属于 Reader 内部，API 消费方不根据引擎切换后台实现。
 
-Readium 的 HTML 根背景设为透明，阅读背景由宿主绘制在导航器之下。导航器根视图在 viewDidLoad 时会涂成主题底色，而首次打开不会触发 `presentationDidChange`，因此 `makeWebViewsTransparent` 在每次位置变化时一并清空根视图，否则 WebView 四周的边距会露出白底。WebView 只占去掉上下边距后的区域；书籍给 html/body 设了不透明底色（例如标题页的整页配色）时，每次位置变化后读取计算底色（`bookBackgroundColor`），由宿主铺满整屏，翻到没有底色的页面时恢复阅读背景。是否铺满由 `ReaderBookBackgroundFollow`（`SettingsKey.readerBookBackgroundFollow`，“我的 → 阅读体验 → 书页底色铺满四周”）决定：默认 `ignoreNearWhite` 忽略三个分量都不低于 240 的白色／米白底色；`keepBackgroundImage` 在当前深浅色与横竖屏设有阅读背景图片时不铺满。该设置只存本机，不参与同步。
+Readium 的 HTML 根背景设为透明，阅读背景由宿主绘制在导航器之下。导航器根视图在 viewDidLoad 时会涂成主题底色，而首次打开不会触发 `presentationDidChange`，因此 `makeWebViewsTransparent` 在每次位置变化时一并清空根视图，否则 WebView 四周的边距会露出白底。WebView 只占去掉上下边距后的区域，外面包着整屏高的章节视图（`EPUBSpreadView`）。书籍给 html/body 设了不透明底色（例如标题页的整页配色）时，每个 WebView 加载完成后（观察 `isLoading`，相邻章节预加载时即完成）读取计算底色，并涂在它所在的章节视图上；边距颜色因此随书页一起滑入滑出，不等位置回报。不能在 `setupUserScripts` 注入脚本取色：该回调时 WebView 已开始加载，脚本不保证作用于当页。是否铺满由 `ReaderBookBackgroundFollow`（`SettingsKey.readerBookBackgroundFollow`，“我的 → 阅读体验 → 书页底色铺满四周”）决定：默认 `ignoreNearWhite` 忽略三个分量都不低于 240 的白色／米白底色；`keepBackgroundImage` 在当前深浅色与横竖屏设有阅读背景图片时不铺满。该设置只存本机，不参与同步。
 
 在线章节缓存需要保持相同请求的合并、成功内容复用和失败后的重试。长 TXT/章节采用拆分与导航索引，修改时关注首屏耗时、索引构建次数和内存，避免每次翻页重复扫描全书。
 
