@@ -17,6 +17,55 @@ struct EPUBTOCEntry: Identifiable, Equatable {
     let id = UUID()
     let title: String
     let spineIndex: Int?
+    /// 目录层级，0 为顶层；nav 的嵌套 <ol> 与 NCX 的嵌套 navPoint 逐层加一。
+    var level: Int = 0
+}
+
+/// 按层级展平的目录的折叠计算（YueduCoreText 与 Readium 阅读器的目录面板共用）。
+/// 目录以先序展平：父项在前，紧随其后、层级更深的连续条目都是它的后代。
+enum TOCOutline {
+    /// 每一项的父项序号；顶层为 nil。
+    static func parents(levels: [Int]) -> [Int?] {
+        var stack: [Int] = []
+        return levels.indices.map { index in
+            while let last = stack.last, levels[last] >= levels[index] { stack.removeLast() }
+            let parent = stack.last
+            stack.append(index)
+            return parent
+        }
+    }
+
+    /// 每一项是否有子项（下一项层级更深）。
+    static func hasChildren(levels: [Int]) -> [Bool] {
+        levels.indices.map { $0 + 1 < levels.count && levels[$0 + 1] > levels[$0] }
+    }
+
+    /// 当前展开状态下应显示的条目：所有祖先都已展开的项。
+    static func visibleIndices(levels: [Int], expanded: Set<Int>) -> [Int] {
+        let parents = parents(levels: levels)
+        var visible = [Bool](repeating: false, count: levels.count)
+        for index in levels.indices {
+            if let parent = parents[index] {
+                visible[index] = visible[parent] && expanded.contains(parent)
+            } else {
+                visible[index] = true
+            }
+        }
+        return levels.indices.filter { visible[$0] }
+    }
+
+    /// 某项的所有祖先（用于默认展开当前章节所在的分组）。
+    static func ancestors(of index: Int, levels: [Int]) -> [Int] {
+        guard levels.indices.contains(index) else { return [] }
+        let parents = parents(levels: levels)
+        var result: [Int] = []
+        var current = parents[index]
+        while let parent = current {
+            result.append(parent)
+            current = parents[parent]
+        }
+        return result
+    }
 }
 
 struct EPUBSpineItem: Equatable {
@@ -741,7 +790,7 @@ final class EPUBContainer {
     }
 
     /// 目录 href 相对其文档所在目录解析后映射到 spine。
-    private func mapToSpine(_ entries: [(title: String, href: String)],
+    private func mapToSpine(_ entries: [(title: String, href: String, level: Int)],
                             baseDirectory: String) -> [EPUBTOCEntry] {
         entries.map { entry in
             let target = Self.isAbsoluteInPackage(entry.href)
@@ -750,7 +799,7 @@ final class EPUBContainer {
             let index = spine.firstIndex {
                 Self.stripFragment($0.href) == Self.stripFragment(target)
             }
-            return EPUBTOCEntry(title: entry.title, spineIndex: index)
+            return EPUBTOCEntry(title: entry.title, spineIndex: index, level: entry.level)
         }
     }
 
@@ -768,7 +817,7 @@ final class EPUBContainer {
 
     // MARK: nav 目录解析（正则提取 <a href>，限制见文件头）
 
-    private static func parseNavTOC(html: String) -> [(title: String, href: String)] {
+    static func parseNavTOC(html: String) -> [(title: String, href: String, level: Int)] {
         var block = html
         if let navStart = html.range(of: "<nav\\b[^>]*>", options: .regularExpression),
            let navEnd = html.range(of: "</nav>", range: navStart.upperBound..<html.endIndex) {
@@ -778,15 +827,40 @@ final class EPUBContainer {
             pattern: "<a\\b[^>]*href\\s*=\\s*[\"']([^\"']+)[\"'][^>]*>([\\s\\S]*?)</a>") else {
             return []
         }
-        var result: [(String, String)] = []
+        // 层级 = 包含该锚点的外层 <li> 中本身带链接的个数。只有标题文字、没有链接的
+        // 分组（<li><span>第一卷</span><ol>…）不计层级，避免把其子项挂到前一个兄弟条目下。
+        let structureTags = (try? NSRegularExpression(pattern: "<(/?)(ol|ul|li)\\b[^>]*>", options: [.caseInsensitive]))?
+            .matches(in: block, range: NSRange(location: 0, length: (block as NSString).length)) ?? []
+        var result: [(String, String, Int)] = []
         let ns = block as NSString
+        var tagCursor = 0
+        var itemHasLink: [Bool] = []
+        var listItemCounts: [Int] = []
         for match in anchorRegex.matches(in: block, range: NSRange(location: 0, length: ns.length)) {
+            while tagCursor < structureTags.count, structureTags[tagCursor].range.location < match.range.location {
+                let tag = structureTags[tagCursor]
+                let closing = tag.range(at: 1).length > 0
+                let isItem = ns.substring(with: tag.range(at: 2)).lowercased() == "li"
+                switch (isItem, closing) {
+                case (true, false): itemHasLink.append(false)
+                case (true, true): if !itemHasLink.isEmpty { itemHasLink.removeLast() }
+                case (false, false): listItemCounts.append(itemHasLink.count)
+                case (false, true):
+                    // 列表结束时一并关闭其中漏写 </li> 的条目。
+                    if let count = listItemCounts.popLast(), count < itemHasLink.count {
+                        itemHasLink.removeLast(itemHasLink.count - count)
+                    }
+                }
+                tagCursor += 1
+            }
             let href = ns.substring(with: match.range(at: 1))
             let inner = ns.substring(with: match.range(at: 2))
             let title = inner.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !href.isEmpty, !title.isEmpty {
-                result.append((XMLValueParser.decodeEntities(title), href))
+                let level = itemHasLink.dropLast().filter { $0 }.count
+                if !itemHasLink.isEmpty { itemHasLink[itemHasLink.count - 1] = true }
+                result.append((XMLValueParser.decodeEntities(title), href, level))
             }
         }
         return result
@@ -1029,10 +1103,70 @@ private extension Array {
     var nonEmpty: Self? { isEmpty ? nil : self }
 }
 
+// MARK: - 注释正文识别（Readium 未标 noteref 的注释链接）
+
+/// Readium 只对 `<a epub:type="noteref">` 弹出注释；多看及 Sigil 注释插件生成的
+/// `<a class="duokan-footnote" href="#note_1">` 没有该属性，会被当成普通链接跳到章末。
+/// 这里按链接目标判断是否为注释正文，规则与 YueduCoreText 的 `collectFootnotes` 一致：
+/// 带 id、class 含 "footnote" 的 `<li>`，或 `epub:type` 含 footnote／endnote／note／rearnote 的元素。
+/// 只看目标，不猜测普通锚点，未命中的链接仍照常跳转。
+enum EPUBFootnoteTarget {
+    /// 文档中 id 为 `id` 的注释正文的内部 HTML；不是注释或为空时返回 nil。
+    static func noteHTML(id: String, inDocument html: String) -> String? {
+        guard !id.isEmpty else { return nil }
+        let escaped = NSRegularExpression.escapedPattern(for: id)
+        guard let openRegex = try? NSRegularExpression(
+            pattern: "<([A-Za-z][\\w:-]*)\\b([^>]*?\\sid\\s*=\\s*[\"']\(escaped)[\"'][^>]*?)(/?)>",
+            options: [.caseInsensitive]) else { return nil }
+        let ns = html as NSString
+        guard let open = openRegex.firstMatch(in: html, range: NSRange(location: 0, length: ns.length)),
+              open.range(at: 3).length == 0 else { return nil }
+        let tag = ns.substring(with: open.range(at: 1)).lowercased()
+        let attributes = ns.substring(with: open.range(at: 2))
+        guard isNoteBody(tag: tag, attributes: attributes) else { return nil }
+
+        // 找到同名标签的配对结束标签（计入嵌套）。
+        guard let tagRegex = try? NSRegularExpression(
+            pattern: "<(/?)\(NSRegularExpression.escapedPattern(for: tag))\\b[^>]*?(/?)>",
+            options: [.caseInsensitive]) else { return nil }
+        let start = open.range.location + open.range.length
+        var depth = 1
+        var end = ns.length
+        for match in tagRegex.matches(in: html, range: NSRange(location: start, length: ns.length - start)) {
+            if match.range(at: 2).length > 0 { continue }
+            depth += match.range(at: 1).length > 0 ? -1 : 1
+            if depth == 0 { end = match.range.location; break }
+        }
+        let inner = ns.substring(with: NSRange(location: start, length: end - start))
+        let text = inner.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : inner
+    }
+
+    private static func isNoteBody(tag: String, attributes: String) -> Bool {
+        if tag == "li", let classes = attributeValue("class", in: attributes),
+           classes.lowercased().contains("footnote") {
+            return true
+        }
+        guard let epubType = attributeValue("epub:type", in: attributes) else { return false }
+        let tokens = epubType.lowercased().split(whereSeparator: \.isWhitespace)
+        return tokens.contains { ["footnote", "endnote", "note", "rearnote"].contains($0) }
+    }
+
+    private static func attributeValue(_ name: String, in attributes: String) -> String? {
+        let pattern = "(?:^|\\s)\(NSRegularExpression.escapedPattern(for: name))\\s*=\\s*([\"'])(.*?)\\1"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let ns = attributes as NSString
+        guard let match = regex.firstMatch(in: attributes, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        return ns.substring(with: match.range(at: 2))
+    }
+}
+
 // MARK: - NCX 目录解析（XMLParser）
 
 enum NCXParser {
-    static func parse(xml: String) -> [(title: String, href: String)] {
+    /// 按先序返回目录点；嵌套 navPoint 的层级逐层加一，父项排在子项之前。
+    static func parse(xml: String) -> [(title: String, href: String, level: Int)] {
         let delegate = Delegate()
         let parser = XMLParser(data: Data(xml.utf8))
         parser.delegate = delegate
@@ -1041,34 +1175,47 @@ enum NCXParser {
     }
 
     private final class Delegate: NSObject, XMLParserDelegate {
-        var points: [(title: String, href: String)] = []
-        private var currentTitle: String?
-        private var currentHref: String?
+        private final class Point {
+            var title = ""
+            var href: String?
+            var emitted = false
+        }
+
+        var points: [(title: String, href: String, level: Int)] = []
+        /// 尚未结束的 navPoint；子项开始前先输出父项，保证先序。
+        private var stack: [Point] = []
         private var isCollectingText = false
+
+        private func emit(_ point: Point, level: Int) {
+            guard !point.emitted else { return }
+            point.emitted = true
+            let title = point.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let href = point.href, !title.isEmpty {
+                points.append((XMLValueParser.decodeEntities(title), href, level))
+            }
+        }
 
         func parser(_ parser: XMLParser, didStartElement name: String, namespaceURI: String?,
                     qualifiedName: String?, attributes: [String: String] = [:]) {
             if name == "navPoint" {
-                currentTitle = nil
-                currentHref = nil
+                if let parent = stack.last { emit(parent, level: stack.count - 1) }
+                stack.append(Point())
             }
-            if name == "content" {
-                currentHref = attributes["src"]
+            if name == "content", let point = stack.last, point.href == nil {
+                point.href = attributes["src"]
             }
-            if name == "text" {
+            if name == "text", !stack.isEmpty {
                 isCollectingText = true
             }
         }
 
         func parser(_ parser: XMLParser, foundCharacters string: String) {
-            if isCollectingText {
-                currentTitle = (currentTitle ?? "") + string
-            }
+            if isCollectingText { stack.last?.title += string }
         }
 
         func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
             if isCollectingText, let text = String(data: CDATABlock, encoding: .utf8) {
-                currentTitle = (currentTitle ?? "") + text
+                stack.last?.title += text
             }
         }
 
@@ -1076,13 +1223,9 @@ enum NCXParser {
             if name == "text" {
                 isCollectingText = false
             }
-            if name == "navPoint" {
-                let title = (currentTitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                if let href = currentHref, !title.isEmpty {
-                    points.append((XMLValueParser.decodeEntities(title), href))
-                }
-                currentTitle = nil
-                currentHref = nil
+            if name == "navPoint", let point = stack.last {
+                emit(point, level: stack.count - 1)
+                stack.removeLast()
             }
         }
     }

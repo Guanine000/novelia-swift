@@ -184,7 +184,7 @@ final class EPUBReaderModel: ObservableObject {
     @Published private(set) var location = EPUBReadingLocation(spineIndex: 0, pageIndex: 0) {
         didSet {
             trimPageCaches()
-            guard !isRestoringPosition, status == .ready else { return }
+            guard !isRestoringPosition, activeRelayouts == 0, status == .ready else { return }
             if let positionHandler {
                 positionHandler(location.spineIndex, pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex))
             } else if let openedBookHash {
@@ -199,6 +199,13 @@ final class EPUBReaderModel: ObservableObject {
     }
     private var openedBookHash: String?
     private var isRestoringPosition = false
+    /// 正在进行的重排数量。重排期间位置会临时归零，此时的变化不写入阅读位置；
+    /// 用计数而不是保存/恢复布尔值，避免新重排取消旧重排时旧任务的收尾把状态写乱。
+    private var activeRelayouts = 0
+    /// 尚未完成的保位重排所要回到的位置。重排开始时会把位置归零并换成空的分页结果，
+    /// 若它被下一次重排取消（例如切到后台时系统截图导致深浅色或尺寸来回切换），
+    /// 后一次必须沿用这里的锚点，不能从已归零的状态重新计算，否则会落到本章第一页。
+    private var pendingRelayoutAnchor: (spine: Int, offset: Int?, fraction: CGFloat)?
     @Published private(set) var generation = 0
     @Published private(set) var style = EPUBReaderStyle()
     @Published private(set) var isAnimating = false
@@ -673,24 +680,33 @@ final class EPUBReaderModel: ObservableObject {
     private func relayout(keepingCurrentSpine: Bool, reason: EPUBLayoutReason,
                           target: (spine: Int, offset: Int?)? = nil, targetProgression: Double? = nil) async {
         guard let container = source else { return }
-        let wasRestoringPosition = isRestoringPosition
-        isRestoringPosition = true
-        defer { isRestoringPosition = wasRestoringPosition }
+        activeRelayouts += 1
+        defer { activeRelayouts -= 1 }
         container.themeTextColor = pageTextColor
         // 预取和跳转任务属于即将被替换的代次。
         for task in prefetchTasks.values { task.cancel() }
         prefetchTasks.removeAll()
         for task in layoutTasks.values { task.cancel() }
         layoutTasks.removeAll()
-        let spineIndex = target?.spine ?? (keepingCurrentSpine ? location.spineIndex : 0)
-        let previousCount = max(pageCount(spineIndex: spineIndex), 1)
-        let previousFraction = keepingCurrentSpine && target == nil
-            ? CGFloat(location.pageIndex) / CGFloat(previousCount)
-            : 0
-        // 重新分页时保持屏幕上显示同一段文本；比例仅用于
-        // 没有文本的页面作为回退。
-        let previousOffset = target != nil ? target?.offset
-            : (keepingCurrentSpine ? pageBook?.sourceOffset(spineIndex: spineIndex, pageIndex: location.pageIndex) : nil)
+        let anchor: (spine: Int, offset: Int?, fraction: CGFloat)
+        if target == nil, keepingCurrentSpine, let pending = pendingRelayoutAnchor {
+            anchor = pending
+        } else {
+            let spine = target?.spine ?? (keepingCurrentSpine ? location.spineIndex : 0)
+            let previousCount = max(pageCount(spineIndex: spine), 1)
+            // 重新分页时保持屏幕上显示同一段文本；比例仅用于
+            // 没有文本的页面作为回退。
+            anchor = (
+                spine,
+                target != nil ? target?.offset
+                    : (keepingCurrentSpine ? pageBook?.sourceOffset(spineIndex: spine, pageIndex: location.pageIndex) : nil),
+                keepingCurrentSpine && target == nil ? CGFloat(location.pageIndex) / CGFloat(previousCount) : 0
+            )
+        }
+        pendingRelayoutAnchor = anchor
+        let spineIndex = anchor.spine
+        let previousFraction = anchor.fraction
+        let previousOffset = anchor.offset
         spreadCache.removeAll()
         failedChapters.removeAll()
         generation += 1
@@ -709,6 +725,7 @@ final class EPUBReaderModel: ObservableObject {
                                          aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
                                          context: layoutContext(reason))
             if book.generation == generation {
+                pendingRelayoutAnchor = nil
                 status = .ready
                 location.spineIndex = spineIndex
                 let restoreOffset = previousOffset ?? targetProgression.flatMap { progression in
@@ -727,8 +744,9 @@ final class EPUBReaderModel: ObservableObject {
         } catch {
             if book.generation == generation {
                 lastLayoutFailure = EPUBLayoutLog.failure(error)
-                // 已取消的重排任务被新任务替代，或阅读器已关闭。
+                // 已取消的重排任务被新任务替代，或阅读器已关闭；只有取消时保留锚点。
                 if EPUBLayoutLog.failure(error).kind != "cancelled" {
+                    pendingRelayoutAnchor = nil
                     status = .failed(describeLayoutError(error))
                 }
             }

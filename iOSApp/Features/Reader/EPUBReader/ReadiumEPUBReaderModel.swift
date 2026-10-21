@@ -710,6 +710,26 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         return false
     }
 
+    /// 未标 `epub:type="noteref"` 的注释链接（多看、Sigil 注释插件等）：目标是注释正文时
+    /// 同样以弹层显示；不是注释或读取失败时照常跳转。读取目标需要异步，因此先拦下再决定。
+    func navigator(_ navigator: VisualNavigator, shouldNavigateToLink link: ReadiumShared.Link) -> Bool {
+        guard textBook == nil, let publication,
+              let url = AnyURL(string: link.href), let id = url.fragment, !id.isEmpty else { return true }
+        Task { [weak self] in
+            let html = try? await publication.get(url.removingFragment())?.read().asString().get()
+            guard let self else { return }
+            if let html, let note = EPUBFootnoteTarget.noteHTML(id: id, inDocument: html) {
+                let text = Self.plainText(fromHTML: note)
+                if !text.isEmpty {
+                    activeNote = EPUBNote(text: text)
+                    return
+                }
+            }
+            _ = await self.navigator?.go(to: link)
+        }
+        return false
+    }
+
     /// 新章节的 WebView 创建时触发（此时已开始加载，注入的脚本不保证作用于当页，
     /// 所以根背景透明改由 RS__backgroundColor 在 HTML 注入阶段完成，见 makeNavigator）。
     func navigator(_ navigator: EPUBNavigatorViewController, setupUserScripts userContentController: WKUserContentController) {

@@ -24,8 +24,11 @@ private struct ReadiumEPUBReaderViewContent: View {
     @StateObject private var model: ReadiumEPUBReaderModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showChrome = true
     @State private var isShowingTOC = false
+    /// 目录中已展开的分组（条目序号）；每次打开目录时重置为只展开当前章节所在分组。
+    @State private var tocExpanded = Set<Int>()
     @State private var isShowingStyle = false
     @State private var isShowingBookmarks = false
     @State private var isScrubbing = false
@@ -142,7 +145,14 @@ private struct ReadiumEPUBReaderViewContent: View {
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in
             batteryLevel = UIDevice.current.batteryLevel
         }
-        .onChange(of: colorScheme) { _, scheme in model.synchronizeSharedSettings(systemIsDark: scheme == .dark) }
+        .onChange(of: colorScheme) { _, scheme in
+            // 进入后台后系统以浅色、深色分别截取快照；此时重建导航器会丢失当前页，回到前台再同步。
+            guard scenePhase != .background else { return }
+            model.synchronizeSharedSettings(systemIsDark: scheme == .dark)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .background { model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
+        }
         .onChange(of: settings.fontSize) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         .onChange(of: settings.appearanceRaw) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         .onChange(of: backgrounds.revision) { _, _ in model.refreshBackground() }
@@ -327,30 +337,35 @@ private struct ReadiumEPUBReaderViewContent: View {
                         ContentUnavailableView("没有目录", systemImage: "list.bullet.rectangle",
                                                description: Text(model.tocNotice ?? "本书未提供目录。"))
                     }
-                    ForEach(model.toc) { item in
-                        let isCurrent = model.currentTOCIndex == item.id
-                        Button {
+                    let levels = model.toc.map(\.level)
+                    let hasChildren = TOCOutline.hasChildren(levels: levels)
+                    ForEach(TOCOutline.visibleIndices(levels: levels, expanded: tocExpanded), id: \.self) { index in
+                        let item = model.toc[index]
+                        ReaderTOCRow(title: item.title, level: item.level,
+                                     isCurrent: model.currentTOCIndex == item.id,
+                                     hasChildren: hasChildren[index],
+                                     isExpanded: tocExpanded.contains(index),
+                                     showsDisclosureColumn: hasChildren.contains(true),
+                                     toggle: {
+                                         withAnimation(.easeInOut(duration: 0.2)) {
+                                             if tocExpanded.contains(index) { tocExpanded.remove(index) } else { tocExpanded.insert(index) }
+                                         }
+                                     }) {
                             isShowingTOC = false
                             model.jump(to: item)
-                        } label: {
-                            HStack {
-                                Text(item.title)
-                                    .foregroundStyle(isCurrent ? NoveliaStyle.brandGreen : .primary)
-                                    .fontWeight(isCurrent ? .semibold : .regular)
-                                    .padding(.leading, CGFloat(item.level) * 14)
-                                Spacer()
-                                if isCurrent {
-                                    Image(systemName: "book.fill")
-                                        .font(.caption)
-                                        .foregroundStyle(NoveliaStyle.brandGreen)
-                                }
-                            }
                         }
                         .id(item.id)
                     }
                 }
                 .onAppear {
-                    if let current = model.currentTOCIndex { proxy.scrollTo(current, anchor: .center) }
+                    if let current = model.currentTOCIndex,
+                       let index = model.toc.firstIndex(where: { $0.id == current }) {
+                        tocExpanded = Set(TOCOutline.ancestors(of: index, levels: model.toc.map(\.level)))
+                        // 等展开后的行进入列表再定位。
+                        DispatchQueue.main.async { proxy.scrollTo(current, anchor: .center) }
+                    } else {
+                        tocExpanded = []
+                    }
                 }
             }
             .navigationTitle("目录")
@@ -358,6 +373,11 @@ private struct ReadiumEPUBReaderViewContent: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("关闭") { isShowingTOC = false }
+                }
+                if model.toc.contains(where: { $0.level > 0 }) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        ReaderTOCExpandAllButton(levels: model.toc.map(\.level), expanded: $tocExpanded)
+                    }
                 }
             }
         }
