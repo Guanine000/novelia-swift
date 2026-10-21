@@ -206,21 +206,22 @@ struct ReaderBookmarkButton: View {
     }
 }
 
-/// 阅读器顶栏的「标记问题」按钮：遇到跳页等异常时点一下，在诊断日志中写入标记与当前位置，
+/// 「阅读样式」面板末尾的「标记问题」：遇到跳页等异常时点一下，在诊断日志中写入标记与当前位置，
 /// 之后从“我的 → 导出应用日志”分享时即可定位问题发生的时刻。日志不含书名或正文。
-struct ReaderIssueMarkButton: View {
+/// 面板打开期间阅读位置不变，记录的仍是打开面板前所在的页。
+struct ReaderIssueMarkSection: View {
     let mark: () -> Void
     @State private var isShowingConfirmation = false
 
     var body: some View {
-        Button {
-            mark()
-            isShowingConfirmation = true
-        } label: {
-            Image(systemName: "exclamationmark.bubble")
-                .frame(width: 36, height: 36)
+        Section {
+            Button("标记问题", systemImage: "exclamationmark.bubble") {
+                mark()
+                isShowingConfirmation = true
+            }
+        } footer: {
+            Text("遇到跳页、漏字等问题时点一下，会在诊断日志中记录此刻的阅读位置；之后可在“我的 → 导出应用日志”中分享。")
         }
-        .accessibilityLabel("标记问题")
         .alert("已标记", isPresented: $isShowingConfirmation) {
             Button("好", role: .cancel) {}
         } message: {

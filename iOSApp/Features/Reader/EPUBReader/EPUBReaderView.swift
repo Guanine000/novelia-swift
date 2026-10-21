@@ -251,7 +251,6 @@ private struct EPUBReaderViewContent: View {
                 }
                 .accessibilityLabel("书签与搜索")
             }
-            ReaderIssueMarkButton { model.markIssue() }
             Button {
                 isShowingTOC = true
             } label: {
@@ -592,6 +591,7 @@ private struct EPUBReaderViewContent: View {
                     Text("点击“应用”后重新分页，并按当前章节的页数比例恢复位置；文字位置可能略有变化。缩进选择“沿用书籍”可恢复原排版。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
+                ReaderIssueMarkSection { model.markIssue() }
             }
             .navigationTitle("阅读样式")
             .navigationBarTitleDisplayMode(.inline)
