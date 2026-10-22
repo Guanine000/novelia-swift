@@ -12,6 +12,10 @@ let package = Package(
         .package(url: "https://github.com/CHANG-JUI-LIN/YueduCoreText.git", exact: "0.8.0"),
         .package(url: "https://github.com/readium/ZIPFoundation.git", exact: "3.0.1"),
         .package(url: "https://github.com/readium/swift-toolkit.git", exact: "3.11.0"),
+        // 与 YueduCoreText 精确依赖的版本一致；Kindle 导入直接用它整理旧版 MOBI 的 HTML。
+        .package(url: "https://github.com/scinfu/SwiftSoup.git", exact: "2.13.7"),
+        // libmobi C 源码（本地包），见 Vendor/CLibMobi/README.md。
+        .package(path: "Vendor/CLibMobi"),
     ],
     targets: [
         .target(
@@ -42,6 +46,16 @@ let package = Package(
             ],
             sources: ["ReadiumTextPublication.swift", "EPUBChapterSource.swift", "EPUBContainer.swift", "EPUBLayoutCoordinator.swift", "EPUBPageBook.swift"]
         ),
+        // App 的 AZW3／MOBI 导入转换，直接编译 App 源码。
+        .target(
+            name: "NoveliaKindle",
+            dependencies: [
+                .product(name: "CLibMobi", package: "CLibMobi"),
+                .product(name: "ReadiumZIPFoundation", package: "ZIPFoundation"),
+                .product(name: "SwiftSoup", package: "SwiftSoup"),
+            ],
+            path: "iOSApp/Features/Library/KindleImport"
+        ),
         .testTarget(name: "NoveliaIOSCoreTests", dependencies: ["NoveliaIOSCore"], path: "Tests/NoveliaIOSCoreTests"),
         .testTarget(
             name: "NoveliaEPUBTests",
@@ -50,6 +64,12 @@ let package = Package(
                 .product(name: "YueduCoreText", package: "YueduCoreText"),
             ],
             path: "Tests/NoveliaEPUBTests",
+            resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "NoveliaKindleTests",
+            dependencies: ["NoveliaKindle", "NoveliaEPUB", .product(name: "ReadiumZIPFoundation", package: "ZIPFoundation")],
+            path: "Tests/NoveliaKindleTests",
             resources: [.copy("Fixtures")]
         ),
     ]

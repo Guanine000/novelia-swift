@@ -118,10 +118,17 @@ def main() -> None:
         scripts = (NOTICES / "Readium-JavaScript-NOTICES.txt").read_text()
         for package in production_scripts(toolkit / READIUM_SCRIPTS_LOCK):
             assert f"\n{package} — " in scripts, f"Bundled script package missing from notices: {package}"
+    # libmobi 以源码放在 Vendor/CLibMobi（本地包，不出现在 Package.resolved）。
+    libmobi_notice = NOTICES / "libmobi-LICENSE.txt"
+    assert libmobi_notice.read_bytes() == (ROOT / "Vendor/CLibMobi/COPYING").read_bytes(), "libmobi license differs"
+    assert "| libmobi | 0.12 | LGPL-3.0-or-later | https://github.com/bfabiszewski/libmobi | [libmobi-LICENSE.txt](libmobi-LICENSE.txt) |" in index
+    libmobi_revision = "85dcfe803fc2a21020ddcf15c3eb66b93d388add"
+    assert libmobi_revision in index, "Exact libmobi source revision is missing"
+    assert libmobi_revision in (ROOT / "Vendor/CLibMobi/README.md").read_text(), "libmobi README revision differs"
     yuedu_pin = pins["yueducoretext"]
     assert yuedu_pin["state"]["revision"] in index, "Exact YueduCoreText source revision is missing"
     assert (NOTICES / "YueduCoreText-NOTICE.txt").is_file()
-    print(f"Verified {len(pins)} Swift Package licenses, the YueduCoreText NOTICE and Readium font/script notices")
+    print(f"Verified {len(pins)} Swift Package licenses, libmobi, the YueduCoreText NOTICE and Readium font/script notices")
 
 
 if __name__ == "__main__":

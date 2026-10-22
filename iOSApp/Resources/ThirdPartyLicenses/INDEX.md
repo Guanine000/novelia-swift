@@ -21,6 +21,14 @@ YueduCoreText 另附 [NOTICE](YueduCoreText-NOTICE.txt)。swift-toolkit（Readiu
 
 This product includes software developed by the "Marcin Krzyzanowski" (http://krzyzanowskim.com/).（CryptoSwift 许可要求的致谢）
 
+## C 库
+
+| 软件 | 版本 | 许可证 | 源码 | 许可文件 |
+| --- | --- | --- | --- | --- |
+| libmobi | 0.12 | LGPL-3.0-or-later | https://github.com/bfabiszewski/libmobi | [libmobi-LICENSE.txt](libmobi-LICENSE.txt) |
+
+libmobi 用于导入 AZW3／MOBI 时解析并转换为 EPUB，以源码形式随本项目提供（仓库 `Vendor/CLibMobi/`，对应上游提交 `85dcfe803fc2a21020ddcf15c3eb66b93d388add`），未修改上游源码，未收录其 DRM 处理代码。libmobi 静态链接进 App；本项目完整对应源码随分发提供，可据此替换 libmobi 后重新构建。LGPL-3.0 以 GPL-3.0 为基础，GPL 全文见 [GPL-3.0-only.txt](GPL-3.0-only.txt)。
+
 ## Readium 随附的字体与脚本
 
 swift-toolkit 3.11.0 的资源包随 App 分发以下第三方内容：

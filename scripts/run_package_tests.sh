@@ -14,6 +14,6 @@ case "$device" in
 esac
 work="$(mktemp -d "${TMPDIR:-/tmp}/novelia-package-tests.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
-for item in Package.swift Sources Tests iOSApp; do ln -s "$root/$item" "$work/$item"; done
+for item in Package.swift Sources Tests iOSApp Vendor; do ln -s "$root/$item" "$work/$item"; done
 cd "$work"
 xcodebuild test -scheme NoveliaIOSPort -destination "$destination" "$@"

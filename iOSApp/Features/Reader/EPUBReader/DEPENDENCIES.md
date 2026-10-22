@@ -8,7 +8,7 @@
 | --- | --- | --- | --- | --- |
 | YueduCoreText | **0.8.0（exact，Xcode 工程内固定）** | MPL-2.0 | https://github.com/CHANG-JUI-LIN/YueduCoreText | HTML/CSS 排版、分页（`BrowserLayoutSession`）、页面绘制（`DisplayListBuilder`）、CJK 排版 |
 | ReadiumZIPFoundation | 3.0.1（解析版本以锁定文件为准） | MIT | https://github.com/readium/ZIPFoundation | 自写 EPUB 容器解析所用的 ZIP 读取（该 fork 由 readium/ZIPFoundation 仓库发布，模块名 `ReadiumZIPFoundation`） |
-| SwiftSoup | 2.13.7（由 YueduCoreText 精确依赖，未直接使用） | MIT | https://github.com/scinfu/SwiftSoup | YueduCoreText 的 HTML 解析后端（传递依赖） |
+| SwiftSoup | 2.13.7（由 YueduCoreText 精确依赖；书库的 Kindle 导入也直接使用同一版本） | MIT | https://github.com/scinfu/SwiftSoup | YueduCoreText 的 HTML 解析后端；Kindle 导入用于整理旧版 MOBI 的 HTML |
 | Readium swift-toolkit | 3.11.0 | BSD-3-Clause | https://github.com/readium/swift-toolkit | 实验性 EPUB／TXT／在线分页阅读器（`ReadiumEPUBReaderModel/View.swift`、`ReadiumTextPublication.swift`，WKWebView + ReadiumCSS）；传递依赖 CryptoSwift、DifferenceKit、Fuzi、GCDWebServer、SQLite.swift、Zip，许可见 `iOSApp/Resources/ThirdPartyLicenses/INDEX.md` |
 
 ## 本项目代码与上游依赖

@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E80000000000000000000001 /* KindleEPUBConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E81000000000000000000001 /* KindleEPUBConverter.swift */; };
+		E80000000000000000000002 /* KindleCSSMediaFlattener.swift in Sources */ = {isa = PBXBuildFile; fileRef = E81000000000000000000002 /* KindleCSSMediaFlattener.swift */; };
+		E80000000000000000000003 /* KindleMOBI6Normalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E81000000000000000000003 /* KindleMOBI6Normalizer.swift */; };
+		A10000000000000000000401 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000401 /* SwiftSoup */; };
+		A10000000000000000000402 /* CLibMobi in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000402 /* CLibMobi */; };
 		E40000000000000000000003 /* LocalLibraryIndexWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000000000000000000004 /* LocalLibraryIndexWriter.swift */; };
 		E40000000000000000000001 /* EPUBContentDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000000000000000000002 /* EPUBContentDiagnostics.swift */; };
 		A10000000000000000000300 /* ReadiumEPUBReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000300 /* ReadiumEPUBReaderModel.swift */; };
@@ -177,6 +182,9 @@
 		E71000000000000000000002 /* ReadingStatisticsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Statistics/ReadingStatisticsViews.swift; sourceTree = "<group>"; };
 		E51000000000000000000002 /* LibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/LibraryStore.swift; sourceTree = "<group>"; };
 		E51000000000000000000003 /* LibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/LibraryViews.swift; sourceTree = "<group>"; };
+		E81000000000000000000001 /* KindleEPUBConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/KindleImport/KindleEPUBConverter.swift; sourceTree = "<group>"; };
+		E81000000000000000000002 /* KindleCSSMediaFlattener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/KindleImport/KindleCSSMediaFlattener.swift; sourceTree = "<group>"; };
+		E81000000000000000000003 /* KindleMOBI6Normalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/KindleImport/KindleMOBI6Normalizer.swift; sourceTree = "<group>"; };
 		E51000000000000000000012 /* LibraryArchiveExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/LibraryArchiveExport.swift; sourceTree = "<group>"; };
 		E51000000000000000000004 /* AppTabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/AppTabs.swift; sourceTree = "<group>"; };
 		E61000000000000000000001 /* LocalBookRecords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/LocalBookRecords.swift; sourceTree = "<group>"; };
@@ -218,6 +226,8 @@
 				A10000000000000000000302 /* ReadiumShared in Frameworks */,
 				A10000000000000000000303 /* ReadiumStreamer in Frameworks */,
 				A10000000000000000000304 /* ReadiumNavigator in Frameworks */,
+				A10000000000000000000401 /* SwiftSoup in Frameworks */,
+				A10000000000000000000402 /* CLibMobi in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -293,6 +303,9 @@
 				D30000000000000000000004 /* ReaderSettingsAdapters.swift */,
 				E51000000000000000000003 /* LibraryViews.swift */,
 				E51000000000000000000012 /* LibraryArchiveExport.swift */,
+				E81000000000000000000001 /* KindleEPUBConverter.swift */,
+				E81000000000000000000002 /* KindleCSSMediaFlattener.swift */,
+				E81000000000000000000003 /* KindleMOBI6Normalizer.swift */,
 				E51000000000000000000002 /* LibraryStore.swift */,
 				E71000000000000000000002 /* ReadingStatisticsViews.swift */,
 			);
@@ -379,6 +392,8 @@
 				F31000000000000000000302 /* ReadiumShared */,
 				F31000000000000000000303 /* ReadiumStreamer */,
 				F31000000000000000000304 /* ReadiumNavigator */,
+				F31000000000000000000401 /* SwiftSoup */,
+				F31000000000000000000402 /* CLibMobi */,
 			);
 			name = Novelia;
 			productName = Novelia;
@@ -420,9 +435,18 @@
 				F30000000000000000000002 /* XCRemoteSwiftPackageReference "YueduCoreText" */,
 				F30000000000000000000003 /* XCRemoteSwiftPackageReference "ReadiumZIPFoundation" */,
 				F30000000000000000000300 /* XCRemoteSwiftPackageReference "swift-toolkit" */,
+				F30000000000000000000401 /* XCRemoteSwiftPackageReference "SwiftSoup" */,
+				F30000000000000000000402 /* XCLocalSwiftPackageReference "Vendor/CLibMobi" */,
 			);
 		};
 /* End PBXProject section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		F30000000000000000000402 /* XCLocalSwiftPackageReference "Vendor/CLibMobi" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/CLibMobi;
+		};
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
 		F30000000000000000000002 /* XCRemoteSwiftPackageReference "YueduCoreText" */ = {
@@ -447,6 +471,14 @@
 			requirement = {
 				kind = exactVersion;
 				version = 3.11.0;
+			};
+		};
+		F30000000000000000000401 /* XCRemoteSwiftPackageReference "SwiftSoup" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/scinfu/SwiftSoup.git";
+			requirement = {
+				kind = exactVersion;
+				version = 2.13.7;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -477,6 +509,15 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F30000000000000000000300 /* XCRemoteSwiftPackageReference "swift-toolkit" */;
 			productName = ReadiumNavigator;
+		};
+		F31000000000000000000401 /* SwiftSoup */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F30000000000000000000401 /* XCRemoteSwiftPackageReference "SwiftSoup" */;
+			productName = SwiftSoup;
+		};
+		F31000000000000000000402 /* CLibMobi */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CLibMobi;
 		};
 /* End XCSwiftPackageProductDependency section */
 
@@ -554,6 +595,9 @@
 				A10000000000000000000032 /* SyncMerge.swift in Sources */,
 				E50000000000000000000003 /* LibraryViews.swift in Sources */,
 				E50000000000000000000012 /* LibraryArchiveExport.swift in Sources */,
+				E80000000000000000000001 /* KindleEPUBConverter.swift in Sources */,
+				E80000000000000000000002 /* KindleCSSMediaFlattener.swift in Sources */,
+				E80000000000000000000003 /* KindleMOBI6Normalizer.swift in Sources */,
 				E50000000000000000000002 /* LibraryStore.swift in Sources */,
 				E50000000000000000000001 /* LibraryOrganizer.swift in Sources */,
 				E70000000000000000000001 /* ReadingStatistics.swift in Sources */,

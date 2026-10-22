@@ -558,7 +558,8 @@ private struct ThirdPartyLicensesView: View {
         ("Fuzi", "4.0.1", "MIT", "Fuzi-LICENSE.txt"),
         ("GCDWebServer", "4.0.1", "BSD-3-Clause", "GCDWebServer-LICENSE.txt"),
         ("SQLite.swift", "0.16.0", "MIT", "SQLite.swift-LICENSE.txt"),
-        ("Zip", "2.1.2", "MIT", "Zip-LICENSE.txt")
+        ("Zip", "2.1.2", "MIT", "Zip-LICENSE.txt"),
+        ("libmobi", "0.12", "LGPL-3.0-or-later", "libmobi-LICENSE.txt")
     ]
     /// 随 Readium 资源包一起分发的字体和脚本。
     private let readiumAssets: [(name: String, file: String)] = [
