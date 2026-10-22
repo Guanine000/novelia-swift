@@ -19,6 +19,9 @@ struct DownloadedWebNovelTXTReader: View {
     @State private var bodyChunksChapterIndex: Int?
     @State private var isShowingContents = false
     @State private var errorMessage: String?
+    /// 目录字数的来源（已解析的书），打开目录时才统计。
+    @State private var parsedBook: TXTParsedBook?
+    @State private var tocWordCounts: ReaderTOCWordCounts?
 
     private var appearance: ReaderAppearance {
         settings.appearance
@@ -126,6 +129,9 @@ struct DownloadedWebNovelTXTReader: View {
         .sheet(isPresented: $isShowingContents) {
             NavigationStack {
                 List {
+                    if let tocWordCounts {
+                        ReaderTOCWordCountHeader(total: tocWordCounts.total)
+                    }
                     if let chapters {
                         ForEach(chapters.indices, id: \.self) { index in
                             Button {
@@ -138,6 +144,9 @@ struct DownloadedWebNovelTXTReader: View {
                                     }
                                     Text(chapters[index].title)
                                         .foregroundStyle(index == chapterIndex ? NoveliaStyle.brandGreen : .primary)
+                                    if let count = tocWordCounts?.entry(index) {
+                                        Text(count).font(.caption2).foregroundStyle(.secondary)
+                                    }
                                 }
                             }
                         }
@@ -149,6 +158,9 @@ struct DownloadedWebNovelTXTReader: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("完成") { isShowingContents = false }
                     }
+                }
+                .task {
+                    if tocWordCounts == nil, let parsedBook { tocWordCounts = await BookWordCounter.txtTOCCounts(parsedBook) }
                 }
             }
             .presentationDetents([.medium, .large])
@@ -165,6 +177,8 @@ struct DownloadedWebNovelTXTReader: View {
                     chapterIndex = min(max(saved.chapter, 0), max(book.chapters.count - 1, 0))
                 }
                 contentHash = book.contentHash
+                parsedBook = book
+                tocWordCounts = nil
                 chapters = book.chapters
             } catch {
                 guard !Task.isCancelled else { return }
@@ -284,7 +298,8 @@ private struct TXTPagedReader: View {
                     settings.positions.recordTXT(hash: hash, position: position)
                 }, readiumIdentity: identity,
                 positionUpdatedAt: settings.positions.all()["txt:\(hash)"]?.updatedAt,
-                bookmarkKey: "txt:\(hash)")
+                bookmarkKey: "txt:\(hash)",
+                tocWordCounts: { await BookWordCounter.txtTOCCounts(parsed) })
         } catch {
             guard !Task.isCancelled else { return }
             let nsError = error as NSError

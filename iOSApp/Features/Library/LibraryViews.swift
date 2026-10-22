@@ -1074,10 +1074,13 @@ struct LibraryBookRow: View {
     @EnvironmentObject private var webDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
     @EnvironmentObject private var state: LibraryStateStore
+    @EnvironmentObject private var wordCounts: LibraryWordCountStore
 
     var body: some View {
+        let hash = state.hashByBook[book.key] ?? book.cloudFileHash
         HStack(alignment: .center, spacing: 4) {
-            LibraryBookRowContent(book: book, status: state.status(for: book), seriesName: showsSeries ? state.seriesName(for: book) : nil)
+            LibraryBookRowContent(book: book, status: state.status(for: book), seriesName: showsSeries ? state.seriesName(for: book) : nil,
+                                  wordCount: wordCounts.total(hash: hash))
                 .contentShape(Rectangle())
                 // 长按优先于点击：普通状态点击打开、长按进入多选；多选时点击或长按都切换选择。
                 // 在 List 行中分别挂 onTapGesture/onLongPressGesture 时点击会抢先触发，故显式组合。
@@ -1093,6 +1096,9 @@ struct LibraryBookRow: View {
                 .accessibilityHint(isSelecting ? "切换选择" : "打开阅读")
                 .accessibilityAction(named: "多选") { actions.beginSelection(with: book) }
                 .accessibilityIdentifier("library-book-\(book.key)")
+                .onAppear { if let hash { wordCounts.request(book, hash: hash) } }
+                .onChange(of: hash) { _, hash in if let hash { wordCounts.request(book, hash: hash) } }
+                .onDisappear { if let hash { wordCounts.cancel(hash: hash) } }
             if isSelecting {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
@@ -1199,6 +1205,8 @@ private struct LibraryBookRowContent: View {
     let book: LibraryBook
     let status: LibraryReadingStatus
     let seriesName: String?
+    /// 全书字数；尚未统计或无法统计时不显示。
+    let wordCount: Int?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -1229,7 +1237,8 @@ private struct LibraryBookRowContent: View {
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(NoveliaStyle.brandGreen.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                    Text(([book.categoryTitle] + (seriesName.map { ["系列：\($0)"] } ?? [])).joined(separator: " · "))
+                    Text(([book.categoryTitle] + [wordCount.map(BookWordCount.format), seriesName.map { "系列：\($0)" }].compactMap { $0 })
+                        .joined(separator: " · "))
                         .lineLimit(1)
                     Spacer(minLength: 4)
                     Text(status.detail)

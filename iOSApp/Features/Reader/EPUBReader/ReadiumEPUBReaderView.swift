@@ -30,6 +30,7 @@ private struct ReadiumEPUBReaderViewContent: View {
     /// 目录中已展开的分组（条目序号）；每次打开目录时重置为只展开当前章节所在分组。
     @State private var tocExpanded = Set<Int>()
     @State private var tocTab = ReaderTOCTab.contents
+    @State private var tocWordCounts: ReaderTOCWordCounts?
     @State private var isShowingStyle = false
     @State private var isShowingBookmarks = false
     @State private var isScrubbing = false
@@ -369,6 +370,9 @@ private struct ReadiumEPUBReaderViewContent: View {
                     }
                 }
                 }
+                if let tocWordCounts, !model.toc.isEmpty {
+                    ReaderTOCWordCountHeader(total: tocWordCounts.total)
+                }
                 if model.toc.isEmpty {
                     ContentUnavailableView("没有目录", systemImage: "list.bullet.rectangle",
                                            description: Text(model.tocNotice ?? "本书未提供目录。"))
@@ -378,6 +382,7 @@ private struct ReadiumEPUBReaderViewContent: View {
                 ForEach(TOCOutline.visibleIndices(levels: levels, expanded: tocExpanded), id: \.self) { index in
                     let item = model.toc[index]
                     ReaderTOCRow(title: item.title, level: item.level,
+                                 subtitle: tocWordCounts?.entry(index),
                                  isCurrent: model.currentTOCIndex == item.id,
                                  hasChildren: hasChildren[index],
                                  isExpanded: tocExpanded.contains(index),
@@ -392,6 +397,9 @@ private struct ReadiumEPUBReaderViewContent: View {
                     }
                     .id(item.id)
                 }
+            }
+            .task {
+                if tocWordCounts == nil { tocWordCounts = await model.tocWordCounts() }
             }
             .onAppear {
                 if let current = model.currentTOCIndex,
