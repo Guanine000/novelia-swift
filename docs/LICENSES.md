@@ -16,6 +16,8 @@ App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完�
 
 阅读器依赖的版本、用途与代码分类见[阅读器依赖](../iOSApp/Features/Reader/EPUBReader/DEPENDENCIES.md)。
 
+**libmobi：** AZW3／MOBI 导入使用 [libmobi](https://github.com/bfabiszewski/libmobi) 0.12（LGPL-3.0-or-later）。其 C 源码位于 [`Vendor/CLibMobi/`](../Vendor/CLibMobi/README.md)，作为本地 Swift 包编译并静态链接，未修改上游源码，未收录 DRM 处理代码；许可原文随 App 提供（[libmobi-LICENSE.txt](../iOSApp/Resources/ThirdPartyLicenses/libmobi-LICENSE.txt)）。Kindle 导入测试样本取自 libmobi 自带的自生成样本，来源见 [`Tests/NoveliaKindleTests/Fixtures/README.md`](../Tests/NoveliaKindleTests/Fixtures/README.md)。
+
 **TXT 分章参考：** [Qingdu Reader](https://github.com/zengchen666/qingdu-reader) 使用 Apache License 2.0。本项目仅参考其公开说明中的设计思路，分章识别器为独立 Swift 实现；没有复制、修改或随包分发 Qingdu Reader 的源代码、二进制或资源。Apache-2.0 原文见 [Qingdu Reader LICENSE](https://github.com/zengchen666/qingdu-reader/blob/main/LICENSE)。
 
 ## 对应源码与发布核对

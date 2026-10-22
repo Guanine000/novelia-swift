@@ -7,15 +7,27 @@ private enum LibraryImportError: LocalizedError {
     case unsupportedFile
 
     var errorDescription: String? {
-        "只支持导入 .txt 或 .epub 文件。"
+        "只支持导入 .txt、.epub、.azw3 或 .mobi 文件。"
     }
 }
 
-/// 书库的 TXT / EPUB 导入：复制文件、登记到文库书目并记录诊断日志。
+private let kindleImportLog = Logger(subsystem: "cc.novelia.ios.port", category: "kindleimport")
+
+/// 书库的 TXT / EPUB / AZW3 / MOBI 导入：复制文件、登记到文库书目并记录诊断日志。
+/// AZW3／MOBI 先经用户确认，再由 `KindleEPUBConverter` 转为 EPUB 后按 EPUB 登记；原文件不保留。
 @MainActor
 final class LibraryImportModel: ObservableObject {
+    /// 等待用户确认“转换为 EPUB”的一批文件。
+    struct PendingKindleImport: Identifiable {
+        let id = UUID()
+        let urls: [URL]
+        let kindleFilenames: [String]
+    }
+
     @Published var isShowingFileImporter = false
+    @Published var pendingKindleImport: PendingKindleImport?
     @Published private(set) var isImporting = false
+    @Published private(set) var isConvertingKindle = false
     @Published private(set) var importCompletedCount = 0
     @Published private(set) var importTotalCount = 0
     @Published var importError: String?
@@ -24,6 +36,35 @@ final class LibraryImportModel: ObservableObject {
 
     func attach(_ library: WenkuLocalLibraryStore) {
         self.library = library
+    }
+
+    /// 导入前的转换说明（与 docs/FEATURES.md 的“本地书籍导入”一致）。
+    static func kindleConversionNotice(for filenames: [String]) -> String {
+        let listed = filenames.prefix(5).joined(separator: "\n")
+        let more = filenames.count > 5 ? "\n等 \(filenames.count) 个文件" : ""
+        return "\(listed)\(more)\n\n以上 \(filenames.count) 个文件将转换为 EPUB 后导入。书库只保存转换后的 EPUB，导出时得到的也是 EPUB，原文件不会保存。部分 Kindle 专属效果（分格放大、纸书页码等）可能无法保留。"
+    }
+
+    static func isKindleFile(_ url: URL) -> Bool {
+        KindleEPUBConverter.supportedExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    /// 选择器回调：含 AZW3／MOBI 时先请用户确认转换，否则直接导入。
+    func handlePickedFiles(_ pickedURLs: [URL]) async {
+        guard !pickedURLs.isEmpty, !isImporting, pendingKindleImport == nil else { return }
+        let kindle = pickedURLs.filter(Self.isKindleFile)
+        guard kindle.isEmpty else {
+            pendingKindleImport = PendingKindleImport(urls: pickedURLs, kindleFilenames: kindle.map(\.lastPathComponent))
+            return
+        }
+        await importFiles(pickedURLs)
+    }
+
+    /// 用户对转换确认的回应；取消时只跳过 Kindle 文件，同批的 EPUB／TXT 照常导入。
+    func resolvePendingKindleImport(convert: Bool) async {
+        guard let pending = pendingKindleImport else { return }
+        pendingKindleImport = nil
+        await importFiles(convert ? pending.urls : pending.urls.filter { !Self.isKindleFile($0) })
     }
 
     /// 从“文件”批量导入：逐项复制并登记到本地书库。
@@ -39,11 +80,13 @@ final class LibraryImportModel: ObservableObject {
         var duplicates: [String] = []
         // 同一批次重复选择的文件只导入一次。
         var seenPaths = Set<String>()
+        var converted = 0
         for (index, pickedURL) in pickedURLs.enumerated() {
             defer { importCompletedCount = index + 1 }
             guard seenPaths.insert(pickedURL.standardizedFileURL.path).inserted else { continue }
             do {
                 try await importFile(pickedURL)
+                if Self.isKindleFile(pickedURL) { converted += 1 }
             } catch let duplicate as LocalLibraryDuplicateError {
                 duplicates.append("\(pickedURL.lastPathComponent)：已存在（《\(duplicate.existingTitle)》）")
             } catch {
@@ -54,6 +97,7 @@ final class LibraryImportModel: ObservableObject {
         let succeeded = seenPaths.count - failures.count - duplicates.count
         if !failures.isEmpty || !duplicates.isEmpty {
             var summary = "批量导入完成：成功 \(succeeded) 个"
+            if converted > 0 { summary += "（其中 \(converted) 个已转换为 EPUB）" }
             if !duplicates.isEmpty { summary += "，已存在 \(duplicates.count) 个" }
             if !failures.isEmpty { summary += "，失败 \(failures.count) 个" }
             importError = summary + "。\n" + (duplicates + failures).joined(separator: "\n")
@@ -70,7 +114,8 @@ final class LibraryImportModel: ObservableObject {
         } else if extensionName == "epub" {
             epubImportLog.info("EPUB import started")
         }
-        guard extensionName == "txt" || extensionName == "epub" else {
+        let isKindle = Self.isKindleFile(pickedURL)
+        guard extensionName == "txt" || extensionName == "epub" || isKindle else {
             throw LibraryImportError.unsupportedFile
         }
         let needsScope = pickedURL.startAccessingSecurityScopedResource()
@@ -79,17 +124,21 @@ final class LibraryImportModel: ObservableObject {
         // 先在主线程占住文件名：复制期间同目录的文库下载不会选到同一个目标。
         FileManager.default.createFile(atPath: destination.path, contents: nil)
         // 协调读取可能需要先从 iCloud 下载，大文件复制也很耗时，都放到主线程之外，进度浮窗保持更新。
-        let copyResult = await Task.detached(priority: .userInitiated) {
-            Result { try Self.coordinatedCopy(from: pickedURL, to: destination) }
-        }.value
-        if case .failure(let error) = copyResult {
-            try? FileManager.default.removeItem(at: destination)
-            if extensionName == "epub" { logEPUBImportFailure(error, stage: "copy", start: start) }
-            if extensionName == "txt" {
-                let nsError = error as NSError
-                TXTDiagnosticLog.logger.error("TXT import copy failed; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public)")
+        if isKindle {
+            try await convertKindleFile(pickedURL, to: destination, start: start)
+        } else {
+            let copyResult = await Task.detached(priority: .userInitiated) {
+                Result { try Self.coordinatedCopy(from: pickedURL, to: destination) }
+            }.value
+            if case .failure(let error) = copyResult {
+                try? FileManager.default.removeItem(at: destination)
+                if extensionName == "epub" { logEPUBImportFailure(error, stage: "copy", start: start) }
+                if extensionName == "txt" {
+                    let nsError = error as NSError
+                    TXTDiagnosticLog.logger.error("TXT import copy failed; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public)")
+                }
+                throw error
             }
-            throw error
         }
         let title = pickedURL.deletingPathExtension().lastPathComponent
         do {
@@ -100,7 +149,7 @@ final class LibraryImportModel: ObservableObject {
             }
             throw duplicate
         } catch {
-            if extensionName == "epub" { logEPUBImportFailure(error, stage: "registration", start: start) }
+            if extensionName == "epub" || isKindle { logEPUBImportFailure(error, stage: "registration", start: start) }
             if extensionName == "txt" {
                 let nsError = error as NSError
                 TXTDiagnosticLog.logger.error("TXT import registration failed; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public)")
@@ -110,10 +159,57 @@ final class LibraryImportModel: ObservableObject {
         if extensionName == "txt" {
             let hash = (try? await TXTBookCache.shared.contentHash(of: destination)) ?? ""
             TXTDiagnosticLog.logger.info("TXT import completed; trace=\(trace, privacy: .public), book=\(DiagnosticContext.bookTag(hash), privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+        } else if isKindle {
+            let bytes = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            kindleImportLog.info("Kindle import completed; format=\(extensionName, privacy: .public), epubBytes=\(bytes, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")
         } else {
             let bytes = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             epubImportLog.info("EPUB import completed; bytes=\(bytes, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")
         }
+    }
+
+    /// 先把选中的文件协调复制到临时目录（可能需要从 iCloud 下载），再在主线程之外转换为 EPUB 写到书库目标。
+    /// 任一步失败都删除临时副本与目标占位文件；临时副本在转换后删除，书库不保留原文件。
+    private func convertKindleFile(_ pickedURL: URL, to destination: URL, start: ContinuousClock.Instant) async throws {
+        let format = pickedURL.pathExtension.lowercased()
+        kindleImportLog.info("Kindle import started; format=\(format, privacy: .public)")
+        isConvertingKindle = true
+        defer { isConvertingKindle = false }
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kindle-import-\(UUID().uuidString).\(format)")
+        let result: Result<Void, Error> = await Task.detached(priority: .userInitiated) {
+            defer { try? FileManager.default.removeItem(at: staging) }
+            do {
+                try Self.coordinatedCopy(from: pickedURL, to: staging)
+            } catch {
+                return .failure(KindleConversionStageError.copy(error))
+            }
+            do {
+                try await KindleEPUBConverter.convert(source: staging, destination: destination)
+                return .success(())
+            } catch {
+                return .failure(error)
+            }
+        }.value
+        guard case .failure(let error) = result else { return }
+        try? FileManager.default.removeItem(at: destination)
+        switch error {
+        case KindleConversionStageError.copy(let underlying):
+            let nsError = underlying as NSError
+            kindleImportLog.error("Kindle import failed; stage=copy, domain=\(ShareableLogPolicy.domainLabel(nsError.domain), privacy: .public), code=\(nsError.code, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")
+            throw underlying
+        case let kindleError as KindleImportError:
+            kindleImportLog.error("Kindle import failed; stage=convert, reason=\(String(describing: kindleError), privacy: .public), format=\(format, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")
+            throw kindleError
+        default:
+            let nsError = error as NSError
+            kindleImportLog.error("Kindle import failed; stage=write, domain=\(ShareableLogPolicy.domainLabel(nsError.domain), privacy: .public), code=\(nsError.code, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")
+            throw KindleImportError.conversionFailed
+        }
+    }
+
+    private enum KindleConversionStageError: Error {
+        case copy(Error)
     }
 
     nonisolated private static func coordinatedCopy(from source: URL, to destination: URL) throws {
@@ -152,7 +248,7 @@ struct LibraryImportProgressOverlay: View {
             ZStack {
                 Color.black.opacity(0.12).ignoresSafeArea()
                 VStack(alignment: .leading, spacing: 12) {
-                    Label("正在导入书籍", systemImage: "books.vertical")
+                    Label(model.isConvertingKindle ? "正在转换为 EPUB" : "正在导入书籍", systemImage: "books.vertical")
                         .font(.system(size: 16, weight: .semibold))
                     ProgressView(value: Double(model.importCompletedCount), total: Double(max(model.importTotalCount, 1)))
                         .tint(NoveliaStyle.brandGreen)

@@ -152,8 +152,9 @@ struct LibraryView: View {
             EPUBFilePicker(contentTypes: [
                 UTType(filenameExtension: "txt") ?? .plainText,
                 UTType(filenameExtension: "epub") ?? .data
-            ], allowsMultipleSelection: true) { urls in
-                Task { await importer.importFiles(urls) }
+            ] + KindleEPUBConverter.supportedExtensions.sorted().compactMap { UTType(filenameExtension: $0) },
+            allowsMultipleSelection: true) { urls in
+                Task { await importer.handlePickedFiles(urls) }
             }
             .ignoresSafeArea()
         }
@@ -174,6 +175,16 @@ struct LibraryView: View {
             Button("好", role: .cancel) { importer.importError = nil }
         } message: {
             Text(importer.importError ?? "")
+        }
+        .alert("转换为 EPUB 后导入", isPresented: .init(
+            get: { importer.pendingKindleImport != nil },
+            // 提示框只能通过按钮关闭，由按钮处理待确认的文件。
+            set: { _ in }
+        ), presenting: importer.pendingKindleImport) { _ in
+            Button("转换并导入") { Task { await importer.resolvePendingKindleImport(convert: true) } }
+            Button("取消", role: .cancel) { Task { await importer.resolvePendingKindleImport(convert: false) } }
+        } message: { pending in
+            Text(LibraryImportModel.kindleConversionNotice(for: pending.kindleFilenames))
         }
         .alert("新建系列", isPresented: $isCreatingSeries) {
             TextField("系列名称", text: $newSeriesName)

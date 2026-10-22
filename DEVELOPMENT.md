@@ -105,7 +105,7 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 | 书库 | `Library/LibraryViews.swift`、`LibraryStore.swift`、`LibraryComponents.swift` | 聚合本地记录、查询筛选、系列、排序与展示状态 |
 | 收藏与历史 | `Library/FavoritesStore.swift`、`ReadingHistoryStore.swift`、`ShelfViews.swift` | 账号相关远端状态、收藏操作、历史与续读 |
 | 文库 | `Wenku/WenkuStore.swift`、`WenkuViews.swift` | 远端文库查询、详情和收藏；本地文件另由书库 Store 管理 |
-| 下载与导入 | `Downloads/WebNovelDownloadStore.swift`、`Library/WenkuLocalLibraryStore.swift` | 下载、导入、文件位置、记录写入及同步书籍接口 |
+| 下载与导入 | `Downloads/WebNovelDownloadStore.swift`、`Library/WenkuLocalLibraryStore.swift`、`Library/KindleImport/` | 下载、导入（含 AZW3／MOBI 转 EPUB）、文件位置、记录写入及同步书籍接口 |
 | 阅读器 | `Reader/ReaderView.swift`、`TXTReaderView.swift`、`EPUBReader/` | 在线/TXT 滚动与分页、EPUB 阅读、引擎和位置转换 |
 | 社区 | `Community/ForumStore.swift`、列表/详情/编辑/Markdown 页面 | 论坛查询、筛选、正文、评论、编辑与链接交互 |
 | 统计 | `Statistics/ReadingStatisticsViews.swift`；Core 的 `Features/Statistics/` | 图表与明细、阅读记录、设备统计及合并 |
@@ -288,6 +288,8 @@ Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒�
 
 索引采用原子写入；新增持久化行为不能让失败操作留下可见但不可打开的记录。文件来源分类、记录 ID、内容哈希和路径具有不同用途，不要混为同一身份。
 
+AZW3／MOBI 导入在 `Downloads/DownloadsViews.swift` 的 `LibraryImportModel`：选择的文件含 Kindle 扩展名时先发布 `pendingKindleImport`，由书库页面弹出转换说明，确认后才导入；取消只跳过 Kindle 文件。转换先协调复制到临时目录，再由 `Library/KindleImport/KindleEPUBConverter` 在主线程之外写到书库目标路径（`.epub`），之后完全按 EPUB 走 `registerDownloadedFile`；记录格式仍为 `.epub`，不新增持久化字段，原文件不保留。转换器使用 `Vendor/CLibMobi`（libmobi C 源码，不含 DRM 代码，见其 README）解析、重建 KF8／MOBI 源文件并生成 OPF／NCX；`KindleMOBI6Normalizer` 用 SwiftSoup 把旧版 MOBI 的 HTML 整理成 XHTML，并在顶层 `mbp:pagebreak` 处分章；`KindleCSSMediaFlattener` 按 Kindle 视角展开 `amzn-*` 媒体查询。KF8 章节另做两项适配：libmobi 输出的不带前缀 `type="noteref"`／`<aside type="footnote">` 改回 `epub:type`（两个引擎只按它识别注释），同章链接 `partNNNNN.html#id` 改回 `#id`（原生引擎只把同文档锚点当作章内注脚）。旧版 MOBI 的 `width`／`height`／`align` 与 `<font>` 属性转为内联 CSS。测试样本中排版与注释部分由 `scripts/make_kindle_fixtures.py` 经 calibre 生成。转换输出必须确定（条目顺序与 ZIP 时间固定），书库按内容哈希去重依赖这一点；修改转换逻辑会改变之后导入文件的哈希，不影响已入库的书。DRM、KFX、Print Replica 与损坏文件在转换前识别，以 `KindleImportError` 报告。
+
 书库多选和系列长按菜单的“压缩分享”由 `Library/LibraryArchiveExport.swift` 的 `LibraryArchiveExporter` 实现：只读取书库中已在本机的书籍文件，用 `ReadiumZIPFoundation` 的 `Archive` 组装 zip，条目名按“序号 + 书名”生成并去掉非法路径字符，同名时追加序号；zip 写入临时目录的 `NoveliaShare/` 后交给系统分享面板。云端未下载的书没有本机文件，会跳过；全部跳过时返回“先下载”的提示。压缩不修改原书、书库索引、阅读进度或同步数据；产物是临时文件，不属于书库身份或备份内容。压缩任务在 `@MainActor` 上异步执行，再次发起时取消上一次，分享面板关闭后清除待分享状态。
 
 通用文件哈希使用 `Support/FileContentHash.swift`。跨功能使用通用工具，不通过同步 UI 文件获取哈希方法。临时路径不写成长期书籍身份，缓存不能代替持久化事实。
@@ -418,7 +420,7 @@ Readium 与 Yuedu 是 Reader 功能内部的引擎选择。两个模型使用 Ap
 新增或移动源文件后检查：
 
 1. `NoveliaIOS.xcodeproj/project.pbxproj` 的文件与 Sources 注册。
-2. `Package.swift` 的 target 路径、显式 sources、exclude 与测试资源。
+2. `Package.swift` 的 target 路径、显式 sources、exclude 与测试资源。Kindle 导入源码同时由 App 目标与包目标 `NoveliaKindle`（测试 `NoveliaKindleTests`）编译；`Vendor/CLibMobi` 是本地 Swift 包，App 工程以本地包引用，`scripts/run_package_tests.sh` 会把 `Vendor` 链接进临时目录。
 3. `scripts/source_layout.json` 中受脚本使用的路径，以及引用这些文件的测试/构建脚本。
 4. 文档、许可资源、Debug/Release 条件编译。
 
