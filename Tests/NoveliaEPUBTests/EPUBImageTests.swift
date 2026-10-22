@@ -6,6 +6,74 @@ import ReadiumZIPFoundation
 
 /// 目录页“图片”与图片查看器：全书图片收集、路径解析与解码。
 final class EPUBImageTests: XCTestCase {
+    func testReadiumSVGAttributeNormalizationPreservesOtherContent() {
+        let html = #"""
+        <!-- <svg viewbox="comment"/> -->
+        <script>const sample = '<svg viewbox="script"/>';</script>
+        <![CDATA[<svg viewbox="cdata"/>]]>
+        <div data-example='<svg viewbox="value"/>' viewbox="ordinary"/>
+        <svg data-label="viewbox='text' >" viewbox='0 0 963 1351' preserveaspectratio="xMidYMid meet" width="100%"><image width="963" height="1351"/></svg>
+        <svg viewBox="0 0 10 20" preserveAspectRatio="none"/>
+        """#
+        let result = EPUBReadiumImageLayout.normalizingSVGAttributes(inHTML: html)
+        let expected = html.replacingOccurrences(of: "viewbox='0 0 963 1351'", with: "viewBox='0 0 963 1351'")
+            .replacingOccurrences(of: "preserveaspectratio=\"xMidYMid meet\"", with: "preserveAspectRatio=\"xMidYMid meet\"")
+        XCTAssertEqual(result, expected)
+        XCTAssertEqual(EPUBReadiumImageLayout.normalizingSVGAttributes(inHTML: result), result)
+        let duplicate = #"<svg viewbox="0 0 10 20" viewBox="0 0 30 40"/>"#
+        XCTAssertEqual(EPUBReadiumImageLayout.normalizingSVGAttributes(inHTML: duplicate), duplicate)
+    }
+
+    /// 必须按 XHTML 加载；HTML 解析器会自动修正 SVG 大小写，掩盖实际 EPUB 故障。
+    @MainActor
+    func testReadiumLowercaseSVGViewBoxClipsImageUntilNormalized() async throws {
+        let data = png(width: 963, height: 1351).base64EncodedString()
+        let html = """
+        <html xmlns="http://www.w3.org/1999/xhtml"><head>
+        <meta name="viewport" content="width=device-width,initial-scale=1"/>
+        <style>body { margin:0 5pt; text-align:center; } div { display:block; }</style>
+        </head><body><div>
+        <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" height="100%" preserveaspectratio="xMidYMid meet" version="1.1" viewbox="0 0 963 1351" width="100%"><image height="1351" width="963" xlink:href="data:image/png;base64,\(data)"/></svg>
+        </div></body></html>
+        """
+        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 430, height: 800))
+        let window = UIWindow(frame: webView.frame)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        controller.view.addSubview(webView)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        func probe(_ document: String) async throws -> [String: Double] {
+            let navigation = ImageNavigationObserver()
+            webView.navigationDelegate = navigation
+            try await withCheckedThrowingContinuation { continuation in
+                navigation.completion = continuation
+                webView.load(Data(document.utf8), mimeType: "application/xhtml+xml",
+                             characterEncodingName: "utf-8", baseURL: URL(string: "https://example.invalid/")!)
+            }
+            let value = try await webView.evaluateJavaScript("""
+            (() => {
+              const svg = document.querySelector('svg').getBoundingClientRect();
+              const image = document.querySelector('image').getBoundingClientRect();
+              return { width:svg.width, height:svg.height, imageWidth:image.width,
+                       imageHeight:image.height, right:image.right-svg.right, bottom:image.bottom-svg.bottom };
+            })()
+            """)
+            return try XCTUnwrap(value as? [String: Double])
+        }
+        let original = try await probe(html)
+        XCTAssertGreaterThan(try XCTUnwrap(original["imageWidth"]), try XCTUnwrap(original["width"]))
+        XCTAssertGreaterThan(try XCTUnwrap(original["imageHeight"]), try XCTUnwrap(original["height"]))
+        for size in [CGSize(width: 430, height: 800), CGSize(width: 834, height: 1100), CGSize(width: 1100, height: 700)] {
+            webView.frame.size = size
+            let fixed = try await probe(EPUBReadiumImageLayout.normalizingSVGAttributes(inHTML: html))
+            XCTAssertGreaterThan(try XCTUnwrap(fixed["imageWidth"]), 0)
+            XCTAssertLessThanOrEqual(try XCTUnwrap(fixed["right"]), 1)
+            XCTAssertLessThanOrEqual(try XCTUnwrap(fixed["bottom"]), 1)
+            XCTAssertEqual(try XCTUnwrap(fixed["imageWidth"]) / XCTUnwrap(fixed["imageHeight"]), 963.0 / 1351, accuracy: 0.001)
+        }
+    }
+
     private func png(width: Int, height: Int) -> Data {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1

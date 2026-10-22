@@ -35,6 +35,28 @@ python3 -I scripts/build_local_release.py --simulator 'iPhone 18 Pro Max'
 python3 -I scripts/build_local_release.py --allow-dirty --simulator '<模拟器名称或 UDID>'
 ```
 
+### 缓存、复验与耗时
+
+默认在 `/private/tmp/novelia-build-cache-<用户编号>/<工作区摘要>/` 保留固定的 Release 编译缓存、独立 Swift 包测试工作区及测试编译缓存。每个工作区独立，公私分支不会覆盖彼此；构建和检查使用文件锁避免并发覆盖。缓存可以删除，下次会重新编译；它不是分发产物。
+
+包测试与离线回归仅在源码快照（包括测试、脚本、工程、锁定依赖和文件权限）、命令参数、环境摘要、Xcode/Swift/SDK，以及包测试的模拟器运行时都一致时，复用 24 小时内的成功记录。失败、日志缺失/损坏、源码变化或依赖检出修改均不能作为通过依据；筛选测试不替代完整测试。独立运行 `run_package_tests.sh` 与发布使用同一缓存入口。显式请求结果包时总会执行测试。
+
+需要重新执行检查、但保留增量编译缓存时：
+
+```sh
+python3 -I scripts/build_local_release.py --force-checks --simulator '<模拟器 UDID>'
+```
+
+需要全新 Release/测试编译与完整检查时：
+
+```sh
+python3 -I scripts/build_local_release.py --fresh-build --simulator '<模拟器 UDID>'
+```
+
+两种方式仍要求新的输出目录；不会覆盖已发布版本。独立包测试也支持在模拟器参数后添加 `--force-checks` 或 `--fresh-build`。发生同名模拟器歧义时使用 UDID。
+
+Release 编译每次仍调用 Xcode，由其做增量构建；生产验证排除、许可、IPA 版本/完整性/隐私检查及源码配套打包每次实际执行。`BUILD.json` 记录检查是否复用；本机 `TIMINGS.json` 记录阶段耗时，不作为发布附件。复用记录不会替代已构建 App 的检查，也不会复用旧 IPA。
+
 ### 脚本做了什么
 
 脚本运行 Swift 包逻辑／排版测试（不运行模拟器 UI 测试）、架构依赖检查与七项离线回归、Release 真机构建、架构验证代码排除检查、原始依赖许可与包内资源核对、IPA 隐私检查，生成未签名 IPA、完整对应源码、锁定依赖完整源码／许可（含 Readium 阅读器脚本所用 npm 包的原始发布包，按锁定文件 SHA-512 校验，并补充两项发布包缺失的 TypeScript 原始源码及构建配置）、BUILD.json 和 SHA256SUMS。
@@ -42,7 +64,7 @@ python3 -I scripts/build_local_release.py --allow-dirty --simulator '<模拟器�
 ### 注意事项
 
 - 开源许可页的 GPL 修改日期（`SettingsViews.swift` 的 `modifiedDate`）必须等于发布提交的日期，否则脚本拒绝构建。
-- Xcode 派生数据默认放在系统临时目录下的新目录（成功后删除，失败时保留供排查）；Release 二进制会记录目标文件路径，`--derived-data` 不得位于用户主目录下，否则 IPA 隐私检查会失败。
+- Xcode 派生数据默认保存在固定的临时目录缓存中；`--fresh-build` 使用全新目录，成功后删除、失败时保留排查。Release 二进制会记录目标文件路径，`--derived-data` 不得位于用户主目录下，否则 IPA 隐私检查会失败；该参数不能与 `--fresh-build` 同用。
 - 产物位于忽略的 `build/local-releases/<版本>-<构建号>/`；只有出现 SUCCESS 才可分发。
 - 输出目录已存在时拒绝覆盖，源码在构建期间变化也会失败。
 - 脚本不修改版本、不提交、不推送、不发布。

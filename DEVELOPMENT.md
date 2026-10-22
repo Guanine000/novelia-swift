@@ -264,7 +264,7 @@ Yuedu 分页的页面身份是 `(generation, spineIndex, pageIndex)`。拖动预
 
 点击先判断链接与注脚命中，再判断翻页。保持跨章预取、渐进排版、任务失效与取消，缓存保留可见页及有限邻页；内存警告时收缩缓存，不能随预取无限累计位图。布局协调器合并相同请求并缓存结果，修改缓存键时纳入实际影响排版的参数。
 
-`EPUBContainer` 负责 ZIP、OPF、spine 和目录及资源读取。CSS/图片相对引用按章节文件目录解析，目录链接按 nav/NCX 文档位置解析；不要把所有相对路径都拼到 OPF 所在目录。Yuedu 的 `linkHit` 对普通链接也检查：以 `#` 开头且命中本章 `footnotes`（引擎 `collectFootnotes` 收集的多看 `li` 或 epub:type 注释正文）时按注释弹层，否则同章锚点跳转不定位，点击会毫无反应。Readium 对可重排 EPUB 在资源映射阶段注入 `EPUBReadiumImageLayout`：将直接位于 `body` 下的独立 `img` 设为块元素，避免连续行内插图与孤行保护组合导致跨栏切图；段落内图片和固定版式不适用此规则，原书不改写。此处理独立于禁用书内脚本设置。Readium 默认执行书内脚本；`SettingsKey.readerEPUBDisablesScripts` 开启时，`openPublication` 经 `onCreatePublication` 包装容器，按 `EPUBScriptRemoval` 去掉章节文档的 `<script>` 与 `on…=` 事件属性、把 `.js` 资源置空（无法按 UTF-8 解码的文档保留原文），并在 `<head>` 注入样式隐藏 `epub:type` 为 footnote／note 的弹出式脚注正文（尾注与多看章末列表不隐藏；元素仍在文档中，弹层照常读取正文），不影响 Readium 自身注入的脚本，也不改原文件。Readium 只对 `epub:type="noteref"` 链接调用注释回调；其他带锚点的书内链接经 `shouldNavigateToLink` 先拦下，读取目标文档，由 `EPUBFootnoteTarget` 按 YueduCoreText `collectFootnotes` 的同一规则（class 含 footnote 的 `<li>`，或 `epub:type` 为 footnote／endnote／note／rearnote）判断，命中则弹层，否则照常 `go(to:)`。目录按先序展平并带 `level`：nav 以外层带链接的 `<li>` 计层级（无链接的分组标题不计），NCX 嵌套 navPoint 的父项先于子项输出；`TOCOutline` 负责目录面板的分组折叠，Yuedu 与 Readium 共用 `ReaderTOCRow`，打开目录时只展开当前章节所在分组。
+`EPUBContainer` 负责 ZIP、OPF、spine 和目录及资源读取。CSS/图片相对引用按章节文件目录解析，目录链接按 nav/NCX 文档位置解析；不要把所有相对路径都拼到 OPF 所在目录。Yuedu 的 `linkHit` 对普通链接也检查：以 `#` 开头且命中本章 `footnotes`（引擎 `collectFootnotes` 收集的多看 `li` 或 epub:type 注释正文）时按注释弹层，否则同章锚点跳转不定位，点击会毫无反应。Readium 在章节资源映射阶段由 `EPUBReadiumImageLayout.normalizingSVGAttributes` 修正 SVG 的 `viewbox`／`preserveaspectratio` 大小写，恢复 XHTML 中的缩放语义；只改 SVG 起始标签的属性名，保留属性值、脚本、注释及原始文件，固定版式也适用此属性修正。`EPUBImageTests` 按 `application/xhtml+xml` 加载合成封面，检查修正前裁切与修正后手机／平板横竖尺寸下的图像边界。Readium 对可重排 EPUB 在资源映射阶段注入 `EPUBReadiumImageLayout`：将直接位于 `body` 下的独立 `img` 设为块元素，避免连续行内插图与孤行保护组合导致跨栏切图；段落内图片和固定版式不适用此规则，原书不改写。此处理独立于禁用书内脚本设置。Readium 默认执行书内脚本；`SettingsKey.readerEPUBDisablesScripts` 开启时，`openPublication` 经 `onCreatePublication` 包装容器，按 `EPUBScriptRemoval` 去掉章节文档的 `<script>` 与 `on…=` 事件属性、把 `.js` 资源置空（无法按 UTF-8 解码的文档保留原文），并在 `<head>` 注入样式隐藏 `epub:type` 为 footnote／note 的弹出式脚注正文（尾注与多看章末列表不隐藏；元素仍在文档中，弹层照常读取正文），不影响 Readium 自身注入的脚本，也不改原文件。Readium 只对 `epub:type="noteref"` 链接调用注释回调；其他带锚点的书内链接经 `shouldNavigateToLink` 先拦下，读取目标文档，由 `EPUBFootnoteTarget` 按 YueduCoreText `collectFootnotes` 的同一规则（class 含 footnote 的 `<li>`，或 `epub:type` 为 footnote／endnote／note／rearnote）判断，命中则弹层，否则照常 `go(to:)`。目录按先序展平并带 `level`：nav 以外层带链接的 `<li>` 计层级（无链接的分组标题不计），NCX 嵌套 navPoint 的父项先于子项输出；`TOCOutline` 负责目录面板的分组折叠，Yuedu 与 Readium 共用 `ReaderTOCRow`，打开目录时只展开当前章节所在分组。
 
 Yuedu 重排开始时会把位置归零并换成空分页结果，`pendingRelayoutAnchor` 记住要回到的章内偏移；重排被下一次取消时沿用该锚点，成功或非取消失败后清除。进入后台后系统会以浅色/深色及其他尺寸截取快照，阅读视图在 `scenePhase == .background` 时忽略外观与尺寸变化，回到前台再按实际值同步一次；Readium 同样不在后台重建导航器。修改重排或生命周期处理时，验证切到其他 App 再返回仍停在原页。资源查找保留已有的编码和路径回退，CSS 导入保留递归上限。
 
@@ -422,7 +422,7 @@ Readium 与 Yuedu 是 Reader 功能内部的引擎选择。两个模型使用 Ap
 新增或移动源文件后检查：
 
 1. `NoveliaIOS.xcodeproj/project.pbxproj` 的文件与 Sources 注册。
-2. `Package.swift` 的 target 路径、显式 sources、exclude 与测试资源。Kindle 导入源码同时由 App 目标与包目标 `NoveliaKindle`（测试 `NoveliaKindleTests`）编译；`Vendor/CLibMobi` 是本地 Swift 包，App 工程以本地包引用，`scripts/run_package_tests.sh` 会把 `Vendor` 链接进临时目录。
+2. `Package.swift` 的 target 路径、显式 sources、exclude 与测试资源。Kindle 导入源码同时由 App 目标与包目标 `NoveliaKindle`（测试 `NoveliaKindleTests`）编译；`Vendor/CLibMobi` 是本地 Swift 包，App 工程以本地包引用，`scripts/run_package_tests.sh` 会把 `Vendor` 链接进固定的独立包测试工作区。
 3. `scripts/source_layout.json` 中受脚本使用的路径，以及引用这些文件的测试/构建脚本。
 4. 文档、许可资源、Debug/Release 条件编译。
 
@@ -453,7 +453,7 @@ python3 scripts/check_architecture_boundaries.py
 git diff --check
 ```
 
-其他离线回归脚本也通过 `python3 scripts/<脚本名>.py` 执行；先读取脚本参数与前置条件。`scripts/build_local_release.py` 发布前固定运行架构依赖检查和以下七项离线回归，另以 `test_local_release.py` 检查打包流程：
+其他离线回归脚本也通过 `python3 scripts/<脚本名>.py` 执行；先读取脚本参数与前置条件。`scripts/build_local_release.py` 发布前要求架构依赖检查和以下七项离线回归通过，另以 `test_local_release.py` 每次检查打包与缓存关卡。`local_build_cache.py` 按工作区隔离固定缓存，`run_package_tests.py` 是独立测试和发布共用入口；相同完整源码、命令、环境、工具链和模拟器运行时的成功检查可在 24 小时内复用，日志摘要损坏/缺失、源码变化、失败或依赖检出修改不允许复用，筛选测试不能满足完整测试。编译与检查加文件锁；Release 始终调用 Xcode 增量构建，许可、生产排除和最终 IPA 检查每次执行。强制检查、全新构建及耗时记录见 [本机构建与分发](docs/BUILD.md#缓存复验与耗时)。
 
 | 脚本 | 覆盖范围 |
 |---|---|

@@ -330,7 +330,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
                 return resource.map { data in
                     // 无法按 UTF-8 解码时保留原文，避免整章变空。
                     guard let html = String(data: data, encoding: .utf8) else { return data }
-                    var result = html
+                    var result = EPUBReadiumImageLayout.normalizingSVGAttributes(inHTML: html)
                     if reflowable {
                         result = EPUBReadiumImageLayout.keepingStandaloneImagesTogether(inHTML: result)
                     }
