@@ -319,19 +319,26 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         case .failure(let error): throw ReadiumOpenError.asset(String(describing: error))
         }
         let opener = PublicationOpener(parser: EPUBParser())
-        let transform: Publication.Builder.Transform = { _, container, _ in
-            guard disablesScripts else { return }
+        let transform: Publication.Builder.Transform = { manifest, container, _ in
+            let reflowable = manifest.metadata.layout != .fixed
             container = container.map { href, resource in
                 let path = href.removingFragment().removingQuery().path
-                if EPUBScriptRemoval.isScriptResource(path: path) {
+                if disablesScripts, EPUBScriptRemoval.isScriptResource(path: path) {
                     return resource.map { _ in Data() }
                 }
                 guard EPUBScriptRemoval.isHTMLResource(path: path) else { return resource }
                 return resource.map { data in
                     // 无法按 UTF-8 解码时保留原文，避免整章变空。
                     guard let html = String(data: data, encoding: .utf8) else { return data }
-                    let cleaned = EPUBScriptRemoval.removingScripts(fromHTML: html)
-                    return Data(EPUBScriptRemoval.hidingPopupNoteBodies(inHTML: cleaned).utf8)
+                    var result = html
+                    if reflowable {
+                        result = EPUBReadiumImageLayout.keepingStandaloneImagesTogether(inHTML: result)
+                    }
+                    if disablesScripts {
+                        result = EPUBScriptRemoval.removingScripts(fromHTML: result)
+                        result = EPUBScriptRemoval.hidingPopupNoteBodies(inHTML: result)
+                    }
+                    return Data(result.utf8)
                 }
             }
         }
