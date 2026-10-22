@@ -228,6 +228,8 @@ Readium 的 HTML 根背景设为透明，阅读背景由宿主绘制在导航器
 
 `TextChapterSource` 将 TXT 或在线内容转为经过转义的 XHTML 段落，供章节接口消费。TXT 长章节拆为分页单元，仅章节起始单元进入目录；不要把 XHTML 标签长度当成源文本偏移。拆分和定位同时涉及 UTF-8、UTF-16 与章节索引，修改时验证 emoji、组合字符、卷标题、无标题全文和分章规则变化。
 
+Readium 分页使用两层横向滚动视图：章节 WebView 自己的滚动视图负责章内翻页，外层分页视图负责切换章节。拖动从 WebView 以外开始（上下页边距、章节标题栏区域）时只有外层响应，会直接切到相邻章节并跳过本章剩余页面（1.0.0 构建 93 前的「跳页」）。`ReadiumEPUBReaderModel.swipeBegan` 在外层拖动开始时检查当前章节在该方向是否还有页面：有就取消这次拖动并用 `goLeft`／`goRight` 章内翻一页，已在章首或章末时保留切章。回归为 `scripts/test_api_architecture_ui.py --epub-pagination` 中的 `testReadiumMidChapterSwipesStayInChapter`（章中部在不同高度含页边距滑动）。
+
 `ReadiumTextPublication` 直接把惰性单元包装成 Publication 的 readingOrder，通过 Resource 按需生成内容，不临时打包 EPUB，不提前获取全书正文。生成的 TXT/在线书籍不执行 EPUB 全书资源诊断。位置服务为每个单元提供一个位置，位置数不是实际页数；显示整书比例时还需结合单元内 progression。
 
 在线阅读沿用原文、译文、双语及译源选择，保留段落顺序、次要文字样式与缺译提示。进度、书签和服务端历史仍为章节级；显示模式或译源改变时从该章开头恢复，不能把一份译文的字符偏移直接套用到其他正文。正文 HTTP/HTTPS 链接通过既有打开方式处理，EPUB 包内链接另行解析。
@@ -360,7 +362,7 @@ WebDAV 请求使用 `reloadIgnoringLocalCacheData` 与 `Cache-Control: no-cache,
 跳页相关诊断：
 - 前后台切换与内存警告（`lifecycle`）。
 - 默认引擎（`epub`）：阅读区尺寸变化、重排计划、重排落点（前后页码，以及 `offset`／`progression`／`fraction` 定位方式），以及重排以外的每次位置变化（来源 `cause`，包括普通翻页）。
-- Readium（`readium`）：每次位置变化（资源序号、章内与全书千分比）。翻页前注册一个不消费事件的点按观察者，并给内部滚动视图的拖动手势追加只读目标，从而把点按、滑动记为 `tap`／`swipe`；只有无法对应到任何操作的移动才记为 `unattributed`。点按、滑动时与位置停稳后各记录一次当前章节 WebView 的分页状态（`offset`／`width`／`content`，单位 pt）：Readium 翻页时若 `offset + width` 超出 `content` 就进入下一章，对照这些值即可判断是否因章节宽度暂时变小而跨章。`setupUserScripts` 回调记录 WebView 新建次数，WebContent 进程终止后 Readium 会重建全部章节，表现为短时间内连续出现。资源读取失败只记录资源序号。
+- Readium（`readium`）：每次位置变化（资源序号、章内与全书千分比）。翻页前注册一个不消费事件的点按观察者，并给内部滚动视图的拖动手势追加只读目标，从而把点按、滑动记为 `tap`／`swipe`；只有无法对应到任何操作的移动才记为 `unattributed`。点按、滑动时与位置停稳后各记录一次当前章节 WebView 的分页状态（`offset`／`width`／`content`，单位 pt）：Readium 翻页时若 `offset + width` 超出 `content` 就进入下一章，对照这些值即可判断是否因章节宽度暂时变小而跨章。`setupUserScripts` 回调记录 WebView 新建次数，WebContent 进程终止后 Readium 会重建全部章节，表现为短时间内连续出现。资源读取失败只记录资源序号。外层拖动在日志中记为 `outerSwipe`，改为章内翻页时另记 `Readium outer swipe redirected`。
 - 「阅读样式」面板末尾的「标记问题」（`ReaderIssueMarkSection`）写入标记行；默认引擎同时记录当前位置，Readium 同时记录分页状态。
 
 普通翻页也会记录，每次翻页约一到三行；导出上限为 10000 行。修改来源名称时同步更新 `ShareableLogPolicy.positionCauses`。

@@ -70,7 +70,8 @@ public enum ShareableLogPolicy {
             #"Readium EPUB opened: [0-9]{1,8} resources, [0-9]{1,8} positions"#,
             #"User marked reading issue; engine=readium, mono=[0-9]{1,12}"#,
             // 1.0.0 构建 93 及以后：翻页时与停稳后的章节分页状态、WebView 重建与资源读取失败。
-            #"Readium page state; when=(?:tap|swipe|settled), resource=-?[0-9]{1,8}, offset=-?[0-9]{1,9}, width=[0-9]{1,6}, content=[0-9]{1,9}, mono=[0-9]{1,12}"#,
+            #"Readium page state; when=(?:tap|swipe|outerSwipe|settled), resource=-?[0-9]{1,8}, offset=-?[0-9]{1,9}, width=[0-9]{1,6}, content=[0-9]{1,9}, mono=[0-9]{1,12}"#,
+            #"Readium outer swipe redirected; direction=(?:left|right), resource=-?[0-9]{1,8}, mono=[0-9]{1,12}"#,
             #"Readium web view created; count=[0-9]{1,8}, mono=[0-9]{1,12}"#,
             #"Readium resource load failed; resource=-?[0-9]{1,8}, mono=[0-9]{1,12}"#,
             #"Readium position changed; kind=\#(bookKind), cause=\#(positionCause), fromResource=-?[0-9]{1,8}, fromProgress=-?[0-9]{1,4}, toResource=-?[0-9]{1,8}, toProgress=-?[0-9]{1,4}, total=-?[0-9]{1,4}, mono=[0-9]{1,12}"#,
@@ -90,7 +91,7 @@ public enum ShareableLogPolicy {
     private static let layoutReason = "(?:" + layoutReasons.joined(separator: "|") + ")"
     private static let bookKind = "(?:epub|txt|online)"
     /// 阅读位置变化的来源：两种阅读引擎共用。`other`／`unattributed` 表示没有对应的用户操作。
-    public static let positionCauses = ["turnForward", "turnBackward", "tap", "swipe", "navigate", "seek", "restore", "open", "rebuild", "preferences", "other", "unattributed"]
+    public static let positionCauses = ["turnForward", "turnBackward", "tap", "swipe", "outerSwipe", "navigate", "seek", "restore", "open", "rebuild", "preferences", "other", "unattributed"]
     private static let positionCause = "(?:" + positionCauses.joined(separator: "|") + ")"
     private static let layoutFields = "book=\(hex8), trace=\(hex8), gen=[0-9]{1,8}, spine=[0-9]{1,8}, totalSpine=[0-9]{1,8}, currentSpine=[0-9]{1,8}, reason=\(layoutReason)"
 
@@ -354,6 +355,12 @@ public enum ReaderDiagnosticMessage {
     public static func readiumPageState(when: String, resource: Int, offset: Int, width: Int, content: Int,
                                         mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
         "Readium page state; when=\(when), resource=\(resource), offset=\(offset), width=\(width), content=\(content), mono=\(mono)"
+    }
+
+    /// 外层章节切换视图开始的拖动被改为章内翻页（本章在该方向仍有页面）。
+    public static func readiumSwipeRedirected(direction: String, resource: Int,
+                                              mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "Readium outer swipe redirected; direction=\(direction), resource=\(resource), mono=\(mono)"
     }
 
     /// Readium 新建章节 WebView；WebContent 进程终止后 Readium 会重建全部章节，表现为短时间内连续出现。

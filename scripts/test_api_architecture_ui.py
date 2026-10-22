@@ -544,6 +544,48 @@ if args.epub_pagination:
        XCTAssertEqual(backwards ? previous.first : previous.last,backwards ? 1 : 60)
       }
      }
+     // 章中途在不同高度（含上下页边距）滑动翻页：只能在本章内翻一页，不能被外层章节切换接管而跳章。
+     func testReadiumMidChapterSwipesStayInChapter() {
+      continueAfterFailure = true
+      let app=XCUIApplication(bundleIdentifier:"cc.novelia.ios.architecture-validation")
+      app.launchArguments=["-architectureValidation","-architectureReadium","-architecturePagination"]
+      app.launch(); defer { app.terminate() }
+      let book=app.staticTexts["分页连续性"].firstMatch
+      XCTAssertTrue(book.waitForExistence(timeout:20)); book.tap()
+      XCTAssertTrue(app.webViews.staticTexts["PAGE_001"].firstMatch.waitForExistence(timeout:30))
+      sleep(3)
+      let probe=app.staticTexts["readium-validation-visible-paragraphs"]
+      XCTAssertTrue(probe.waitForExistence(timeout:20))
+      func visible() -> [Int] {
+       guard let data=probe.label.data(using:.utf8), let values=try? JSONSerialization.jsonObject(with:data) as? [Int] else { return [] }
+       return values.sorted()
+      }
+      func settle(_ before: String) {
+       let changed=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in probe.label != before && !visible().isEmpty },object:nil)
+       _ = XCTWaiter.wait(for:[changed],timeout:6)
+       sleep(1)
+      }
+      // 每页显示 5 个编号、每章 20 个：点按 6 次到第二章第 3 页（31–35）。
+      for _ in 0..<6 { let before=probe.label; app.coordinate(withNormalizedOffset:CGVector(dx:0.85,dy:0.5)).tap(); settle(before) }
+      for dy in [0.5, 0.88, 0.94, 0.97, 0.06, 0.12] {
+       for backwards in [true, false] {
+        let before=probe.label
+        let old=visible()
+        let from=app.coordinate(withNormalizedOffset:CGVector(dx:backwards ? 0.2 : 0.8,dy:dy))
+        let to=app.coordinate(withNormalizedOffset:CGVector(dx:backwards ? 0.8 : 0.2,dy:dy))
+        from.press(forDuration:0.05,thenDragTo:to)
+        settle(before)
+        let now=visible()
+        print("MARGIN_SWIPE dy=\(dy) backwards=\(backwards) before=\(old) after=\(now)")
+        guard let oldFirst=old.first, let first=now.first else { continue }
+        // 只检查起点在章中部的滑动；章首向前、章末向后本就应切章。
+        if (backwards && (oldFirst-1)%20==0) || (!backwards && (oldFirst-1)%20>=15) { continue }
+        // 起点在第二章中部，前后各一页都仍在第二章（编号 21–40）；跨章即为外层章节切换接管了滑动。
+        XCTAssertEqual((first-1)/20, (oldFirst-1)/20, "Swipe at dy=\(dy) backwards=\(backwards) changed chapter: \(old) -> \(now)")
+        XCTAssertLessThanOrEqual(abs(first-oldFirst), old.count, "Swipe at dy=\(dy) backwards=\(backwards) skipped pages: \(old) -> \(now)")
+       }
+      }
+     }
     }
     """)
 print(f'UI test artifacts: {r}', flush=True)

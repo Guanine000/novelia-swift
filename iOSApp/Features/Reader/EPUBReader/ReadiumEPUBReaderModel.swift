@@ -627,8 +627,46 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     /// 本次阅读器会话中 Readium 新建章节 WebView 的次数。
     private var createdWebViews = 0
-    /// 章节 WebView 与章节间滚动视图的拖动手势观察者（只读，不改变手势行为）。
-    private lazy var gestureProbe = ReadiumGestureProbe { [weak self] in self?.noteGesture("swipe") }
+    /// 章节 WebView 与章节间滚动视图的拖动手势观察者。
+    private lazy var gestureProbe = ReadiumGestureProbe { [weak self] recognizer in self?.swipeBegan(recognizer) }
+
+    /// Readium 用两层横向滚动视图：章节 WebView 自己的滚动视图负责章内翻页，外层分页视图负责切换章节。
+    /// 拖动从 WebView 以外的区域开始（上下页边距、章节标题栏区域）时只有外层能响应，会直接切到相邻章节，
+    /// 跳过本章剩余页面。因此外层开始拖动时，若本章在该方向上仍有页面，就取消这次拖动并改为章内翻一页；
+    /// 已在章首或章末时保留外层的切章行为。
+    private func swipeBegan(_ recognizer: UIPanGestureRecognizer) {
+        guard let scrollView = recognizer.view as? UIScrollView else { return }
+        if scrollView.superview is WKWebView {
+            noteGesture("swipe")
+            return
+        }
+        noteGesture("outerSwipe")
+        let translation = recognizer.translation(in: scrollView).x
+        let dx = translation != 0 ? translation : recognizer.velocity(in: scrollView).x
+        guard dx != 0, let chapter = currentChapterScrollView() else { return }
+        // 手指向左拖动显示右侧内容。
+        let towardsRight = dx < 0
+        let hasRoom = towardsRight
+            ? chapter.contentOffset.x + chapter.bounds.width < chapter.contentSize.width - 1
+            : chapter.contentOffset.x > 1
+        guard hasRoom else { return }
+        recognizer.isEnabled = false
+        recognizer.isEnabled = true
+        let resource = locator.flatMap { navigationIndex?.resourceIndex(for: $0.href) } ?? -1
+        Self.shareable.notice(ReaderDiagnosticMessage.readiumSwipeRedirected(direction: towardsRight ? "right" : "left", resource: resource))
+        Task { [weak self] in
+            guard let navigator = self?.navigator else { return }
+            _ = towardsRight ? await navigator.goRight(options: .animated) : await navigator.goLeft(options: .animated)
+        }
+    }
+
+    /// 当前屏幕中央的章节 WebView 的滚动视图。
+    private func currentChapterScrollView() -> UIScrollView? {
+        guard let root = navigator?.view,
+              let (webView, _) = Self.visibleWebView(containing: CGPoint(x: root.bounds.midX, y: root.bounds.midY), in: root)
+        else { return nil }
+        return webView.scrollView
+    }
 
     /// 记录用户手势，并在 Readium 处理之前保存当时的分页状态。
     private func noteGesture(_ gesture: String) {
@@ -638,10 +676,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     /// 读取当前屏幕中央章节 WebView 的横向滚动状态（Readium 翻页即据此判断是否已到章末）。
     private func logPageState(when: String) {
-        guard let root = navigator?.view,
-              let (webView, _) = Self.visibleWebView(containing: CGPoint(x: root.bounds.midX, y: root.bounds.midY), in: root)
-        else { return }
-        let scrollView = webView.scrollView
+        guard let scrollView = currentChapterScrollView() else { return }
         let resource = locator.flatMap { navigationIndex?.resourceIndex(for: $0.href) } ?? -1
         Self.shareable.notice(ReaderDiagnosticMessage.readiumPageState(
             when: when, resource: resource, offset: Int(scrollView.contentOffset.x.rounded()),
@@ -1072,24 +1107,24 @@ private struct TransparentCSSColor: CSSColor {
 }
 
 
-/// 给 Readium 内部滚动视图的拖动手势追加观察目标。只在开始拖动时回调，不改变手势的识别与滚动行为；
+/// 给 Readium 内部滚动视图的拖动手势追加观察目标，只在开始拖动时回调（是否取消由回调决定）；
 /// 已附加的手势用弱引用集合去重。
 @MainActor
 private final class ReadiumGestureProbe: NSObject {
-    private let onBegan: () -> Void
+    private let onBegan: (UIPanGestureRecognizer) -> Void
     private let attached = NSHashTable<UIGestureRecognizer>.weakObjects()
 
-    init(onBegan: @escaping () -> Void) {
+    init(onBegan: @escaping (UIPanGestureRecognizer) -> Void) {
         self.onBegan = onBegan
     }
 
-    func attach(to recognizer: UIGestureRecognizer) {
+    func attach(to recognizer: UIPanGestureRecognizer) {
         guard !attached.contains(recognizer) else { return }
         attached.add(recognizer)
         recognizer.addTarget(self, action: #selector(handle(_:)))
     }
 
-    @objc private func handle(_ recognizer: UIGestureRecognizer) {
-        if recognizer.state == .began { onBegan() }
+    @objc private func handle(_ recognizer: UIPanGestureRecognizer) {
+        if recognizer.state == .began { onBegan(recognizer) }
     }
 }
