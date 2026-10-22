@@ -143,6 +143,25 @@ extension ReadiumTextPublicationTests {
         }
     }
 
+    func testDocumentURLResolvesFullPathsRatherThanDuplicateBasenames() {
+        let index = ReadiumNavigationIndex(readingOrder: ["a/text.xhtml", "b/text.xhtml", "text.xhtml", "中文.xhtml"].map { Link(href: $0) }, tableOfContents: [])
+        for (path, expected) in [("a/text.xhtml?x=1#p", 0), ("b/text.xhtml", 1), ("text.xhtml", 2), ("%E4%B8%AD%E6%96%87.xhtml", 3)] {
+            XCTAssertEqual(index.resourceIndex(forDocumentURL: URL(string: "readium://12345678-1234-1234-1234-123456789abc/" + path)!), expected)
+        }
+        for path in ["missing.xhtml", "a/not-text.xhtml", "wrapper.html", "other/text.xhtml"] {
+            XCTAssertNil(index.resourceIndex(forDocumentURL: URL(string: "readium://12345678-1234-1234-1234-123456789abc/" + path)!))
+        }
+    }
+
+    func testDocumentURLDoesNotGuessFromUnknownOriginsOrAssets() {
+        let index = ReadiumNavigationIndex(readingOrder: [Link(href: "text.xhtml")], tableOfContents: [])
+        for url in ["https://example.test/text.xhtml", "readium://assets/text.xhtml", "file:///text.xhtml"] {
+            XCTAssertNil(index.resourceIndex(forDocumentURL: URL(string: url)!))
+        }
+        let remote = ReadiumNavigationIndex(readingOrder: [Link(href: "https://example.test/text.xhtml")], tableOfContents: [])
+        XCTAssertEqual(remote.resourceIndex(forDocumentURL: URL(string: "https://example.test/text.xhtml?x=1#p")!), 0)
+    }
+
     func testNavigationIndexHandlesEmptyAndNonReadingOrderTOC() {
         let empty = ReadiumNavigationIndex(readingOrder: [], tableOfContents: [])
         XCTAssertNil(empty.tocIndex(for: Link(href: "missing.xhtml").url()))

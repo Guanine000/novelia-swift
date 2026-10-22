@@ -366,10 +366,10 @@ WebDAV 请求使用 `reloadIgnoringLocalCacheData` 与 `Cache-Control: no-cache,
 跳页相关诊断：
 - 前后台切换与内存警告（`lifecycle`）。
 - 默认引擎（`epub`）：阅读区尺寸变化、重排计划、重排落点（前后页码，以及 `offset`／`progression`／`fraction` 定位方式），以及重排以外的每次位置变化（来源 `cause`，包括普通翻页）。
-- Readium（`readium`）：每次位置变化（资源序号、章内与全书千分比）。翻页前注册一个不消费事件的点按观察者，并给内部滚动视图的拖动手势追加只读目标，从而把点按、滑动记为 `tap`／`swipe`；只有无法对应到任何操作的移动才记为 `unattributed`。点按、滑动时与位置停稳后各记录一次当前章节 WebView 的分页状态（`offset`／`width`／`content`，单位 pt）：Readium 翻页时若 `offset + width` 超出 `content` 就进入下一章，对照这些值即可判断是否因章节宽度暂时变小而跨章。`setupUserScripts` 回调记录 WebView 新建次数，WebContent 进程终止后 Readium 会重建全部章节，表现为短时间内连续出现。资源读取失败只记录资源序号。外层拖动在日志中记为 `outerSwipe`，改为章内翻页时另记 `Readium outer swipe redirected`。
-- 「阅读样式」面板末尾的「标记问题」（`ReaderIssueMarkSection`）写入标记行；默认引擎同时记录当前位置，Readium 同时记录分页状态。
+- Readium（`readium`）：每次位置变化记录资源序号、章内与全书千分比，手势来源为 `tap`／`swipe`／`outerSwipe`，无法关联时为 `unattributed`。`page snapshot` 使用匿名阅读会话、导航器代次、操作编号和弱引用 WebView 序号关联轨迹，分别记录模型资源与 WebView URL 映射得到的资源、中央候选页面数量、加载/拖动状态及 `offset`／`width`／`content`（pt）；URL 仅用于内存匹配，绝不输出。章内手势直接采样手势所属 WebView；外层手势和位置回调只接受唯一覆盖阅读区中央且祖先可见的页面。`locationCallback` 只是位置回调后的采样，不代表动画或排版已停稳，旧导航器或旧操作的延迟采样丢弃。外层滑动每次记录方向和决定原因：章内重定向、真实边界放行、固定版交由原生容器处理，或方向未知、页面缺失/重叠、加载中、拖动中、归属不符、尺寸无效、重定向忙碌而取消；重定向另记完成、失败或导航器过期，防止把未处理当成正常跨章。`setupUserScripts` 记录 WebView 新建次数，资源失败只记资源序号。旧版事件格式继续允许导出历史记录。
+- 「阅读样式」面板末尾的「标记问题」（`ReaderIssueMarkSection`）写入标记行；默认引擎同时记录当前位置，Readium 同时记录分页状态（`issue`），标记前的连续轨迹照常保留；标记位置不代表异常落点。
 
-普通翻页也会记录，每次翻页约一到三行；导出上限为 10000 行。修改来源名称时同步更新 `ShareableLogPolicy.positionCauses`。
+普通翻页也会记录，外层滑动额外记录判断与重定向结果；导出上限为 10000 行。修改来源名称时同步更新 `ShareableLogPolicy.positionCauses`。
 
 ## 新增、修改与删除功能
 
