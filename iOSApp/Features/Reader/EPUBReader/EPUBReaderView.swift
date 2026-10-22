@@ -23,6 +23,8 @@ struct PagedTextBook {
     var positionUpdatedAt: Date? = nil
     /// 书签与书内搜索使用的身份（本地 TXT 为 `txt:<文件哈希>`）；在线小说为 nil，不提供这两项功能。
     var bookmarkKey: String? = nil
+    /// 目录字数（本地 TXT）；在线小说为 nil，不显示字数。
+    var tocWordCounts: (@Sendable () async -> ReaderTOCWordCounts)? = nil
 }
 
 struct EPUBReaderView: View {
@@ -48,6 +50,7 @@ private struct EPUBReaderViewContent: View {
     /// 目录中已展开的分组（条目序号）；每次打开目录时重置为只展开当前章节所在分组。
     @State private var tocExpanded = Set<Int>()
     @State private var tocTab = ReaderTOCTab.contents
+    @State private var tocWordCounts: ReaderTOCWordCounts?
     @State private var isShowingStyle = false
     @State private var isShowingBookmarks = false
     @State private var didCopyDiagnostics = false
@@ -406,6 +409,9 @@ private struct EPUBReaderViewContent: View {
                                     }
                                 }
                             }
+                            if let tocWordCounts {
+                                ReaderTOCWordCountHeader(total: tocWordCounts.total)
+                            }
                             let tocEntries = model.source?.toc ?? []
                             // 每次渲染只计算一次：列表行是惰性加载的，但之前每行都会重新扫描整个目录。
                             let currentIndex = model.currentTOCIndex
@@ -414,7 +420,8 @@ private struct EPUBReaderViewContent: View {
                             ForEach(TOCOutline.visibleIndices(levels: levels, expanded: tocExpanded), id: \.self) { index in
                                 let entry = tocEntries[index]
                                 ReaderTOCRow(title: entry.title, level: entry.level,
-                                             subtitle: model.container != nil ? entry.spineIndex.map { "spine \($0 + 1)" } : nil,
+                                             subtitle: ReaderTOCRow.subtitle(wordCount: tocWordCounts?.entry(index),
+                                                                             detail: model.container != nil ? entry.spineIndex.map { "spine \($0 + 1)" } : nil),
                                              isCurrent: currentIndex == index,
                                              hasChildren: hasChildren[index],
                                              isExpanded: tocExpanded.contains(index),
@@ -425,6 +432,9 @@ private struct EPUBReaderViewContent: View {
                                 }
                                 .id(index)
                             }
+                        }
+                        .task {
+                            if tocWordCounts == nil { tocWordCounts = await model.tocWordCounts() }
                         }
                         .onAppear {
                             if let current = model.currentTOCIndex {
@@ -935,6 +945,18 @@ private struct EPUBReaderPageSurface: View, Equatable {
 
 // MARK: - 可折叠目录（YueduCoreText 与 Readium 阅读器共用）
 
+/// 目录顶部的全书字数（口径见 `BookWordCount`）。
+struct ReaderTOCWordCountHeader: View {
+    let total: Int
+
+    var body: some View {
+        Text("全书 \(BookWordCount.format(total))")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("全书字数 \(BookWordCount.format(total))")
+    }
+}
+
 /// 目录中的一行：按层级缩进；有子项的分组左侧显示展开/折叠按钮，点标题仍跳到该章。
 struct ReaderTOCRow: View {
     let title: String
@@ -946,6 +968,12 @@ struct ReaderTOCRow: View {
     /// 目录没有任何分组时不留出展开按钮的位置（TXT、在线小说等扁平目录）。
     var showsDisclosureColumn = true
     let toggle: () -> Void
+
+    /// 副标题：本章字数在前，其他说明在后。
+    static func subtitle(wordCount: String?, detail: String?) -> String? {
+        let parts = [wordCount, detail].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
     let select: () -> Void
 
     var body: some View {

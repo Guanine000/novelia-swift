@@ -432,6 +432,7 @@ final class EPUBReaderModel: ObservableObject {
     func start(textBook: PagedTextBook) {
         guard status == .idle, openTask == nil else { return }
         textBookmarkKey = textBook.bookmarkKey
+        textTOCWordCounts = textBook.tocWordCounts
         openTask = Task { [weak self] in
             await self?.open(source: textBook.source, unit: textBook.startUnit,
                              offset: textBook.startOffset, onPosition: textBook.onPosition)
@@ -1182,6 +1183,18 @@ final class EPUBReaderModel: ObservableObject {
 
     /// 书签与搜索使用的书籍身份：EPUB 为 `epub:<文件哈希>`，本地 TXT 为 `txt:<文件哈希>`；在线小说为 nil。
     var bookmarkKey: String? { openedBookHash.map { "epub:\($0)" } ?? textBookmarkKey }
+
+    // MARK: 字数
+
+    private var textTOCWordCounts: (@Sendable () async -> ReaderTOCWordCounts)?
+
+    /// 目录显示的字数：EPUB 按 spine 统计并缓存，TXT 由打开方提供；在线小说为 nil，不为字数逐章联网。
+    func tocWordCounts() async -> ReaderTOCWordCounts? {
+        if let textTOCWordCounts { return await textTOCWordCounts() }
+        guard let container, let hash = openedBookHash else { return nil }
+        return await BookWordCounter.epubTOCCounts(fileURL: container.fileURL, hash: hash,
+                                                   entrySpines: container.toc.map(\.spineIndex))
+    }
 
     /// 当前显示的页（双页时两页）在本章内的比例范围。
     var currentPageRange: (chapter: Int, range: Range<Double>)? {

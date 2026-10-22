@@ -721,6 +721,19 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         return String((locator?.text.highlight ?? locator?.text.after ?? "").prefix(ReaderBookmark.maxSnippetLength))
     }
 
+    /// 目录显示的字数：EPUB 按原生容器的 spine 统计并缓存（目录项按文件路径换算 spine 序号），
+    /// TXT 由打开方提供；在线小说为 nil。
+    func tocWordCounts() async -> ReaderTOCWordCounts? {
+        if let textBook { return await textBook.tocWordCounts?() }
+        guard let container = imageContainer, let hash = bookHash else { return nil }
+        let spines = toc.map { item -> Int? in
+            let string = item.link.url().string
+            let path = EPUBContainer.stripFragment(string.removingPercentEncoding ?? string)
+            return container.spine.firstIndex { EPUBContainer.normalizePath(path) == $0.href || path.hasSuffix("/" + $0.href) }
+        }
+        return await BookWordCounter.epubTOCCounts(fileURL: container.fileURL, hash: hash, entrySpines: spines)
+    }
+
     /// 图片列表记录的是原生容器的 spine 序号；Readium 的 readingOrder 可能不含非线性条目，按文件路径换算。
     private func readingOrderIndex(forSpine spine: Int) -> Int? {
         guard let container = imageContainer, let publication, container.spine.indices.contains(spine) else { return nil }

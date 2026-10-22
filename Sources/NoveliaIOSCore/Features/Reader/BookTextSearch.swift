@@ -27,8 +27,8 @@ enum BookTextSearch {
         return decodeEntities(text)
     }
 
-    /// 实体解码为单个字符，与 `textLength` 的计数一致；无法识别的实体用占位字符。
-    private static func decodeEntities(_ text: String) -> String {
+    /// 实体解码为单个字符，与 `textLength` 的计数一致；无法识别的实体用占位字符。字数统计（`BookWordCount`）共用。
+    static func decodeEntities(_ text: String) -> String {
         guard text.contains("&") else { return text }
         let named: [String: String] = ["amp": "&", "lt": "<", "gt": ">", "quot": "\"", "apos": "'", "nbsp": " "]
         let regex = try? NSRegularExpression(pattern: #"&(#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);"#)

@@ -44,7 +44,7 @@ let package = Package(
                 "EPUBReaderView.swift",
                 "EPUBSampleBook.swift",
             ],
-            sources: ["ReadiumTextPublication.swift", "EPUBChapterSource.swift", "EPUBContainer.swift", "EPUBLayoutCoordinator.swift", "EPUBPageBook.swift"]
+            sources: ["ReadiumTextPublication.swift", "EPUBChapterSource.swift", "EPUBContainer.swift", "EPUBLayoutCoordinator.swift", "EPUBPageBook.swift", "EPUBWordCount.swift"]
         ),
         // App 的 AZW3／MOBI 导入转换，直接编译 App 源码。
         .target(

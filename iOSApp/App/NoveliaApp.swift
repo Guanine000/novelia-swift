@@ -179,6 +179,7 @@ struct RootView: View {
     @StateObject private var wenkuStore: WenkuStore
     @StateObject private var webNovelDownloads: WebNovelDownloadStore
     @StateObject private var webDAVSync: WebDAVSyncStore
+    @StateObject private var libraryWordCounts = LibraryWordCountStore()
     @AppStorage(SettingsKey.tabBarOrder) private var tabOrderRaw = ""
     /// 启动时按“我的 → 自定义底栏”的设置选中页面；之后只记录用户的切换。
     @State private var selectedTab = AppTabLayout.initialTab(
@@ -247,6 +248,7 @@ struct RootView: View {
         .environmentObject(wenkuStore)
         .environmentObject(webNovelDownloads)
         .environmentObject(webDAVSync)
+        .environmentObject(libraryWordCounts)
         .environmentObject(updates)
         .modifier(WebDAVAutoSyncTriggers(sync: webDAVSync, web: webNovelDownloads, wenku: wenkuDownloads,
                                          library: services.local.library, blockedTags: services.local.blockedTags,
