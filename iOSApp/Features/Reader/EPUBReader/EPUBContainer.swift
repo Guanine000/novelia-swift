@@ -1219,6 +1219,30 @@ enum EPUBImageDecoding {
     }
 }
 
+// MARK: - Readium 独立插图分页
+
+/// 直接位于 body 下的连续 img 会组成匿名行框；Readium 的孤行保护会让 WebKit
+/// 把第二张图片切到相邻栏，即使单张图片完全放得下一页。只把这类独立图片改为
+/// 块元素，段落内的小图仍按书籍样式排版。由 Readium 的资源映射注入，不修改原书。
+enum EPUBReadiumImageLayout {
+    static func keepingStandaloneImagesTogether(inHTML html: String) -> String {
+        guard let head = html.range(of: "</head>", options: .caseInsensitive) else { return html }
+        let style = """
+        <style id="novelia-standalone-images">
+        body > img {
+            display: block !important;
+            -webkit-column-break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+        }
+        </style>
+        """
+        var result = html
+        result.insert(contentsOf: style, at: head.lowerBound)
+        return result
+    }
+}
+
 // MARK: - 书内脚本禁用（Readium 可选）
 
 /// 部分书籍自带脚本接管交互（如掌阅风格注释脚本删掉链接 href、按住时显示自绘气泡），
