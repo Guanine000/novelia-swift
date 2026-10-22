@@ -67,6 +67,8 @@ public enum ShareableLogPolicy {
             #"(?:EPUB|TXT|Online) chapter layout failed; \#(layoutFields), error=\#(errorKindPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}\#(tail)"#,
         ],
         "readium": [
+            #"Readium page snapshot; session=\#(hex8), nav=[0-9]{1,8}, op=[0-9]{1,8}, when=(?:tap|swipe|outerSwipe|locationCallback|issue|navigationComplete), model=-?[0-9]{1,8}, page=-?[0-9]{1,8}, view=[0-9]{1,8}, candidates=[0-9]{1,6}, offset=-?[0-9]{1,9}, width=[0-9]{1,6}, content=[0-9]{1,9}, loading=(?:true|false), moving=(?:true|false), mono=[0-9]{1,12}"#,
+            #"Readium outer swipe decision; session=\#(hex8), nav=[0-9]{1,8}, op=[0-9]{1,8}, direction=(?:left|right|unknown), reason=(?:redirect|boundary|fixedLayout|noDirection|noPage|ambiguous|loading|moving|mismatch|invalidSize|busy|stale|completed|failed), mono=[0-9]{1,12}"#,
             #"Readium EPUB opened: [0-9]{1,8} resources, [0-9]{1,8} positions"#,
             #"User marked reading issue; engine=readium, mono=[0-9]{1,12}"#,
             // 1.0.0 构建 93 及以后：翻页时与停稳后的章节分页状态、WebView 重建与资源读取失败。
@@ -355,6 +357,19 @@ public enum ReaderDiagnosticMessage {
     public static func readiumPageState(when: String, resource: Int, offset: Int, width: Int, content: Int,
                                         mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
         "Readium page state; when=\(when), resource=\(resource), offset=\(offset), width=\(width), content=\(content), mono=\(mono)"
+    }
+
+    /// 页面所属资源独立于模型位置；未知为 -1，没有可唯一选择的页面时 view 为 0。
+    public static func readiumSnapshot(session: String, nav: Int, op: Int, when: String,
+                                        model: Int, page: Int, view: Int, candidates: Int,
+                                        offset: Int, width: Int, content: Int, loading: Bool, moving: Bool,
+                                        mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "Readium page snapshot; session=\(session), nav=\(nav), op=\(op), when=\(when), model=\(model), page=\(page), view=\(view), candidates=\(candidates), offset=\(offset), width=\(width), content=\(content), loading=\(loading), moving=\(moving), mono=\(mono)"
+    }
+
+    public static func readiumSwipeDecision(session: String, nav: Int, op: Int, direction: String, reason: String,
+                                             mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "Readium outer swipe decision; session=\(session), nav=\(nav), op=\(op), direction=\(direction), reason=\(reason), mono=\(mono)"
     }
 
     /// 外层章节切换视图开始的拖动被改为章内翻页（本章在该方向仍有页面）。

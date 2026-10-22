@@ -205,6 +205,17 @@ final class ReaderDiagnosticMessageTests: XCTestCase {
         for when in ["tap", "swipe", "outerSwipe", "settled"] {
             passes("readium", M.readiumPageState(when: when, resource: -1, offset: 3216, width: 402, content: 4824))
         }
+        for when in ["tap", "swipe", "outerSwipe", "locationCallback", "issue", "navigationComplete"] {
+            passes("readium", M.readiumSnapshot(session: "1234abcd", nav: 2, op: 17, when: when,
+                model: 3, page: -1, view: 0, candidates: 2, offset: 0, width: 1373, content: 15103, loading: true, moving: false))
+        }
+        for reason in ["redirect", "boundary", "fixedLayout", "noDirection", "noPage", "ambiguous", "loading", "moving", "mismatch", "invalidSize", "busy", "stale", "completed", "failed"] {
+            for direction in ["left", "right", "unknown"] {
+                let message = M.readiumSwipeDecision(session: "1234abcd", nav: 2, op: 17, direction: direction, reason: reason)
+                passes("readium", message)
+                XCTAssertNil(ShareableLogPolicy.message(subsystem: ShareableLogPolicy.subsystem, category: "readium", text: message + " url=/private/book.xhtml"))
+            }
+        }
         passes("readium", M.readiumWebViewCreated(count: 3))
         for direction in ["left", "right"] { passes("readium", M.readiumSwipeRedirected(direction: direction, resource: 14)) }
         passes("readium", M.readiumResourceLoadFailed(resource: 7))

@@ -137,6 +137,21 @@ struct ReadiumNavigationIndex {
         Self.resourceIndex(for: href, resources: resources)
     }
 
+    /// Readium 3.11 本地资源形如 readium://<会话 UUID>/<完整包内路径>。
+    /// 只去掉已知服务器来源，不做文件名/路径后缀猜测；远程资源必须精确匹配完整 URL。
+    /// URL 仅用于内存匹配，不进入日志；未知或固定版 wrapper 返回 nil。
+    func resourceIndex(forDocumentURL url: URL) -> Int? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: true) else { return nil }
+        components.query = nil
+        components.fragment = nil
+        if let string = components.url?.absoluteString, let href = AnyURL(string: string),
+           let index = resourceIndex(for: href) { return index }
+        guard components.scheme == "readium", let host = components.host, UUID(uuidString: host) != nil else { return nil }
+        let path = String(components.percentEncodedPath.drop(while: { $0 == "/" }))
+        guard let href = AnyURL(string: path) else { return nil }
+        return resourceIndex(for: href)
+    }
+
     func tocIndex(for href: AnyURL) -> Int? {
         if let resource = resourceIndex(for: href) { return tocByResource[resource] }
         return tocByHref[href.normalized.string]

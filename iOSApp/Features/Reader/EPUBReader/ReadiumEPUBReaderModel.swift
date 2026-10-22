@@ -426,6 +426,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         })
 
         self.navigator = navigator
+        redirectedOperation = nil
+        pendingLocationCause = nil
         navigatorRevision += 1
     }
 
@@ -603,11 +605,18 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     // MARK: 位置诊断
 
-    /// 最近一次由本模型发起的导航来源。导航器稍后才回报新位置，因此在下一次位置回报时取用并清空；
-    /// 超过 3 秒未回报视为过期。点按、滑动翻页由 Readium 内部处理，记为 unattributed。
+    /// 匿名标识仅在此阅读器实例内有效；导航器重建另由 navigatorRevision 区分。
+    private let diagnosticSession = DiagnosticContext.newTraceID()
+    private var diagnosticOperation = 0
+    /// 导航来源在下一次位置回报时取用并清空；超过 3 秒视为过期。
+    /// 点按和拖动观察者也注册来源，未能关联时记为 unattributed。
     private var pendingLocationCause: (cause: String, time: ContinuousClock.Instant)?
+    private let diagnosticViews = NSMapTable<WKWebView, NSNumber>.weakToStrongObjects()
+    private var nextDiagnosticView = 0
+    private var redirectedOperation: Int?
 
     private func markNavigation(_ cause: String) {
+        diagnosticOperation += 1
         pendingLocationCause = (cause, .now)
     }
 
@@ -628,8 +637,13 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             kind: kind, cause: cause, fromResource: resource(previous), fromProgress: permille(previous?.locations.progression),
             toResource: resource(current), toProgress: permille(current.locations.progression),
             total: permille(current.locations.totalProgression)))
-        // 停稳后的分页状态：与下一次翻页时的状态对照，可看出章节页数是否在两次翻页之间变化。
-        DispatchQueue.main.async { [weak self] in self?.logPageState(when: "settled") }
+        // 仅表示位置回调后的采样，不宣称排版或动画已经停稳；丢弃旧导航器/旧操作的延迟采样。
+        let revision = navigatorRevision
+        let operation = diagnosticOperation
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.navigatorRevision == revision, self.diagnosticOperation == operation else { return }
+            self.logPageState(when: "locationCallback")
+        }
     }
 
     /// 本次阅读器会话中 Readium 新建章节 WebView 的次数。
@@ -643,57 +657,121 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     /// 已在章首或章末时保留外层的切章行为。
     private func swipeBegan(_ recognizer: UIPanGestureRecognizer) {
         guard let scrollView = recognizer.view as? UIScrollView else { return }
-        if scrollView.superview is WKWebView {
-            noteGesture("swipe")
+        if let webView = scrollView.superview as? WKWebView {
+            markNavigation("swipe")
+            logPageState(when: "swipe", page: webView, candidates: 1)
             return
         }
-        noteGesture("outerSwipe")
+        markNavigation("outerSwipe")
+        let selection = chapterPageSelection()
+        logPageState(when: "outerSwipe", page: selection.page, candidates: selection.count)
         let translation = recognizer.translation(in: scrollView).x
         let dx = translation != 0 ? translation : recognizer.velocity(in: scrollView).x
-        guard dx != 0, let chapter = currentChapterScrollView() else { return }
-        // 手指向左拖动显示右侧内容。
+        let direction = dx == 0 ? "unknown" : (dx < 0 ? "right" : "left")
+        let operation = diagnosticOperation
+        let revision = navigatorRevision
+        func decision(_ reason: String) {
+            Self.shareable.notice(ReaderDiagnosticMessage.readiumSwipeDecision(
+                session: diagnosticSession, nav: revision, op: operation, direction: direction, reason: reason))
+        }
+        func cancel() {
+            recognizer.isEnabled = false
+            recognizer.isEnabled = true
+        }
+        // 无法证明页面归属或尺寸可靠时取消本次外层拖动，避免把未知状态当成章末直接跳章。
+        // 固定版使用 wrapper/双页容器，不套用可重排章节的宽度与 URL 判定。
+        if publication?.metadata.layout == .fixed { decision("fixedLayout"); return }
+        guard dx != 0 else { cancel(); decision("noDirection"); return }
+        guard redirectedOperation == nil else { cancel(); decision("busy"); return }
+        guard let page = selection.page else {
+            cancel(); decision(selection.count > 1 ? "ambiguous" : "noPage"); return
+        }
+        guard !page.isLoading else { cancel(); decision("loading"); return }
+        let chapter = page.scrollView
+        guard !chapter.isDragging, !chapter.isDecelerating else { cancel(); decision("moving"); return }
+        let modelResource = locator.flatMap { navigationIndex?.resourceIndex(for: $0.href) }
+        let pageResource = page.url.flatMap { navigationIndex?.resourceIndex(forDocumentURL: $0) }
+        guard let modelResource, pageResource == modelResource else { cancel(); decision("mismatch"); return }
+        let offset = chapter.contentOffset.x
+        let width = chapter.bounds.width
+        let content = chapter.contentSize.width
+        guard offset.isFinite, width.isFinite, content.isFinite, width > 0, content >= width - 1,
+              offset >= -1, offset + width <= content + 1 else { cancel(); decision("invalidSize"); return }
         let towardsRight = dx < 0
-        let hasRoom = towardsRight
-            ? chapter.contentOffset.x + chapter.bounds.width < chapter.contentSize.width - 1
-            : chapter.contentOffset.x > 1
-        guard hasRoom else { return }
-        recognizer.isEnabled = false
-        recognizer.isEnabled = true
-        let resource = locator.flatMap { navigationIndex?.resourceIndex(for: $0.href) } ?? -1
-        Self.shareable.notice(ReaderDiagnosticMessage.readiumSwipeRedirected(direction: towardsRight ? "right" : "left", resource: resource))
-        Task { [weak self] in
-            guard let navigator = self?.navigator else { return }
-            _ = towardsRight ? await navigator.goRight(options: .animated) : await navigator.goLeft(options: .animated)
+        let hasRoom = towardsRight ? offset + width < content - 1 : offset > 1
+        guard hasRoom else { decision("boundary"); return }
+        cancel()
+        decision("redirect")
+        redirectedOperation = operation
+        Task { [weak self, weak navigator = self.navigator] in
+            guard let self else { return }
+            defer { if self.redirectedOperation == operation { self.redirectedOperation = nil } }
+            guard let navigator, self.navigator === navigator, self.navigatorRevision == revision else {
+                decision("stale"); return
+            }
+            let succeeded = towardsRight ? await navigator.goRight(options: .animated) : await navigator.goLeft(options: .animated)
+            guard self.navigator === navigator, self.navigatorRevision == revision else { decision("stale"); return }
+            decision(succeeded ? "completed" : "failed")
+            self.logPageState(when: "navigationComplete", operation: operation)
         }
     }
 
-    /// 当前屏幕中央的章节 WebView 的滚动视图。
-    private func currentChapterScrollView() -> UIScrollView? {
-        guard let root = navigator?.view,
-              let (webView, _) = Self.visibleWebView(containing: CGPoint(x: root.bounds.midX, y: root.bounds.midY), in: root)
-        else { return nil }
-        return webView.scrollView
+    /// 只接受唯一覆盖阅读区中央、且没有隐藏祖先的 WebView。切章动画中的重叠页面不任意取第一个。
+    private func chapterPageSelection() -> (page: WKWebView?, count: Int) {
+        guard let root = navigator?.view else { return (nil, 0) }
+        let point = CGPoint(x: root.bounds.midX, y: root.bounds.midY)
+        var stack = [root]
+        var pages: [WKWebView] = []
+        while let view = stack.popLast() {
+            guard !view.isHidden, view.alpha > 0.01 else { continue }
+            // 祖先裁剪也参与可见性判断，排除已滑出当前章节容器的预加载页面。
+            if view.clipsToBounds, !view.bounds.contains(view.convert(point, from: root)) { continue }
+            if let page = view as? WKWebView, page.window != nil,
+               page.bounds.contains(page.convert(point, from: root)) { pages.append(page) }
+            stack.append(contentsOf: view.subviews)
+        }
+        return (pages.count == 1 ? pages[0] : nil, pages.count)
     }
 
-    /// 记录用户手势，并在 Readium 处理之前保存当时的分页状态。
     private func noteGesture(_ gesture: String) {
         markNavigation(gesture)
         logPageState(when: gesture)
     }
 
-    /// 读取当前屏幕中央章节 WebView 的横向滚动状态（Readium 翻页即据此判断是否已到章末）。
-    private func logPageState(when: String) {
-        guard let scrollView = currentChapterScrollView() else { return }
-        let resource = locator.flatMap { navigationIndex?.resourceIndex(for: $0.href) } ?? -1
-        Self.shareable.notice(ReaderDiagnosticMessage.readiumPageState(
-            when: when, resource: resource, offset: Int(scrollView.contentOffset.x.rounded()),
-            width: Int(scrollView.bounds.width.rounded()), content: Int(scrollView.contentSize.width.rounded())))
+    /// 分别记录模型资源和页面实际资源；仅使用匿名会话/View 序号，不输出 URL。
+    private func logPageState(when: String, operation: Int? = nil) {
+        let selection = chapterPageSelection()
+        logPageState(when: when, page: selection.page, candidates: selection.count, operation: operation)
     }
 
-    /// 用户点了「标记问题」：记录标记及此刻的分页状态。
+    private func logPageState(when: String, page: WKWebView?, candidates: Int, operation: Int? = nil) {
+        var viewID = 0
+        if let page {
+            if let existing = diagnosticViews.object(forKey: page) { viewID = existing.intValue }
+            else {
+                nextDiagnosticView += 1
+                viewID = nextDiagnosticView
+                diagnosticViews.setObject(NSNumber(value: viewID), forKey: page)
+            }
+        }
+        func number(_ value: CGFloat?) -> Int {
+            guard let value, value.isFinite else { return 0 }
+            return Int(min(max(value.rounded(), -999_999_999), 999_999_999))
+        }
+        let scroll = page?.scrollView
+        Self.shareable.notice(ReaderDiagnosticMessage.readiumSnapshot(
+            session: diagnosticSession, nav: navigatorRevision, op: operation ?? diagnosticOperation, when: when,
+            model: locator.flatMap { navigationIndex?.resourceIndex(for: $0.href) } ?? -1,
+            page: page?.url.flatMap { navigationIndex?.resourceIndex(forDocumentURL: $0) } ?? -1,
+            view: viewID, candidates: candidates, offset: number(scroll?.contentOffset.x),
+            width: min(999_999, number(scroll?.bounds.width)), content: number(scroll?.contentSize.width),
+            loading: page?.isLoading ?? false, moving: (scroll?.isDragging ?? false) || (scroll?.isDecelerating ?? false)))
+    }
+
+    /// 标记是阅读轨迹中的时间点，不把此刻的页面冒充为异常落点。
     func markIssue() {
         Self.shareable.notice(ReaderDiagnosticMessage.issueMarked(engine: "readium"))
-        logPageState(when: "settled")
+        logPageState(when: "issue")
     }
 
     // MARK: 书签与书内搜索
@@ -939,6 +1017,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
 extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
+        guard (navigator as AnyObject) === self.navigator else { return }
         let previous = self.locator
         logLocationChange(from: previous, to: locator)
         let current = navigationIndex?.tocIndex(for: locator.href)
