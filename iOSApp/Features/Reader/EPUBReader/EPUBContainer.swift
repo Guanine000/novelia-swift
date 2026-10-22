@@ -1219,12 +1219,41 @@ enum EPUBImageDecoding {
     }
 }
 
-// MARK: - Readium 独立插图分页
+// MARK: - Readium 图片兼容
 
 /// 直接位于 body 下的连续 img 会组成匿名行框；Readium 的孤行保护会让 WebKit
 /// 把第二张图片切到相邻栏，即使单张图片完全放得下一页。只把这类独立图片改为
-/// 块元素，段落内的小图仍按书籍样式排版。由 Readium 的资源映射注入，不修改原书。
+/// 块元素，段落内的小图仍按书籍样式排版。同时修正 XHTML 内 SVG 的已知属性大小写。
+/// 由 Readium 的资源映射注入，不修改原书；块布局仅用于可重排书籍。
 enum EPUBReadiumImageLayout {
+    /// 部分转换器把 SVG 属性名转成小写。XHTML 按 XML 区分大小写，丢失 viewBox
+    /// 后图片会按原始像素绘制并被 SVG 视口裁切。仅修正已知属性名，不重写尺寸或原书。
+    static func normalizingSVGAttributes(inHTML html: String) -> String {
+        let tokens = try! NSRegularExpression(
+            pattern: #"<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<(?:script|style)\b[^>]*>[\s\S]*?</(?:script|style)\s*>|<[A-Za-z][\w:-]*\b(?:[^>"']|"[^"]*"|'[^']*')*>"#,
+            options: [.caseInsensitive])
+        let attributes = try! NSRegularExpression(
+            pattern: #"\s+([\w:-]+)\s*=\s*(?:"[^"]*"|'[^']*')"#)
+        let names = ["viewbox": "viewBox", "preserveaspectratio": "preserveAspectRatio"]
+        var result = html as NSString
+        for token in tokens.matches(in: html, range: NSRange(location: 0, length: result.length)).reversed() {
+            let tag = result.substring(with: token.range) as NSString
+            guard tag.range(of: #"^<svg(?=\s|/?>)"#, options: [.regularExpression, .caseInsensitive]).location == 0 else { continue }
+            let matches = attributes.matches(in: tag as String, range: NSRange(location: 0, length: tag.length))
+            var patched = tag
+            for attribute in matches.reversed() {
+                let range = attribute.range(at: 1)
+                let name = tag.substring(with: range)
+                guard let canonical = names[name.lowercased()], name != canonical else { continue }
+                // 无法判断重复属性的作者意图时保留原标签，避免引入重复的 XML 属性。
+                guard matches.filter({ tag.substring(with: $0.range(at: 1)).lowercased() == name.lowercased() }).count == 1 else { continue }
+                patched = patched.replacingCharacters(in: range, with: canonical) as NSString
+            }
+            result = result.replacingCharacters(in: token.range, with: patched as String) as NSString
+        }
+        return result as String
+    }
+
     static func keepingStandaloneImagesTogether(inHTML html: String) -> String {
         guard let head = html.range(of: "</head>", options: .caseInsensitive) else { return html }
         let style = """

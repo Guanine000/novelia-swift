@@ -5,6 +5,9 @@
 输出目录已存在时拒绝执行，确保已交付的构建保持不变。
 """
 import argparse
+import importlib.util
+import sys
+import time
 import base64
 import hashlib
 import json
@@ -18,10 +21,17 @@ import tempfile
 import urllib.request
 import zipfile
 
+sys.dont_write_bytecode = True
+
 ROOT = Path(__file__).resolve().parents[1]
 PIN_FILE = Path("NoveliaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved")
 NOTICES = Path("iOSApp/Resources/ThirdPartyLicenses")
 PREFERRED_SOURCES = Path("scripts/vendor-npm-sources")
+
+_cache_spec = importlib.util.spec_from_file_location("local_build_cache", ROOT / "scripts/local_build_cache.py")
+cache = importlib.util.module_from_spec(_cache_spec)
+_cache_spec.loader.exec_module(cache)
+TIMINGS = []
 
 
 def verify_preferred_sources(directory, packages):
@@ -63,13 +73,19 @@ def public_source_note(version, build, ipa_name, source_name, dependencies_name)
 
 
 def run(command, *, cwd=ROOT, log=None):
+    started = time.monotonic()
     if log:
+        print(f"RUN {log.name}", flush=True)
         with log.open("w") as stream:
             result = subprocess.run(command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT)
         if result.returncode:
             raise RuntimeError(f"Check/build failed; see {log.name}")
     else:
         subprocess.run(command, cwd=cwd, check=True)
+    if log:
+        reused = "Validation cache: HIT; exact source, environment and command matched" in log.read_text(errors="replace")
+        TIMINGS.append({"stage": log.name, "seconds": round(time.monotonic() - started, 3), "reused": reused})
+        print(f"DONE {log.name}: {TIMINGS[-1]['seconds']}s", flush=True)
 
 
 NPM_REGISTRY = "https://registry.npmjs.org"
@@ -186,9 +202,15 @@ def main():
                         help="Also generate a source-directions TXT for the public v<version> release; private builds omit it")
     parser.add_argument("--simulator", default="iPhone 18 Pro Max", help="Swift package test simulator name or UDID; no UI tests")
     parser.add_argument("--derived-data", type=Path,
-                        help="Xcode derived data outside home folders; default is a fresh system temp directory removed after success")
+                        help="Xcode derived data outside home folders; default is a persistent cache per checkout")
+    parser.add_argument("--force-checks", action="store_true", help="Rerun checks even when exact-input success records exist")
+    parser.add_argument("--fresh-build", action="store_true", help="Use fresh Release/test build directories and rerun all checks")
     parser.add_argument("--output", type=Path, help="New ignored directory under this repository's build/ directory")
     args = parser.parse_args()
+    if args.fresh_build and args.derived_data:
+        parser.error("--fresh-build cannot be combined with --derived-data")
+    TIMINGS.clear()
+    started = time.monotonic()
     version, build = project_version((ROOT / "NoveliaIOS.xcodeproj/project.pbxproj").read_text())
     status = git("status", "--porcelain=v1")
     if status and args.public_release:
@@ -204,12 +226,19 @@ def main():
         parser.error("Output must be under the ignored repository build/ directory")
     if out.exists():
         parser.error("Output already exists; use a new build number/directory instead of replacing it")
+    directory = cache.cache_directory(ROOT)
     try:
-        derived = check_derived_data((args.derived_data or Path(tempfile.gettempdir())).resolve())
+        derived = check_derived_data((args.derived_data or directory / "release-derived").resolve())
     except RuntimeError as error:
         parser.error(str(error))
-    if not args.derived_data:
-        derived = Path(tempfile.mkdtemp(prefix="novelia-derived-")).resolve()
+    if args.fresh_build:
+        derived = Path(tempfile.mkdtemp(prefix="novelia-fresh-release-", dir="/private/tmp")).resolve()
+    # 同一路径的 Release 编译与源码打包串行，防止另一个进程覆盖正在打包的 App。
+    with cache.file_lock(derived.parent / (derived.name + ".lock")):
+        perform_build(args, version, build, status, out, derived, directory, started)
+
+
+def perform_build(args, version, build, status, out, derived, directory, started):
     out.mkdir(parents=True)
     files = source_files()
     before = fingerprint(files)
@@ -218,10 +247,15 @@ def main():
         run(["python3", "-I", "scripts/test_local_release.py"], log=out / "packaging-tests.log")
         run(["git", "diff", "--check"])
         run(["git", "diff", "--cached", "--check"])
-        run([str(ROOT / "scripts/run_package_tests.sh"), args.simulator,
-             "-test-timeouts-enabled", "YES", "-default-test-execution-time-allowance", "120"], log=out / "package-tests.log")
+        package_command = [str(ROOT / "scripts/run_package_tests.sh"), args.simulator]
+        if args.force_checks: package_command.append("--force-checks")
+        if args.fresh_build: package_command.append("--fresh-build")
+        run(package_command, log=out / "package-tests.log")
+        checks = cache.Checks(ROOT, directory / "checks/offline", {"toolchain": cache.toolchain_identity()},
+                              force=args.force_checks or args.fresh_build)
         for script in ["check_architecture_boundaries.py", "test_forum_filters.py", "test_unified_login.py", "test_auth_login_bridge.py", "test_library_store.py", "test_library_transactions.py", "test_reading_statistics_store.py", "test_service_consumers.py"]:
-            run(["python3", "-I", str(ROOT / "scripts" / script)], log=out / f"{script}.log")
+            checks.run(["python3", "-I", str(ROOT / "scripts" / script)], log=out / f"{script}.log")
+        cache.checkouts_ready(derived / "SourcePackages/checkouts", ROOT / PIN_FILE)
         run(["xcodebuild", "-project", "NoveliaIOS.xcodeproj", "-scheme", "Novelia", "-configuration", "Release",
              "-sdk", "iphoneos", "-destination", "generic/platform=iOS", "-derivedDataPath", str(derived),
              "CODE_SIGNING_ALLOWED=NO", "build"], log=out / "release-build.log")
@@ -283,7 +317,7 @@ def main():
         metadata.write_text(json.dumps({"version": version, "build": build, "configuration": "iPhoneOS Release unsigned",
                                        "commit": git("rev-parse", "HEAD"), "dirty": bool(status), "source": "uncommitted worktree snapshot" if status else "commit",
                                        "source_fingerprint": hashlib.sha256(json.dumps(before, sort_keys=True).encode()).hexdigest(),
-                                       "pins": pins}, indent=2) + "\n")
+                                       "pins": pins, "validation": checks.results + TIMINGS}, indent=2) + "\n")
         artifacts = [ipa, source, dependencies, metadata]
         if args.public_release:
             directions = out / f"{prefix}-source-info.txt"
@@ -291,9 +325,11 @@ def main():
             artifacts.append(directions)
         (out / "SHA256SUMS").write_text("".join(hashlib.sha256(file.read_bytes()).hexdigest() + "  " + file.name + "\n" for file in artifacts))
         (out / "SUCCESS").write_text("All checks passed. IPA, source, dependencies and SHA256SUMS are ready.\n")
-        if not args.derived_data:
+        (out / "TIMINGS.json").write_text(json.dumps({"totalSeconds": round(time.monotonic() - started, 3),
+                                                       "stages": TIMINGS + checks.results}, indent=2) + "\n")
+        if args.fresh_build:
             shutil.rmtree(derived)
-        print(f"Local unsigned build ready: {out}")
+        print(f"Local unsigned build ready: {out}", flush=True)
     except Exception:
         (out / "FAILED-DO-NOT-DISTRIBUTE").write_text("Build/check failed. This folder is not a distribution. Inspect local logs.\n")
         print(f"Derived data kept for inspection: {derived}")
