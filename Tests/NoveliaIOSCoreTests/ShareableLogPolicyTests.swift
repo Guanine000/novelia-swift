@@ -202,10 +202,11 @@ final class ReaderDiagnosticMessageTests: XCTestCase {
         passes("epub", M.issueMarked(engine: "native"))
         passes("readium", M.issueMarked(engine: "readium"))
         passes("readium", M.readiumOpened(resources: 48, positions: 1203))
-        for when in ["tap", "swipe", "settled"] {
+        for when in ["tap", "swipe", "outerSwipe", "settled"] {
             passes("readium", M.readiumPageState(when: when, resource: -1, offset: 3216, width: 402, content: 4824))
         }
         passes("readium", M.readiumWebViewCreated(count: 3))
+        for direction in ["left", "right"] { passes("readium", M.readiumSwipeRedirected(direction: direction, resource: 14)) }
         passes("readium", M.readiumResourceLoadFailed(resource: 7))
         for phase in ["active", "inactive", "background", "unknown"] { passes("lifecycle", M.scenePhase(phase)) }
         passes("lifecycle", M.memoryWarning())
