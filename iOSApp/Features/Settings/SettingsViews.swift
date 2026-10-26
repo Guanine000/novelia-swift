@@ -547,7 +547,7 @@ private struct LogActivitySheet: UIViewControllerRepresentable {
 private struct ThirdPartyLicensesView: View {
     /// GPL-3.0 第 5(a) 条要求的修改日期。scripts/build_local_release.py 要求它等于
     /// 发布提交的日期，因此每次发布构建时都需更新。
-    static let modifiedDate = "2026-10-22"
+    static let modifiedDate = "2026-10-26"
     private let packages: [(name: String, version: String, license: String, file: String)] = [
         ("SwiftSoup", "2.13.7", "MIT", "SwiftSoup-LICENSE.txt"),
         ("YueduCoreText", "0.8.0", "MPL-2.0", "YueduCoreText-LICENSE.txt"),

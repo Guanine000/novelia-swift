@@ -4,7 +4,7 @@
 
 ## 本项目许可
 
-本仓库中由项目维护者拥有授权权利的 App 源代码和项目文档采用 **GNU GPL-3.0-only**（SPDX：`GPL-3.0-only`），完整条款见根目录 [LICENSE](../LICENSE)。本 iOS 项目是参考 [GPL-3.0-only 安卓客户端](https://github.com/nobYoQ/novelia) 制作的 Swift 移植版本，包含平台适配和后续修改；上游版权声明 `Copyright (C) 2026 Novelia Android contributors.` 予以保留。本 iOS 移植及新增部分版权声明为 `Copyright (C) 2026 Novelia iOS contributors.`，修改版本日期为 2026-10-18。
+本仓库中由项目维护者拥有授权权利的 App 源代码和项目文档采用 **GNU GPL-3.0-only**（SPDX：`GPL-3.0-only`），完整条款见根目录 [LICENSE](../LICENSE)。本 iOS 项目是参考 [GPL-3.0-only 安卓客户端](https://github.com/nobYoQ/novelia) 制作的 Swift 移植版本，包含平台适配和后续修改；上游版权声明 `Copyright (C) 2026 Novelia Android contributors.` 予以保留。本 iOS 移植及新增部分版权声明为 `Copyright (C) 2026 Novelia iOS contributors.`，修改版本日期为 2026-10-26。
 
 WebDAV 强版本读取、坚果云条件头兼容和首次创建流程参考并以 Swift 适配自安卓端 `WebDavClient.kt`，固定来源提交为 [44be26d](https://github.com/nobYoQ/novelia/blob/44be26d51e2a38e98aea74dc31aca1bb0a0261fe/app/src/main/java/cc/novelia/app/data/webdav/WebDavClient.kt)。保留上述安卓贡献者版权和 GPL-3.0-only 许可；适配部分见本仓库 `WebDAVRemote.swift`。未引入 Anx Reader、Joplin 或 restic 的代码与依赖。
 
