@@ -365,7 +365,7 @@ struct NoveliaLoginSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Text("在 Novelia 官方认证页面登录、注册或找回密码。账号密码由认证网站直接处理，不会交给本 App。")
+                Text("在 Novelia 官网登录。若未自动显示登录框，请点击网页中的“登录/注册”。账号密码由官网直接处理。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -444,9 +444,8 @@ struct NoveliaAuthWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let controller = WKUserContentController()
         controller.add(context.coordinator, name: "noveliaAuth")
-        // 上游 Android 应用为认证 iframe 启用第三方 Cookie。
-        // WKWebView 没有对应开关，因此将 auth.novelia.cc 作为顶层
-        // 页面加载。它发送给 window.parent 的 postMessage 此时会发送给自身。
+        // 使用官网现有登录表单；成功通知只触发原生 Cookie 续期，不读取账号密码。
+        // 小说网页与认证 API 的来源分别配置并严格检查。
         let script = configuration.loginSuccessScript
         controller.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
 
@@ -492,7 +491,7 @@ struct NoveliaAuthWebView: UIViewRepresentable {
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard message.name == "noveliaAuth",
                   message.frameInfo.isMainFrame,
-                  configuration.trusts(scheme: message.frameInfo.securityOrigin.protocol,
+                  configuration.trustsLoginPage(scheme: message.frameInfo.securityOrigin.protocol,
                                        host: message.frameInfo.securityOrigin.host,
                                        port: message.frameInfo.securityOrigin.port),
                   message.body as? String == "login_success" else { return }
@@ -541,7 +540,7 @@ struct ForumLoginSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Text("使用同一个 Novelia 账号登录小说与论坛。账号密码由官方认证网站直接处理。")
+                Text("在 Novelia 官网登录同一个小说与论坛账号。若未显示登录框，请点击网页中的“登录/注册”。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)

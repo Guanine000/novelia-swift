@@ -104,6 +104,14 @@ final class APIServiceTests: XCTestCase {
                        "https://auth.novelia.cc/api/v1/auth/refresh?app=n")
         XCTAssertEqual(production.refreshURL(app: "f").absoluteString,
                        "https://auth.novelia.cc/api/v1/auth/refresh?app=f")
+        XCTAssertEqual(production.loginURL(app: "n").absoluteString,
+                       "https://n.novelia.cc/?app=n&theme=system")
+        XCTAssertTrue(production.trustsLoginPage(scheme: "https", host: "n.novelia.cc", port: 0))
+        XCTAssertTrue(production.trustsLoginPage(scheme: "https", host: "auth.novelia.cc", port: 443))
+        XCTAssertFalse(production.trustsLoginPage(scheme: "https", host: "n.novelia.cc.evil.test", port: 443))
+        XCTAssertFalse(production.trustsLoginPage(scheme: "http", host: "n.novelia.cc", port: 443))
+        XCTAssertFalse(production.trustsLoginPage(scheme: "https", host: "n.novelia.cc", port: 8443))
+        XCTAssertFalse(production.trusts(scheme: "https", host: "n.novelia.cc", port: 443))
         XCTAssertTrue(production.trusts(scheme: "https", host: "auth.novelia.cc", port: 0))
         XCTAssertFalse(production.trusts(scheme: "http", host: "auth.novelia.cc", port: 443))
         XCTAssertFalse(production.trusts(scheme: "https", host: "auth.novelia.cc.evil.test", port: 443))
@@ -121,6 +129,8 @@ final class APIServiceTests: XCTestCase {
                     "https://login.example.test/path", "https://login.example.test?x=1",
                     "https://login.example.test#fragment"] {
             XCTAssertThrowsError(try AuthenticationConfiguration(origin: URL(string: raw)!))
+            XCTAssertThrowsError(try AuthenticationConfiguration(origin: URL(string: "https://auth.example.test")!,
+                                                                 loginPageOrigin: URL(string: raw)!))
         }
         XCTAssertThrowsError(try AuthenticationConfiguration(origin: URL(string: "https://login.example.test")!,
                                                              loginPath: "//evil.test/login"))

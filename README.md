@@ -56,6 +56,8 @@
 
 完整列表见[功能说明 → 已知限制](docs/FEATURES.md#已知限制)与 [WebDAV → 已知限制](docs/WEBDAV.md#已知限制)；多台设备版本不同时见 [WebDAV → 与旧版本混用](docs/WEBDAV.md#与旧版本混用)。
 
+账号登录在 App 内打开 Novelia 官网，由官网处理账号密码；登录成功后建立小说与论坛会话。
+
 ## 致谢
 
 - 产品功能参考 [nobYoQ/novelia](https://github.com/nobYoQ/novelia)（GPL-3.0-only 安卓客户端）。
