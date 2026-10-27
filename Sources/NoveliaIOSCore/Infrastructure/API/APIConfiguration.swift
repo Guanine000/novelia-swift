@@ -31,7 +31,9 @@ public struct APIConfiguration: Sendable {
         bookCommentsOrigin: URL(string: "https://forum.novelia.cc/")!,
         novelOrigin: URL(string: "https://n.novelia.cc")!,
         forumOrigin: URL(string: "https://forum.novelia.cc")!,
-        authentication: try! AuthenticationConfiguration(origin: URL(string: "https://auth.novelia.cc")!),
+        authentication: try! AuthenticationConfiguration(
+            origin: URL(string: "https://auth.novelia.cc")!,
+            loginPageOrigin: URL(string: "https://n.novelia.cc")!),
         legacyNovelHosts: ["novelia.cc", "www.novelia.cc", "books.fishhawk.top"]
     )
 
@@ -64,16 +66,17 @@ public struct APIConfiguration: Sendable {
     }
 }
 
-/// 登录桥接的可信来源与入口配置；构造时校验 HTTPS origin，网页与原生校验使用同一来源。
+/// 登录桥接的可信网页与认证 API 配置；构造时校验 HTTPS origin，网页与原生使用相同配置。
 public struct AuthenticationConfiguration: Sendable {
     public let origin: URL
+    public let loginPageOrigin: URL
     public let refreshPath: String
     public let loginPath: String
     public let registerPath: String
 
     public init(origin: URL, refreshPath: String = "/api/v1/auth/refresh",
                 loginPath: String = "/api/v1/auth/login",
-                registerPath: String = "/api/v1/auth/register") throws {
+                registerPath: String = "/api/v1/auth/register", loginPageOrigin: URL? = nil) throws {
         guard let parts = URLComponents(url: origin, resolvingAgainstBaseURL: false),
               parts.scheme == "https", let host = parts.host, !host.isEmpty,
               parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
@@ -92,6 +95,10 @@ public struct AuthenticationConfiguration: Sendable {
         normalized.host = host.lowercased()
         if normalized.port == 443 { normalized.port = nil }
         self.origin = normalized.url!
+        // 登录网页与认证 API 可分属两个明确配置的来源，分别校验，不信任整个父域。
+        self.loginPageOrigin = try loginPageOrigin.map {
+            try AuthenticationConfiguration(origin: $0).origin
+        } ?? self.origin
         self.refreshPath = refreshPath
         self.loginPath = loginPath
         self.registerPath = registerPath
@@ -105,7 +112,7 @@ public struct AuthenticationConfiguration: Sendable {
     }
 
     public func loginURL(app: String) -> URL {
-        var parts = URLComponents(url: origin, resolvingAgainstBaseURL: false)!
+        var parts = URLComponents(url: loginPageOrigin, resolvingAgainstBaseURL: false)!
         parts.path = "/"
         parts.queryItems = [URLQueryItem(name: "app", value: app), URLQueryItem(name: "theme", value: "system")]
         return parts.url!
@@ -117,6 +124,13 @@ public struct AuthenticationConfiguration: Sendable {
             && (port == 0 ? 443 : port) == (origin.port ?? 443)
     }
 
+    /// 只有配置中的登录网页或认证页主框架可以发送登录完成通知。
+    public func trustsLoginPage(scheme: String, host: String, port: Int) -> Bool {
+        trusts(scheme: scheme, host: host, port: port) ||
+            (scheme == "https" && host.lowercased() == loginPageOrigin.host?.lowercased()
+             && (port == 0 ? 443 : port) == (loginPageOrigin.port ?? 443))
+    }
+
     /// 配置值先编码为 JSON 再传入桥接脚本，避免把地址字符串当成可执行 JavaScript。
     public var loginSuccessScript: String {
         func literal(_ value: String) -> String {
@@ -126,11 +140,13 @@ public struct AuthenticationConfiguration: Sendable {
         return """
         (() => {
           const trustedOrigin = \(literal(origin.absoluteString));
+          const loginPageOrigin = \(literal(loginPageOrigin.absoluteString));
           const loginPath = \(literal(loginPath));
           const registerPath = \(literal(registerPath));
           const notify = () => window.webkit.messageHandlers.noveliaAuth.postMessage('login_success');
           window.addEventListener('message', function(event) {
-            if (event.origin === trustedOrigin && event.data && event.data.type === 'login_success') {
+            if ((window.location.origin === trustedOrigin || window.location.origin === loginPageOrigin) &&
+                event.origin === trustedOrigin && event.data && event.data.type === 'login_success') {
               notify();
             }
           });
@@ -139,13 +155,34 @@ public struct AuthenticationConfiguration: Sendable {
             const response = await originalFetch.apply(this, arguments);
             const url = new URL(input instanceof Request ? input.url : input, window.location.href);
             const method = String(options?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
-            if (window.location.origin === trustedOrigin &&
-                url.origin === window.location.origin && method === 'POST' && response.ok &&
+            if ((window.location.origin === trustedOrigin || window.location.origin === loginPageOrigin) &&
+                url.origin === trustedOrigin && method === 'POST' && response.ok &&
                 (url.pathname === loginPath || url.pathname === registerPath)) {
               notify();
             }
             return response;
           };
+          // 官网改为站内登录弹窗。仅点击明确的登录入口，不读取表单、密码或响应正文。
+          // 登录按钮异步挂载时观察 DOM；成功打开或超时后停止观察。
+          if (loginPageOrigin !== trustedOrigin && window.location.origin === loginPageOrigin) {
+            let observer;
+            const openLogin = () => {
+              const button = Array.from(document.querySelectorAll('button'))
+                .find(button => button.textContent.trim() === '登录/注册');
+              if (!button) return false;
+              button.click();
+              observer?.disconnect();
+              return true;
+            };
+            const start = () => {
+              if (openLogin()) return;
+              observer = new MutationObserver(openLogin);
+              observer.observe(document.documentElement, { childList: true, subtree: true });
+              setTimeout(() => observer.disconnect(), 15000);
+            };
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+            else start();
+          }
         })();
         """
     }

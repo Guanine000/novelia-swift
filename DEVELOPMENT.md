@@ -168,7 +168,7 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 
 小说与论坛是同一个用户账号，但分别维护 `app=n` 与 `app=f` 会话。书籍评论虽然使用论坛来源，仍使用小说会话。改变这些对应关系必须有后端证据及相关回归。
 
-两种会话用同一个认证站点刷新 Cookie 续期，而该 Cookie 每次续期都会轮换。`AccountAuthStore` 与 `ForumAuthStore` 必须注入同一个 `SerialAsyncGate`（`AppServices` 统一组装），续期逐个执行，后一个读取前一个写回 WebView 的新 Cookie。续期进行中再调用 `refreshSession` 时等待同一结果；退出登录（`sessionGeneration` 变化）后的调用不复用旧结果。网络部分由 `AuthSessionRefresher` 实现，WebView Cookie 存储是唯一来源，请求设置 `httpShouldHandleCookies = false`。
+两种会话用同一个认证站点刷新 Cookie 续期，而该 Cookie 每次续期都会轮换。`AccountAuthStore` 与 `ForumAuthStore` 必须注入同一个 `SerialAsyncGate`（`AppServices` 统一组装），续期逐个执行，后一个读取前一个写回 WebView 的新 Cookie。续期进行中再调用 `refreshSession` 时等待同一结果；退出登录（`sessionGeneration` 变化）后的调用不复用旧结果。登录 WebView 打开配置的小说官网，脚本在官网按钮挂载后自动点击“登录/注册”；找不到时用户可手动点击。桥接只观察官网向认证来源发送的成功登录请求或认证页的成功通知，不读取表单及响应正文。登录网页与认证 API 使用分别校验的 HTTPS origin，不扩大到任意子域。网络续期部分由 `AuthSessionRefresher` 实现，WebView Cookie 存储是唯一来源，请求设置 `httpShouldHandleCookies = false`。
 
 生产账号状态、API token provider 与续期入口使用同一 `SessionTokenStore`。生产适配继续使用原 Keychain/Vault；测试使用内存适配。不要在消费方直接读取 Vault、解析 JWT 判断账号，使用 `AccountSessionProviding` 的状态和 `matchesAccount`。
 
