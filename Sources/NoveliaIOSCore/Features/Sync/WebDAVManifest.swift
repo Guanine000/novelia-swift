@@ -29,6 +29,7 @@ struct WebDAVBook<Record: Codable>: Codable {
 extension WebDAVBook: Equatable where Record: Equatable {}
 
 struct WebDAVManifest: Codable {
+    var webEPUBMaps: [String: WebNovelEPUBMap]? = nil
     var version = 1
     var webBooks: [WebDAVBook<DownloadedWebNovel>] = []
     var wenkuBooks: [WebDAVBook<LocalWenkuEPUB>] = []

@@ -94,5 +94,10 @@
   "FileContentHash.swift": "Sources/NoveliaIOSCore/Support/FileContentHash.swift",
   "SessionTokenStore.swift": "Sources/NoveliaIOSCore/Domain/SessionTokenStore.swift",
   "ArchitectureValidation.swift": "iOSApp/App/Diagnostics/ArchitectureValidation.swift",
-  "ArchitectureFixtureBackend.swift": "Tests/NoveliaIOSCoreTests/ArchitectureFixtureBackend.swift"
+  "ArchitectureFixtureBackend.swift": "Tests/NoveliaIOSCoreTests/ArchitectureFixtureBackend.swift",
+  "EPUBUpdateState.swift": "Sources/NoveliaIOSCore/Features/Reader/EPUBUpdateState.swift",
+  "WebNovelEPUBUpdate.swift": "iOSApp/App/Integrations/WebNovelEPUBUpdate.swift",
+  "WebDAVEPUBUpdater.swift": "Sources/NoveliaIOSCore/Features/Sync/WebDAVEPUBUpdater.swift",
+  "WebNovelEPUBIdentity.swift": "Sources/NoveliaIOSCore/Features/Reader/WebNovelEPUBIdentity.swift",
+  "WebNovelEPUBReading.swift": "iOSApp/App/Integrations/WebNovelEPUBReading.swift"
 }

@@ -15,6 +15,9 @@ struct ReaderBookmarksSearchSheet: View {
     let chapterTitle: (Int) -> String?
     let chapterText: (Int) async throws -> String
     let onJump: (Int, Double) -> Void
+    var legacyBookKey: String? = nil
+    var chapterIDAtIndex: (Int) -> String? = { _ in nil }
+    var resolveChapter: ((ReaderBookmark) -> Int?)? = nil
     @State var tab: Tab = .bookmarks
     @Environment(\.dismiss) private var dismiss
     @State private var saveError: String?
@@ -54,7 +57,12 @@ struct ReaderBookmarksSearchSheet: View {
     // MARK: 书签
 
     private var bookmarkList: some View {
-        let bookmarks = store.bookmarks(for: bookKey)
+        let legacy = legacyBookKey.map { store.bookmarks(for: $0).filter { chapterIDAtIndex($0.chapterIndex) == nil } } ?? []
+        let bookmarks = (store.bookmarks(for: bookKey) + legacy).sorted {
+            let lhs = resolveChapter?($0) ?? ($0.chapterID == nil ? $0.chapterIndex : Int.max)
+            let rhs = resolveChapter?($1) ?? ($1.chapterID == nil ? $1.chapterIndex : Int.max)
+            return (lhs, $0.chapterProgression) < (rhs, $1.chapterProgression)
+        }
         return List {
             if bookmarks.isEmpty {
                 ContentUnavailableView("还没有书签", systemImage: "bookmark",
@@ -63,12 +71,17 @@ struct ReaderBookmarksSearchSheet: View {
             }
             ForEach(bookmarks) { bookmark in
                 Button {
-                    jump(bookmark.chapterIndex, bookmark.chapterProgression)
+                    if let index = resolveChapter?(bookmark) ?? (bookmark.chapterID == nil ? bookmark.chapterIndex : nil) {
+                        jump(index, bookmark.chapterProgression)
+                    } else { saveError = "本机尚未包含或核对这个章节，请在章节同步与更新中核对或更新 EPUB。" }
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(bookmark.chapterTitle ?? chapterTitle(bookmark.chapterIndex) ?? "第 \(bookmark.chapterIndex + 1) 章")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
+                        if bookmark.chapterID != nil, resolveChapter?(bookmark) == nil {
+                            Text("本机章节未下载或未核对").font(.caption).foregroundStyle(.orange)
+                        }
                         if !bookmark.snippet.isEmpty {
                             Text(bookmark.snippet)
                                 .font(.footnote)
@@ -176,10 +189,14 @@ struct ReaderBookmarkButton: View {
     let chapterTitle: String?
     /// 书签摘要：Yuedu 直接取页内文本，Readium 需读取章节正文，因此为异步。
     let snippet: () async -> String
+    var chapterID: String? = nil
     @State private var saveError: String?
 
     var body: some View {
-        let existing = pageRange.map { store.bookmarks(for: bookKey, chapter: $0.chapter, in: $0.range) } ?? []
+        let existing = pageRange.map { page in store.bookmarks(for: bookKey).filter { bookmark in
+            (chapterID.map { bookmark.chapterID == $0 } ?? (bookmark.chapterIndex == page.chapter))
+                && (page.range.contains(bookmark.chapterProgression) || bookmark.chapterProgression == page.range.lowerBound)
+        } } ?? []
         Button {
             if !existing.isEmpty {
                 do { try store.remove(existing.map(\.id)) }
@@ -190,7 +207,7 @@ struct ReaderBookmarkButton: View {
                 Task {
                     let text = await snippet()
                     do { try store.add(bookKey: bookKey, chapterIndex: pageRange.chapter, progression: pageRange.range.lowerBound,
-                              chapterTitle: title, snippet: text) }
+                              chapterTitle: title, snippet: text, chapterID: chapterID) }
                     catch { saveError = "书签未能保存，请重试。" }
                 }
             }

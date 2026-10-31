@@ -116,6 +116,11 @@
 		FEA000000000000000000001 /* SessionTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEB000000000000000000001 /* SessionTokenStore.swift */; };
 		FEA000000000000000000002 /* ArchitectureValidation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEB000000000000000000002 /* ArchitectureValidation.swift */; };
 		FEA000000000000000000003 /* ArchitectureFixtureBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEB000000000000000000003 /* ArchitectureFixtureBackend.swift */; };
+		F02900000000000000000001 /* EPUBUpdateState.swift in Sources */ = {isa = PBXBuildFile; fileRef = F02910000000000000000001 /* EPUBUpdateState.swift */; };
+		F02900000000000000000002 /* WebNovelEPUBUpdate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F02910000000000000000002 /* WebNovelEPUBUpdate.swift */; };
+		F03000000000000000000001 /* WebDAVEPUBUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03010000000000000000001 /* WebDAVEPUBUpdater.swift */; };
+F03100000000000000000001 /* WebNovelEPUBIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03110000000000000000001; };
+F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03210000000000000000001; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -222,6 +227,11 @@
 		FEB000000000000000000001 /* SessionTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/SessionTokenStore.swift; sourceTree = "<group>"; };
 		FEB000000000000000000002 /* ArchitectureValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/Diagnostics/ArchitectureValidation.swift; sourceTree = "<group>"; };
 		FEB000000000000000000003 /* ArchitectureFixtureBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../Tests/NoveliaIOSCoreTests/ArchitectureFixtureBackend.swift; sourceTree = "<group>"; };
+		F02910000000000000000001 /* EPUBUpdateState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/EPUBUpdateState.swift; sourceTree = "<group>"; };
+		F02910000000000000000002 /* WebNovelEPUBUpdate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/Integrations/WebNovelEPUBUpdate.swift; sourceTree = "<group>"; };
+		F03010000000000000000001 /* WebDAVEPUBUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Sync/WebDAVEPUBUpdater.swift; sourceTree = "<group>"; };
+F03110000000000000000001 /* WebNovelEPUBIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/WebNovelEPUBIdentity.swift; sourceTree = "<group>"; };
+F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/Integrations/WebNovelEPUBReading.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -293,6 +303,8 @@
 				B10000000000000000000013 /* WenkuViews.swift */,
 				B10000000000000000000014 /* WenkuStore.swift */,
 				B10000000000000000000023 /* WebDAVSync.swift */,
+				F03210000000000000000001 /* WebNovelEPUBReading.swift */,
+				F02910000000000000000002 /* WebNovelEPUBUpdate.swift */,
 				B10000000000000000000024 /* ForumListView.swift */,
 				B10000000000000000000030 /* ForumPostDetailView.swift */,
 				B10000000000000000000031 /* ForumMarkdownViews.swift */,
@@ -368,6 +380,9 @@
 				E61000000000000000000002 /* WebDAVManifest.swift */,
 				E61000000000000000000003 /* WebDAVSyncPlanner.swift */,
 				E61000000000000000000004 /* WebDAVRemote.swift */,
+				F03110000000000000000001 /* WebNovelEPUBIdentity.swift */,
+				F03010000000000000000001 /* WebDAVEPUBUpdater.swift */,
+				F02910000000000000000001 /* EPUBUpdateState.swift */,
 				E61000000000000000000005 /* WebDAVSyncEngine.swift */,
 				E61000000000000000000006 /* WebDAVAutoSyncPolicy.swift */,
 				E61000000000000000000007 /* WebDAVCloudBooks.swift */,
@@ -621,6 +636,11 @@
 				E60000000000000000000002 /* WebDAVManifest.swift in Sources */,
 				E60000000000000000000003 /* WebDAVSyncPlanner.swift in Sources */,
 				E60000000000000000000004 /* WebDAVRemote.swift in Sources */,
+				F03100000000000000000001 /* WebNovelEPUBIdentity.swift in Sources */,
+				F03000000000000000000001 /* WebDAVEPUBUpdater.swift in Sources */,
+				F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */,
+				F02900000000000000000002 /* WebNovelEPUBUpdate.swift in Sources */,
+				F02900000000000000000001 /* EPUBUpdateState.swift in Sources */,
 				E60000000000000000000005 /* WebDAVSyncEngine.swift in Sources */,
 				E60000000000000000000006 /* WebDAVAutoSyncPolicy.swift in Sources */,
 				E60000000000000000000007 /* WebDAVCloudBooks.swift in Sources */,
@@ -765,8 +785,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.1.1;
-				CURRENT_PROJECT_VERSION = 105;
+				MARKETING_VERSION = 1.2.0;
+				CURRENT_PROJECT_VERSION = 124;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -789,8 +809,8 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.1.1;
-				CURRENT_PROJECT_VERSION = 105;
+				MARKETING_VERSION = 1.2.0;
+				CURRENT_PROJECT_VERSION = 124;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;

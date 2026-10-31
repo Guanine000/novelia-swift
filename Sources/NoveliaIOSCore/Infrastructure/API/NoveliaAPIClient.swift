@@ -137,7 +137,8 @@ public struct NoveliaAPIClient: Sendable {
         components.queryItems = queryItems
         guard let url = components.url else { throw NoveliaAPIError.invalidURL }
 
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         request.setValue("application/epub+zip, application/octet-stream", forHTTPHeaderField: "Accept")
         request.timeoutInterval = NoveliaRequestTimeout.generatedNovelFile
         let downloadStartedAt = ProcessInfo.processInfo.systemUptime
@@ -794,20 +795,28 @@ private struct APIChapter: Decodable {
             originalText: original,
             translatedText: translated,
             bilingualParagraphs: bilingualParagraphs,
-            translationsBySource: translationsBySource
+            translationsBySource: translationsBySource,
+            originalTitle: titleJp?.nonEmpty
         )
     }
 }
 
 private extension APIWebDetail {
     func asNovel(providerId: String, novelId: String) -> Novel {
+        var volumeTitle: String?, originalVolumeTitle: String?
         let chapters = (toc ?? []).compactMap { item -> NovelChapter? in
-            guard let chapterId = item.chapterId?.nonEmpty else { return nil }
+            guard let chapterId = item.chapterId?.nonEmpty else {
+                volumeTitle = item.titleZh?.nonEmpty ?? item.titleJp?.nonEmpty
+                originalVolumeTitle = item.titleJp?.nonEmpty
+                return nil
+            }
             return NovelChapter(
                 id: chapterId,
                 title: item.titleZh?.nonEmpty ?? item.titleJp?.nonEmpty ?? chapterId,
                 originalText: "",
-                translatedText: ""
+                translatedText: "",
+                originalTitle: item.titleJp?.nonEmpty,
+                volumeTitle: volumeTitle, originalVolumeTitle: originalVolumeTitle
             )
         }
         let author = (authors ?? []).compactMap { $0.name?.nonEmpty }.joined(separator: "、")

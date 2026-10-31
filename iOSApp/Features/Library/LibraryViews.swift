@@ -641,6 +641,12 @@ final class LibraryBookActions: ObservableObject {
     @Published var newSeriesBooks: [LibraryBook] = []
     @Published var newSeriesName = ""
     @Published var actionError: String?
+    @Published var pendingEPUBUpdate: DownloadedWebNovel?
+    @Published var updateConfigurationBook: DownloadedWebNovel?
+    @Published var pendingCloudEPUBUpdate: DownloadedWebNovel?
+    @Published var updatingNovelID: String?
+    @Published var epubUpdateMessage: String?
+    var epubUpdateTask: Task<Void, Never>?
     /// 云端删除失败以非阻断提示保留重试入口；多次失败合并书籍键，避免丢掉较早的重试。
     @Published var cloudDeleteError: String?
     @Published var failedCloudDeleteKeys: Set<String> = []
@@ -653,6 +659,7 @@ final class LibraryBookActions: ObservableObject {
     /// 文件已不在服务器上的云端书籍：打开时或下载失败后提示，可从云端删除。
     @Published var missingCloudBook: LibraryBook?
     /// 正在编辑书库信息的文库／导入书籍。
+    @Published var chapterUpdateBook: DownloadedWebNovel?
     @Published var editingBook: LibraryBook?
     /// 下载完成的书，页面据此打开阅读。
     @Published var downloadedBookKey: String?
@@ -824,6 +831,15 @@ struct LibraryBookActionDialogs: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .sheet(item: $actions.updateConfigurationBook) { book in
+                WebNovelEPUBUpdateOptionsSheet(book: book) { configuration in
+                    actions.updateConfigurationBook = nil
+                    updateEPUB(book, configuration: configuration)
+                }
+            }
+            .sheet(item: $actions.chapterUpdateBook) { book in
+                WebNovelEPUBReader(book: book, managementOnly: true)
+            }
             .sheet(item: $actions.editingBook) { book in
                 if case .wenku(let record) = book.origin,
                    let current = wenkuDownloads.books.first(where: { $0.id == record.id }) {
@@ -952,7 +968,16 @@ struct LibraryBookActionDialogs: ViewModifier {
                 Text("系列中的书会移出系列，书籍文件和阅读进度都会保留。")
             }
             .safeAreaInset(edge: .bottom) {
-                if let progress = actions.deletionProgress {
+                if actions.updatingNovelID != nil {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text("正在获取并更新 EPUB…").font(.subheadline)
+                        Spacer()
+                        Button("取消") { actions.epubUpdateTask?.cancel() }
+                    }
+                    .padding(12)
+                    .background(.regularMaterial)
+                } else if let progress = actions.deletionProgress {
                     HStack(spacing: 12) {
                         ProgressView()
                         Text(progress).font(.subheadline)
@@ -986,11 +1011,77 @@ struct LibraryBookActionDialogs: ViewModifier {
                     .background(.regularMaterial)
                 }
             }
+            .confirmationDialog("更新到最新章节？", isPresented: .init(get: { actions.pendingEPUBUpdate != nil },
+                set: { if !$0 { actions.pendingEPUBUpdate = nil } }), titleVisibility: .visible,
+                presenting: actions.pendingEPUBUpdate) { book in
+                Button(book.epubUpdateConfiguration == nil ? "选择语言和译源" : "重新获取并更新 EPUB") { updateEPUB(book) }
+            } message: { book in
+                if book.epubUpdateConfiguration == nil {
+                    Text("这本书缺少历史下载设置，下一步请选择语言模式和译源。确认后才会下载，取消不会修改原书。")
+                } else {
+                Text("将按原来的\(book.resolvedDownloadMode.title)模式和译源重新获取整本 EPUB，成功后替换本机旧文件；失败或取消会保留旧文件。阅读位置和书签按章节路径尝试承接，目录被改动时可能需要重新定位。更新后可再进行 WebDAV 同步。")
+                }
+            }
+            .confirmationDialog("从 WebDAV 获取新版 EPUB？", isPresented: .init(get: { actions.pendingCloudEPUBUpdate != nil },
+                set: { if !$0 { actions.pendingCloudEPUBUpdate = nil } }), titleVisibility: .visible,
+                presenting: actions.pendingCloudEPUBUpdate) { book in
+                Button("取回云端 EPUB 并合并进度、书签") { updateEPUBFromCloud(book) }
+            } message: { _ in
+                Text("请先在持有新版的设备上同步。将使用 WebDAV 保存的 EPUB、译源及语言模式，成功后替换本机旧版，按章节路径承接本机状态并合并云端进度和书签。更新后再手动同步一次，把本机承接的状态传回其他设备。")
+            }
+            .alert("EPUB 更新", isPresented: .init(get: { actions.epubUpdateMessage != nil },
+                set: { if !$0 { actions.epubUpdateMessage = nil } })) {
+                Button("好", role: .cancel) { actions.epubUpdateMessage = nil }
+            } message: { Text(actions.epubUpdateMessage ?? "") }
             .alert("操作失败", isPresented: .init(get: { actions.actionError != nil }, set: { if !$0 { actions.actionError = nil } })) {
                 Button("好", role: .cancel) { actions.actionError = nil }
             } message: {
                 Text(actions.actionError ?? "")
             }
+    }
+
+    private func updateEPUB(_ book: DownloadedWebNovel, configuration: WebNovelEPUBUpdateConfiguration? = nil) {
+        actions.pendingEPUBUpdate = nil
+        if configuration == nil && book.epubUpdateConfiguration == nil { actions.updateConfigurationBook = book; return }
+        guard actions.updatingNovelID == nil else { return }
+        actions.updatingNovelID = book.id
+        actions.epubUpdateTask = Task {
+            defer { actions.updatingNovelID = nil; actions.epubUpdateTask = nil }
+            do {
+                let changed = try await webDownloads.updateEPUB(book, configuration: configuration)
+                actions.epubUpdateMessage = changed
+                    ? "已获取网站当前可下载的 EPUB 并替换本机旧版。书库中的系列归属保留；已确认章节的阅读状态保留；未核对的旧书可在阅读器“章节同步与更新”中核对。可手动同步到 WebDAV。"
+                    : "下载文件与本机内容完全相同，已保留原文件和下载时间。"
+            } catch is CancellationError {
+                actions.epubUpdateMessage = "已取消更新，原书籍文件保留。"
+            } catch {
+                actions.actionError = "EPUB 更新失败：\(error.localizedDescription) 原书籍未被本次更新替换。"
+            }
+        }
+    }
+
+    private func updateEPUBFromCloud(_ book: DownloadedWebNovel) {
+        actions.pendingCloudEPUBUpdate = nil
+        guard actions.updatingNovelID == nil else { return }
+        actions.updatingNovelID = book.id
+        actions.epubUpdateTask = Task {
+            defer { actions.updatingNovelID = nil; actions.epubUpdateTask = nil }
+            do {
+                let result = try await syncStore.updateWebNovelEPUBFromCloud(book, web: webDownloads)
+                switch result {
+                case .updated:
+                    actions.epubUpdateMessage = "已取回 WebDAV 保存的新版 EPUB，并合并云端进度、书签。已保留已确认章节的本机状态；打开后可核对新版章节。请再手动同步一次，把结果传回云端。"
+                case .alreadyCurrent:
+                    actions.epubUpdateMessage = "本机与 WebDAV 的 EPUB 内容一致，已合并云端进度和书签；可再手动同步本机的新修改。"
+                }
+            } catch {
+                if Task.isCancelled || error is CancellationError {
+                    actions.epubUpdateMessage = "已取消取回云端 EPUB，未以本次下载替换旧书。"
+                } else {
+                    actions.actionError = "从 WebDAV 更新失败：\(error.localizedDescription) 未以本次下载替换旧书。"
+                }
+            }
+        }
     }
 
     private func download(_ book: LibraryBook) {
@@ -1168,6 +1259,19 @@ struct LibraryBookRow: View {
 
     @ViewBuilder
     private func localFileItems(for book: LibraryBook) -> some View {
+        if case .webNovel(let record) = book.origin, record.novel.isRemote, record.resolvedFileFormat == .epub {
+            Button { actions.chapterUpdateBook = record } label: {
+                Label("章节同步与更新", systemImage: "arrow.triangle.2.circlepath")
+            }
+            Button { actions.pendingEPUBUpdate = record } label: {
+                Label("更新到最新章节", systemImage: "arrow.clockwise")
+            }
+            .disabled(actions.updatingNovelID != nil || webDownloads.progress[record.id] != nil)
+            Button { actions.pendingCloudEPUBUpdate = record } label: {
+                Label("从 WebDAV 获取新版 EPUB", systemImage: "icloud.and.arrow.down")
+            }
+            .disabled(actions.updatingNovelID != nil || webDownloads.progress[record.id] != nil)
+        }
         ShareLink(item: book.fileURL) {
             Label("导出", systemImage: "square.and.arrow.up")
         }
@@ -1506,6 +1610,8 @@ struct LibraryReaderDestination: View {
     var body: some View {
         if book.format == .txt {
             DownloadedWebNovelTXTReader(url: book.fileURL, title: book.title, rules: rules.configuration, statisticsID: book.key)
+        } else if case .webNovel(let record) = book.origin, record.novel.isRemote {
+            WebNovelEPUBReader(book: record)
         } else {
             EPUBReaderHost(initialURL: book.fileURL, statisticsID: book.key, statisticsTitle: book.title)
         }

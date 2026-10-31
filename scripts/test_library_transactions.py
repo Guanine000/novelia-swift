@@ -77,6 +77,24 @@ struct FakeAPI: NovelDownloadService {
   try Data("PKsynthetic".utf8).write(to: to)
  }
 }
+actor UpdatingAPI: NovelDownloadService {
+ var data = Data("new EPUB".utf8)
+ var fails = false
+ var waits = false
+ var entered = false
+ var receivedMode: WebNovelDownloadMode?
+ var receivedSource: NovelTranslationSource?
+ func configure(data: Data? = nil, fails: Bool = false, waits: Bool = false) {
+  if let data { self.data = data }; self.fails = fails; self.waits = waits
+ }
+ func downloadWebNovelEPUB(to: URL, providerId: String, novelId: String, title: String,
+                          translationSource: NovelTranslationSource?, mode: WebNovelDownloadMode) async throws {
+  receivedMode = mode; receivedSource = translationSource; entered = true
+  if waits { try await Task.sleep(nanoseconds: 30_000_000_000) }
+  if fails { throw CocoaError(.fileReadCorruptFile) }
+  try data.write(to: to)
+ }
+}
 @MainActor final class LibraryStateStore {
  var transfers: [(String, String)] = []
  func transfer(from: String, to: String) { transfers.append((from, to)) }
@@ -322,6 +340,135 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   precondition(race.books.isEmpty)
   let raceNames = try fm.contentsOfDirectory(atPath: raceDir.path)
   precondition(!raceNames.contains { $0.hasPrefix("sync-") || $0.hasPrefix(".copy-") })
+  // 真实下载 Store 的手动 EPUB 更新：保留译源/模式、同内容不替换、失败不损坏旧文件。
+  let updateDir = root.appendingPathComponent("epub-update")
+  try fm.createDirectory(at: updateDir, withIntermediateDirectories: true)
+  let novel = Novel(id: "remote/site/one", title: "Update", author: "", summary: "", genres: [], chapters: [], accent: .plum,
+                    providerId: "site", novelId: "one")
+  let updateBook = DownloadedWebNovel(novel: novel, fileFilename: "old.epub", downloadedAt: Date(timeIntervalSince1970: 1),
+                                    translationSource: .sakura, downloadMode: .bilingual, fileFormat: .epub)
+  let oldBytes = Data("old EPUB".utf8)
+  try oldBytes.write(to: updateDir.appendingPathComponent(updateBook.fileFilename))
+  try JSONEncoder().encode([updateBook]).write(to: updateDir.appendingPathComponent("library.json"))
+  let updateAPI = UpdatingAPI()
+  let updating = WebNovelDownloadStore(api: updateAPI, directory: updateDir)
+  try await updating.loadIfNeeded()
+  let updated = try await updating.updateEPUB(updateBook)
+  precondition(updated && updating.books.count == 1 && updating.books[0].id == updateBook.id)
+  precondition(updating.books[0].downloadedAt > updateBook.downloadedAt)
+  let mode = await updateAPI.receivedMode, translator = await updateAPI.receivedSource
+  precondition(mode == .bilingual && translator == .sakura)
+  let updatedRecord = updating.books[0], updatedURL = updating.fileURL(for: updating.books[0])
+  precondition(!fm.fileExists(atPath: updateDir.appendingPathComponent("old.epub").path))
+  let filesBeforeIdentical = try fm.contentsOfDirectory(atPath: updateDir.path).sorted()
+  let identical = try await updating.updateEPUB(updatedRecord)
+  let filesAfterIdentical = try fm.contentsOfDirectory(atPath: updateDir.path).sorted()
+  precondition(!identical && updating.books == [updatedRecord] && filesBeforeIdentical == filesAfterIdentical)
+  await updateAPI.configure(fails: true)
+  do { _ = try await updating.updateEPUB(updatedRecord); preconditionFailure("download must fail") } catch {}
+  precondition(updating.books == [updatedRecord] && fm.fileExists(atPath: updatedURL.path))
+  let failUpdate = Faults(); failUpdate.failWrites = [1]
+  let updateWriterFailure = WebNovelDownloadStore(api: FakeAPI(), directory: updateDir,
+      indexWriter: LocalLibraryIndexWriter(persist: { try failUpdate.persist($0, $1) }))
+  try await updateWriterFailure.loadIfNeeded()
+  do { _ = try await updateWriterFailure.updateEPUB(updatedRecord); preconditionFailure("commit must fail") } catch {}
+  precondition(updateWriterFailure.books == [updatedRecord] && fm.fileExists(atPath: updatedURL.path))
+  do {
+  // 缺失历史配置时在任何下载请求之前拒绝；明确选择且同内容时保存配置，不改原文件时间。
+  let legacyDir = root.appendingPathComponent("legacy-update-options")
+  try fm.createDirectory(at: legacyDir, withIntermediateDirectories: true)
+  let legacy = DownloadedWebNovel(novel: novel, fileFilename: "legacy.epub", downloadedAt: Date(timeIntervalSince1970: 3), translationSource: .sakura, downloadMode: nil, fileFormat: .epub)
+  try oldBytes.write(to: legacyDir.appendingPathComponent("legacy.epub"))
+  try JSONEncoder().encode([legacy]).write(to: legacyDir.appendingPathComponent("library.json"))
+  let legacyAPI = UpdatingAPI(); await legacyAPI.configure(data: oldBytes)
+  let legacyStore = WebNovelDownloadStore(api: legacyAPI, directory: legacyDir)
+  try await legacyStore.loadIfNeeded()
+  do { _ = try await legacyStore.updateEPUB(legacy); preconditionFailure("must require configuration") }
+  catch WebNovelEPUBUpdateError.configurationRequired {}
+  let enteredWithoutOptions = await legacyAPI.entered; precondition(!enteredWithoutOptions)
+  do { _ = try await legacyStore.updateEPUB(legacy, configuration: .init(mode: .translated, translationSource: nil)); preconditionFailure("must require translator") }
+  catch WebNovelEPUBUpdateError.configurationRequired {}
+  let enteredInvalid = await legacyAPI.entered; precondition(!enteredInvalid)
+  let sameLegacy = try await legacyStore.updateEPUB(legacy, configuration: .init(mode: .bilingual, translationSource: .gpt))
+  precondition(!sameLegacy && legacyStore.books[0].downloadMode == .bilingual && legacyStore.books[0].translationSource == .gpt)
+  precondition(legacyStore.books[0].fileFilename == legacy.fileFilename && legacyStore.books[0].downloadedAt == legacy.downloadedAt)
+  let legacyReloaded = WebNovelDownloadStore(api: legacyAPI, directory: legacyDir); try await legacyReloaded.loadIfNeeded()
+  precondition(legacyReloaded.books[0].epubUpdateConfiguration == .init(mode: .bilingual, translationSource: .gpt))
+  _ = try await legacyReloaded.updateEPUB(legacyReloaded.books[0])
+  let autoMode = await legacyAPI.receivedMode, autoSource = await legacyAPI.receivedSource
+  precondition(autoMode == .bilingual && autoSource == .gpt)
+  let beforeFailedChoice = legacyReloaded.books[0]
+  await legacyAPI.configure(fails: true)
+  do { _ = try await legacyReloaded.updateEPUB(beforeFailedChoice, configuration: .init(mode: .original, translationSource: .sakura)); preconditionFailure("download must fail") } catch {}
+  precondition(legacyReloaded.books == [beforeFailedChoice])
+  await legacyAPI.configure(data: Data("changed EPUB".utf8))
+  _ = try await legacyReloaded.updateEPUB(beforeFailedChoice, configuration: .init(mode: .original, translationSource: .sakura))
+  let originalSource = await legacyAPI.receivedSource, originalMode = await legacyAPI.receivedMode
+  precondition(originalMode == .original && originalSource == nil)
+  precondition(legacyReloaded.books[0].downloadMode == .original && legacyReloaded.books[0].translationSource == nil)
+  }
+  // 验证失败、取消和下载期间删除，均不能覆盖或复活旧记录。
+  let validationFailure = WebNovelDownloadStore(api: FakeAPI(), directory: updateDir,
+      prepareEPUBUpdate: { _, _, _ in throw CocoaError(.fileReadCorruptFile) })
+  try await validationFailure.loadIfNeeded()
+  do { _ = try await validationFailure.updateEPUB(updatedRecord); preconditionFailure("validation must fail") } catch {}
+  precondition(validationFailure.books == [updatedRecord] && fm.fileExists(atPath: updatedURL.path))
+  let cancelAPI = UpdatingAPI(); await cancelAPI.configure(waits: true)
+  let cancelledUpdate = WebNovelDownloadStore(api: cancelAPI, directory: updateDir)
+  try await cancelledUpdate.loadIfNeeded()
+  let cancelTask = Task { try await cancelledUpdate.updateEPUB(updatedRecord) }
+  while !(await cancelAPI.entered) { try await Task.sleep(nanoseconds: 1_000_000) }
+  cancelTask.cancel()
+  do { _ = try await cancelTask.value; preconditionFailure("cancel must fail") } catch is CancellationError {}
+  precondition(cancelledUpdate.books == [updatedRecord] && fm.fileExists(atPath: updatedURL.path))
+  let deletionAPI = UpdatingAPI(); await deletionAPI.configure(data: Data("newest EPUB".utf8))
+  var deleting: WebNovelDownloadStore!
+  deleting = WebNovelDownloadStore(api: deletionAPI, directory: updateDir,
+      prepareEPUBUpdate: { _, _, _ in try await deleting.remove(updatedRecord) })
+  try await deleting.loadIfNeeded()
+  do { _ = try await deleting.updateEPUB(updatedRecord); preconditionFailure("must not resurrect deleted record") }
+  catch WebNovelEPUBUpdateError.changed {}
+  precondition(deleting.books.isEmpty)
+  let remainingUpdateFiles = try fm.contentsOfDirectory(atPath: updateDir.path)
+  precondition(remainingUpdateFiles == ["library.json"])
+  // 云端取回使用同一真实 Store 替换事务，保留远端版本时间并调用状态承接钩子。
+  let cloudDir = root.appendingPathComponent("cloud-epub-update")
+  try fm.createDirectory(at: cloudDir, withIntermediateDirectories: true)
+  try oldBytes.write(to: cloudDir.appendingPathComponent(updateBook.fileFilename))
+  try JSONEncoder().encode([updateBook]).write(to: cloudDir.appendingPathComponent("library.json"))
+  let cloudRecord = DownloadedWebNovel(novel: novel, fileFilename: "cloud.epub", downloadedAt: Date(timeIntervalSince1970: 2),
+                                    translationSource: .sakura, downloadMode: .bilingual, fileFormat: .epub)
+  let cloudFile = root.appendingPathComponent("cloud-source.epub"), cloudBytes = Data("exact WebDAV bytes".utf8)
+  try cloudBytes.write(to: cloudFile)
+  var preparedCloud = false
+  let cloudStore = WebNovelDownloadStore(api: FakeAPI(), directory: cloudDir, prepareEPUBUpdate: { originalRecord, oldURL, newURL in
+   precondition(originalRecord == updateBook)
+   let oldData = try Data(contentsOf: oldURL); precondition(oldData == oldBytes)
+   let newData = try Data(contentsOf: newURL); precondition(newData == cloudBytes)
+   preparedCloud = true
+  })
+  try await cloudStore.replaceFromSync(cloudRecord, files: [cloudRecord.fileFilename: cloudFile])
+  let keptCloud = cloudStore.books[0], keptCloudURL = cloudStore.fileURL(for: cloudStore.books[0])
+  precondition(preparedCloud && keptCloud.downloadedAt == cloudRecord.downloadedAt && keptCloud.downloadMode == .bilingual)
+  let keptBytes = try Data(contentsOf: keptCloudURL); precondition(keptBytes == cloudBytes)
+  do { try await cloudStore.replaceFromSync(updateBook, files: [updateBook.fileFilename: cloudFile]); preconditionFailure("older remote must fail") } catch {}
+  let cloudValidation = WebNovelDownloadStore(api: FakeAPI(), directory: cloudDir, prepareEPUBUpdate: { _, _, _ in throw CocoaError(.fileReadCorruptFile) })
+  try await cloudValidation.loadIfNeeded()
+  do { try await cloudValidation.replaceFromSync(cloudRecord, files: [cloudRecord.fileFilename: cloudFile]); preconditionFailure("invalid replacement must fail") } catch {}
+  precondition(cloudValidation.books == [keptCloud] && fm.fileExists(atPath: keptCloudURL.path))
+  let cloudFaults = Faults(); cloudFaults.failWrites = [1]
+  let cloudCommit = WebNovelDownloadStore(api: FakeAPI(), directory: cloudDir, indexWriter: LocalLibraryIndexWriter(persist: { try cloudFaults.persist($0, $1) }))
+  try await cloudCommit.loadIfNeeded()
+  do { try await cloudCommit.replaceFromSync(cloudRecord, files: [cloudRecord.fileFilename: cloudFile]); preconditionFailure("cloud commit must fail") } catch {}
+  precondition(cloudCommit.books == [keptCloud] && fm.fileExists(atPath: keptCloudURL.path))
+  var cloudDeleting: WebNovelDownloadStore!
+  cloudDeleting = WebNovelDownloadStore(api: FakeAPI(), directory: cloudDir, prepareEPUBUpdate: { _, _, _ in try await cloudDeleting.remove(keptCloud) })
+  try await cloudDeleting.loadIfNeeded()
+  do { try await cloudDeleting.replaceFromSync(cloudRecord, files: [cloudRecord.fileFilename: cloudFile]); preconditionFailure("cloud replacement must not resurrect") } catch {}
+  precondition(cloudDeleting.books.isEmpty)
+  let remainingCloud = try fm.contentsOfDirectory(atPath: cloudDir.path); precondition(remainingCloud == ["library.json"])
+  print("Cloud EPUB replacement passed: exact bytes, remote timestamp, state hook, stale record, validation/commit failures, deletion race")
+  print("Manual EPUB updates passed: mode/source, identical content, network/validation/commit failure, cancellation and delete race")
   print("Library transactions passed: legacy load, corrupt-index recovery, failed edit/delete, stale/equal/wrong-version synced metadata, newer remote metadata persistence, move rollback and rollback failure, in-flight commit, cancellation and copy/delete race")
  }
  @MainActor static func responsiveness(_ root: URL, synchronous: Bool) async throws -> [String: Double] {

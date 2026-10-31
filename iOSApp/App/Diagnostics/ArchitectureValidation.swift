@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #if DEBUG
 import Foundation
+import ReadiumZIPFoundation
 
 extension AppServices {
     /// 只允许独立 Debug App 使用的替代组装，创建合成后台和内存会话。
@@ -17,6 +18,14 @@ extension AppServices {
         }
         if ProcessInfo.processInfo.arguments.contains("-seedPerformanceLibrary") {
             seedPerformanceLibrary()
+        }
+        if ProcessInfo.processInfo.arguments.contains("-architectureLegacyWebEPUB") {
+            let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            let index = support.appendingPathComponent("WebNovelDownloads/library.json")
+            if let data = try? Data(contentsOf: index), var records = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                for i in records.indices { records[i].removeValue(forKey: "downloadMode"); records[i].removeValue(forKey: "translationSource") }
+                if let encoded = try? JSONSerialization.data(withJSONObject: records) { try? encoded.write(to: index, options: .atomic) }
+            }
         }
         URLProtocol.registerClass(ArchitectureNetworkTrap.self)
         let readium = ProcessInfo.processInfo.arguments.contains("-architectureReadium")
@@ -51,7 +60,17 @@ extension AppServices {
             forumOrigin: URL(string: "https://forum.example.invalid")!,
             authentication: try! AuthenticationConfiguration(origin: URL(string: "https://auth.example.invalid")!))
         let failure = ProcessInfo.processInfo.arguments.contains("-architectureFailFirstSearch") ? "searchNovels" : nil
-        let backend = ArchitectureFixtureBackend(initialFailure: failure) { try await EPUBSampleBook.sampleURL() }
+        let ambiguous = ProcessInfo.processInfo.arguments.contains("-architectureWebEPUBAmbiguous")
+        let large = ProcessInfo.processInfo.arguments.contains("-architectureLargeWebEPUB")
+        let webUpdate = ProcessInfo.processInfo.arguments.contains("-architectureWebEPUBUpdate")
+        let initialFile: @Sendable () async throws -> URL = {
+            if webUpdate { return try await ArchitectureWebEPUBFixture.file(updated: false, ambiguous: ambiguous, countOverride: large ? 130 : nil) }
+            return try await EPUBSampleBook.sampleURL()
+        }
+        let newerFile: (@Sendable () async throws -> URL)?
+        if webUpdate { newerFile = { try await ArchitectureWebEPUBFixture.file(updated: true, ambiguous: ambiguous, countOverride: large ? 131 : nil) } }
+        else { newerFile = nil }
+        let backend = ArchitectureFixtureBackend(initialFailure: failure, sampleFile: initialFile, updatedSampleFile: newerFile, ambiguousChapters: ambiguous, directorySize: large ? 131 : nil, onCall: { ArchitectureNetworkTrap.serviceCalled($0) })
         let refreshQueue = SerialAsyncGate()
         let account = AccountAuthStore(configuration: configuration,
             tokenStore: FixtureTokenStore(username: ArchitectureFixtureBackend.username), refreshQueue: refreshQueue)
@@ -109,6 +128,21 @@ import SwiftUI
 final class ArchitectureNetworkTrap: URLProtocol {
     private static let lock = NSLock()
     private static var attempts = 0
+    private static var chapterAttempts = 0
+    private static var localDocumentAttempts = 0
+    private static var batchAttempts = 0
+    private static var downloadAttempts = 0
+    static var downloadCount: Int { lock.lock(); defer { lock.unlock() }; return downloadAttempts }
+    static var batchCount: Int { lock.lock(); defer { lock.unlock() }; return batchAttempts }
+    static var localDocumentCount: Int { lock.lock(); defer { lock.unlock() }; return localDocumentAttempts }
+    static var chapterCount: Int { lock.lock(); defer { lock.unlock() }; return chapterAttempts }
+    static func serviceCalled(_ name: String) {
+        lock.lock(); defer { lock.unlock() }
+        if name == "chapter" { chapterAttempts += 1 }
+        if name == "localEPUBDocument" { localDocumentAttempts += 1 }
+        if name == "localEPUBBatch" { batchAttempts += 1 }
+        if name == "downloadWebNovelEPUB" { downloadAttempts += 1 }
+    }
     static var count: Int { lock.lock(); defer { lock.unlock() }; return attempts }
     override class func canInit(with request: URLRequest) -> Bool {
         guard let url = request.url, ["http", "https"].contains(url.scheme ?? "") else { return false }
@@ -126,10 +160,40 @@ final class ArchitectureNetworkTrap: URLProtocol {
 struct ArchitectureValidationIndicator: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
-            Text("验证环境 · 外部请求 \(ArchitectureNetworkTrap.count)")
+            Text("验证环境 · 外部请求 \(ArchitectureNetworkTrap.count) · 正文请求 \(ArchitectureNetworkTrap.chapterCount) · 本机正文 \(ArchitectureNetworkTrap.localDocumentCount) · 批次 \(ArchitectureNetworkTrap.batchCount) · EPUB请求 \(ArchitectureNetworkTrap.downloadCount)")
                 .font(.caption2).padding(4).background(.regularMaterial).allowsHitTesting(false)
                 .accessibilityIdentifier("architecture-validation-status")
         }
+    }
+}
+
+/// 独立验证App的旧版/新版网络EPUB：网站有两章，初始文件只有一章，更新新增第二章。
+private enum ArchitectureWebEPUBFixture {
+    static func file(updated: Bool, ambiguous: Bool = false, countOverride: Int? = nil) async throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("architecture-web-\(updated ? "new" : "old").epub")
+        try? FileManager.default.removeItem(at: url)
+        let archive = try await Archive(url: url, accessMode: .create)
+        func add(_ path: String, _ text: String, compressed: Bool = true) async throws {
+            let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try Data(text.utf8).write(to: temporary)
+            defer { try? FileManager.default.removeItem(at: temporary) }
+            try await archive.addEntry(with: path, fileURL: temporary, compressionMethod: compressed ? .deflate : .none)
+        }
+        try await add("mimetype", "application/epub+zip", compressed: false)
+        try await add("META-INF/container.xml", "<container xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\" version=\"1.0\"><rootfiles><rootfile full-path=\"book.opf\" media-type=\"application/oebps-package+xml\"/></rootfiles></container>")
+        let count = countOverride ?? (ambiguous ? (updated ? 3 : 2) : (updated ? 2 : 1))
+        func title(_ index: Int) -> String { countOverride != nil ? "验证章节 \(index)" : ambiguous ? "幕间" : (index == 1 ? "第一章" : "第二章") }
+        let items = (1...count).map { "<item id=\"c\($0)\" href=\"Text/episode\($0).xhtml\" media-type=\"application/xhtml+xml\"/>" }.joined()
+        let spine = (1...count).map { "<itemref idref=\"c\($0)\"/>" }.joined()
+        try await add("book.opf", "<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\" unique-identifier=\"book\"><metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:identifier id=\"book\">fixture-one</dc:identifier><dc:title>架构验证小说</dc:title><dc:language>zh</dc:language></metadata><manifest>\(items)<item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/></manifest><spine>\(spine)</spine></package>")
+        let links = (1...count).map { "<li><a href=\"Text/episode\($0).xhtml\">\(title($0))</a></li>" }.joined()
+        try await add("nav.xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\"><body><nav epub:type=\"toc\"><ol>\(links)</ol></nav></body></html>")
+        let text = String(repeating: "这是替代服务提供的阅读正文，章节获取不经过真实服务器。", count: 50)
+        for index in 1...count {
+            let title = title(index)
+            try await add("Text/episode\(index).xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>\(title)</title></head><body><h1>\(title)</h1><p>\(text)</p></body></html>")
+        }
+        return url
     }
 }
 #endif

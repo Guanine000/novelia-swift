@@ -83,7 +83,7 @@ final class LocalAppServices {
         self.cloudBooks = cloudBooks
         sync = WebDAVSyncStore(local: AppWebDAVSyncLocalState(blocked: blockedTags, backgrounds: backgrounds,
                                                            positions: positions, library: library,
-                                                           bookmarkStore: bookmarks),
+                                                           identityMaps: readerSettings.webEPUBMaps, bookmarkStore: bookmarks),
                                statistics: statistics, cloudBooks: cloudBooks,
                                defaults: defaults, passwordStore: passwordStore)
     }

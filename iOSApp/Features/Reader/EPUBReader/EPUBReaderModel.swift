@@ -189,12 +189,13 @@ final class EPUBReaderModel: ObservableObject {
             if let positionHandler {
                 positionHandler(location.spineIndex, pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex))
             } else if let openedBookHash {
+                guard webContext == nil || locationCause != nil else { return }
                 let offset = pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex)
                 let length = pageBook?.sourceLength(spineIndex: location.spineIndex)
                 settings.recordEPUBPosition(
                     hash: openedBookHash, fraction: overallProgress, spineIndex: location.spineIndex,
                     chapterOffset: offset,
-                    chapterProgression: offset.flatMap { offset in length.map { EPUBChapterProgress.progression(offset: offset, length: $0) } })
+                    chapterProgression: offset.flatMap { offset in length.map { EPUBChapterProgress.progression(offset: offset, length: $0) } }, context: webContext, paths: webChapterPaths)
             }
         }
     }
@@ -276,9 +277,12 @@ final class EPUBReaderModel: ObservableObject {
     private static let styleDefaultsKey = ReaderSettings.epubStyleKey
 
     private let settings: ReaderSettings
+    private let webContext: WebNovelEPUBContext?
+    private let onReachedEnd: (() -> Void)?
 
-    init(settings: ReaderSettings, layoutCoordinator: EPUBLayoutCoordinator = .shared) {
+    init(settings: ReaderSettings, webContext: WebNovelEPUBContext? = nil, onReachedEnd: (() -> Void)? = nil, layoutCoordinator: EPUBLayoutCoordinator = .shared) {
         self.settings = settings
+        self.webContext = webContext; self.onReachedEnd = onReachedEnd
         self.layoutCoordinator = layoutCoordinator
         EPUBLocalFonts.registerSavedFonts()
         if let data = UserDefaults.standard.data(forKey: Self.styleDefaultsKey),
@@ -519,7 +523,7 @@ final class EPUBReaderModel: ObservableObject {
             stage = "layout"
             lastLayoutFailure = nil
             // 直接排版保存位置的章节，避免先排版第 0 章再恢复位置。
-            let saved = settings.epubPosition(hash: bookHash)
+            let saved = settings.epubPosition(hash: bookHash, context: webContext, paths: webChapterPaths)
             if let spine = saved?.chapterIndex, let offset = saved?.chapterOffset, container.spine.indices.contains(spine) {
                 restored = true
                 await relayout(keepingCurrentSpine: false, reason: .restore, target: (spine, offset))
@@ -621,6 +625,8 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     private func prepareTOCDiagnosticsPrompt(bookHash: String) {
+        // 网络小说更新面板可能仍在呈现；目录说明保留在目录中，避免打开新版时抢占更新/续读面板。
+        guard webContext == nil else { return }
         guard !tocDiagnosticMessages.isEmpty else { return }
         let key = "epubPrototype.tocDiagnostics.v2.\(bookHash)"
         tocDiagnosticsPreferenceKey = key
@@ -1087,7 +1093,7 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     func commitTurn(forward: Bool) {
-        guard canTurn(forward: forward), let target = turnLocation(forward: forward) else { return }
+        guard canTurn(forward: forward), let target = turnLocation(forward: forward) else { blockedTurn(forward: forward); return }
         moveLocation(to: target, cause: forward ? "turnForward" : "turnBackward")
         prefetchNeighbors(of: location.spineIndex)
     }
@@ -1182,7 +1188,26 @@ final class EPUBReaderModel: ObservableObject {
     private var textBookmarkKey: String?
 
     /// 书签与搜索使用的书籍身份：EPUB 为 `epub:<文件哈希>`，本地 TXT 为 `txt:<文件哈希>`；在线小说为 nil。
-    var bookmarkKey: String? { openedBookHash.map { "epub:\($0)" } ?? textBookmarkKey }
+    var bookmarkKey: String? { webContext?.bookKey ?? openedBookHash.map { "epub:\($0)" } ?? textBookmarkKey }
+    var webChapterPaths: [String] { container?.spine.map(\.href) ?? [] }
+    var legacyBookmarkKey: String? { webContext == nil ? nil : openedBookHash.map { "epub:\($0)" } }
+    var currentBookmarkKey: String? { webChapterID(location.spineIndex) == nil ? (legacyBookmarkKey ?? bookmarkKey) : bookmarkKey }
+    func webChapterID(_ index: Int) -> String? { webContext?.chapterID(index: index, paths: webChapterPaths) }
+    func bookmarkIndex(_ bookmark: ReaderBookmark) -> Int? {
+        if let id = bookmark.chapterID { return webContext?.index(chapterID: id, paths: webChapterPaths) }
+        return bookmark.chapterIndex
+    }
+    var canShowWebNovelEnd: Bool {
+        onReachedEnd != nil && status == .ready && !isLayingOut && !isAnimating
+            && location.spineIndex == (source?.chapterCount ?? 0) - 1
+            && pageBook?.isChapterComplete(location.spineIndex) == true
+            && location.pageIndex + pageStride >= pageCount(spineIndex: location.spineIndex)
+    }
+    func blockedTurn(forward: Bool) {
+        guard forward, canShowWebNovelEnd else { return }
+        onReachedEnd?()
+    }
+
 
     // MARK: 字数
 

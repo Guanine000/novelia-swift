@@ -81,17 +81,17 @@ final class WebDAVClient: WebDAVRemote, ReadingStatisticsRemote {
 
     /// `configuration` 仅供测试注入 URLProtocol；应用使用默认的临时会话。
     init(address: String, username: String, password: String,
-         configuration: URLSessionConfiguration = .ephemeral, folderCache: WebDAVFolderCache? = nil) throws {
+         configuration: URLSessionConfiguration = .ephemeral, folderCache: WebDAVFolderCache? = nil, webEPUBIdentity: Bool = false) throws {
         guard let url = URL(string: address), url.scheme?.lowercased() == "https",
               url.host != nil, url.user == nil, url.password == nil,
               url.query == nil, url.fragment == nil else { throw WebDAVSyncError.invalidURL }
         base = url
         root = url.appendingPathComponent("NoveliaSync", isDirectory: true)
-                  .appendingPathComponent("v1", isDirectory: true)
+                  .appendingPathComponent(webEPUBIdentity ? "web-epub-v1" : "v1", isDirectory: true)
         authorization = "Basic " + Data("\(username):\(password)".utf8).base64EncodedString()
         session = URLSession(configuration: configuration, delegate: WebDAVRedirectGuard(), delegateQueue: nil)
         self.folderCache = folderCache
-        folderCacheKey = Self.serverKey(username: username, base: url)
+        folderCacheKey = Self.serverKey(username: username, base: url) + (webEPUBIdentity ? "|web-epub-v1" : "")
     }
 
     /// 缓存用的服务器标识。

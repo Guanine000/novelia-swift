@@ -29,12 +29,20 @@ def main():
     with cache.file_lock(directory / 'package.lock'):
         workspace = directory / 'package-workspace'
         workspace.mkdir(parents=True, exist_ok=True)
-        for name in ['Package.swift', 'Sources', 'Tests', 'iOSApp', 'Vendor']:
+        for name in ['Package.swift', 'Sources', 'Tests', 'iOSApp']:
             link = workspace / name
             if not link.is_symlink():
                 link.symlink_to(ROOT / name)
             elif link.resolve() != (ROOT / name).resolve():
                 raise RuntimeError(f'Unexpected cached workspace link: {name}')
+        # Xcode 27.2 对经符号链接访问的本地 C 包生成错误的测试产品依赖；
+        # 使用内容相同的实际副本，仍由源码摘要保证验证对象与项目一致。
+        vendor = workspace / 'Vendor'
+        if vendor.is_symlink():
+            vendor.unlink()
+        if vendor.exists():
+            shutil.rmtree(vendor)
+        shutil.copytree(ROOT / 'Vendor', vendor, ignore=shutil.ignore_patterns('.swiftpm', '.build'))
         # 使用与 App 相同的已锁定依赖；只复制，不让 SwiftPM 重写项目原文件。
         pinned = ROOT / 'NoveliaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved'
         target = workspace / 'Package.resolved'

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
+import Combine
 
 /// LocalAppServices 持有的本地进度存储，阅读与同步通过同一实例访问。
 /// 保留 readingPositions.v1、web/epub/txt 身份和旧位置读取；位置转换由阅读引擎负责。
@@ -7,6 +8,8 @@ import Foundation
 /// 缓存只对本实例有效，同一偏好存储不得再创建第二个实例写入进度。
 @MainActor
 final class ReadingPositionStore: ReadingPositionSynchronizing {
+    private let changeSubject = PassthroughSubject<Void, Never>()
+    var changes: AnyPublisher<Void, Never> { changeSubject.eraseToAnyPublisher() }
     private let defaults: UserDefaults
     private var cache: [String: SyncedReadingPosition]?
 
@@ -19,6 +22,13 @@ final class ReadingPositionStore: ReadingPositionSynchronizing {
             .flatMap { try? JSONDecoder().decode([String: SyncedReadingPosition].self, from: $0) } ?? [:]
         cache = loaded
         return loaded
+    }
+
+    func mergePosition(key: String, position: SyncedReadingPosition, replacingEqualTimestamp: Bool) {
+        var next = all()
+        guard position.updatedAt > (next[key]?.updatedAt ?? .distantPast) || (replacingEqualTimestamp && position.updatedAt == next[key]?.updatedAt) else { return }
+        next[key] = position
+        save(next)
     }
 
     func recordWeb(id: String, chapterIndex: Int) {
@@ -95,6 +105,7 @@ final class ReadingPositionStore: ReadingPositionSynchronizing {
         if let data = try? JSONEncoder().encode(positions) {
             defaults.set(data, forKey: Self.key)
             cache = positions
+            changeSubject.send()
         }
     }
 }

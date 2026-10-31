@@ -12,6 +12,14 @@ enum WebNovelFileFormat: String, Codable, CaseIterable, Identifiable, Sendable {
     var fileExtension: String { rawValue }
 }
 
+/// 网站更新的明确配置；旧记录缺字段时不推断模式，必须由用户确认。
+struct WebNovelEPUBUpdateConfiguration: Equatable, Sendable {
+    let mode: WebNovelDownloadMode
+    let translationSource: NovelTranslationSource?
+    var isValid: Bool { mode == .original || translationSource != nil }
+    var effectiveSource: NovelTranslationSource? { mode == .original ? nil : translationSource }
+}
+
 struct DownloadedWebNovel: Codable, Identifiable, Hashable, Sendable {
     let novel: Novel
     let fileFilename: String
@@ -25,6 +33,11 @@ struct DownloadedWebNovel: Codable, Identifiable, Hashable, Sendable {
     var id: String { novel.id }
     var resolvedFileFormat: WebNovelFileFormat {
         fileFormat ?? (fileFilename.lowercased().hasSuffix(".txt") ? .txt : .epub)
+    }
+    var epubUpdateConfiguration: WebNovelEPUBUpdateConfiguration? {
+        guard let downloadMode else { return nil }
+        let value = WebNovelEPUBUpdateConfiguration(mode: downloadMode, translationSource: translationSource)
+        return value.isValid ? value : nil
     }
     var resolvedDownloadMode: WebNovelDownloadMode {
         downloadMode ?? (translationSource == nil ? .original : .translated)

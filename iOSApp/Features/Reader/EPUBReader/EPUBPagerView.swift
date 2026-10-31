@@ -36,6 +36,7 @@ struct EPUBPagerView: UIViewRepresentable {
     /// 完成一次翻页（宿主在动画结束后提交新的当前页并刷新位图）。
     var onCommit: (Bool) -> Void
     /// 翻页动画开始/结束通知；宿主据此在动画期间冻结分页代次。
+    var onBlockedTurn: (Bool) -> Void = { _ in }
     var onAnimatingChange: (Bool) -> Void = { _ in }
     /// 点击本地点（当前页本地坐标）的链接/注脚命中测试。
     var linkHitTest: (CGPoint) -> EPUBLinkHit? = { _ in nil }
@@ -62,6 +63,7 @@ struct EPUBPagerView: UIViewRepresentable {
         view.canTurnProvider = canTurn
         view.commitHandler = onCommit
         view.animatingChangeHandler = onAnimatingChange
+        view.blockedTurnHandler = onBlockedTurn
         view.linkHitTestProvider = linkHitTest
         view.imageTapProvider = onImageTap
         view.noteTapHandler = onNoteTap
@@ -78,6 +80,7 @@ struct EPUBPagerView: UIViewRepresentable {
         view.canTurnProvider = canTurn
         view.commitHandler = onCommit
         view.animatingChangeHandler = onAnimatingChange
+        view.blockedTurnHandler = onBlockedTurn
         view.linkHitTestProvider = linkHitTest
         view.imageTapProvider = onImageTap
         view.noteTapHandler = onNoteTap
@@ -91,6 +94,7 @@ struct EPUBPagerView: UIViewRepresentable {
 }
 
 final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
+    var blockedTurnHandler: ((Bool) -> Void)?
     var canTurnProvider: ((Bool) -> Bool)?
     var commitHandler: ((Bool) -> Void)?
     var animatingChangeHandler: ((Bool) -> Void)?
@@ -293,6 +297,7 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
                   (canTurnProvider?(direction == true) ?? false),
                   (direction == true ? images.next : images.previous) != nil else {
                 snapBack()
+                if gesture.state == .ended, let direction = forward { blockedTurnHandler?(direction) }
                 return
             }
             completeTurn(forward: direction == true)
@@ -333,7 +338,7 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
         // 3) 左右三分之一：翻页。
         let forward = location.x >= width * 2 / 3
         guard (canTurnProvider?(forward) ?? false),
-              (forward ? images.next : images.previous) != nil else { return }
+              (forward ? images.next : images.previous) != nil else { blockedTurnHandler?(forward); return }
         completeTurn(forward: forward)
     }
 
