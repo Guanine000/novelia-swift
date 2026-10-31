@@ -74,6 +74,227 @@ final class EPUBImageTests: XCTestCase {
         }
     }
 
+    /// 按 XHTML 加载真实 SVG 命名空间；模拟 ReadiumCSS 的默认命名空间及多栏，
+    /// 防止只在 HTML 或没有分页的 WebView 中验证而漏掉封面底部跨栏。
+    @MainActor
+    func testReadiumSVGCoverFitsOneColumnInXHTML() async throws {
+        let data = png(width: 794, height: 1126).base64EncodedString()
+        func document(columns: Int, wrapped: Bool, mediaHeight: String = "95vh") -> String {
+            let cover = """
+            <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+                 width="100%" height="100%" viewBox="0 0 794 1126" preserveAspectRatio="none">
+              <image width="794" height="1126" xlink:href="data:image/png;base64,\(data)"/>
+            </svg>
+            """
+            return """
+            <html xmlns="http://www.w3.org/1999/xhtml"><head>
+            <meta name="viewport" content="width=device-width,initial-scale=1"/>
+            <style>
+            @namespace url("http://www.w3.org/1999/xhtml");
+            html { height:100vh; column-count:\(columns); column-gap:0; column-fill:auto;
+                   --RS__maxMediaHeight:\(mediaHeight); --RS__maxMediaWidth:100%; }
+            body { margin:0; padding:0 20px; box-sizing:border-box; text-align:center; }
+            img, svg { width:auto; height:auto; max-width:100%; max-height:var(--RS__maxMediaHeight)!important;
+                       break-inside:avoid; }
+            </style></head><body>\(wrapped ? "<div>\(cover)</div>" : cover)
+            <p>正文<svg xmlns="http://www.w3.org/2000/svg" id="inline" width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16"/></svg>小图</p>
+            </body></html>
+            """
+        }
+        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1373, height: 798))
+        let window = UIWindow(frame: webView.frame)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        controller.view.addSubview(webView)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        func probe(_ html: String) async throws -> [String: Double] {
+            let navigation = ImageNavigationObserver()
+            webView.navigationDelegate = navigation
+            try await withCheckedThrowingContinuation { continuation in
+                navigation.completion = continuation
+                webView.load(Data(html.utf8), mimeType: "application/xhtml+xml",
+                             characterEncodingName: "utf-8", baseURL: URL(string: "https://example.invalid/")!)
+            }
+            let value = try await webView.evaluateJavaScript("""
+            (() => {
+              const svg=document.querySelector('svg'), image=svg.querySelector('image');
+              const s=getComputedStyle(svg), r=svg.getBoundingClientRect(), i=image.getBoundingClientRect();
+              const inline=document.getElementById('inline').getBoundingClientRect();
+              return { fragments:svg.getClientRects().length, height:r.height, width:r.width,
+                       imageWidth:i.width, imageHeight:i.height, limit:parseFloat(s.maxHeight) || 0,
+                       bottom:r.bottom,
+                       inlineWidth:inline.width, inlineHeight:inline.height };
+            })()
+            """)
+            return try XCTUnwrap(value as? [String: Double])
+        }
+        let original = try await probe(document(columns: 2, wrapped: true))
+        XCTAssertGreaterThan(try XCTUnwrap(original["fragments"]), 1)
+        XCTAssertEqual(original["limit"], 0)
+        for (size, columns) in [(CGSize(width: 430, height: 800), 1),
+                                (CGSize(width: 834, height: 1100), 1),
+                                (CGSize(width: 1373, height: 798), 2)] {
+            webView.frame.size = size
+            for wrapped in [true, false] {
+                let html = document(columns: columns, wrapped: wrapped, mediaHeight: "90vh")
+                let fixed = try await probe(EPUBReadiumImageLayout.keepingStandaloneImagesTogether(inHTML: html))
+                XCTAssertEqual(fixed["fragments"], 1)
+                XCTAssertGreaterThan(try XCTUnwrap(fixed["imageWidth"]), 0)
+                XCTAssertLessThanOrEqual(try XCTUnwrap(fixed["height"]), Double(size.height) * 0.9 + 1)
+                XCTAssertLessThanOrEqual(try XCTUnwrap(fixed["width"]), Double(size.width) / Double(columns) + 1)
+                XCTAssertLessThanOrEqual(try XCTUnwrap(fixed["bottom"]), Double(size.height) + 1)
+                XCTAssertEqual(try XCTUnwrap(fixed["imageWidth"]) / XCTUnwrap(fixed["imageHeight"]), 794.0 / 1126, accuracy: 0.001)
+                XCTAssertEqual(fixed["inlineWidth"], 16)
+                XCTAssertEqual(fixed["inlineHeight"], 16)
+            }
+        }
+    }
+
+    @MainActor
+    func testReadiumNearWhitePageBackgroundIsReversibleAndPreservesArtwork() async throws {
+        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 834, height: 1100))
+        let window = UIWindow(frame: webView.frame)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        controller.view.addSubview(webView)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let html = """
+        <html xmlns="http://www.w3.org/1999/xhtml"><head><style>
+        html { background-color:#faf7f0; }
+        body { background:white url('data:image/png;base64,\(png(width: 2, height: 2).base64EncodedString())'); }
+        #local { background-color:white; color:black; }
+        </style></head><body style="background-color:white!important"><p id="local">局部底色</p></body></html>
+        """
+        let navigation = ImageNavigationObserver()
+        webView.navigationDelegate = navigation
+        try await withCheckedThrowingContinuation { continuation in
+            navigation.completion = continuation
+            webView.load(Data(html.utf8), mimeType: "application/xhtml+xml", characterEncodingName: "utf-8",
+                         baseURL: URL(string: "https://example.invalid/")!)
+        }
+        func apply(_ ignores: Bool) async throws {
+            _ = try await webView.evaluateJavaScript(EPUBReadiumPageBackground.script(ignoresNearWhite: ignores, threshold: 240.0 / 255))
+        }
+        func probe() async throws -> [String: String] {
+            let result = try await webView.evaluateJavaScript("""
+            (() => ({root:getComputedStyle(document.documentElement).backgroundColor,
+                     body:getComputedStyle(document.body).backgroundColor,
+                     image:getComputedStyle(document.body).backgroundImage,
+                     local:getComputedStyle(document.getElementById('local')).backgroundColor,
+                     priority:document.body.style.getPropertyPriority('background-color')}))()
+            """)
+            return try XCTUnwrap(result as? [String: String])
+        }
+        let original = try await probe()
+        for _ in 0..<2 {
+            try await apply(true)
+            let clear = try await probe()
+            XCTAssertEqual(clear["root"], "rgba(0, 0, 0, 0)")
+            XCTAssertEqual(clear["body"], "rgba(0, 0, 0, 0)")
+            XCTAssertEqual(clear["image"], original["image"])
+            XCTAssertEqual(clear["local"], "rgb(255, 255, 255)")
+        }
+        try await apply(false)
+        let restored = try await probe()
+        XCTAssertEqual(restored, original, "切换规则应还原书内颜色、背景图片和行内 important")
+
+        // 先清除白底，再模拟主题/书内脚本改为黑底；重算不能用旧缓存覆盖新颜色。
+        try await apply(true)
+        _ = try await webView.evaluateJavaScript("document.body.style.setProperty('background-color', 'black', 'important')")
+        try await apply(true)
+        let dark = try await probe()
+        XCTAssertEqual(dark["body"], "rgb(0, 0, 0)")
+        try await apply(false)
+        _ = try await webView.evaluateJavaScript("document.body.style.setProperty('background-color', '#88c1ec', 'important')")
+        try await apply(true)
+        let colored = try await probe()
+        XCTAssertEqual(colored["body"], "rgb(136, 193, 236)")
+        XCTAssertEqual(colored["image"], original["image"])
+    }
+
+    /// 样式刷新可能由页面变化回调触发；相同配置必须停在稳定状态，不能再产生变化回调。
+    @MainActor
+    func testReadiumAppearanceDoesNotFeedBackIntoDocumentChanges() async throws {
+        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 834, height: 1100))
+        let window = UIWindow(frame: webView.frame)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        controller.view.addSubview(webView)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let navigation = ImageNavigationObserver()
+        webView.navigationDelegate = navigation
+        try await withCheckedThrowingContinuation { continuation in
+            navigation.completion = continuation
+            let html = "<html xmlns='http://www.w3.org/1999/xhtml'><head><style>body{background:white}</style></head><body><p>正文</p></body></html>"
+            webView.load(Data(html.utf8), mimeType: "application/xhtml+xml", characterEncodingName: "utf-8",
+                         baseURL: URL(string: "https://example.invalid/")!)
+        }
+        let script = EPUBReadiumPageBackground.script(ignoresNearWhite: true, threshold: 240.0 / 255)
+        let encoded = try JSONSerialization.data(withJSONObject: [script])
+        let literal = try XCTUnwrap(String(data: encoded, encoding: .utf8))
+        _ = try await webView.evaluateJavaScript("""
+        window.appearanceScript = \(literal)[0];
+        window.appearanceCallbacks = 0;
+        window.appearanceMutations = 0;
+        window.appearanceObserver = new MutationObserver(records => {
+          window.appearanceCallbacks++;
+          window.appearanceMutations += records.length;
+          // 上限防止旧实现让测试进程无限循环；正确实现应第一次回调后即稳定。
+          if (window.appearanceCallbacks < 20) eval(window.appearanceScript);
+        });
+        window.appearanceObserver.observe(document.documentElement, {subtree:true,childList:true,attributes:true,characterData:true});
+        eval(window.appearanceScript);
+        """)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let result = try await webView.evaluateJavaScript("({callbacks:window.appearanceCallbacks,mutations:window.appearanceMutations})")
+        let counts = try XCTUnwrap(result as? [String: Int])
+        XCTAssertGreaterThan(counts["mutations"] ?? 0, 0)
+        XCTAssertLessThanOrEqual(counts["callbacks"] ?? 20, 2, "同配置样式必须停止改写 DOM")
+        _ = try await webView.evaluateJavaScript("window.appearanceObserver.disconnect()")
+    }
+
+    /// 在深色时开启去白底，切回浅色仍须处理恢复出来的书内白底。
+    @MainActor
+    func testReadiumWhiteBackgroundTracksOnlyActualThemeChanges() async throws {
+        let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 430, height: 800))
+        let navigation = ImageNavigationObserver()
+        webView.navigationDelegate = navigation
+        try await withCheckedThrowingContinuation { continuation in
+            navigation.completion = continuation
+            let html = """
+            <html xmlns="http://www.w3.org/1999/xhtml" style="--USER__appearance:readium-night-on"><head><style>
+            body { background:white; color:#123456; }
+            :root[style*="readium-night-on"] body { background-color:transparent !important; }
+            </style></head><body><p>正文</p></body></html>
+            """
+            webView.load(Data(html.utf8), mimeType: "application/xhtml+xml", characterEncodingName: "utf-8",
+                         baseURL: URL(string: "https://example.invalid/")!)
+        }
+        let on = EPUBReadiumPageBackground.script(ignoresNearWhite: true, threshold: 240.0 / 255)
+        let off = EPUBReadiumPageBackground.script(ignoresNearWhite: false, threshold: 240.0 / 255)
+        _ = try await webView.evaluateJavaScript(on)
+        for _ in 0..<3 {
+            _ = try await webView.evaluateJavaScript("document.documentElement.style.removeProperty('--USER__appearance')")
+            try await Task.sleep(nanoseconds: 50_000_000)
+            let value = try await webView.evaluateJavaScript("getComputedStyle(document.body).backgroundColor")
+            XCTAssertEqual(value as? String, "rgba(0, 0, 0, 0)")
+            let color = try await webView.evaluateJavaScript("getComputedStyle(document.body).color")
+            XCTAssertEqual(color as? String, "rgb(18, 52, 86)", "去白底不覆盖文字色")
+            _ = try await webView.evaluateJavaScript("document.documentElement.style.setProperty('--USER__appearance','readium-night-on')")
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        _ = try await webView.evaluateJavaScript(off)
+        _ = try await webView.evaluateJavaScript("document.documentElement.style.removeProperty('--USER__appearance')")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let restored = try await webView.evaluateJavaScript("getComputedStyle(document.body).backgroundColor")
+        XCTAssertEqual(restored as? String, "rgb(255, 255, 255)")
+        let observer = try await webView.evaluateJavaScript("!!document.__noveliaWhiteBackgroundObserver")
+        XCTAssertEqual(observer as? Bool, false, "关闭规则后移除观察，恢复出版社底色")
+    }
+
     private func png(width: Int, height: Int) -> Data {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1

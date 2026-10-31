@@ -194,7 +194,9 @@ struct RootView: View {
         _favorites = StateObject(wrappedValue: FavoritesStore(api: services.api.favorites, session: services.account))
         _readingHistory = StateObject(wrappedValue: ReadingHistoryStore(api: services.api.history, session: services.account))
         _wenkuStore = StateObject(wrappedValue: WenkuStore(api: services.api.wenku, favorites: services.api.favorites))
-        _webNovelDownloads = StateObject(wrappedValue: WebNovelDownloadStore(api: services.api.downloads))
+        _webNovelDownloads = StateObject(wrappedValue: WebNovelDownloadStore(api: services.api.downloads, prepareEPUBUpdate: { book, old, new in
+            try await WebNovelEPUBUpdate.prepare(book: book, old: old, new: new, local: services.local)
+        }))
         _auth = StateObject(wrappedValue: services.account)
         _forumAuth = StateObject(wrappedValue: services.forumAccount)
     }
@@ -252,7 +254,7 @@ struct RootView: View {
         .environmentObject(updates)
         .modifier(WebDAVAutoSyncTriggers(sync: webDAVSync, web: webNovelDownloads, wenku: wenkuDownloads,
                                          library: services.local.library, blockedTags: services.local.blockedTags,
-                                         bookmarks: services.local.bookmarks))
+                                         identityMaps: services.local.readerSettings.webEPUBMaps, bookmarks: services.local.bookmarks))
         .task { if services.performsUpdateChecks { await updates.check() } }
         .task(id: auth.username) {
             // 作品详情的收藏状态依赖这两份收藏；原先由“书架”页加载。

@@ -37,13 +37,18 @@ actor ArchitectureFixtureBackend: NovelCatalogService, NovelContentService, Wenk
     private var failure: String?
     private let sampleFile: @Sendable () async throws -> URL
 
-    init(initialFailure: String? = nil, sampleFile: @escaping @Sendable () async throws -> URL) {
-        self.failure = initialFailure; self.sampleFile = sampleFile
+    private let directorySize: Int?
+    private let ambiguousChapters: Bool
+    private let onCall: @Sendable (String) -> Void
+    private let updatedSampleFile: (@Sendable () async throws -> URL)?
+    init(initialFailure: String? = nil, sampleFile: @escaping @Sendable () async throws -> URL, updatedSampleFile: (@Sendable () async throws -> URL)? = nil, ambiguousChapters: Bool = false, directorySize: Int? = nil, onCall: @escaping @Sendable (String) -> Void = { _ in }) {
+        self.failure = initialFailure; self.sampleFile = sampleFile; self.updatedSampleFile = updatedSampleFile; self.onCall = onCall; self.ambiguousChapters = ambiguousChapters; self.directorySize = directorySize
     }
     func failNext(_ name: String) { failure = name }
     func callCounts() -> [String: Int] { calls }
     private func mark(_ name: String) throws {
         calls[name, default: 0] += 1
+        onCall(name)
         if failure == name { failure = nil; throw URLError(.notConnectedToInternet) }
     }
     private func decode<T: Decodable>(_ object: Any, as: T.Type) throws -> T {
@@ -51,7 +56,7 @@ actor ArchitectureFixtureBackend: NovelCatalogService, NovelContentService, Wenk
     }
     private func novel() -> Novel {
         Novel(id: "remote/fixture/one", title: "架构验证小说", author: "合成作者", summary: "本书来自内存替代服务。",
-            genres: ["验证"], chapters: ["第一章", "第二章"].enumerated().map {
+            genres: ["验证"], chapters: (directorySize.map { (1...$0).map { "验证章节 \($0)" } } ?? (ambiguousChapters ? ["幕间", "幕间", "幕间"] : ["第一章", "第二章"])).enumerated().map {
                 NovelChapter(id: String($0.offset + 1), title: $0.element, originalText: "", translatedText: "")
             }, accent: .ocean, providerId: "fixture", novelId: "one",
             cloudFavoriteFolderID: favorite ? "folder" : nil,
@@ -111,7 +116,10 @@ actor ArchitectureFixtureBackend: NovelCatalogService, NovelContentService, Wenk
     func novelForContinuation(providerId: String, novelId: String) async throws -> NoveliaCloudNovelDetail { try mark("novelForContinuation"); return NoveliaCloudNovelDetail(novel: novel(), lastReadChapterID: "1") }
     func downloadWebNovelEPUB(to destinationURL: URL, providerId: String, novelId: String, title: String,
                              translationSource: NovelTranslationSource?, mode: WebNovelDownloadMode) async throws {
-        try mark("downloadWebNovelEPUB"); let file = try await sampleFile()
+        try mark("downloadWebNovelEPUB")
+        let file: URL
+        if (calls["downloadWebNovelEPUB"] ?? 0) > 1, let updatedSampleFile { file = try await updatedSampleFile() }
+        else { file = try await sampleFile() }
         try FileManager.default.copyItem(at: file, to: destinationURL)
     }
     func downloadWenkuEPUB(to destinationURL: URL, novelId: String, volumeId: String, mode: WenkuEPUBMode,

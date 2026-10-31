@@ -5,7 +5,9 @@ import Combine
 /// 阅读器和书库读写进度的边界；App 注入同一实例，读取本地进度不依赖 WebDAV。
 @MainActor
 protocol ReadingPositionProviding: AnyObject {
+    var changes: AnyPublisher<Void, Never> { get }
     func all() -> [String: SyncedReadingPosition]
+    func mergePosition(key: String, position: SyncedReadingPosition, replacingEqualTimestamp: Bool)
     func recordWeb(id: String, chapterIndex: Int)
     func recordEPUB(hash: String, fraction: Double, spineIndex: Int, chapterOffset: Int?, chapterProgression: Double?)
     func epubPosition(hash: String) -> SyncedReadingPosition?
@@ -14,6 +16,13 @@ protocol ReadingPositionProviding: AnyObject {
     /// 删除书籍文件已不在书库、且早于 `cutoff` 未更新的 EPUB/TXT 位置；在线小说（web:）位置不处理。
     @discardableResult
     func pruneFilePositions(keepingHashes: Set<String>, olderThan cutoff: Date) -> Int
+}
+
+@MainActor
+extension ReadingPositionProviding {
+    func mergePosition(key: String, position: SyncedReadingPosition) {
+        mergePosition(key: key, position: position, replacingEqualTimestamp: false)
+    }
 }
 
 /// 供同步适配合并进度；具体存储负责旧数据和时间合并规则，阅读器无需调用此能力。

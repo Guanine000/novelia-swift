@@ -21,6 +21,7 @@ struct WebDAVAutoSyncTriggers: ViewModifier {
     let wenku: WenkuLocalLibraryStore
     let library: LibraryStateStore
     let blockedTags: BlockedTagsStore
+    let identityMaps: WebNovelEPUBMapStore
     let bookmarks: ReaderBookmarkStore
 
     func body(content: Content) -> some View {
@@ -36,6 +37,7 @@ struct WebDAVAutoSyncTriggers: ViewModifier {
             .onReceive(wenku.$books.dropFirst()) { _ in sync.localStateDidChange() }
             .onReceive(library.objectWillChange) { sync.localStateDidChange() }
             .onReceive(blockedTags.objectWillChange) { sync.localStateDidChange() }
+            .onReceive(identityMaps.$maps.dropFirst()) { _ in sync.localStateDidChange() }
             .onReceive(bookmarks.$records.dropFirst()) { _ in sync.localStateDidChange() }
     }
 }
@@ -48,7 +50,10 @@ struct AppWebDAVSyncLocalState: WebDAVSyncLocalState {
     let backgrounds: ReaderBackgroundStore
     let positions: any ReadingPositionSynchronizing
     let library: any LibrarySeriesManaging
+    let identityMaps: WebNovelEPUBMapStore
     let bookmarkStore: ReaderBookmarkStore
+    var webEPUBMaps: [String: WebNovelEPUBMap] { identityMaps.maps }
+    func applyWebEPUBMaps(_ maps: [String: WebNovelEPUBMap]) throws { try identityMaps.merge(maps) }
     var readingPositions: [String: SyncedReadingPosition] { positions.all() }
     func mergeReadingPositions(_ remote: [String: SyncedReadingPosition], webBooks: [DownloadedWebNovel]) {
         positions.merge(remote, webBooks: webBooks)

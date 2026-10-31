@@ -19,10 +19,15 @@ struct SyncedReadingPosition: Codable, Equatable {
     /// 回退到 `fraction`。
     var chapterProgression: Double? = nil
 
-    /// 远端位置的时间不早于本地位置时，替换本地位置。
+    /// 网络小说 EPUB 的源站章节 ID；spine 序号只作兼容显示。
+    var chapterID: String? = nil
+
+    /// 网络小说ID位置时间相同保留本机；旧身份保留原有不早于本机即替换的兼容规则。
     static func merged(_ local: [String: Self], _ remote: [String: Self]) -> [String: Self] {
         var result = local
-        for (key, value) in remote where value.updatedAt >= (result[key]?.updatedAt ?? .distantPast) {
+        for (key, value) in remote where key.hasPrefix("webepub:")
+            ? value.updatedAt > (result[key]?.updatedAt ?? .distantPast)
+            : value.updatedAt >= (result[key]?.updatedAt ?? .distantPast) {
             result[key] = value
         }
         return result

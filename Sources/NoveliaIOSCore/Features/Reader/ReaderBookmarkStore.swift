@@ -38,14 +38,14 @@ final class ReaderBookmarkStore: ObservableObject {
 
     @discardableResult
     func add(bookKey: String, chapterIndex: Int, progression: Double, chapterTitle: String?, snippet: String,
-             now: Date = Date()) throws -> ReaderBookmark {
+             now: Date = Date(), chapterID: String? = nil) throws -> ReaderBookmark {
         let cleaned = snippet.split(whereSeparator: \.isNewline).joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let bookmark = ReaderBookmark(
             id: UUID(), bookKey: bookKey, chapterIndex: max(0, chapterIndex),
             chapterProgression: progression.isFinite ? min(1, max(0, progression)) : 0,
             chapterTitle: chapterTitle.map { String($0.prefix(200)) },
-            snippet: String(cleaned.prefix(ReaderBookmark.maxSnippetLength)), createdAt: now, updatedAt: now)
+            snippet: String(cleaned.prefix(ReaderBookmark.maxSnippetLength)), createdAt: now, updatedAt: now, chapterID: chapterID)
         var next = records
         next[bookmark.id.uuidString] = bookmark
         try save(next)
@@ -72,6 +72,16 @@ final class ReaderBookmarkStore: ObservableObject {
     /// WebDAV 合并后的书签。
     func applySynced(_ remote: [String: ReaderBookmark]) throws {
         try save(ReaderBookmark.merged(records, remote))
+    }
+
+    /// 映射更正允许修正同一历史时间的章节ID，不提升时间；较新的状态和删除墓碑仍受保护。
+    func applyMigration(_ copies: [String: ReaderBookmark]) throws {
+        var next = ReaderBookmark.merged(records, copies)
+        for (id, copy) in copies where copy.isValid {
+            if let saved = records[id], saved.updatedAt == copy.updatedAt,
+               !saved.isDeleted, saved.chapterID != copy.chapterID { next[id] = copy }
+        }
+        try save(next)
     }
 
     private func save(_ next: [String: ReaderBookmark]) throws {

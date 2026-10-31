@@ -68,7 +68,7 @@ let package = Package(
         ),
         .testTarget(
             name: "NoveliaKindleTests",
-            dependencies: ["NoveliaKindle", "NoveliaEPUB", .product(name: "ReadiumZIPFoundation", package: "ZIPFoundation")],
+            dependencies: ["NoveliaKindle", "NoveliaEPUB", .product(name: "CLibMobi", package: "CLibMobi"), .product(name: "ReadiumZIPFoundation", package: "ZIPFoundation")],
             path: "Tests/NoveliaKindleTests",
             resources: [.copy("Fixtures")]
         ),

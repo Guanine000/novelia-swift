@@ -191,6 +191,13 @@ final class WebDAVSyncStore: ObservableObject {
                                          verifiesBlobs: trigger == nil) { [weak self] in self?.show($0) }
                     }
                 }
+                if options.books, web.books.contains(where: { $0.novel.isRemote }) || !cloudBooks.webBooks.isEmpty || !local.webEPUBMaps.isEmpty || local.readingPositions.keys.contains(where: { $0.hasPrefix("webepub:") }) {
+                    stage = "同步网络小说章节进度与书签"
+                    try await manifestGate.run {
+                        let identity = try WebDAVClient(address: self.trimmedAddress, username: self.username.trimmingCharacters(in: .whitespacesAndNewlines), password: self.password, folderCache: folderCache, webEPUBIdentity: true)
+                        try await WebNovelEPUBIdentitySync.run(remote: identity, local: self.local)
+                    }
+                }
                 let imported = result.imported
                 recordETagSupport(lacking: result.lacksETag)
                 autoState.content.lastSuccess = Date()
@@ -287,6 +294,31 @@ final class WebDAVSyncStore: ObservableObject {
         let removed = try await manifestGate.run { try await WebDAVCloudBookDeleter.delete(keys, from: client) }
         cloudBooks.remove(keys: keys)
         return removed
+    }
+
+    /// 显式更新本机已有的网络小说 EPUB；不通过网站重新生成，保证两端使用同一文件哈希。
+    func updateWebNovelEPUBFromCloud(_ book: DownloadedWebNovel,
+                                    web: any SyncBookLibrary<DownloadedWebNovel>) async throws -> WebDAVEPUBUpdater.Result {
+        guard !isSyncing, downloadingCloudBook == nil else { throw WebDAVEPUBUpdateError.busy }
+        let account = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isEnabled, syncBooks, !account.isEmpty, !account.contains(":"), !password.isEmpty else {
+            throw WebDAVEPUBUpdateError.disabled
+        }
+        let client = try WebDAVClient(address: trimmedAddress, username: account, password: password)
+        isSyncing = true
+        show(WebDAVSyncProgress(stage: "从 WebDAV 更新 EPUB", detail: "正在读取云端版本…"))
+        defer { isSyncing = false; finishAutomaticRun() }
+        let result = try await manifestGate.run {
+            let identity = try WebDAVClient(address: self.trimmedAddress, username: account, password: self.password, webEPUBIdentity: true)
+            try await WebNovelEPUBIdentitySync.run(remote: identity, local: self.local)
+            return try await WebDAVEPUBUpdater.run(book: book, remote: client, library: web, local: local) { detail in
+                self.progressDetail = detail
+            }
+        }
+        cloudBooks.remove(webID: book.id)
+        completedUnits = totalUnits
+        progressDetail = "云端 EPUB 与阅读状态已取回"
+        return result
     }
 
     /// 下载云端书籍的全部文件并导入书库，成功后移除云端记录。与同步互不阻塞；同一时间只下载一本。

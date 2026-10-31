@@ -1169,3 +1169,137 @@ extension WebDAVSyncEngineTests {
         XCTAssertEqual(manifest.deletedBooks, ["web:recent": date(900), "web:new": now, "web:again": now.addingTimeInterval(1)])
     }
 }
+
+
+@MainActor
+final class WebDAVEPUBUpdaterTests: XCTestCase {
+    private var directory: URL!
+    private var log: EventLog!
+    private var remote: FakeRemote!
+    private var library: FakeLibrary<DownloadedWebNovel>!
+    private var local: FakeLocalState!
+    private var old: DownloadedWebNovel!
+    private var target: DownloadedWebNovel!
+    private var asset: WebDAVAsset!
+
+    override func setUp() async throws {
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        log = EventLog(); remote = FakeRemote(log: log, directory: directory)
+        library = FakeLibrary("web", log: log); local = FakeLocalState(log: log, directory: directory)
+        let novel = Novel(id: "remote/site/book", title: "Book", author: "", summary: "", genres: [], chapters: [], accent: .plum, providerId: "site", novelId: "book")
+        old = DownloadedWebNovel(novel: novel, fileFilename: "old.epub", downloadedAt: Date(timeIntervalSince1970: 1), translationSource: nil, downloadMode: nil, fileFormat: .epub)
+        target = DownloadedWebNovel(novel: novel, fileFilename: "new.epub", downloadedAt: Date(timeIntervalSince1970: 2), translationSource: .sakura, downloadMode: .bilingual, fileFormat: .epub)
+        library.books = [old]
+        let file = directory.appendingPathComponent(old.fileFilename)
+        try Data("old".utf8).write(to: file)
+        library.files[old.id] = [old.fileFilename: file]
+        asset = remote.seed("exact cloud EPUB", as: target.fileFilename)
+        var manifest = WebDAVManifest(); manifest.webBooks = [WebDAVBook(record: target, assets: [asset])]
+        remote.manifest = manifest
+    }
+    override func tearDown() async throws { try? FileManager.default.removeItem(at: directory) }
+
+    func testDownloadsExactCloudFileAndLatestStateWithoutServerWrites() async throws {
+        let key = "epub:\(asset.hash)"
+        let bookmark = ReaderBookmark(id: UUID(), bookKey: key, chapterIndex: 0, chapterProgression: 0.2, chapterTitle: nil, snippet: "", createdAt: Date(), updatedAt: Date())
+        remote.onDownload = { [self] in
+            remote.manifest?.positions[key] = SyncedReadingPosition(chapterIndex: 3, fraction: 0.5, updatedAt: Date())
+            remote.manifest?.positions["epub:unrelated"] = SyncedReadingPosition(chapterIndex: 7, fraction: 0.8, updatedAt: Date())
+            remote.manifest?.bookmarks = [bookmark.id.uuidString: bookmark]
+        }
+        let result = try await WebDAVEPUBUpdater.run(book: old, remote: remote, library: library, local: local)
+        guard case .updated = result else { return XCTFail("expected update") }
+        XCTAssertEqual(library.books, [target])
+        XCTAssertEqual(library.received[target.id]?[target.fileFilename], Data("exact cloud EPUB".utf8))
+        XCTAssertEqual(local.readingPositions[key]?.chapterIndex, 3)
+        XCTAssertNil(local.readingPositions["epub:unrelated"])
+        XCTAssertEqual(local.appliedBookmarks?[bookmark.id.uuidString], bookmark)
+        XCTAssertTrue(remote.puts.isEmpty)
+        XCTAssertEqual(log.count("remote.upload"), 0)
+        XCTAssertTrue(remote.handedOut.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+    }
+    func testSameHashOnlyMergesState() async throws {
+        try Data("exact cloud EPUB".utf8).write(to: library.files[old.id]![old.fileFilename]!)
+        let key = "epub:\(asset.hash)"
+        remote.manifest?.positions[key] = SyncedReadingPosition(chapterIndex: 2, fraction: 0.4, updatedAt: Date())
+        let result = try await WebDAVEPUBUpdater.run(book: old, remote: remote, library: library, local: local)
+        guard case .alreadyCurrent = result else { return XCTFail("same bytes") }
+        XCTAssertEqual(library.books, [old]); XCTAssertEqual(log.count("remote.download"), 0)
+        XCTAssertEqual(log.count("web.replace"), 0); XCTAssertEqual(local.readingPositions[key]?.chapterIndex, 2)
+    }
+    func testOlderOrEqualDateDifferentFileCannotReplaceLocal() async throws {
+        for date in [Date(timeIntervalSince1970: 0), old.downloadedAt] {
+            let record = DownloadedWebNovel(novel: target.novel, fileFilename: target.fileFilename, downloadedAt: date, translationSource: target.translationSource, downloadMode: target.downloadMode, fileFormat: target.fileFormat)
+            remote.manifest?.webBooks = [WebDAVBook(record: record, assets: [asset])]
+            do { _ = try await WebDAVEPUBUpdater.run(book: old, remote: remote, library: library, local: local); XCTFail("must refuse stale/conflicting record") } catch {}
+        }
+        XCTAssertEqual(library.books, [old]); XCTAssertEqual(log.count("remote.download"), 0)
+    }
+    func testCloudOrLocalDeletionDuringDownloadDoesNotReplaceOrApplyState() async throws {
+        for deleteCloud in [true, false] {
+            library.books = [old]
+            remote.onDownload = { [self] in
+                if deleteCloud { remote.manifest?.webBooks = [] } else { library.books = [] }
+            }
+            remote.manifest?.webBooks = [WebDAVBook(record: target, assets: [asset])]
+            do { _ = try await WebDAVEPUBUpdater.run(book: old, remote: remote, library: library, local: local); XCTFail("must revalidate") } catch {}
+            XCTAssertEqual(log.count("web.replace"), 0); XCTAssertNil(local.appliedBookmarks)
+        }
+    }
+    func testCorruptOrMissingBlobLeavesOldBook() async throws {
+        for bytes in [Data("corrupt".utf8), nil] {
+            remote.blobs[asset.hash] = bytes
+            do { _ = try await WebDAVEPUBUpdater.run(book: old, remote: remote, library: library, local: local); XCTFail("must verify hash") } catch {}
+            XCTAssertEqual(library.books, [old]); XCTAssertEqual(log.count("web.replace"), 0)
+        }
+        XCTAssertTrue(remote.handedOut.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+    }
+    func testCancellationAfterDownloadLeavesOldBook() async throws {
+        let task = Task { try await WebDAVEPUBUpdater.run(book: old, remote: remote, library: library, local: local) }
+        remote.onDownload = { task.cancel() }
+        do { _ = try await task.value; XCTFail("must cancel") } catch is CancellationError {}
+        XCTAssertEqual(library.books, [old]); XCTAssertEqual(log.count("web.replace"), 0)
+        XCTAssertNil(local.appliedBookmarks)
+    }
+}
+
+@MainActor
+final class WebNovelEPUBIdentitySyncTests: XCTestCase {
+    func testIdentityStateSurvivesDifferentFileManifestAndConditionalRetry() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = EventLog(), key = WebNovelEPUBContext.key(provider: "source", novel: "book")
+        let remote = FakeRemote(log: log, directory: directory), local = FakeLocalState(log: log, directory: directory)
+        let timestamp = Date(timeIntervalSince1970: 100)
+        let old = SyncedReadingPosition(chapterIndex: 10, fraction: nil, updatedAt: timestamp, chapterProgression: 0.3, chapterID: "stable")
+        let newer = SyncedReadingPosition(chapterIndex: 99, fraction: nil, updatedAt: timestamp.addingTimeInterval(20), chapterProgression: 0.7, chapterID: "stable")
+        var manifest = WebDAVManifest(); manifest.positions[key] = old
+        let bookmark = ReaderBookmark(id: UUID(), bookKey: key, chapterIndex: 99, chapterProgression: 0.2, chapterTitle: "Chapter", snippet: "", createdAt: timestamp, updatedAt: timestamp, chapterID: "stable")
+        manifest.bookmarks = [bookmark.id.uuidString: bookmark]
+        remote.manifest = manifest
+        local.readingPositions[key] = newer
+        var removed = bookmark; removed.deleted = true; removed.updatedAt = timestamp.addingTimeInterval(10)
+        local.bookmarks = [removed.id.uuidString: removed]
+        remote.putErrors = [.concurrentChange]
+        try await WebNovelEPUBIdentitySync.run(remote: remote, local: local)
+        XCTAssertEqual(remote.puts.count, 2)
+        XCTAssertEqual(remote.manifest?.positions[key], newer)
+        XCTAssertTrue(local.appliedBookmarks?[removed.id.uuidString]?.isDeleted == true)
+        XCTAssertTrue(remote.manifest?.webBooks.isEmpty == true)
+        // 原 v1 清单的书籍hash/版本与本清单无关；同步无需下载新版EPUB。
+        XCTAssertEqual(log.count("remote.download"), 0)
+    }
+    func testIdentityFailureDoesNotApplyUncommittedRemoteState() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = EventLog(), remote = FakeRemote(log: EventLog(), directory: directory)
+        let local = FakeLocalState(log: log, directory: directory)
+        remote.manifest = WebDAVManifest(); remote.putError = .unsupportedConditions
+        do { try await WebNovelEPUBIdentitySync.run(remote: remote, local: local); XCTFail("must preserve strong conditions") } catch WebDAVSyncError.unsupportedConditions {}
+        XCTAssertNil(local.appliedBookmarks)
+        XCTAssertTrue(local.readingPositions.isEmpty)
+    }
+}

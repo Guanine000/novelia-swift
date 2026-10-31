@@ -7,6 +7,18 @@ struct WebNovelDownloadProgress: Equatable {
     var fraction: Double { total == 0 ? 0 : Double(completed) / Double(total) }
 }
 
+enum WebNovelEPUBUpdateError: LocalizedError {
+    case unavailable, busy, changed, configurationRequired
+    var errorDescription: String? {
+        switch self {
+        case .unavailable: "这本书不是可更新的网络小说 EPUB。"
+        case .configurationRequired: "下载设置不完整，请先选择语言模式和译源。"
+        case .busy: "这本小说正在下载，请稍后重试。"
+        case .changed: "更新期间书籍已被删除、移动或替换，未覆盖当前书库，请重新操作。"
+        }
+    }
+}
+
 /// Root 持有的网络小说下载与本地记录 Store，通过 NovelDownloadService 获取 EPUB。
 /// 管理 WebNovelDownloads 文件、library.json 和进度/错误；保留记录身份及同步兼容。
 @MainActor
@@ -21,6 +33,8 @@ final class WebNovelDownloadStore: ObservableObject {
     private let indexURL: URL
     private let api: any NovelDownloadService
     private let repository: LocalLibraryRepository<DownloadedWebNovel>
+    /// App 集成层校验新 EPUB 并尝试承接阅读状态；默认无操作，供独立存储验证使用。
+    private let prepareEPUBUpdate: (DownloadedWebNovel, URL, URL) async throws -> Void
     private var hasLoaded = false
     var isReady: Bool { hasLoaded }
     @Published private(set) var isLoading = true
@@ -28,10 +42,12 @@ final class WebNovelDownloadStore: ObservableObject {
 
     init(api: any NovelDownloadService, fileManager: FileManager = .default, directory: URL? = nil,
          indexWriter: LocalLibraryIndexWriter = LocalLibraryIndexWriter(),
-         fileCopier: LocalLibraryFileCopier = LocalLibraryFileCopier()) {
+         fileCopier: LocalLibraryFileCopier = LocalLibraryFileCopier(),
+         prepareEPUBUpdate: @escaping (DownloadedWebNovel, URL, URL) async throws -> Void = { _, _, _ in }) {
         self.api = api
         self.fileManager = fileManager
         self.syncFileCopier = fileCopier
+        self.prepareEPUBUpdate = prepareEPUBUpdate
         let support = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let directory = directory ?? support.appendingPathComponent("WebNovelDownloads", isDirectory: true)
         self.directory = directory
@@ -117,6 +133,70 @@ final class WebNovelDownloadStore: ObservableObject {
         progress[novel.id] = nil
     }
 
+    /// 手动更新同一下载记录：完整重新生成，沿用语言/译源；内容相同不改变文件或同步时间。
+    /// 提交时复核旧记录，防止网络等待期间的删除或移动被重新添加；失败仅清理新临时文件。
+    @discardableResult
+    func updateEPUB(_ book: DownloadedWebNovel, configuration: WebNovelEPUBUpdateConfiguration? = nil) async throws -> Bool {
+        guard book.novel.isRemote, book.resolvedFileFormat == .epub,
+              let provider = book.novel.providerId, let novel = book.novel.novelId else {
+            throw WebNovelEPUBUpdateError.unavailable
+        }
+        guard let selected = configuration ?? book.epubUpdateConfiguration, selected.isValid else {
+            throw WebNovelEPUBUpdateError.configurationRequired
+        }
+        guard progress[book.id] == nil else { throw WebNovelEPUBUpdateError.busy }
+        try await loadIfNeeded()
+        guard books.first(where: { $0.id == book.id }) == book else { throw WebNovelEPUBUpdateError.changed }
+        progress[book.id] = .init(completed: 0, total: 1)
+        errors[book.id] = nil
+        defer { progress[book.id] = nil }
+        let source = selected.effectiveSource
+        let destination = uniqueDestination(for: Self.websiteDownloadFilename(title: book.novel.title,
+                                         mode: selected.mode, translationSource: source))
+        var committed = false
+        defer { if !committed { try? fileManager.removeItem(at: destination) } }
+        do {
+            try Task.checkCancellation()
+            try await api.downloadWebNovelEPUB(to: destination, providerId: provider, novelId: novel,
+                                             title: book.novel.title, translationSource: source, mode: selected.mode)
+            try Task.checkCancellation()
+            let oldURL = fileURL(for: book)
+            let same = try await Task.detached(priority: .utility) {
+                try FileContentHash.sha256(oldURL) == FileContentHash.sha256(destination)
+            }.value
+            guard books.first(where: { $0.id == book.id }) == book else { throw WebNovelEPUBUpdateError.changed }
+            try Task.checkCancellation()
+            if same {
+                if book.downloadMode != selected.mode || book.translationSource != source {
+                    try await commit { records in
+                        guard let index = records.firstIndex(where: { $0.id == book.id }), records[index] == book else { throw WebNovelEPUBUpdateError.changed }
+                        records[index] = DownloadedWebNovel(novel: book.novel, fileFilename: book.fileFilename,
+                            downloadedAt: book.downloadedAt, translationSource: source, downloadMode: selected.mode, fileFormat: book.fileFormat)
+                    }
+                }
+                return false
+            }
+            try await prepareEPUBUpdate(book, oldURL, destination)
+            try Task.checkCancellation()
+            let updated = DownloadedWebNovel(novel: book.novel, fileFilename: destination.lastPathComponent,
+                                            downloadedAt: Date(), translationSource: source,
+                                            downloadMode: selected.mode, fileFormat: .epub)
+            try await commit { records in
+                guard let index = records.firstIndex(where: { $0.id == book.id }), records[index] == book else {
+                    throw WebNovelEPUBUpdateError.changed
+                }
+                records[index] = updated
+            }
+            committed = true
+            await syncFileCopier.remove([oldURL])
+            return true
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            if !(error is CancellationError) { errors[book.id] = error.localizedDescription }
+            throw error
+        }
+    }
+
     /// 索引提交失败时保留原文件，用户可以重试删除。
     func remove(_ book: DownloadedWebNovel) async throws {
         let removed = try await commit { records -> DownloadedWebNovel? in
@@ -188,12 +268,17 @@ final class WebNovelDownloadStore: ObservableObject {
         guard let old = books.first(where: { $0.id == book.id }), let source = files[book.fileFilename] else {
             throw CocoaError(.fileReadNoSuchFile)
         }
+        guard book.downloadedAt >= old.downloadedAt else { throw WebNovelEPUBUpdateError.changed }
         let destination = directory.appendingPathComponent("sync-\(UUID().uuidString).\(book.resolvedFileFormat.fileExtension)")
         try await syncFileCopier.copy(from: source, to: destination)
         let replacement = DownloadedWebNovel(novel: book.novel, fileFilename: destination.lastPathComponent,
             downloadedAt: book.downloadedAt, translationSource: book.translationSource,
             downloadMode: book.downloadMode, fileFormat: book.fileFormat)
         do {
+            if old.novel.isRemote, old.resolvedFileFormat == .epub, book.resolvedFileFormat == .epub {
+                try await prepareEPUBUpdate(old, fileURL(for: old), destination)
+            }
+            try Task.checkCancellation()
             try await commit { records in
                 guard let index = records.firstIndex(where: { $0.id == book.id }), records[index] == old else {
                     throw CocoaError(.fileWriteUnknown)

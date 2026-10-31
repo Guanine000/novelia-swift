@@ -33,9 +33,11 @@ struct EPUBReaderView: View {
     var textBook: PagedTextBook? = nil
     var accessory: AnyView? = nil
     var statisticsBook: ReadingBook? = nil
+    var webContext: WebNovelEPUBContext? = nil
+    var onReachedEnd: (() -> Void)? = nil
     var body: some View {
         EPUBReaderViewContent(bookURL: bookURL, textBook: textBook, accessory: accessory,
-                          statisticsBook: statisticsBook, settings: settings)
+                          statisticsBook: statisticsBook, settings: settings, webContext: webContext, onReachedEnd: onReachedEnd)
     }
 }
 
@@ -66,12 +68,13 @@ private struct EPUBReaderViewContent: View {
     var accessory: AnyView? = nil
     var statisticsBook: ReadingBook? = nil
 
-    init(bookURL: URL?, textBook: PagedTextBook?, accessory: AnyView?, statisticsBook: ReadingBook?, settings: ReaderSettings) {
+
+    init(bookURL: URL?, textBook: PagedTextBook?, accessory: AnyView?, statisticsBook: ReadingBook?, settings: ReaderSettings, webContext: WebNovelEPUBContext?, onReachedEnd: (() -> Void)?) {
         self.bookURL = bookURL; self.textBook = textBook; self.accessory = accessory
         self.statisticsBook = statisticsBook
         _settings = ObservedObject(wrappedValue: settings)
         _backgrounds = ObservedObject(wrappedValue: settings.backgrounds)
-        _model = StateObject(wrappedValue: EPUBReaderModel(settings: settings))
+        _model = StateObject(wrappedValue: EPUBReaderModel(settings: settings, webContext: webContext, onReachedEnd: onReachedEnd))
     }
 
     var body: some View {
@@ -200,7 +203,10 @@ private struct EPUBReaderViewContent: View {
                 ReaderBookmarksSearchSheet(store: settings.bookmarks, bookKey: key, chapterCount: model.chapterCount,
                                            chapterTitle: { model.chapterTitle($0) },
                                            chapterText: { try await model.chapterPlainText($0) },
-                                           onJump: { model.jump(toChapter: $0, progression: $1) })
+                                           onJump: { model.jump(toChapter: $0, progression: $1) },
+                                           legacyBookKey: model.legacyBookmarkKey,
+                                           chapterIDAtIndex: { model.webChapterID($0) },
+                                           resolveChapter: { model.bookmarkIndex($0) })
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NoveliaImportedFontsChanged"))) { _ in model.refreshBackground() }
@@ -244,8 +250,8 @@ private struct EPUBReaderViewContent: View {
                 .frame(maxWidth: .infinity)
             if let accessory { accessory }
             if let key = model.bookmarkKey {
-                ReaderBookmarkButton(store: settings.bookmarks, bookKey: key, pageRange: model.currentPageRange,
-                                     chapterTitle: currentChapterTitle, snippet: { model.currentPageSnippet })
+                ReaderBookmarkButton(store: settings.bookmarks, bookKey: model.currentBookmarkKey ?? key, pageRange: model.currentPageRange,
+                                     chapterTitle: currentChapterTitle, snippet: { model.currentPageSnippet }, chapterID: model.currentPageRange.flatMap { model.webChapterID($0.chapter) })
                 Button {
                     isShowingBookmarks = true
                 } label: {
@@ -318,7 +324,7 @@ private struct EPUBReaderViewContent: View {
                     Button {
                         model.commitTurn(forward: true)
                     } label: { Image(systemName: "chevron.right") }
-                    .disabled(!model.canTurn(forward: true))
+                    .disabled(!model.canTurn(forward: true) && !model.canShowWebNovelEnd)
                     .accessibilityLabel("下一页")
                 }
             }
@@ -468,6 +474,7 @@ private struct EPUBReaderViewContent: View {
             }
         }
         .presentationDetents([.medium, .large])
+
     }
 
     private func toggleTOCGroup(_ index: Int) {
@@ -852,6 +859,9 @@ struct EPUBReaderHost: View {
     let initialURL: URL?
     var statisticsID: String? = nil
     var statisticsTitle: String? = nil
+    var webContext: WebNovelEPUBContext? = nil
+    var onReachedEnd: (() -> Void)? = nil
+    var accessory: AnyView? = nil
     @State private var resolvedURL: URL?
     /// 实验：EPUB 改由 Readium（WKWebView）排版；TXT 与在线章节不受影响。
     @AppStorage(SettingsKey.readerEPUBReadium) private var usesReadium = false
@@ -877,9 +887,9 @@ struct EPUBReaderHost: View {
         Group {
             if let resolvedURL {
                 if usesReadium {
-                    ReadiumEPUBReaderView(bookURL: resolvedURL, statisticsBook: descriptor(for: resolvedURL))
+                    ReadiumEPUBReaderView(bookURL: resolvedURL, accessory: accessory, statisticsBook: descriptor(for: resolvedURL), webContext: webContext, onReachedEnd: onReachedEnd)
                 } else {
-                    EPUBReaderView(bookURL: resolvedURL, statisticsBook: descriptor(for: resolvedURL))
+                    EPUBReaderView(bookURL: resolvedURL, accessory: accessory, statisticsBook: descriptor(for: resolvedURL), webContext: webContext, onReachedEnd: onReachedEnd)
                 }
             } else {
                 ProgressView("准备样例书…")
@@ -919,6 +929,7 @@ private struct EPUBReaderPageSurface: View, Equatable {
             onCommit: { forward in
                 model.commitTurn(forward: forward)
             },
+            onBlockedTurn: { model.blockedTurn(forward: $0) },
             onAnimatingChange: { animating in model.setAnimating(animating) },
             linkHitTest: { point in model.linkHit(at: point) },
             onImageTap: { point in model.openImage(at: point) },

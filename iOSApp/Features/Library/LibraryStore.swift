@@ -197,6 +197,12 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
     }
 
     private func readingStatus(for book: LibraryBook) -> LibraryReadingStatus {
+        if case .webNovel(let record) = book.origin, record.novel.isRemote,
+           let provider = record.novel.providerId, let novel = record.novel.novelId,
+           let position = positions[WebNovelEPUBContext.key(provider: provider, novel: novel)], let id = position.chapterID {
+            let title = record.novel.chapters.first(where: { $0.id == id })?.title ?? "已同步阅读位置（章节待核对）"
+            return LibraryReadingStatus(lastReadAt: max(position.updatedAt, lastOpened[book.key] ?? .distantPast), detail: title, fraction: nil)
+        }
         let position = hash(for: book).flatMap { positions[book.positionPrefix + $0] }
         let opened = lastOpened[book.key]
         let lastReadAt = [position?.updatedAt, opened].compactMap { $0 }.filter { $0 > .distantPast }.max()

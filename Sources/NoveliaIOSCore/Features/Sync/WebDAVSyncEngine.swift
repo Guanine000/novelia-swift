@@ -32,6 +32,8 @@ protocol WebDAVSyncLocalState {
     var librarySeries: LibrarySeriesState { get }
     func applyLibrarySeries(_ series: LibrarySeriesState)
     /// 阅读器书签（含删除墓碑），随书籍同步。
+    var webEPUBMaps: [String: WebNovelEPUBMap] { get }
+    func applyWebEPUBMaps(_ maps: [String: WebNovelEPUBMap]) throws
     var bookmarks: [String: ReaderBookmark] { get }
     func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) throws
     var blockedTags: [String: SyncedBlockedTag] { get }
@@ -48,6 +50,8 @@ protocol WebDAVSyncLocalState {
 }
 
 extension WebDAVSyncLocalState {
+    var webEPUBMaps: [String: WebNovelEPUBMap] { [:] }
+    func applyWebEPUBMaps(_ maps: [String: WebNovelEPUBMap]) throws {}
     var bookmarks: [String: ReaderBookmark] { [:] }
     func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) throws {}
 }

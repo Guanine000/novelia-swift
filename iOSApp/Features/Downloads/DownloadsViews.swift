@@ -268,6 +268,59 @@ struct LibraryImportProgressOverlay: View {
 }
 
 /// 在“网络小说/文库”两个下载库之间移动书籍；系列归属与最近打开时间随新标识转移。
+/// 网站更新缺失历史配置时共用的选择页；不请求网络，只有明确提交才开始更新。
+struct WebNovelEPUBUpdateOptionsSheet: View {
+    let book: DownloadedWebNovel
+    let onConfirm: (WebNovelEPUBUpdateConfiguration) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var mode: WebNovelDownloadMode?
+    @State private var source: NovelTranslationSource?
+    init(book: DownloadedWebNovel, onConfirm: @escaping (WebNovelEPUBUpdateConfiguration) -> Void) {
+        self.book = book; self.onConfirm = onConfirm
+        _mode = State(initialValue: book.downloadMode)
+        _source = State(initialValue: book.translationSource)
+    }
+    private var configuration: WebNovelEPUBUpdateConfiguration? {
+        guard let mode else { return nil }
+        let value = WebNovelEPUBUpdateConfiguration(mode: mode, translationSource: source)
+        return value.isValid ? value : nil
+    }
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(book.novel.title)
+                    Text("这本书没有完整的历史下载设置，请确认本次更新的语言模式和译源。成功后会保存选择，后续更新沿用。").font(.footnote)
+                }
+                Section("语言模式") {
+                    ForEach(WebNovelDownloadMode.allCases) { value in
+                        Button { mode = value } label: {
+                            HStack { Text(value.title); Spacer(); if mode == value { Image(systemName: "checkmark") } }
+                        }.accessibilityLabel(value.title)
+                    }
+                }
+                if let mode, mode != .original {
+                    Section("翻译源") {
+                        ForEach(NovelTranslationSource.allCases) { value in
+                            Button { source = value } label: {
+                                HStack { Text(value.title); Spacer(); if source == value { Image(systemName: "checkmark") } }
+                            }.accessibilityLabel(value.title)
+                        }
+                    }
+                }
+                Button("确认并更新 EPUB") {
+                    guard let configuration else { return }
+                    dismiss(); onConfirm(configuration)
+                }.disabled(configuration == nil)
+            }
+            .navigationTitle("选择更新设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.visible, for: .navigationBar)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
+        }
+    }
+}
+
 @MainActor
 enum LibraryMover {
     static func moveToWenku(_ book: DownloadedWebNovel, web: WebNovelDownloadStore,

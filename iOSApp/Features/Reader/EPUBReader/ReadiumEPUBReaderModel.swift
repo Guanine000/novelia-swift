@@ -113,9 +113,12 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     private static let styleDefaultsKey = ReaderSettings.epubStyleKey
 
     private let settings: ReaderSettings
+    private let webContext: WebNovelEPUBContext?
+    private let onReachedEnd: (() -> Void)?
 
-    init(settings: ReaderSettings) {
+    init(settings: ReaderSettings, webContext: WebNovelEPUBContext? = nil, onReachedEnd: (() -> Void)? = nil) {
         self.settings = settings
+        self.webContext = webContext; self.onReachedEnd = onReachedEnd
         if let data = UserDefaults.standard.data(forKey: Self.styleDefaultsKey),
            let saved = try? JSONDecoder().decode(EPUBReaderStyle.self, from: data) {
             style = saved
@@ -400,7 +403,6 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             fontFamilyDeclarations: Self.importedFontDeclarations()
         )
         config.readiumCSSRSProperties.pageGutter = CSSPxLength(Double(style.leftMargin + style.rightMargin) / 2)
-        config.readiumCSSRSProperties.textColor = CSSIntColor(Self.rgb(themeTextColor))
         // 根背景透明：书籍未设背景时露出宿主绘制的阅读背景；书籍给 body 设的背景
         // （如 `<body bgcolor>`）按 CSS 规则延伸到整个页面。
         config.readiumCSSRSProperties.backgroundColor = TransparentCSSColor()
@@ -409,8 +411,12 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         navigator.delegate = self
 
         // 先于翻页适配器注册且不消费事件：只记下点按，供位置日志区分用户翻页与 Readium 自行移动。
-        gestureToken = navigator.addObserver(.tap { [weak self] _ in
+        gestureToken = navigator.addObserver(.tap { [weak self] event in
             self?.noteGesture("tap")
+            if let self, let view = self.navigator?.view,
+               event.location.x < view.bounds.width / 3 || event.location.x > view.bounds.width * 2 / 3 { self.pendingWebPositionWrite = true }
+            if let self, self.isAtWebNovelEnd, let view = self.navigator?.view,
+               event.location.x > view.bounds.width * 2 / 3 { self.pendingWebPositionWrite = false; self.onReachedEnd?(); return true }
             return false
         })
         let adapter = DirectionalNavigationAdapter(animatedTransition: true)
@@ -491,7 +497,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     private func preferences() -> EPUBPreferences {
         // 不提交背景色与文字色：ReadiumCSS 会以 !important 把它们套到所有元素，
         // 抹掉书内的配色、白字光晕与元素背景。背景由宿主绘制（HTML 根透明），
-        // 默认文字色经 RS__textColor 设定（见 makeNavigator），书内颜色可正常覆盖。
+        // 默认文字色沿用 Readium，自带夜间主题可通过偏好更新，书内浅色配色保留。
         // 深色模式仍用 Readium 夜间主题，强制可读的浅色文字。
         // 行距、段距、缩进属于 ReadiumCSS 的“高级设置”，需关闭出版社样式才生效；
         // 保持默认时沿用书籍原有 CSS。
@@ -511,17 +517,6 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         )
     }
 
-    private var themeTextColor: UIColor {
-        UIColor(settings.appearance.primaryText(system: isDarkMode ? .dark : .light))
-    }
-
-    private static func rgb(_ color: UIColor) -> Int {
-        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
-        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-        func channel(_ value: CGFloat) -> Int { Int((min(max(value, 0), 1) * 255).rounded()) }
-        return (channel(red) << 16) | (channel(green) << 8) | channel(blue)
-    }
-
     private static func importedFontDeclarations() -> [AnyHTMLFontFamilyDeclaration] {
         EPUBLocalFonts.importedFonts().compactMap { font in
             guard let file = FileURL(url: font.url) else { return nil }
@@ -539,23 +534,26 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         let dark = settings.isDark(systemIsDark: systemIsDark)
         let font = CGFloat(settings.fontSize)
         guard dark != isDarkMode || font != style.fontSize else { return }
-        let themeChanged = dark != isDarkMode
         isDarkMode = dark
         style.fontSize = font
-        // 默认文字色属于导航器配置，切换深浅色需要重建。
-        if themeChanged, navigator != nil {
-            rebuildNavigator()
-        } else {
-            markNavigation("preferences")
-            navigator?.submitPreferences(preferences())
-        }
-    }
-
-    /// 背景颜色变化后重新提交偏好（背景图由宿主视图绘制在导航器之下）。
-    func refreshBackground() {
+        // 深浅色是 Readium 的可更新偏好，保留当前导航器与页面事件通道。
+        // 默认文字色由 Readium 主题负责，避免为静态 RS 配置在主题切换时重建整页。
         markNavigation("preferences")
         navigator?.submitPreferences(preferences())
         reapplyPageBackgrounds()
+    }
+
+    /// 自定义背景变化只更新外层颜色，不提交分页偏好或重写正文样式。
+    func refreshBackground() {
+        reapplyPageBackgrounds()
+    }
+
+    /// 只有去白底规则变化时重算正文；位置/显示回报仍只消费缓存，避免刷新反馈。
+    func refreshPageBackgroundRule() {
+        for case let page as WKWebView in pageLoadObservations.keyEnumerator().allObjects {
+            guard !page.isLoading, page.url != nil else { continue }
+            readPageBackground(of: page)
+        }
     }
 
     func applyStyle(_ requested: EPUBReaderStyle) {
@@ -591,7 +589,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     func goForward() {
         markNavigation("turnForward")
-        Task { _ = await navigator?.goForward(options: .animated) }
+        Task { if await navigator?.goForward(options: .animated) == false, isAtWebNovelEnd { pendingWebPositionWrite = false; onReachedEnd?() } }
     }
     func goBackward() {
         markNavigation("turnBackward")
@@ -608,6 +606,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     /// 匿名标识仅在此阅读器实例内有效；导航器重建另由 navigatorRevision 区分。
     private let diagnosticSession = DiagnosticContext.newTraceID()
     private var diagnosticOperation = 0
+    private var pendingWebPositionWrite = false
     /// 导航来源在下一次位置回报时取用并清空；超过 3 秒视为过期。
     /// 点按和拖动观察者也注册来源，未能关联时记为 unattributed。
     private var pendingLocationCause: (cause: String, time: ContinuousClock.Instant)?
@@ -617,6 +616,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     private func markNavigation(_ cause: String) {
         diagnosticOperation += 1
+        if ["turnForward", "turnBackward", "navigate", "seek", "swipe", "outerSwipe"].contains(cause) { pendingWebPositionWrite = true }
         pendingLocationCause = (cause, .now)
     }
 
@@ -657,6 +657,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     /// 已在章首或章末时保留外层的切章行为。
     private func swipeBegan(_ recognizer: UIPanGestureRecognizer) {
         guard let scrollView = recognizer.view as? UIScrollView else { return }
+        if isAtWebNovelEnd, recognizer.velocity(in: scrollView).x < -100 {
+            recognizer.isEnabled = false; recognizer.isEnabled = true
+            pendingWebPositionWrite = false; onReachedEnd?(); return
+        }
         if let webView = scrollView.superview as? WKWebView {
             markNavigation("swipe")
             logPageState(when: "swipe", page: webView, candidates: 1)
@@ -780,7 +784,31 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     private var positionsPerResource: [Int: Int] = [:]
 
     /// 书签与搜索使用的书籍身份：EPUB 为 `epub:<文件哈希>`，本地 TXT 为 `txt:<文件哈希>`；在线小说为 nil。
-    var bookmarkKey: String? { bookHash.map { "epub:\($0)" } ?? textBook?.bookmarkKey }
+    var bookmarkKey: String? { webContext?.bookKey ?? bookHash.map { "epub:\($0)" } ?? textBook?.bookmarkKey }
+    var webChapterPaths: [String] {
+        publication?.readingOrder.map { link in
+            let path = EPUBContainer.normalizePath(EPUBContainer.stripFragment(link.href.removingPercentEncoding ?? link.href))
+            return imageContainer?.spine.first(where: { $0.href == path || $0.href.hasSuffix("/" + path) || path.hasSuffix("/" + $0.href) })?.href ?? path
+        } ?? []
+    }
+    var legacyBookmarkKey: String? { webContext == nil ? nil : bookHash.map { "epub:\($0)" } }
+    var currentBookmarkKey: String? { currentPageRange.flatMap { webChapterID($0.chapter) } == nil ? (legacyBookmarkKey ?? bookmarkKey) : bookmarkKey }
+    func webChapterID(_ index: Int) -> String? { webContext?.chapterID(index: index, paths: webChapterPaths) }
+    func bookmarkIndex(_ bookmark: ReaderBookmark) -> Int? {
+        if let id = bookmark.chapterID { return webContext?.index(chapterID: id, paths: webChapterPaths) }
+        return bookmark.chapterIndex
+    }
+    private var isAtWebNovelEnd: Bool {
+        guard onReachedEnd != nil, status == .ready,
+              let locator, navigationIndex?.resourceIndex(for: locator.href) == chapterCount - 1,
+              let page = chapterPageSelection().page else { return false }
+        let scroll = page.scrollView
+        return !page.isLoading && !scroll.isDecelerating && scroll.bounds.width > 0
+            && scroll.contentSize.width >= scroll.bounds.width - 1
+            && scroll.contentOffset.x.isFinite && scroll.contentSize.width.isFinite
+            && scroll.contentOffset.x + scroll.bounds.width >= scroll.contentSize.width - 1
+    }
+
 
     var chapterCount: Int { publication?.readingOrder.count ?? 0 }
 
@@ -947,19 +975,21 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         guard let hash = bookHash,
               let key = locatorKey, let timeKey = locatorTimeKey,
               let json = try? locator.jsonString() else { return }
+        guard webContext == nil || pendingWebPositionWrite else { return }
+        pendingWebPositionWrite = false
         UserDefaults.standard.set(json, forKey: key)
         UserDefaults.standard.set(Date(), forKey: timeKey)
         let spine = navigationIndex?.resourceIndex(for: locator.href) ?? 0
         settings.recordEPUBPosition(
             hash: hash, fraction: locator.locations.totalProgression ?? 0,
-            spineIndex: spine, chapterOffset: nil, chapterProgression: locator.locations.progression)
+            spineIndex: spine, chapterOffset: nil, chapterProgression: locator.locations.progression, context: webContext, paths: webChapterPaths)
     }
 
     /// 本机 Locator 优先；若 WebDAV 合并来的位置更新（例如来自旧引擎或其他设备），改按其恢复。
     private func savedLocator(publication: Publication, hash: String) async -> Locator? {
         let defaults = UserDefaults.standard
-        let synced = settings.epubPosition(hash: hash)
-        if let key = locatorKey, let json = defaults.string(forKey: key),
+        let synced = settings.epubPosition(hash: hash, context: webContext, paths: webChapterPaths)
+        if !settings.missingWebEPUBChapter(context: webContext, paths: webChapterPaths), let key = locatorKey, let json = defaults.string(forKey: key),
            let value = try? JSONValue(jsonString: json),
            let saved = try? Locator(json: value, warnings: nil) {
             let savedAt = locatorTimeKey.flatMap { defaults.object(forKey: $0) as? Date } ?? .distantPast
@@ -1121,15 +1151,13 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     }
 
     private func readPageBackground(of webView: WKWebView) {
-        let script = """
-            (function () {
-              function bg(el) { return el ? getComputedStyle(el).backgroundColor : ''; }
-              var root = bg(document.documentElement);
-              return /^rgba?\\(/.test(root) && !/,\\s*0\\)$/.test(root) ? root : bg(document.body);
-            })()
-            """
+        let rule = ReaderBookBackgroundFollow(storedValue: UserDefaults.standard.string(forKey: SettingsKey.readerBookBackgroundFollow))
+        let revision = navigatorRevision
+        let script = EPUBReadiumPageBackground.script(
+            ignoresNearWhite: rule == .ignoreNearWhite, threshold: ReaderBookBackgroundFollow.nearWhiteThreshold)
         webView.evaluateJavaScript(script) { [weak self, weak webView] result, _ in
-            guard let self, let webView else { return }
+            guard let self, let webView, self.navigatorRevision == revision,
+                  rule == ReaderBookBackgroundFollow(storedValue: UserDefaults.standard.string(forKey: SettingsKey.readerBookBackgroundFollow)) else { return }
             let color = (result as? String).flatMap(Self.opaqueColor(fromCSS:))
             if let color { self.pageBackgrounds.setObject(color, forKey: webView) } else { self.pageBackgrounds.removeObject(forKey: webView) }
             self.applyPageBackground(to: webView)

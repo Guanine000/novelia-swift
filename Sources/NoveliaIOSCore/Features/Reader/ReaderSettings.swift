@@ -11,6 +11,7 @@ final class ReaderSettings: ObservableObject {
     let positions: any ReadingPositionProviding
     /// EPUB 与本地 TXT 的书签；未注入时只保存在内存。
     let bookmarks: ReaderBookmarkStore
+    let webEPUBMaps: WebNovelEPUBMapStore
     let defaults: UserDefaults
     @Published private var storedFontSize: Double
     @Published private var storedAppearance: String
@@ -21,6 +22,7 @@ final class ReaderSettings: ObservableObject {
         self.positions = positions ?? ReadingPositionStore(defaults: defaults)
         self.bookmarks = bookmarks ?? ReaderBookmarkStore()
         self.defaults = defaults
+        self.webEPUBMaps = WebNovelEPUBMapStore(defaults: defaults)
         let epubStyle = defaults.data(forKey: Self.epubStyleKey)
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
         let previousFont = defaults.object(forKey: SettingsKey.readerFontSize) as? Double
@@ -109,7 +111,7 @@ final class ReaderSettings: ObservableObject {
 }
 
 /// Readium：书籍给页面指定了不透明底色时，阅读器四周（边距、安全区）何时跟随它。
-/// 只影响四周，WebView 内的书页底色始终按书籍显示。
+/// 忽略近白时也透明化正文 html/body；其他底色及图片保持书内样式。
 enum ReaderBookBackgroundFollow: String, CaseIterable, Identifiable {
     /// 忽略纯白或接近白色的书籍底色（默认）：白底书保留阅读背景，彩色页面仍铺满。
     case ignoreNearWhite

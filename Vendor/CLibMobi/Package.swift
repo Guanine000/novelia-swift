@@ -16,7 +16,7 @@ let package = Package(
     name: "CLibMobi",
     platforms: [.iOS(.v17)],
     products: [
-        .library(name: "CLibMobi", targets: ["CLibMobi"])
+        .library(name: "CLibMobi", type: .static, targets: ["CLibMobi"])
     ],
     targets: [
         .target(

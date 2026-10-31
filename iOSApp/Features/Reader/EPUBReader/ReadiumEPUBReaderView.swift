@@ -12,9 +12,11 @@ struct ReadiumEPUBReaderView: View {
     var textBook: PagedTextBook? = nil
     var accessory: AnyView? = nil
     var statisticsBook: ReadingBook? = nil
+    var webContext: WebNovelEPUBContext? = nil
+    var onReachedEnd: (() -> Void)? = nil
     var body: some View {
         ReadiumEPUBReaderViewContent(bookURL: bookURL, textBook: textBook, accessory: accessory,
-                          statisticsBook: statisticsBook, settings: settings)
+                          statisticsBook: statisticsBook, settings: settings, webContext: webContext, onReachedEnd: onReachedEnd)
     }
 }
 
@@ -36,6 +38,7 @@ private struct ReadiumEPUBReaderViewContent: View {
     @State private var isScrubbing = false
     @State private var scrubProgress = 0.0
     @State private var draftStyle = EPUBReaderStyle()
+    @AppStorage(SettingsKey.readerBookBackgroundFollow) private var bookBackgroundFollow = ReaderBookBackgroundFollow.default.rawValue
     @State private var batteryLevel: Float = -1
     @State private var wasBatteryMonitoringEnabled = false
     let bookURL: URL?
@@ -47,12 +50,13 @@ private struct ReadiumEPUBReaderViewContent: View {
         settings.appearance.background(system: model.isDarkMode ? .dark : .light)
     }
 
-    init(bookURL: URL?, textBook: PagedTextBook?, accessory: AnyView?, statisticsBook: ReadingBook?, settings: ReaderSettings) {
+
+    init(bookURL: URL?, textBook: PagedTextBook?, accessory: AnyView?, statisticsBook: ReadingBook?, settings: ReaderSettings, webContext: WebNovelEPUBContext?, onReachedEnd: (() -> Void)?) {
         self.bookURL = bookURL; self.textBook = textBook; self.accessory = accessory
         self.statisticsBook = statisticsBook
         _settings = ObservedObject(wrappedValue: settings)
         _backgrounds = ObservedObject(wrappedValue: settings.backgrounds)
-        _model = StateObject(wrappedValue: ReadiumEPUBReaderModel(settings: settings))
+        _model = StateObject(wrappedValue: ReadiumEPUBReaderModel(settings: settings, webContext: webContext, onReachedEnd: onReachedEnd))
     }
 
     var body: some View {
@@ -159,6 +163,7 @@ private struct ReadiumEPUBReaderViewContent: View {
         .onChange(of: settings.fontSize) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         .onChange(of: settings.appearanceRaw) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         .onChange(of: backgrounds.revision) { _, _ in model.refreshBackground() }
+        .onChange(of: bookBackgroundFollow) { _, _ in model.refreshPageBackgroundRule() }
         .task(id: model.status) {
             if model.status == .ready { await model.scanBookDiagnostics() }
         }
@@ -170,7 +175,10 @@ private struct ReadiumEPUBReaderViewContent: View {
                 ReaderBookmarksSearchSheet(store: settings.bookmarks, bookKey: key, chapterCount: model.chapterCount,
                                            chapterTitle: { model.chapterTitle($0) },
                                            chapterText: { try await model.chapterPlainText($0) },
-                                           onJump: { model.jump(toChapter: $0, progression: $1) })
+                                           onJump: { model.jump(toChapter: $0, progression: $1) },
+                                           legacyBookKey: model.legacyBookmarkKey,
+                                           chapterIDAtIndex: { model.webChapterID($0) },
+                                           resolveChapter: { model.bookmarkIndex($0) })
             }
         }
         .sheet(isPresented: $isShowingStyle) { styleSheet }
@@ -197,8 +205,8 @@ private struct ReadiumEPUBReaderViewContent: View {
             if textBook == nil { engineBadge }
             if let accessory { accessory }
             if let key = model.bookmarkKey, model.status == .ready {
-                ReaderBookmarkButton(store: settings.bookmarks, bookKey: key, pageRange: model.currentPageRange,
-                                     chapterTitle: model.currentChapterTitle, snippet: { await model.currentPageSnippet() })
+                ReaderBookmarkButton(store: settings.bookmarks, bookKey: model.currentBookmarkKey ?? key, pageRange: model.currentPageRange,
+                                     chapterTitle: model.currentChapterTitle, snippet: { await model.currentPageSnippet() }, chapterID: model.currentPageRange.flatMap { model.webChapterID($0.chapter) })
                 Button {
                     isShowingBookmarks = true
                 } label: {
@@ -347,6 +355,7 @@ private struct ReadiumEPUBReaderViewContent: View {
             }
         }
         .presentationDetents([.medium, .large])
+
     }
 
     private var tocList: some View {

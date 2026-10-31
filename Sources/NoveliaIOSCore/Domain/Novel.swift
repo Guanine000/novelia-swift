@@ -83,6 +83,11 @@ public struct Novel: Identifiable, Hashable, Codable, Sendable {
 public struct NovelChapter: Identifiable, Hashable, Codable, Sendable {
     public let id: String
     public let title: String
+    /// 网站目录的原文标题；旧索引缺少时为nil，用于网络EPUB原文/译文目录对照。
+    public let originalTitle: String?
+    /// 网站目录中的卷/分组标题；只用于网络EPUB目录对应，历史记录可缺省。
+    public let volumeTitle: String?
+    public let originalVolumeTitle: String?
     public let originalText: String
     public let translatedText: String
     public let bilingualParagraphs: [NovelBilingualParagraph]?
@@ -94,10 +99,16 @@ public struct NovelChapter: Identifiable, Hashable, Codable, Sendable {
         originalText: String,
         translatedText: String,
         bilingualParagraphs: [NovelBilingualParagraph]? = nil,
-        translationsBySource: [NovelTranslationSource: [String]]? = nil
+        translationsBySource: [NovelTranslationSource: [String]]? = nil,
+        originalTitle: String? = nil,
+        volumeTitle: String? = nil,
+        originalVolumeTitle: String? = nil
     ) {
         self.id = id
         self.title = title
+        self.originalTitle = originalTitle
+        self.volumeTitle = volumeTitle
+        self.originalVolumeTitle = originalVolumeTitle
         self.originalText = originalText
         self.translatedText = translatedText
         self.bilingualParagraphs = bilingualParagraphs

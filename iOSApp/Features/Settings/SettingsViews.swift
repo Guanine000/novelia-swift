@@ -94,8 +94,8 @@ struct SettingsView: View {
                         ForEach(ReaderBookBackgroundFollow.allCases) { Text($0.title).tag($0) }
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("书页底色铺满四周")
-                            Text("书籍页面自带底色（如彩色标题页）时，边距也使用该颜色。“忽略白色底色”：白色或米白底色不铺满；“保留背景图片”：设置了阅读背景图片时不铺满。")
+                            Text("书页底色与阅读背景")
+                            Text("“忽略白色底色”：正文页面的白色、米白底色透明化，显示阅读背景；保留彩色底色、书内背景图片和局部元素底色。“保留背景图片”：保留书内底色，设置阅读背景图片时边距不跟随书页。")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -547,7 +547,7 @@ private struct LogActivitySheet: UIViewControllerRepresentable {
 private struct ThirdPartyLicensesView: View {
     /// GPL-3.0 第 5(a) 条要求的修改日期。scripts/build_local_release.py 要求它等于
     /// 发布提交的日期，因此每次发布构建时都需更新。
-    static let modifiedDate = "2026-10-27"
+    static let modifiedDate = "2026-10-31"
     private let packages: [(name: String, version: String, license: String, file: String)] = [
         ("SwiftSoup", "2.13.7", "MIT", "SwiftSoup-LICENSE.txt"),
         ("YueduCoreText", "0.8.0", "MPL-2.0", "YueduCoreText-LICENSE.txt"),

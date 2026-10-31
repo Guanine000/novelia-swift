@@ -45,11 +45,14 @@ subprocess.run(['xcrun','simctl','install',args.device,args.app], check=True)
 (r/'TapTests.swift').write_text(r'''import XCTest
 final class TapTests: XCTestCase {
  let bundle = "cc.novelia.ios.architecture-validation"
- func start(readium: Bool = false, failSearch: Bool = false, txt: Bool = false) -> XCUIApplication {
+ func start(readium: Bool = false, failSearch: Bool = false, txt: Bool = false, webUpdate: Bool = false, ambiguous: Bool = false, large: Bool = false) -> XCUIApplication {
   continueAfterFailure = false
   let app = XCUIApplication(bundleIdentifier: bundle)
   app.launchArguments = ["-architectureValidation", "-resetArchitectureValidation"]
   if txt { app.launchArguments.append("-architectureTXT") }
+  if webUpdate { app.launchArguments.append("-architectureWebEPUBUpdate") }
+  if ambiguous { app.launchArguments.append("-architectureWebEPUBAmbiguous") }
+  if large { app.launchArguments.append("-architectureLargeWebEPUB") }
   if failSearch { app.launchArguments.append("-architectureFailFirstSearch") }
   if readium { app.launchArguments.append("-architectureReadium") }
   app.launch()
@@ -71,6 +74,268 @@ final class TapTests: XCTestCase {
   let book = app.staticTexts["\u{67b6}\u{6784}\u{9a8c}\u{8bc1}\u{5c0f}\u{8bf4}"].firstMatch
   XCTAssertTrue(book.waitForExistence(timeout: 15)); book.tap()
   XCTAssertTrue(app.navigationBars["\u{4f5c}\u{54c1}\u{8be6}\u{60c5}"].waitForExistence(timeout: 10))
+ }
+
+ func revealInfo(_ element: XCUIElement, app: XCUIApplication, up: Bool = true) {
+  for _ in 0..<10 {
+   if element.exists { return }
+   if up { app.swipeUp() } else { app.swipeDown() }
+  }
+  XCTAssertTrue(element.exists, "Information is not reachable: \(element)")
+ }
+ func openDownloadedNetworkBook(readium: Bool, ambiguous: Bool = false, large: Bool = false) -> XCUIApplication {
+  let app = start(readium: readium, webUpdate: true, ambiguous: ambiguous, large: large)
+  app.buttons["发现"].firstMatch.tap()
+  let novel = app.staticTexts["架构验证小说"].firstMatch
+  XCTAssertTrue(novel.waitForExistence(timeout: 15)); novel.tap()
+  let download = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "下载全书 EPUB")).firstMatch
+  reveal(download, app: app); download.tap()
+  let begin = app.buttons["开始下载"]; reveal(begin, app: app); begin.tap()
+  XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "EPUB 下载完成")).firstMatch.waitForExistence(timeout: 30))
+  app.buttons["关闭"].tap(); app.buttons["书库"].firstMatch.tap()
+  let more = app.buttons["更多操作：架构验证小说"]
+  XCTAssertTrue(more.waitForExistence(timeout: 15)); more.tap()
+  app.buttons["阅读"].firstMatch.tap()
+  XCTAssertTrue(app.buttons["目录"].waitForExistence(timeout: 30))
+  return app
+ }
+ func openChapterUpdates(_ app: XCUIApplication) {
+  app.buttons["返回"].firstMatch.tap()
+  openBookManagement(app)
+ }
+ func openBookManagement(_ app: XCUIApplication) {
+  let more = app.buttons["更多操作：架构验证小说"]; XCTAssertTrue(more.waitForExistence(timeout: 15)); more.tap()
+  let updates = app.buttons["章节同步与更新"]; XCTAssertTrue(updates.waitForExistence(timeout: 10)); updates.tap()
+  XCTAssertTrue(app.buttons["按目录核对章节"].waitForExistence(timeout: 15))
+ }
+ // 双向切换主题后，正文中央点按必须仍能隐藏并恢复控件。
+ func testReadiumThemeSwitchPreservesCenterTap() {
+  let app = openDownloadedNetworkBook(readium: true); defer { app.terminate() }
+  for color in ["浅色", "深色", "浅色"] {
+   let style = app.buttons["阅读样式"]
+   XCTAssertTrue(style.waitForExistence(timeout: 15)); style.tap()
+   let theme = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "阅读主题")).firstMatch
+   for _ in 0..<10 {
+    if theme.exists && theme.isHittable { break }
+    app.collectionViews.allElementsBoundByIndex.last?.swipeUp()
+   }
+   XCTAssertTrue(theme.isHittable); theme.tap(); app.buttons[color].tap()
+   app.navigationBars["阅读样式"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+    .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+   XCTAssertTrue(style.waitForExistence(timeout: 10))
+   app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65)).tap()
+   expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: style)
+   waitForExpectations(timeout: 5)
+   app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65)).tap()
+   XCTAssertTrue(style.waitForExistence(timeout: 5))
+  }
+ }
+ func checkNetworkEnd(readium: Bool) {
+  let app = openDownloadedNetworkBook(readium: readium); defer { app.terminate() }
+  let slider = app.sliders.firstMatch
+  XCTAssertTrue(slider.waitForExistence(timeout: 15)); slider.adjust(toNormalizedSliderPosition: 1)
+  let end = app.staticTexts["已读完本机已下载章节"]
+  for _ in 0..<15 {
+   if end.exists { break }
+   app.coordinate(withNormalizedOffset: CGVector(dx: 0.70, dy: 0.5)).tap()
+  }
+  XCTAssertTrue(end.waitForExistence(timeout: 15))
+  XCTAssertTrue(app.buttons["更新至最新章节"].exists)
+  XCTAssertTrue(app.staticTexts["暂无法确认未下载数量，请核对本机章节。"].exists)
+  let confirm = app.buttons["确认这两个章节对应"]
+  reveal(confirm, app: app); confirm.tap()
+  let confirmed = app.staticTexts["已保存该章节对应，原进度和书签已尝试迁移。"]
+  revealInfo(confirmed, app: app)
+  XCTAssertTrue(confirmed.waitForExistence(timeout: 15))
+  let remaining = app.staticTexts["还有 1 章未下载"]; revealInfo(remaining, app: app, up: false)
+  XCTAssertTrue(remaining.waitForExistence(timeout: 15))
+  let update = app.buttons["更新至最新章节"]
+  reveal(update, app: app, up: false); update.tap()
+  let updated = app.staticTexts["EPUB 已更新，阅读位置按已确认章节恢复。可核对新版章节后继续阅读。"]
+  revealInfo(updated, app: app)
+  XCTAssertTrue(updated.waitForExistence(timeout: 30))
+  let verify = app.buttons["按目录核对章节"]
+  let verified = app.staticTexts["章节核对完成。"]
+  for _ in 0..<3 {
+   if verified.exists { break }
+   for _ in 0..<3 { app.swipeDown() }
+   reveal(verify, app: app); verify.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+   for _ in 0..<4 { if verified.exists { break }; app.swipeUp() }
+  }
+  XCTAssertTrue(verified.waitForExistence(timeout: 30))
+  let continuation = app.buttons["继续阅读新章节"]; reveal(continuation, app: app, up: false); continuation.tap()
+  XCTAssertTrue(app.buttons["目录"].waitForExistence(timeout: 15))
+  openChapterUpdates(app)
+  XCTAssertTrue(app.staticTexts["本机已包含网站当前全部章节"].waitForExistence(timeout: 15))
+  app.buttons["关闭"].tap()
+  XCTAssertTrue(app.staticTexts["architecture-validation-status"].label.contains("正文请求 0"))
+  zeroExternalRequests(app)
+ }
+
+ func testNetworkEPUBManualCandidatesAndNext() {
+  let app = openDownloadedNetworkBook(readium: false, ambiguous: true); defer { app.terminate() }
+  openChapterUpdates(app)
+  let verify = app.buttons["按目录核对章节"]; reveal(verify, app: app); verify.tap()
+  let pending = app.staticTexts["web-epub-pending-count"]; revealInfo(pending, app: app)
+  XCTAssertEqual(pending.label, "待确认 2 章")
+  func choose(_ label: String) {
+   let picker = app.buttons["web-epub-remote-selection"]; reveal(picker, app: app); picker.tap()
+   let option = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch; XCTAssertTrue(option.waitForExistence(timeout: 10), app.debugDescription); option.tap()
+   if !app.buttons["关闭"].waitForExistence(timeout: 3) { app.navigationBars.buttons.element(boundBy: 0).tap() }
+  }
+  choose("第 1 章 · 幕间")
+  let confirm = app.buttons["确认这两个章节对应"]; reveal(confirm, app: app); confirm.tap()
+  revealInfo(pending, app: app, up: false); XCTAssertEqual(pending.label, "待确认 1 章")
+  let local = app.buttons["web-epub-local-selection"]; reveal(local, app: app)
+  XCTAssertTrue(local.label.contains("第 2 项"))
+  XCTAssertTrue(app.staticTexts["architecture-validation-status"].label.contains("正文请求 0"))
+  choose("第 2 章 · 幕间")
+  let preview = app.buttons["查看所选章节正文"]; reveal(preview, app: app); preview.tap()
+  XCTAssertTrue(app.staticTexts["本机正文"].waitForExistence(timeout: 15))
+  XCTAssertTrue(app.staticTexts["网站正文"].exists)
+  XCTAssertTrue(app.staticTexts["architecture-validation-status"].label.contains("正文请求 1"))
+  reveal(confirm, app: app); confirm.tap()
+  revealInfo(pending, app: app, up: false); XCTAssertEqual(pending.label, "待确认 0 章")
+  XCTAssertFalse(app.buttons["确认这两个章节对应"].exists)
+  zeroExternalRequests(app)
+ }
+
+ func testMovedWenkuEPUBKeepsOriginalReader() {
+  let app = openDownloadedNetworkBook(readium: false); defer { app.terminate() }
+  app.buttons["返回"].firstMatch.tap()
+  let more = app.buttons["更多操作：架构验证小说"]
+  XCTAssertTrue(more.waitForExistence(timeout: 15)); more.tap()
+  app.buttons["移至文库"].tap()
+  let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "library-book-wenku:")).firstMatch
+  XCTAssertTrue(row.waitForExistence(timeout: 15)); row.tap()
+  XCTAssertTrue(app.buttons["目录"].waitForExistence(timeout: 20))
+  app.buttons["目录"].tap()
+  XCTAssertFalse(app.buttons["章节更新"].exists)
+  app.buttons["关闭"].tap()
+  let slider = app.sliders.firstMatch
+  XCTAssertTrue(slider.waitForExistence(timeout: 10)); slider.adjust(toNormalizedSliderPosition: 1)
+  app.coordinate(withNormalizedOffset: CGVector(dx: 0.70, dy: 0.5)).tap()
+  XCTAssertFalse(app.staticTexts["已读完本机已下载章节"].exists)
+  zeroExternalRequests(app)
+ }
+ func testNativeNetworkEPUBEndAndUpdate() { checkNetworkEnd(readium: false) }
+ func testReadiumNetworkEPUBEndAndUpdate() { checkNetworkEnd(readium: true) }
+ func testBookMenuManagementAvoidsBodyRescan() {
+  let app = openDownloadedNetworkBook(readium: false); defer { app.terminate() }
+  openChapterUpdates(app)
+  let status = app.staticTexts["architecture-validation-status"]
+  XCTAssertTrue(status.label.contains("本机正文 0"))
+  let verify = app.buttons["按目录核对章节"]; reveal(verify, app: app); verify.tap()
+  let complete = app.staticTexts["章节核对完成。"]; revealInfo(complete, app: app)
+  XCTAssertTrue(complete.waitForExistence(timeout: 20))
+  XCTAssertTrue(status.label.contains("本机正文 1"))
+  app.buttons["关闭"].tap(); openBookManagement(app)
+  XCTAssertTrue(app.staticTexts["还有 1 章未下载"].waitForExistence(timeout: 15))
+  XCTAssertTrue(status.label.contains("本机正文 1"))
+  let check = app.buttons["重新检查更新"]; reveal(check, app: app); check.tap()
+  XCTAssertTrue(app.staticTexts["还有 1 章未下载"].waitForExistence(timeout: 15))
+  XCTAssertTrue(status.label.contains("本机正文 1"))
+  XCTAssertTrue(status.label.contains("正文请求 0"))
+  app.buttons["关闭"].tap()
+  let more = app.buttons["更多操作：架构验证小说"]; more.tap(); app.buttons["阅读"].firstMatch.tap()
+  let toc = app.buttons["目录"]; XCTAssertTrue(toc.waitForExistence(timeout: 15)); toc.tap()
+  XCTAssertFalse(app.buttons["章节更新"].exists)
+  zeroExternalRequests(app)
+ }
+ func testLargeBookMenuBatchVerification() {
+  let app = openDownloadedNetworkBook(readium: false, large: true); defer { app.terminate() }
+  openChapterUpdates(app)
+  let status = app.staticTexts["architecture-validation-status"]
+  XCTAssertTrue(status.label.contains("本机正文 0"))
+  let verify = app.buttons["按目录核对章节"]; reveal(verify, app: app); verify.tap()
+  let complete = app.staticTexts["章节核对完成。"]; revealInfo(complete, app: app)
+  XCTAssertTrue(complete.waitForExistence(timeout: 40))
+  XCTAssertTrue(status.label.contains("本机正文 130"))
+  XCTAssertTrue(status.label.contains("批次 3"))
+  app.buttons["关闭"].tap(); openBookManagement(app)
+  XCTAssertTrue(app.staticTexts["还有 1 章未下载"].waitForExistence(timeout: 15))
+  XCTAssertTrue(status.label.contains("本机正文 130"))
+  XCTAssertTrue(status.label.contains("批次 3"))
+  XCTAssertTrue(status.label.contains("正文请求 0"))
+  zeroExternalRequests(app)
+ }
+ func testLegacyUpdateRequiresExplicitOptions() {
+  let app = openDownloadedNetworkBook(readium: false); app.terminate()
+  app.launchArguments = ["-architectureValidation", "-architectureWebEPUBUpdate", "-architectureLegacyWebEPUB"]
+  app.launch(); defer { app.terminate() }
+  app.buttons["书库"].firstMatch.tap()
+  let more = app.buttons["更多操作：架构验证小说"]; XCTAssertTrue(more.waitForExistence(timeout: 15)); more.tap()
+  app.buttons["更新到最新章节"].tap()
+  let select = app.buttons["选择语言和译源"]; XCTAssertTrue(select.waitForExistence(timeout: 10)); select.tap()
+  let confirm = app.buttons["确认并更新 EPUB"]; XCTAssertTrue(confirm.waitForExistence(timeout: 15)); XCTAssertFalse(confirm.isEnabled)
+  app.buttons["译文"].tap(); XCTAssertFalse(confirm.isEnabled)
+  app.buttons["取消"].tap()
+  let status = app.staticTexts["architecture-validation-status"]
+  XCTAssertTrue(status.label.contains("EPUB请求 0"))
+  openBookManagement(app)
+  let update = app.buttons["更新至最新章节"]; reveal(update, app: app); update.tap()
+  XCTAssertTrue(confirm.waitForExistence(timeout: 15)); XCTAssertFalse(confirm.isEnabled)
+  app.buttons["双语"].tap(); app.buttons["GPT"].tap(); XCTAssertTrue(confirm.isEnabled); confirm.tap()
+  let success = app.staticTexts.matching(NSPredicate(format: "label == %@ OR label == %@", "文件内容没有变化，原阅读位置保留。", "EPUB 已更新，阅读位置按已确认章节恢复。可核对新版章节后继续阅读。")).firstMatch
+  revealInfo(success, app: app); XCTAssertTrue(success.waitForExistence(timeout: 30))
+  reveal(update, app: app, up: false); update.tap()
+  expectation(for: NSPredicate(format: "label CONTAINS %@", "EPUB请求 2"), evaluatedWith: status)
+  waitForExpectations(timeout: 15)
+  revealInfo(success, app: app); XCTAssertTrue(success.waitForExistence(timeout: 30))
+  XCTAssertFalse(app.navigationBars["选择更新设置"].exists)
+  app.buttons["关闭"].tap(); more.tap(); app.buttons["更新到最新章节"].tap()
+  XCTAssertTrue(app.buttons["重新获取并更新 EPUB"].waitForExistence(timeout: 10))
+  zeroExternalRequests(app)
+ }
+ func testMenuUpdateInheritsConfirmedChapterLocally() {
+  let app = openDownloadedNetworkBook(readium: false); defer { app.terminate() }
+  openChapterUpdates(app)
+  let confirm = app.buttons["确认这两个章节对应"]; reveal(confirm, app: app); confirm.tap()
+  let pending = app.staticTexts["web-epub-pending-count"]; revealInfo(pending, app: app, up: false)
+  XCTAssertEqual(pending.label, "待确认 0 章")
+  XCTAssertTrue(app.buttons["关闭"].waitForExistence(timeout: 15)); app.buttons["关闭"].tap()
+  let more = app.buttons["更多操作：架构验证小说"]; XCTAssertTrue(more.waitForExistence(timeout: 15)); more.tap()
+  app.buttons["更新到最新章节"].tap()
+  let update = app.buttons["重新获取并更新 EPUB"]; XCTAssertTrue(update.waitForExistence(timeout: 10)); update.tap()
+  XCTAssertTrue(app.alerts["EPUB 更新"].waitForExistence(timeout: 30)); app.buttons["好"].tap()
+  more.tap(); app.buttons["阅读"].firstMatch.tap()
+  openChapterUpdates(app)
+  revealInfo(pending, app: app); XCTAssertEqual(pending.label, "待确认 1 章")
+  XCTAssertTrue(app.staticTexts["architecture-validation-status"].label.contains("正文请求 0"))
+  zeroExternalRequests(app)
+ }
+ func testManualWebNovelEPUBUpdate() {
+  let app = start(); defer { app.terminate() }
+  app.buttons["发现"].firstMatch.tap()
+  let novel = app.staticTexts["架构验证小说"].firstMatch
+  XCTAssertTrue(novel.waitForExistence(timeout: 15)); novel.tap()
+  let download = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "下载全书 EPUB")).firstMatch
+  reveal(download, app: app); download.tap()
+  let begin = app.buttons["开始下载"]; reveal(begin, app: app); begin.tap()
+  let completed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "EPUB 下载完成")).firstMatch
+  XCTAssertTrue(completed.waitForExistence(timeout: 30))
+  app.buttons["关闭"].tap()
+  app.buttons["书库"].firstMatch.tap()
+  let more = app.buttons["更多操作：架构验证小说"]
+  XCTAssertTrue(more.waitForExistence(timeout: 10)); more.tap()
+  let update = app.buttons["更新到最新章节"]
+  XCTAssertTrue(update.waitForExistence(timeout: 10)); update.tap()
+  let confirm = app.buttons["重新获取并更新 EPUB"]
+  XCTAssertTrue(confirm.waitForExistence(timeout: 10)); confirm.tap()
+  XCTAssertTrue(app.alerts["EPUB 更新"].waitForExistence(timeout: 30))
+  XCTAssertFalse(app.alerts["操作失败"].exists)
+  app.buttons["好"].tap()
+  XCTAssertTrue(more.waitForExistence(timeout: 10))
+  more.tap()
+  let cloud = app.buttons["从 WebDAV 获取新版 EPUB"]
+  XCTAssertTrue(cloud.waitForExistence(timeout: 10)); cloud.tap()
+  let fetch = app.buttons["取回云端 EPUB 并合并进度、书签"]
+  XCTAssertTrue(fetch.waitForExistence(timeout: 10)); fetch.tap()
+  XCTAssertTrue(app.alerts["操作失败"].waitForExistence(timeout: 15))
+  XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "请先开启 WebDAV")).firstMatch.exists)
+  app.buttons["好"].tap()
+  XCTAssertTrue(more.waitForExistence(timeout: 10))
+  zeroExternalRequests(app)
  }
  func testDiscoveryCommentsDownloadAndLibrary() {
   let app = start(); defer { app.terminate() }

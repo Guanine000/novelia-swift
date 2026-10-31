@@ -1223,7 +1223,8 @@ enum EPUBImageDecoding {
 
 /// 直接位于 body 下的连续 img 会组成匿名行框；Readium 的孤行保护会让 WebKit
 /// 把第二张图片切到相邻栏，即使单张图片完全放得下一页。只把这类独立图片改为
-/// 块元素，段落内的小图仍按书籍样式排版。同时修正 XHTML 内 SVG 的已知属性大小写。
+/// 块元素，段落内的小图仍按书籍样式排版。独立 SVG 封面补齐媒体限高与防跨栏规则，
+/// 避免 ReadiumCSS 的 XHTML 默认命名空间使其 svg 选择器失效。同时修正 SVG 属性大小写。
 /// 由 Readium 的资源映射注入，不修改原书；块布局仅用于可重排书籍。
 enum EPUBReadiumImageLayout {
     /// 部分转换器把 SVG 属性名转成小写。XHTML 按 XML 区分大小写，丢失 viewBox
@@ -1258,8 +1259,21 @@ enum EPUBReadiumImageLayout {
         guard let head = html.range(of: "</head>", options: .caseInsensitive) else { return html }
         let style = """
         <style id="novelia-standalone-images">
+        @namespace svg url("http://www.w3.org/2000/svg");
         body > img {
             display: block !important;
+            -webkit-column-break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+        }
+        body > svg|svg, body > div > svg|svg:only-child {
+            display: block;
+            width: auto;
+            height: auto;
+            max-width: var(--RS__maxMediaWidth, 100%);
+            max-height: var(--RS__maxMediaHeight, 95vh) !important;
+            margin-left: auto;
+            margin-right: auto;
             -webkit-column-break-inside: avoid !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
@@ -1269,6 +1283,80 @@ enum EPUBReadiumImageLayout {
         var result = html
         result.insert(contentsOf: style, at: head.lowerBound)
         return result
+    }
+}
+
+// MARK: - Readium 页面底色
+
+/// 只处理 html/body 的页面底色；局部元素和背景图片保留书内样式。
+/// 相同配置不重复写 DOM；主题观察只响应实际主题标记变化，忽略自身背景与其他样式修改。
+enum EPUBReadiumPageBackground {
+    static func script(ignoresNearWhite: Bool, threshold: Double) -> String {
+        return """
+        (function () {
+          function apply() {
+            var configuration = '\(ignoresNearWhite)|\(threshold)';
+            var changed = document.__noveliaPageAppearance !== configuration;
+            var elements = [document.documentElement, document.body];
+            elements.forEach(function (el) {
+              if (!el || !el.__noveliaPageBackground) return;
+              var saved = el.__noveliaPageBackground;
+              var owned = el.style.getPropertyValue('background-color') === 'transparent'
+                  && el.style.getPropertyPriority('background-color') === 'important';
+              if (changed && owned) {
+                if (saved.value) el.style.setProperty('background-color', saved.value, saved.priority);
+                else el.style.removeProperty('background-color');
+              }
+              if (changed || !owned) delete el.__noveliaPageBackground;
+            });
+            function color(el) {
+              if (!el) return null;
+              var css = getComputedStyle(el).backgroundColor;
+              var match = css.match(/^rgba?\\(([^)]+)\\)$/);
+              if (!match) return null;
+              var values = match[1].split(',').map(Number);
+              return { css: css, rgb: values.slice(0, 3), alpha: values.length > 3 ? values[3] : 1 };
+            }
+            if (\(ignoresNearWhite)) {
+              elements.forEach(function (el) {
+                if (!el) return;
+                var c = color(el);
+                if (!el.__noveliaPageBackground && c && c.alpha > 0 && c.rgb.every(function (v) { return v >= \(threshold * 255); })) {
+                  el.__noveliaPageBackground = {
+                    value: el.style.getPropertyValue('background-color'),
+                    priority: el.style.getPropertyPriority('background-color')
+                  };
+                  el.style.setProperty('background-color', 'transparent', 'important');
+                }
+              });
+            }
+            document.__noveliaPageAppearance = configuration;
+            var root = color(document.documentElement), body = color(document.body);
+            return root && root.alpha > 0 ? root.css : (body ? body.css : '');
+          }
+          var key = '\(ignoresNearWhite)|\(threshold)';
+          var state = document.__noveliaWhiteBackgroundObserver;
+          if (state && state.key !== key) {
+            state.observer.disconnect();
+            delete document.__noveliaWhiteBackgroundObserver;
+            state = null;
+          }
+          if (\(ignoresNearWhite) && !state) {
+            var appearance = function () { return document.documentElement.style.getPropertyValue('--USER__appearance'); };
+            state = { key: key, appearance: appearance() };
+            state.observer = new MutationObserver(function () {
+              var next = appearance();
+              if (next === state.appearance) return;
+              // 先记下主题再处理背景；自身 background-color 改动不会再次触发处理。
+              state.appearance = next;
+              apply();
+            });
+            state.observer.observe(document.documentElement, {attributes:true,attributeFilter:['style']});
+            document.__noveliaWhiteBackgroundObserver = state;
+          }
+          return apply();
+        })()
+        """
     }
 }
 

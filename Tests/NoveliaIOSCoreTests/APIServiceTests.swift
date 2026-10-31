@@ -61,6 +61,24 @@ final class APIServiceTests: XCTestCase {
         XCTAssertEqual(result.pageCount, 3)
     }
 
+    func testCatalogRetainsBothTitlesInOneDirectoryRequest() async throws {
+        var calls = 0
+        ServiceHTTPMock.handler = { request in
+            calls += 1
+            XCTAssertEqual(request.url?.path, "/custom/novel/site/book")
+            return Data(#"{"titleJp":"作品","titleZh":"小说","toc":[{"titleJp":"第一巻","titleZh":"第一卷"},{"chapterId":"stable","titleJp":"第一話","titleZh":"第一章"},{"titleJp":"第二巻","titleZh":"第二卷"},{"chapterId":"second","titleJp":"第二話","titleZh":"第二章"}]}"#.utf8)
+        }
+        let novel = try await services().catalog.novel(providerId: "site", novelId: "book")
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(novel.chapters.first?.id, "stable")
+        XCTAssertEqual(novel.chapters.first?.title, "第一章")
+        XCTAssertEqual(novel.chapters.first?.originalTitle, "第一話")
+        XCTAssertEqual(novel.chapters.first?.volumeTitle, "第一卷")
+        XCTAssertEqual(novel.chapters.first?.originalVolumeTitle, "第一巻")
+        XCTAssertEqual(novel.chapters.last?.volumeTitle, "第二卷")
+        XCTAssertEqual(novel.chapters.count, 2)
+    }
+
     func testBookCommentsUseConfiguredOriginAndNovelSession() async throws {
         ServiceHTTPMock.handler = { request in
             XCTAssertEqual(request.url?.host, "comments.example.test")
