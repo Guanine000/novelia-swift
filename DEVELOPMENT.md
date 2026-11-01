@@ -12,6 +12,12 @@
 - [API、数据模型与认证](#api数据模型与认证)
 - [本地状态与跨功能连接](#本地状态与跨功能连接)
 - [阅读器实现](#阅读器实现)
+- [网络小说 EPUB 章节同步与更新](#网络小说-epub-章节同步与更新)
+  - [手动更新事务](#手动更新事务)
+  - [ID 阅读状态与同步](#id-阅读状态与同步)
+  - [更新时的本地文件对应](#更新时的本地文件对应)
+  - [管理入口与核对性能](#管理入口与核对性能)
+  - [旧下载配置确认](#旧下载配置确认)
 - [书库、文件与统计实现](#书库文件与统计实现)
 - [WebDAV 同步实现](#webdav-同步实现)
 - [网络、缓存与诊断约定](#网络缓存与诊断约定)
@@ -38,7 +44,7 @@ Xcode App 当前直接编译 App 与 Core 源文件，功能目录并不是独�
 
 ## 开始开发
 
-开发环境：macOS 上的 Xcode（当前在 Xcode 27.1 上维护）、iOS 17 模拟器（主目标）或 iOS 15 模拟器（`NoveliaLegacy`），以及用于离线回归与发布脚本的 Python 3。App 编译与测试命令见[构建与验证](#构建与验证)。云端环境没有 Xcode，iOS 15 目标需要在 Mac 上编译确认。
+开发环境：macOS 上的 Xcode（当前使用 Xcode 27.2）、iOS 17 模拟器（主目标）或 iOS 15 模拟器（`NoveliaLegacy`），以及用于离线回归与发布脚本的 Python 3。App 编译与测试命令见[构建与验证](#构建与验证)。云端环境没有 Xcode，iOS 15 目标需要在 Mac 上编译确认。
 
 每次任务开始：
 
@@ -235,7 +241,7 @@ Readium 的 HTML 根背景设为透明，阅读背景由宿主绘制在导航器
 
 `TextChapterSource` 将 TXT 或在线内容转为经过转义的 XHTML 段落，供章节接口消费。TXT 长章节拆为分页单元，仅章节起始单元进入目录；不要把 XHTML 标签长度当成源文本偏移。拆分和定位同时涉及 UTF-8、UTF-16 与章节索引，修改时验证 emoji、组合字符、卷标题、无标题全文和分章规则变化。
 
-Readium 分页使用两层横向滚动视图：章节 WebView 自己的滚动视图负责章内翻页，外层分页视图负责切换章节。拖动从 WebView 以外开始（上下页边距、章节标题栏区域）时只有外层响应，会直接切到相邻章节并跳过本章剩余页面（1.0.0 构建 93 前的「跳页」）。`ReadiumEPUBReaderModel.swipeBegan` 在外层拖动开始时检查当前章节在该方向是否还有页面：有就取消这次拖动并用 `goLeft`／`goRight` 章内翻一页，已在章首或章末时保留切章。回归为 `scripts/test_api_architecture_ui.py --epub-pagination` 中的 `testReadiumMidChapterSwipesStayInChapter`（章中部在不同高度含页边距滑动）。
+Readium 分页使用两层横向滚动视图：章节 WebView 自己的滚动视图负责章内翻页，外层分页视图负责切换章节。拖动从 WebView 以外开始（上下页边距、章节标题栏区域）时只有外层响应，会直接切到相邻章节并跳过本章剩余页面。`ReadiumEPUBReaderModel.swipeBegan` 在外层拖动开始时检查当前章节在该方向是否还有页面：有就取消这次拖动并用 `goLeft`／`goRight` 章内翻一页，已在章首或章末时保留切章。回归为 `scripts/test_api_architecture_ui.py --epub-pagination` 中的 `testReadiumMidChapterSwipesStayInChapter`（章中部在不同高度含页边距滑动）。
 
 `ReadiumTextPublication` 直接把惰性单元包装成 Publication 的 readingOrder，通过 Resource 按需生成内容，不临时打包 EPUB，不提前获取全书正文。生成的 TXT/在线书籍不执行 EPUB 全书资源诊断。位置服务为每个单元提供一个位置，位置数不是实际页数；显示整书比例时还需结合单元内 progression。
 
@@ -245,7 +251,7 @@ Resource 每次请求重新创建，避免将一次加载失败固化为缓存�
 
 ### 书签与书内搜索
 
-书签（`ReaderBookmark`，Domain）以阅读位置身份 `epub:<哈希>`／`txt:<哈希>` 归属书籍，位置为章节加章内比例，两种引擎都用 `jump(toChapter:progression:)` 跳转；在线小说没有书签身份（`bookmarkKey` 为 nil），沿用在线阅读器的章节书签。`currentPageRange` 给出当前页在章内的比例范围：Yuedu 取页首与下一页的源文本偏移，Readium 按该章位置数估计页宽。书内搜索由 Core 的 `BookTextSearch` 逐章提取纯文本完成，提取规则与 `EPUBChapterProgress.textLength` 一致，使比例与阅读位置同一口径；只搜索本机内容，最多 500 条。两种引擎共用 `ReaderBookmarksSearchSheet` 与 `ReaderBookmarkButton`。
+文库与普通导入书籍的书签（`ReaderBookmark`，Domain）以阅读位置身份 `epub:<哈希>`／`txt:<哈希>` 归属书籍，位置为章节加章内比例，两种引擎都用 `jump(toChapter:progression:)` 跳转；在线小说没有书签身份（`bookmarkKey` 为 nil），沿用在线阅读器的章节书签。`currentPageRange` 给出当前页在章内的比例范围：Yuedu 取页首与下一页的源文本偏移，Readium 按该章位置数估计页宽。书内搜索由 Core 的 `BookTextSearch` 逐章提取纯文本完成，提取规则与 `EPUBChapterProgress.textLength` 一致，使比例与阅读位置同一口径；只搜索本机内容，最多 500 条。两种引擎共用 `ReaderBookmarksSearchSheet` 与 `ReaderBookmarkButton`。已核对的网络小说 EPUB 使用稳定小说及章节身份，见[章节同步与更新](#网络小说-epub-章节同步与更新)。
 
 字数口径与缓存在 Core 的 `BookWordCount.swift`：`BookWordCount` 仿 Word 计数（中日文字符与全角／中文标点逐字计，其余连续非空白字符计一词，弯引号等共用标点紧跟单词时并入该词），XHTML 先去掉 head/script/style、注释与 `<rt>`／`<rp>`，标签视为分隔，实体按 `BookTextSearch.decodeEntities` 解码；`tocCounts` 把 spine 字数按“到下一个更靠后的目录项为止”分给目录项，同一 spine 的后续条目不计。`BookWordCountCache` 以文件内容哈希为键，写在 Caches `BookWordCounts/`（版本不符视为未命中，超过 2000 个文件删最旧），并合并同一哈希的并发统计；修改口径时提高 `ruleVersion`。`Reader/BookWordCounter.swift` 是 App 入口：EPUB 由 `EPUBReader/EPUBWordCount.swift` 打开独立容器逐 spine 统计（不与阅读中的容器共享诊断计数，读取失败的章计 0），TXT 直接用 `TXTTextDecoder` 解码，不经过 `TXTBookCache`，避免书库批量统计挤掉阅读中的书。TXT 各章字数随分章规则变化，由打开方从已解析的书现算（`PagedTextBook.tocWordCounts`），只缓存全书字数。书库的 `Library/LibraryWordCounts.swift`（`LibraryWordCountStore`，Root 持有并注入）在行出现时登记、一次统计一本、后登记先算，行消失时撤回未开始的请求；云端书籍只读缓存。阅读器在打开目录时才统计，在线小说不统计。字数缓存属于可重建数据，不写入书库索引，也不同步。
 
@@ -280,6 +286,65 @@ Yuedu 路径有宿主级兼容处理：剥离脚本、按设备条件处理媒�
 目录诊断和内容诊断验证资源读取、解码与目录补全，不证明 WebKit 排版、脚本执行或图片/字体显示正确。需要变更引擎、依赖或兼容处理时，同时检查本地 EPUB、TXT、在线内容以及实际交互。
 
 阅读器依赖与代码来源见 [依赖说明](iOSApp/Features/Reader/EPUBReader/DEPENDENCIES.md)，完整许可见 [第三方许可索引](iOSApp/Resources/ThirdPartyLicenses/INDEX.md)。
+
+## 网络小说 EPUB 章节同步与更新
+
+本节统一说明网络小说 EPUB 的更新事务、章节身份、映射、管理面板和下载配置。用户操作见[功能说明 → EPUB 下载](docs/FEATURES.md#epub-下载)。
+
+### 手动更新事务
+
+书库本机网络小说 EPUB 的菜单通过 `WebNovelDownloadStore.updateEPUB` 沿用旧记录的模式／译源重新请求整本文件；文件生成请求忽略本机 HTTP 缓存并要求重新验证。相同字节保留原文件与时间，新内容在提交时比较原记录，避免删除／移动竞态导致复活；失败与取消清理新文件，成功才移除旧文件。更新不更改 WebDAV 协议和按需下载规则。
+
+App 在 Root 注入包含原下载记录的 `WebNovelEPUBUpdate.prepare`。先验证新容器和 spine，再按明确的小说身份及旧文件哈希迁移已确认章节状态，成功后 Store 才提交替换；旧文件损坏时允许更新有效新文件。迁移保留原时间和旧哈希记录，提交失败可能留下无文件引用的 ID 状态，不表示文件已替换。网站 `episodeN.xhtml` 是序号，不能作为稳定章节 ID，不再调用路径匹配推断身份。`EPUBUpdateState` 仅保留历史辅助测试，不是当前网络小说的更新迁移路径。
+
+真实 Store 的成功、同内容、请求／校验／写盘失败、取消和删除竞态由 `test_library_transactions.py` 覆盖；路径映射、目标较新状态保护、旧版较新状态与删除合并由 `EPUBUpdateStateTests` 覆盖；隔离 App 的菜单确认流程由 `testManualWebNovelEPUBUpdate` 覆盖。源码／生成书籍用本地合成数据验证，真实网站与原书待验。
+
+手动云端更新由 `WebDAVSyncStore.updateWebNovelEPUBFromCloud` 经过清单门闩调用 Core `WebDAVEPUBUpdater`；仅允许本机网络小说 EPUB，读取云端原文件并校验哈希，下载后重新读取清单，检查同一文件版本及本机原记录。不同文件只接受严格更晚的下载时间；同哈希只合并状态。先合并目标哈希的远端状态，再用 Store 的 `replaceFromSync` 调用同一校验／承接钩子及比较提交事务；文件复制后检查取消，失败清理暂存文件，远端时间保留，不自动上传结果。与普通同步共用忙碌状态与门闩，不改自动替换规则。协议替身回归覆盖准确字节、最新状态、同哈希、旧版本／并发变化、损坏／缺失 blob 和取消；真实 Store 回归覆盖远端时间、状态钩子、校验／提交失败与删除竞态，隔离 UI 覆盖菜单及缺少配置提示。
+
+
+### ID 阅读状态与同步
+
+仅 `LibraryReaderDestination` 的当前 `.webNovel` EPUB 进入 `App/Integrations/WebNovelEPUBReading.swift`；文库、导入、移动到文库的书不启用，`sourceWebNovel` 不作为启用条件。集成对象消费 `NovelCatalogService` / `NovelContentService` 和 Root 所有的下载 Store，不在引擎或页面创建具体 API。两引擎接收 `WebNovelEPUBContext`，以规范资源路径映射源站 ID；Readium readingOrder 按路径转换，不能直接套原生 spine 序号。
+
+Core `WebNovelEPUBIdentity.swift` 定义 `webepub:<SHA256(带长度的书源/小说ID)>`、文件绑定映射、迁移与独立同步。映射由 `ReaderSettings.webEPUBMaps` 持有，使用同一注入 defaults；每个绑定带更新时间及更正删除记录，补全按路径合并，重复章节ID不解析。映射与文件SHA-256绑定，未核对不猜测。`WebNovelEPUBTOCMatcher` 以本机目录和网站目录的唯一标题对应源站ID，仅清理空白，不模糊化章号/标点；同时保留原文标题。旧下载目录可为仍存在的同一ID提供旧名，但旧新目录同名指向不同ID时拒绝自动匹配。卷名和原文卷名作为可选字段由网站目录的非章节分组传递；本机使用目录层级/分组标题。全局/卷内唯一对应先成为锚点，再在锚点区间分别计算最早与最晚可行的有序子序列，仅绑定两者相同的项；交叉锚点停用顺序推断，整段无法对应或有多种可能时不按序号猜测。多资源争同ID、多目录项共资源及已经确认的ID均不自动重分配。单标题候选超过512时回退手动，避免畸形目录产生平方级候选。核对复用/请求一次网站目录，不调用章节正文服务，只在本地检查缺章/缺译占位；正文预览仍由用户单独点击触发。旧书可预览并人工确认，取消保留已确认部分；纯缺章/缺译占位不当成有正文。
+
+进度新增可选 `chapterID`，章内比例跨文件；本机同文件偏移和 Readium Locator 仍可辅助。已知ID不存在于本机映射时不回退另一版的索引/全书比例，提示更新/核对。原生只在明确用户定位时写 ID 进度，Readium 对翻页/拖动/导航记录写入意图，打开、恢复与偏好重建不提升时间。Store变化发布只读通知，集成层复用同步来的同哈希映射。书库网络小说显示稳定位置的章节信息，文库保持哈希位置。
+
+迁移只处理已确认章节，保留旧记录和原时间；canonical书签UUID按原UUID与稳定小说键确定，避免与文库旧哈希记录冲突。107/108副本只有在本机保留原记录、能验证派生关系时归并，无法证明的不按位置/标题去重。墓碑优先于旧副本，手动更正可修正同历史时间的章节ID，不覆盖较新的阅读状态或复活删除。持久化失败可重试，映射确认不等于全部旧数据迁移完成。
+
+`WebNovelEPUBIdentitySync` 在原内容同步成功后，经相同清单门闩使用 `WebDAVClient(webEPUBIdentity: true)` 访问独立 `NoveliaSync/web-epub-v1/`，只合并ID位置、书签/墓碑和文件映射。旧客户端不访问此目录；参与新同步的设备仍需全部升级。保持强条件提交与三次冲突重读，提交成功才应用远端状态，本机较新的并发修改由存储合并保留。映射变更参与自动同步指纹及触发。纯文库且无网络小说状态时不访问此目录。
+
+末页事件仅由明确下一页操作触发：原生 Pager 拒绝用户翻页时判断最后章节已排版完成，Readium 用实际末资源及当前WebView的末页几何判断；不会在刚进入末章时遮挡正文。集成面板查询目录、计算已核验且有正文的章节差集（不计缺译/缺章占位），不完整或失败不显示精确0。更新保持模式/译源，提交前保留原状态，成功后重建容器/导航器；标题和正文均相同且两端唯一的已确认资源可沿用ID，新增/改写资源需核对。显式“继续阅读新章节”才推进位置。面板强制显示自身导航栏，避免继承阅读器隐藏栏导致无法返回。
+
+对应验证：`WebNovelEPUBIdentityTests`、`WebNovelEPUBIdentitySyncTests`、真实Store事务及 `testNativeNetworkEPUBEndAndUpdate` / `testReadiumNetworkEPUBEndAndUpdate`。实际服务器、用户原书和真机体验与模拟器证据分别记录。
+
+目录核对回归包括插章/重排、两侧同名、原文标题、旧目录改名/ID冲突、同资源多目录项、已有确认保护及旧JSON缺字段。独立Debug服务调用计数在两引擎的完整更新/核对/续读流程中断言正文服务调用为0；外部请求计数仍单独保留。计数诊断不进入Release。
+
+手动核对默认只展示未绑定的正文资源，网站候选按标题/卷名及邻近锚点过滤，保持网站顺序并展示序号/卷名/前后章。未知可选择完整目录，多个候选默认不选中；确认后跳下一待确认项。并排预览仅在显式点击时请求一章，选择变化清空预览，异步结果须校验本机项、远端ID与文件hash未变化；更正已绑定章节需界面明确确认，沿用原迁移时间和墓碑规则。
+
+候选页采用显式可搜索列表，显示导航栏并在点选后返回；目录检查task归属整个NavigationStack，不因推入/退出候选页重复查询或重置选择。手动确认流程断言预览前正文调用0，主动预览后为1。
+
+### 更新时的本地文件对应
+
+新旧 EPUB 比较统一由`WebNovelEPUBUpdate.prepare`，阅读器、书库网站更新和WebDAV替换均经Store既有钩子调用，阅读器不再另行继承。新文件先验证；旧确认状态先迁移，再读取两份文件全部正文资源。Core `WebNovelEPUBFileMatcher`仅接受两端唯一且标题/正文去空白相同的资源，不按路径序号猜ID；未确认旧副本也参与重复判定。新增/修订/占位正文保留未确认。继承保留来源绑定时间，目标确认/墓碑不覆盖。解析后复读App所有的映射Store，按新hash保存，不提升阅读时间；后续事务取消/冲突仅可能留下有效hash映射缓存，不替换原书。目录检查仍只查询目录，比较本身不访问网站。
+
+核对/更新面板显示期间固定背景阅读器身份，关闭面板后才按新文件/映射重建；防止背景导航栏隐藏设置影响面板返回。显式继续阅读仍按用户操作重建并跳转。
+
+更新面板的返回操作放在固定顶部栏，不依赖背景阅读器的系统导航栏样式。
+
+### 管理入口与核对性能
+
+手动入口位于书库每本书的更多操作菜单“章节同步与更新”，`LibraryBookActions.chapterUpdateBook` 经页面统一 sheet 显示 `WebNovelEPUBReader(managementOnly: true)`，直接使用管理模型和面板，不创建 `EPUBReaderHost`、排版器或统计会话。阅读器目录仅保留目录和图片，末页自动入口保留。管理模式不显示继续阅读动作，仍保留原进度。
+
+同一不可变文件hash下的映射只由确认/验证/本地继承创建，创建时已排除缺章和缺译；load/refreshMap直接复用这些验证事实，不在check中逐章重读。目录标题索引线性建立，revision只在context变化时计算。EPUB容器准备、候选筛选、目录匹配及本机正文读取/解析使用后台任务。候选任务可取消，检查当前索引/hash后才更新，手动选择取消过期候选结果。
+
+verifyAll仅读取未确认且有候选的本机正文，每64章applyVerified一次，避免每章编码全部映射并迁移书签。提交时复读共享Store，保护已有确认/墓碑，批次之间让出执行；取消保留已完成批次。Debug 计数用于回归检查打开时不读取正文、核对按批次保存、重开复用已有映射；生产构建排除这些计数。
+
+### 旧下载配置确认
+
+LocalBookRecords定义WebNovelEPUBUpdateConfiguration及DownloadedWebNovel.epubUpdateConfiguration：缺downloadMode绝不用于网站更新推断，translated/bilingual缺译源也返回nil；original有效且effectiveSource为nil。保留resolvedDownloadMode仅供旧记录显示兼容，不作为更新兜底。Store.updateEPUB在请求前校验明确配置；无配置抛configurationRequired，不设置进度或请求网络。成功替换写入所选配置；同内容仅CAS更新配置，保持路径/下载时间；失败/取消保留原记录。
+
+书库更新确认框和管理/末页面板共用WebNovelEPUBUpdateOptionsSheet（位于DownloadsViews、LibraryMover之前）。语言缺省不预选；已有已知字段可显示，译文/双语要求译源，原文不传译源；取消仅关闭，明确提交才进入原更新事务。管理模型在同内容保存配置后复读Store，避免下次重复询问。WebDAV准确字节替换保留云端元数据，不提示生成设置。
 
 ## 书库、文件与统计实现
 
@@ -435,6 +500,10 @@ Readium 与 Yuedu 是 Reader 功能内部的引擎选择。两个模型使用 Ap
 
 路径映射目前按文件名索引，不可为不同目录的同名文件写入互相覆盖的映射；若需求确需重复文件名，应调整映射及消费脚本。不要只确认 Xcode 编译通过就断言 Package 与脚本也正确。
 
+为兼容 Xcode 27.2，本地 CLibMobi 产品显式声明为静态库，Kindle 测试直接声明该产品依赖，避免自动生成测试产品时缺少 `clibmobi_CLibMobi.CLibMobi`。这不改变 C 源码或阅读器行为。
+
+独立包验证工作区为 Vendor 创建实际源码副本（排除生成目录），避免 Xcode 27.2 经符号链接解析本地 C 包时生成无效测试产品依赖；应用构建仍使用原 Vendor 源码。
+
 ## 构建与验证
 
 ### 选择验证
@@ -561,6 +630,8 @@ python3 scripts/check_architecture_release.py '<Release Novelia.app 内的 Novel
 
 ## 文档维护
 
+仓库文档只保留当前功能、实现约束、开发与验证方法。工作计划、实施过程、任务日志和历史验收记录不写入仓库，也不在仓库内另建归档目录；需要追溯的过程记录保存到项目的 Notion 长期记忆，逐版变更写在 GitHub Release。
+
 功能、行为、构建或依赖改变时，在同一次改动中更新对应文档，不留到发布时补写。每项内容只在一处详细描述，其他位置用链接指向它，不复制正文。
 
 | 改动 | 需要更新的文档 |
@@ -599,63 +670,3 @@ python3 scripts/check_architecture_release.py '<Release Novelia.app 内的 Novel
 ## 许可
 
 项目使用 GPL-3.0-only，第三方组件各自遵循许可；现有 YueduCoreText 的 MPL-2.0 和 Readium 等许可材料不能移除或重新授权。提交和分发按 `docs/BUILD.md` 与 `VERSIONING.md` 执行，IPA 分发需配套对应源码及许可材料。架构工作不自动授权改版本、提交、推送或发布。
-
-## 网络小说 EPUB 手动更新
-
-书库本机网络小说 EPUB 的菜单通过 `WebNovelDownloadStore.updateEPUB` 沿用旧记录的模式／译源重新请求整本文件；文件生成请求忽略本机 HTTP 缓存并要求重新验证。相同字节保留原文件与时间，新内容在提交时比较原记录，避免删除／移动竞态导致复活；失败与取消清理新文件，成功才移除旧文件。更新不更改 WebDAV 协议和按需下载规则。
-
-App 在 Root 注入包含原下载记录的 `WebNovelEPUBUpdate.prepare`。先验证新容器和 spine，再按明确的小说身份及旧文件哈希迁移已确认章节状态，成功后 Store 才提交替换；旧文件损坏时允许更新有效新文件。迁移保留原时间和旧哈希记录，提交失败可能留下无文件引用的 ID 状态，不表示文件已替换。网站 `episodeN.xhtml` 是序号，不能作为稳定章节 ID，不再调用路径匹配推断身份。`EPUBUpdateState` 仅保留历史辅助测试，不是当前网络小说的更新迁移路径。
-
-真实 Store 的成功、同内容、请求／校验／写盘失败、取消和删除竞态由 `test_library_transactions.py` 覆盖；路径映射、目标较新状态保护、旧版较新状态与删除合并由 `EPUBUpdateStateTests` 覆盖；隔离 App 的菜单确认流程由 `testManualWebNovelEPUBUpdate` 覆盖。源码／生成书籍用本地合成数据验证，真实网站与原书待验。
-
-手动云端更新由 `WebDAVSyncStore.updateWebNovelEPUBFromCloud` 经过清单门闩调用 Core `WebDAVEPUBUpdater`；仅允许本机网络小说 EPUB，读取云端原文件并校验哈希，下载后重新读取清单，检查同一文件版本及本机原记录。不同文件只接受严格更晚的下载时间；同哈希只合并状态。先合并目标哈希的远端状态，再用 Store 的 `replaceFromSync` 调用同一校验／承接钩子及比较提交事务；文件复制后检查取消，失败清理暂存文件，远端时间保留，不自动上传结果。与普通同步共用忙碌状态与门闩，不改自动替换规则。协议替身回归覆盖准确字节、最新状态、同哈希、旧版本／并发变化、损坏／缺失 blob 和取消；真实 Store 回归覆盖远端时间、状态钩子、校验／提交失败与删除竞态，隔离 UI 覆盖菜单及缺少配置提示。
-
-
-## 网络小说 EPUB 的 ID 阅读状态
-
-仅 `LibraryReaderDestination` 的当前 `.webNovel` EPUB 进入 `App/Integrations/WebNovelEPUBReading.swift`；文库、导入、移动到文库的书不启用，`sourceWebNovel` 不作为启用条件。集成对象消费 `NovelCatalogService` / `NovelContentService` 和 Root 所有的下载 Store，不在引擎或页面创建具体 API。两引擎接收 `WebNovelEPUBContext`，以规范资源路径映射源站 ID；Readium readingOrder 按路径转换，不能直接套原生 spine 序号。
-
-Core `WebNovelEPUBIdentity.swift` 定义 `webepub:<SHA256(带长度的书源/小说ID)>`、文件绑定映射、迁移与独立同步。映射由 `ReaderSettings.webEPUBMaps` 持有，使用同一注入 defaults；每个绑定带更新时间及更正删除记录，补全按路径合并，重复章节ID不解析。映射与文件SHA-256绑定，未核对不猜测。`WebNovelEPUBTOCMatcher` 以本机目录和网站目录的唯一标题对应源站ID，仅清理空白，不模糊化章号/标点；同时保留原文标题。旧下载目录可为仍存在的同一ID提供旧名，但旧新目录同名指向不同ID时拒绝自动匹配。卷名和原文卷名作为可选字段由网站目录的非章节分组传递；本机使用目录层级/分组标题。全局/卷内唯一对应先成为锚点，再在锚点区间分别计算最早与最晚可行的有序子序列，仅绑定两者相同的项；交叉锚点停用顺序推断，整段无法对应或有多种可能时不按序号猜测。多资源争同ID、多目录项共资源及已经确认的ID均不自动重分配。单标题候选超过512时回退手动，避免畸形目录产生平方级候选。核对复用/请求一次网站目录，不调用章节正文服务，只在本地检查缺章/缺译占位；正文预览仍由用户单独点击触发。旧书可预览并人工确认，取消保留已确认部分；纯缺章/缺译占位不当成有正文。
-
-进度新增可选 `chapterID`，章内比例跨文件；本机同文件偏移和 Readium Locator 仍可辅助。已知ID不存在于本机映射时不回退另一版的索引/全书比例，提示更新/核对。原生只在明确用户定位时写 ID 进度，Readium 对翻页/拖动/导航记录写入意图，打开、恢复与偏好重建不提升时间。Store变化发布只读通知，集成层复用同步来的同哈希映射。书库网络小说显示稳定位置的章节信息，文库保持哈希位置。
-
-迁移只处理已确认章节，保留旧记录和原时间；canonical书签UUID按原UUID与稳定小说键确定，避免与文库旧哈希记录冲突。107/108副本只有在本机保留原记录、能验证派生关系时归并，无法证明的不按位置/标题去重。墓碑优先于旧副本，手动更正可修正同历史时间的章节ID，不覆盖较新的阅读状态或复活删除。持久化失败可重试，映射确认不等于全部旧数据迁移完成。
-
-`WebNovelEPUBIdentitySync` 在原内容同步成功后，经相同清单门闩使用 `WebDAVClient(webEPUBIdentity: true)` 访问独立 `NoveliaSync/web-epub-v1/`，只合并ID位置、书签/墓碑和文件映射。旧客户端不访问此目录；参与新同步的设备仍需全部升级。保持强条件提交与三次冲突重读，提交成功才应用远端状态，本机较新的并发修改由存储合并保留。映射变更参与自动同步指纹及触发。纯文库且无网络小说状态时不访问此目录。
-
-末页事件仅由明确下一页操作触发：原生 Pager 拒绝用户翻页时判断最后章节已排版完成，Readium 用实际末资源及当前WebView的末页几何判断；不会在刚进入末章时遮挡正文。集成面板查询目录、计算已核验且有正文的章节差集（不计缺译/缺章占位），不完整或失败不显示精确0。更新保持模式/译源，提交前保留原状态，成功后重建容器/导航器；标题和正文均相同且两端唯一的已确认资源可沿用ID，新增/改写资源需核对。显式“继续阅读新章节”才推进位置。面板强制显示自身导航栏，避免继承阅读器隐藏栏导致无法返回。
-
-对应验证：`WebNovelEPUBIdentityTests`、`WebNovelEPUBIdentitySyncTests`、真实Store事务及 `testNativeNetworkEPUBEndAndUpdate` / `testReadiumNetworkEPUBEndAndUpdate`。实际服务器、用户原书和真机体验与模拟器证据分别记录。
-
-目录核对回归包括插章/重排、两侧同名、原文标题、旧目录改名/ID冲突、同资源多目录项、已有确认保护及旧JSON缺字段。独立Debug服务调用计数在两引擎的完整更新/核对/续读流程中断言正文服务调用为0；外部请求计数仍单独保留。计数诊断不进入Release。
-
-网络小说手动核对入口由书库更多操作通过 `LibraryBookActions.chapterUpdateBook` 打开独立管理面板；不创建阅读器。两引擎目录仅保留目录/图片，不增加回调入口；末页事件仍由App稳定所有者呈现更新面板。
-
-手动核对默认只展示未绑定的正文资源，网站候选按标题/卷名及邻近锚点过滤，保持网站顺序并展示序号/卷名/前后章。未知可选择完整目录，多个候选默认不选中；确认后跳下一待确认项。并排预览仅在显式点击时请求一章，选择变化清空预览，异步结果须校验本机项、远端ID与文件hash未变化；更正已绑定章节需界面明确确认，沿用原迁移时间和墓碑规则。
-
-候选页采用显式可搜索列表，显示导航栏并在点选后返回；目录检查task归属整个NavigationStack，不因推入/退出候选页重复查询或重置选择。手动确认流程断言预览前正文调用0，主动预览后为1。
-
-## 网络小说更新时的本地文件对应
-
-112将新旧EPUB比较统一到`WebNovelEPUBUpdate.prepare`，阅读器、书库网站更新和WebDAV替换均经Store既有钩子调用，阅读器不再另行继承。新文件先验证；旧确认状态先迁移，再读取两份文件全部正文资源。Core `WebNovelEPUBFileMatcher`仅接受两端唯一且标题/正文去空白相同的资源，不按路径序号猜ID；未确认旧副本也参与重复判定。新增/修订/占位正文保留未确认。继承保留来源绑定时间，目标确认/墓碑不覆盖。解析后复读App所有的映射Store，按新hash保存，不提升阅读时间；后续事务取消/冲突仅可能留下有效hash映射缓存，不替换原书。目录检查仍只查询目录，比较本身不访问网站。
-
-核对/更新面板显示期间固定背景阅读器身份，关闭面板后才按新文件/映射重建；防止背景导航栏隐藏设置影响面板返回。显式继续阅读仍按用户操作重建并跳转。
-
-更新面板的返回操作放在固定顶部栏，不依赖背景阅读器的系统导航栏样式。
-
-## 113 手动入口与核对性能
-
-手动入口改为书库每本书的更多操作菜单“章节同步与更新”，LibraryBookActions.chapterUpdateBook经页面统一sheet显示WebNovelEPUBReader(managementOnly:true)，直接使用管理模型和面板，不创建EPUBReaderHost、排版器或统计会话。目录第三选项及其回调移除，末页自动入口保留。管理模式不显示继续阅读动作，仍保留原进度。
-
-同一不可变文件hash下的映射只由确认/验证/本地继承创建，创建时已排除缺章和缺译；load/refreshMap直接复用这些验证事实，不在check中逐章重读。目录标题索引线性建立，revision只在context变化时计算。EPUB容器准备、候选筛选、目录匹配及本机正文读取/解析使用后台任务。候选任务可取消，检查当前索引/hash后才更新，手动选择取消过期候选结果。
-
-verifyAll仅读取未确认且有候选的本机正文，每64章applyVerified一次，避免每章编码全部映射并迁移书签。提交时复读共享Store，保护已有确认/墓碑，批次之间让出执行；取消保留已完成批次。Debug记录本机正文读取和批次计数，130章样本断言打开0次读取、核对130次且仅3次批次保存、重开不增加正文读取；生产构建排除计数。
-
-## 114 旧下载配置必须确认
-
-LocalBookRecords定义WebNovelEPUBUpdateConfiguration及DownloadedWebNovel.epubUpdateConfiguration：缺downloadMode绝不用于网站更新推断，translated/bilingual缺译源也返回nil；original有效且effectiveSource为nil。保留resolvedDownloadMode仅供旧记录显示兼容，不作为更新兜底。Store.updateEPUB在请求前校验明确配置；无配置抛configurationRequired，不设置进度或请求网络。成功替换写入所选配置；同内容仅CAS更新配置，保持路径/下载时间；失败/取消保留原记录。
-
-书库更新确认框和管理/末页面板共用WebNovelEPUBUpdateOptionsSheet（位于DownloadsViews、LibraryMover之前）。语言缺省不预选；已有已知字段可显示，译文/双语要求译源，原文不传译源；取消仅关闭，明确提交才进入原更新事务。管理模型在同内容保存配置后复读Store，避免下次重复询问。WebDAV准确字节替换保留云端元数据，不提示生成设置。
-
-Xcode 27.2 构建兼容：本地 CLibMobi 产品显式声明为静态库，Kindle 测试直接声明该产品依赖，避免自动生成测试产品时报缺少 clibmobi_CLibMobi.CLibMobi。该调整不改变 C 源码或阅读器行为。
-独立包验证工作区为 Vendor 创建实际源码副本（排除生成目录），避免 Xcode 27.2 经符号链接解析本地 C 包时生成无效测试产品依赖；应用构建仍使用原 Vendor 源码。
