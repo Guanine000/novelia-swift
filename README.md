@@ -41,7 +41,9 @@
 [下载最新正式版](https://github.com/Guanine000/novelia-swift/releases/latest) · [查看预发布测试版与发行记录](https://github.com/Guanine000/novelia-swift/releases)
 
 > [!IMPORTANT]
-> Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名。含 iOS 15 版本的双安装包目前作为**预发布测试版**提供，请在发行记录中选择预发布版本；最新正式版入口仍指向稳定版。双安装包分别为：`Novelia` 面向 **iOS 17**，默认使用 YueduCoreText 原生分页；文件名含 `ios15` 的 `NoveliaLegacy`（bundle id `cc.novelia.ios.port.ios15`，主屏幕名称为 Novelia 15）面向 **iOS 15**，分页固定为 Readium，不能切回原生分页，也不导入 AZW3／MOBI。
+> Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名。双安装包分别为：`Novelia` 面向 **iOS 17**，默认使用 YueduCoreText 原生分页；文件名含 `ios15` 的 `NoveliaLegacy`（bundle id `cc.novelia.ios.port.ios15`，主屏幕名称为 Novelia 15）面向 **iOS 15**，分页固定为 Readium，不能切回原生分页，也不导入 AZW3／MOBI。
+>
+> **iOS 15 Legacy 版还没有在真实 iOS 15／16 上运行验证。** 已通过编译与自动化检查，但旧系统实际运行和真实书籍完整回归仍待验证。
 
 想从源码运行，请用 Xcode 打开 `NoveliaIOS.xcodeproj`。iOS 17 选择 `Novelia` scheme，iOS 15 选择 `NoveliaLegacy` scheme。测试、本机构建与分发流程见[本机构建与分发](docs/BUILD.md)。
 
