@@ -88,7 +88,7 @@ final class TextChapterSourceTests: XCTestCase {
         let book = source([TextChapterContent(title: "长章", subtitle: nil,
                                               paragraphs: Array(repeating: TextChapterParagraph(text: Self.paragraph), count: 1_000))])
         let pages = EPUBPageBook(generation: 1)
-        let elapsed = try await ContinuousClock().measure {
+        let elapsed = try await MonotonicClock().measure {
             try await pages.layoutChapter(0, container: book, config: EPUBLayoutTests.readerConfig(workarounds: true), aspectRatio: 440 / 956)
         }
         print("TEXTUNIT units=\(book.chapterCount) firstUnitPages=\(pages.pageCount(spineIndex: 0)) elapsed=\(elapsed)")
@@ -195,7 +195,7 @@ extension TextChapterSourceTests {
     func testLargeBookUnitBuildTiming() {
         let body = String(repeating: "　　月光透过窗棂洒在书桌上，她轻轻合上那本旧书，指尖还残留着纸页的温度。\n", count: 140)
         let bodies = (1...1_675).map { TextChapterBody(title: "第\($0)章", subtitle: nil, body: body) }
-        let clock = ContinuousClock()
+        let clock = MonotonicClock()
         var eagerCount = 0, lazyCount = 0
         let eager = clock.measure {
             eagerCount = TextChapterSource.units(splitting: bodies.map {

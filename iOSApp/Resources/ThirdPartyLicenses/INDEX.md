@@ -42,7 +42,7 @@ swift-toolkit 3.11.0 的资源包随 App 分发以下第三方内容：
 
 阅读器脚本是压缩后的打包文件。Release 的依赖源码包包含 swift-toolkit 的脚本源码与 pnpm 锁定文件，以及打包所用全部 npm 包的原始发布包（`swift-toolkit-npm-sources/`，按锁定文件中的 SHA-512 完整性校验）。
 依赖源码附件另包含 `npm-preferred-sources/`，提供 @juggle/resize-observer 3.4.0 和 approx-string-match 1.1.0 在 npm 发布包中缺少的 TypeScript 实现、构建配置及精确来源/校验清单。
-本应用的 EPUB 原型代码为本项目新写，通过 Swift Package Manager 使用 YueduCoreText 公开 API；未修改上游文件。
+本应用的 EPUB 原型代码为本项目新写，通过 Swift Package Manager 使用 YueduCoreText 公开 API；未修改上游文件。iOS 17 的 Novelia 链接上表中的 YueduCoreText 与 libmobi。iOS 15 的 NoveliaLegacy 不链接这两项，其开源许可页不列出它们；本目录的许可文本仍随资源复制，供 iOS 17 安装包使用。
 
 ## YueduCoreText 对应源码
 

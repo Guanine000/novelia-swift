@@ -28,7 +28,7 @@ struct WenkuView: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(NoveliaStyle.muted)
                 TextField("搜索文库作品", text: $query)
                     .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .compatAutocorrectionDisabled()
                 if !query.isEmpty {
                     Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(NoveliaStyle.muted) }
                 }
@@ -78,7 +78,7 @@ struct WenkuFavoritesView: View {
     var body: some View {
         Group {
             if auth.username == nil {
-                ContentUnavailableView {
+                CompatUnavailable {
                     Label("登录后同步文库收藏", systemImage: "person.crop.circle.badge.checkmark")
                 } description: {
                     Text("文库收藏与网络小说收藏分开保存，并同步到 Novelia 网页端。")
@@ -87,9 +87,9 @@ struct WenkuFavoritesView: View {
                         .buttonStyle(.borderedProminent).tint(NoveliaStyle.brandGreen)
                 }
             } else if let error = store.favoriteErrorMessage, store.favorites.isEmpty {
-                ContentUnavailableView("无法加载文库收藏", systemImage: "heart", description: Text(error))
+                CompatUnavailable("无法加载文库收藏", systemImage: "heart", description: Text(error))
             } else if store.favorites.isEmpty {
-                ContentUnavailableView("文库收藏为空", systemImage: "books.vertical", description: Text("搜索文库作品后，在详情页添加收藏。"))
+                CompatUnavailable("文库收藏为空", systemImage: "books.vertical", description: Text("搜索文库作品后，在详情页添加收藏。"))
             } else {
                 WenkuNovelList(novels: store.favorites, loading: false, error: store.favoriteErrorMessage,
                                filtersBlocked: false, pager: nil) { await store.refreshFavorites(account: auth.username) }
@@ -129,7 +129,7 @@ private struct WenkuNovelList: View {
                     if loading && novels.isEmpty {
                         ProgressView("正在搜索文库…").padding(36)
                     } else if let error, novels.isEmpty {
-                        ContentUnavailableView {
+                        CompatUnavailable {
                             Label("文库请求失败", systemImage: "wifi.exclamationmark")
                         } description: {
                             Text(error)
@@ -139,7 +139,7 @@ private struct WenkuNovelList: View {
                                 .tint(NoveliaStyle.brandGreen)
                         }
                     } else if novels.isEmpty {
-                        ContentUnavailableView("没有找到作品", systemImage: "books.vertical", description: Text("换个关键词试试。"))
+                        CompatUnavailable("没有找到作品", systemImage: "books.vertical", description: Text("换个关键词试试。"))
                     }
                     ForEach(novels.filter { !filtersBlocked || !blocked.hides(blocked.wenkuTags[$0.id] ?? []) }) { novel in
                         NavigationLink {
@@ -164,7 +164,7 @@ private struct WenkuNovelList: View {
             }
             .refreshable { await reload() }
             // 翻页后回到顶部，像网页端一样从新一页的第一部作品开始看。
-            .onChange(of: pager?.page) { proxy.scrollTo(Self.topAnchor, anchor: .top) }
+            .onValueChange(of: pager?.page) { _, _ in proxy.scrollTo(Self.topAnchor, anchor: .top) }
         }
     }
 
@@ -295,7 +295,7 @@ struct WenkuDetailView: View {
             } else if isLoading {
                 ProgressView("正在加载文库详情…")
             } else {
-                ContentUnavailableView("无法加载作品", systemImage: "wifi.exclamationmark", description: Text(error ?? "请稍后重试。"))
+                CompatUnavailable("无法加载作品", systemImage: "wifi.exclamationmark", description: Text(error ?? "请稍后重试。"))
             }
         }
         .navigationTitle(detail?.displayTitle ?? outline.displayTitle)
@@ -430,7 +430,7 @@ struct WenkuDetailView: View {
                 }
             }
         }
-        .scrollIndicators(.hidden)
+        .compatScrollIndicatorsHidden()
     }
 
     private func relatedWebNovelsSection(_ detail: WenkuNovelDetail) -> some View {
@@ -575,7 +575,7 @@ private struct WenkuDownloadSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationStack {
             Form {
                 Section("卷") { Text(volume.volumeId); Text("有译文的章节：\(volume.total)") }
                 Section("下载内容") {
@@ -623,7 +623,7 @@ private struct WenkuDownloadSheet: View {
             .navigationTitle("下载 EPUB")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("关闭") { dismiss() } }
+                ToolbarItem(placement: .compatTopBarLeading) { Button("关闭") { dismiss() } }
             }
             .onAppear {
                 if let first = availableTranslators.first { translator = first }

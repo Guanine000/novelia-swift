@@ -68,7 +68,7 @@ private struct ReadiumEPUBReaderViewContent: View {
                 case .idle, .opening:
                     ProgressView(textBook == nil ? "正在解析 EPUB…" : "正在打开章节…")
                 case .failed(let message):
-                    ContentUnavailableView {
+                    CompatUnavailable {
                         Label("无法打开", systemImage: "exclamationmark.triangle")
                     } description: {
                         Text(message).textSelection(.enabled)
@@ -128,8 +128,8 @@ private struct ReadiumEPUBReaderViewContent: View {
             }
         }
 #endif
-        .toolbar(.hidden, for: .navigationBar)
-        .toolbar(.hidden, for: .tabBar)
+        .compatToolbar(.hidden, for: .navigationBar)
+        .compatToolbar(.hidden, for: .tabBar)
         .statusBarHidden(true)
         .trackReadingTime(statisticsBook ?? ReadingBook(id: "epub:\(bookURL?.lastPathComponent ?? "text")",
                                                        title: bookURL?.deletingPathExtension().lastPathComponent ?? "阅读", kind: .epub),
@@ -152,18 +152,18 @@ private struct ReadiumEPUBReaderViewContent: View {
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in
             batteryLevel = UIDevice.current.batteryLevel
         }
-        .onChange(of: colorScheme) { _, scheme in
+        .onValueChange(of: colorScheme) { _, scheme in
             // 进入后台后系统以浅色、深色分别截取快照；此时重建导航器会丢失当前页，回到前台再同步。
             guard scenePhase != .background else { return }
             model.synchronizeSharedSettings(systemIsDark: scheme == .dark)
         }
-        .onChange(of: scenePhase) { _, phase in
+        .onValueChange(of: scenePhase) { _, phase in
             if phase != .background { model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         }
-        .onChange(of: settings.fontSize) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
-        .onChange(of: settings.appearanceRaw) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
-        .onChange(of: backgrounds.revision) { _, _ in model.refreshBackground() }
-        .onChange(of: bookBackgroundFollow) { _, _ in model.refreshPageBackgroundRule() }
+        .onValueChange(of: settings.fontSize) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
+        .onValueChange(of: settings.appearanceRaw) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
+        .onValueChange(of: backgrounds.revision) { _, _ in model.refreshBackground() }
+        .onValueChange(of: bookBackgroundFollow) { _, _ in model.refreshPageBackgroundRule() }
         .task(id: model.status) {
             if model.status == .ready { await model.scanBookDiagnostics() }
         }
@@ -325,7 +325,7 @@ private struct ReadiumEPUBReaderViewContent: View {
     // MARK: 目录
 
     private var tocSheet: some View {
-        NavigationStack {
+        CompatNavigationStack {
             Group {
                 if tocTab == .images, model.imageLibrary.isAvailable {
                     ReaderImageGallery(library: model.imageLibrary, chapterTitle: { model.imageChapterTitle($0) }) { entry in
@@ -338,23 +338,15 @@ private struct ReadiumEPUBReaderViewContent: View {
             }
             .navigationTitle("目录")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { isShowingTOC = false }
-                }
-                if model.imageLibrary.isAvailable {
-                    ToolbarItem(placement: .principal) {
-                        ReaderTOCTabPicker(selection: $tocTab)
-                    }
-                }
-                if tocTab == .contents || !model.imageLibrary.isAvailable, model.toc.contains(where: { $0.level > 0 }) {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        ReaderTOCExpandAllButton(levels: model.toc.map(\.level), expanded: $tocExpanded)
-                    }
-                }
-            }
+            .modifier(ReaderTOCNavigationToolbar(
+                showsImageTabs: model.imageLibrary.isAvailable,
+                levels: model.toc.map(\.level),
+                tocTab: $tocTab,
+                expanded: $tocExpanded,
+                onClose: { isShowingTOC = false }
+            ))
         }
-        .presentationDetents([.medium, .large])
+        .compatPresentationDetents(.medium, .large)
 
     }
 
@@ -383,7 +375,7 @@ private struct ReadiumEPUBReaderViewContent: View {
                     ReaderTOCWordCountHeader(total: tocWordCounts.total)
                 }
                 if model.toc.isEmpty {
-                    ContentUnavailableView("没有目录", systemImage: "list.bullet.rectangle",
+                    CompatUnavailable("没有目录", systemImage: "list.bullet.rectangle",
                                            description: Text(model.tocNotice ?? "本书未提供目录。"))
                 }
                 let levels = model.toc.map(\.level)
@@ -426,7 +418,7 @@ private struct ReadiumEPUBReaderViewContent: View {
     // MARK: 阅读样式
 
     private var styleSheet: some View {
-        NavigationStack {
+        CompatNavigationStack {
             Form {
                 Section("背景") { NavigationLink("阅读背景") { ReaderBackgroundSettingsView() } }
                 Section("分页") {
@@ -494,10 +486,10 @@ private struct ReadiumEPUBReaderViewContent: View {
             .navigationTitle("阅读样式")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .compatTopBarLeading) {
                     Button("取消") { isShowingStyle = false }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .compatTopBarTrailing) {
                     Button("应用") {
                         model.applyStyle(draftStyle)
                         isShowingStyle = false
@@ -505,7 +497,7 @@ private struct ReadiumEPUBReaderViewContent: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .compatPresentationDetents(.medium, .large)
     }
 
     private func styleSlider(_ label: String, value: Binding<CGFloat>,
@@ -521,7 +513,7 @@ private struct ReadiumEPUBReaderViewContent: View {
     // MARK: 注脚
 
     private func noteSheet(_ note: EPUBNote) -> some View {
-        NavigationStack {
+        CompatNavigationStack {
             ScrollView {
                 Text(note.text)
                     .font(.system(size: 15))
@@ -532,14 +524,14 @@ private struct ReadiumEPUBReaderViewContent: View {
             .navigationTitle("注释")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .compatTopBarLeading) {
                     Button("关闭") { model.activeNote = nil }
                 }
             }
         }
-        .presentationDetents([.medium])
+        .compatPresentationDetents(.medium)
         // 半屏 sheet 默认为半透明材质，注释正文需要不透明底色才易读。
-        .presentationBackground(Color(uiColor: .systemBackground))
+        .compatPresentationBackground(Color(uiColor: .systemBackground))
     }
 }
 

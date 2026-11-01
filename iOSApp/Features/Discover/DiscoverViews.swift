@@ -37,7 +37,7 @@ struct DiscoverHomeView: View {
                 }
             }
         }
-        .onChange(of: catalog, initial: true) { _, value in loaded.insert(value) }
+        .onValueChange(of: catalog, initial: true) { _, value in loaded.insert(value) }
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle("发现")
         .navigationBarTitleDisplayMode(.inline)
@@ -137,15 +137,7 @@ struct PageNavigator: View {
         }
         .font(.system(size: 13, weight: .medium))
         .foregroundStyle(NoveliaStyle.muted)
-        .toolbar {
-            // 数字键盘没有回车键，用键盘上方的按钮完成跳转。
-            if inlineJumpFocused {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("跳转") { submitInlineJump() }
-                }
-            }
-        }
+        .compatKeyboardJumpToolbar(isPresented: inlineJumpFocused, action: submitInlineJump)
     }
 
     private var pageButtons: some View {
@@ -247,7 +239,7 @@ private struct DiscoverContentView: View {
             content
                 .navigationTitle(showsNavigationBar ? "搜索结果" : "")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar(showsNavigationBar ? .visible : .hidden, for: .navigationBar)
+                .compatToolbar(showsNavigationBar ? .visible : .hidden, for: .navigationBar)
         }
     }
 
@@ -260,7 +252,7 @@ private struct DiscoverContentView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("FIND YOUR NEXT STORY")
                             .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .tracking(1.4)
+                            .compatTracking(1.4)
                             .foregroundStyle(NoveliaStyle.brandGreen)
                         Text("发现好故事")
                             .font(.system(size: 31, weight: .bold, design: .rounded))
@@ -273,7 +265,7 @@ private struct DiscoverContentView: View {
                         .foregroundStyle(NoveliaStyle.muted)
                     TextField("搜索书名、作者或题材", text: $query)
                         .font(.system(size: 15))
-                        .autocorrectionDisabled()
+                        .compatAutocorrectionDisabled()
                 }
                 .padding(14)
                 .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
@@ -307,7 +299,7 @@ private struct DiscoverContentView: View {
                 }
 
                 if let errorMessage = store.errorMessage {
-                    ContentUnavailableView {
+                    CompatUnavailable {
                         Label("暂时无法连接", systemImage: "wifi.exclamationmark")
                     } description: {
                         Text(errorMessage)
@@ -357,7 +349,7 @@ private struct DiscoverContentView: View {
                     .padding(.top, 4)
                 }
                 if store.novels.isEmpty && store.wenkuNovels.isEmpty && store.errorMessage == nil && !store.isLoading {
-                    ContentUnavailableView.search(text: query)
+                    CompatSearchUnavailable(text: query)
                         .padding(.top, 20)
                 }
             }
@@ -367,7 +359,7 @@ private struct DiscoverContentView: View {
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
         // 翻页后回到顶部，像网页端一样从新一页的第一部作品开始看。
-        .onChange(of: store.page) { proxy.scrollTo(Self.topAnchor, anchor: .top) }
+        .onValueChange(of: store.page) { _, _ in proxy.scrollTo(Self.topAnchor, anchor: .top) }
         }
         .task(id: query) { await store.searchIfNeeded(query: query) }
     }
@@ -398,7 +390,7 @@ private struct RankingContentView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("RANKING")
                         .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .tracking(1.4)
+                        .compatTracking(1.4)
                         .foregroundStyle(NoveliaStyle.brandGreen)
                     Text("小说排行榜")
                         .font(.system(size: 28, weight: .bold, design: .rounded))
@@ -424,7 +416,7 @@ private struct RankingContentView: View {
                 }
 
                 if let errorMessage = store.errorMessage {
-                    ContentUnavailableView {
+                    CompatUnavailable {
                         Label("排行榜加载失败", systemImage: "wifi.exclamationmark")
                     } description: {
                         Text(errorMessage)
@@ -459,13 +451,13 @@ private struct RankingContentView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                 } else if !store.isLoading && store.errorMessage == nil {
-                    ContentUnavailableView("暂无排行榜作品", systemImage: "chart.bar")
+                    CompatUnavailable("暂无排行榜作品", systemImage: "chart.bar")
                 }
             }
             .padding(20)
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
-        .onChange(of: page) { proxy.scrollTo("ranking-top", anchor: .top) }
+        .onValueChange(of: page) { _, _ in proxy.scrollTo("ranking-top", anchor: .top) }
         }
         .navigationTitle("小说排行榜")
         .navigationBarTitleDisplayMode(.inline)
@@ -520,7 +512,7 @@ private struct TagSearchContentView: View {
                 }
 
                 if let errorMessage = store.errorMessage {
-                    ContentUnavailableView {
+                    CompatUnavailable {
                         Label("标签搜索失败", systemImage: "wifi.exclamationmark")
                     } description: {
                         Text(errorMessage)
@@ -547,14 +539,14 @@ private struct TagSearchContentView: View {
                         Task { await store.goTo(page: target) }
                     }
                 } else if !store.isLoading && store.errorMessage == nil {
-                    ContentUnavailableView.search(text: tag)
+                    CompatSearchUnavailable(text: tag)
                         .padding(.top, 8)
                 }
             }
             .padding(20)
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
-        .onChange(of: store.page) { proxy.scrollTo("tag-search-top", anchor: .top) }
+        .onValueChange(of: store.page) { _, _ in proxy.scrollTo("tag-search-top", anchor: .top) }
         }
         .navigationTitle("标签搜索")
         .navigationBarTitleDisplayMode(.inline)

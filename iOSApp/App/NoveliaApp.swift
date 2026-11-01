@@ -1,7 +1,6 @@
 import SwiftUI
 import OSLog
 import UIKit
-import PhotosUI
 import UniformTypeIdentifiers
 import ImageIO
 
@@ -215,7 +214,7 @@ struct RootView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             ForEach(tabOrder) { tab in
-                NavigationStack {
+                CompatNavigationStack {
                     switch tab {
                     case .library: LibraryView()
                     case .discover: DiscoverHomeView()
@@ -229,7 +228,7 @@ struct RootView: View {
         }
         // 调整顺序后整体重建底栏；就地重排时系统底栏的图标不会随标题更新。
         .id(tabOrderRaw)
-        .onChange(of: selectedTab) { _, tab in
+        .onValueChange(of: selectedTab) { _, tab in
             UserDefaults.standard.set(tab.rawValue, forKey: SettingsKey.tabBarLastSelected)
         }
         .tint(AppThemeColor.color(for: appThemeColorRaw, customHex: appThemeCustomHex))
@@ -261,7 +260,7 @@ struct RootView: View {
             await favorites.refresh(account: auth.username)
             await wenkuStore.refreshFavorites(account: auth.username)
         }
-        .onChange(of: checksUpdates) { _, enabled in
+        .onValueChange(of: checksUpdates) { _, enabled in
             if enabled && services.performsUpdateChecks { Task { await updates.check(force: true) } }
             else { updates.release = nil }
         }
@@ -292,7 +291,7 @@ struct RootView: View {
             // 内存紧张时系统可能结束 Readium 的 WebContent 进程，章节随之重建，是跳页的常见诱因。
             Self.lifecycleLogger.notice(ReaderDiagnosticMessage.memoryWarning())
         }
-        .onChange(of: scenePhase) { _, phase in
+        .onValueChange(of: scenePhase) { _, phase in
             // 切换前后台会触发阅读器截图与重排，记录时间点以便与阅读日志对照。
             Self.lifecycleLogger.notice(ReaderDiagnosticMessage.scenePhase(Self.phaseName(phase)))
             if phase == .active { Task { await restoreSessions() } }
@@ -302,7 +301,7 @@ struct RootView: View {
         }
         .fullScreenCover(isPresented: .constant(opensSampleReaderDirectly)) {
             // 全屏呈现不继承上面注入的环境对象，阅读器需要的对象在此单独注入。
-            NavigationStack {
+            CompatNavigationStack {
                 EPUBReaderHost(initialURL: nil)
             }
             .environmentObject(services.local.readerSettings)

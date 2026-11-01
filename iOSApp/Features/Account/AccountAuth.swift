@@ -363,7 +363,7 @@ struct NoveliaLoginSheet: View {
     @State private var loginCompletionTask: Task<Void, Never>?
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationStack {
             VStack(spacing: 0) {
                 Text("在 Novelia 官网登录。若未自动显示登录框，请点击网页中的“登录/注册”。账号密码由官网直接处理。")
                     .font(.footnote)
@@ -538,7 +538,7 @@ struct ForumLoginSheet: View {
     @State private var loginCompletionTask: Task<Void, Never>?
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationStack {
             VStack(spacing: 0) {
                 Text("在 Novelia 官网登录同一个小说与论坛账号。若未显示登录框，请点击网页中的“登录/注册”。")
                     .font(.footnote)

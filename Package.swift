@@ -3,6 +3,9 @@ import PackageDescription
 
 let package = Package(
     name: "NoveliaIOSPort",
+    // 本包只服务测试。NoveliaEPUB 依赖上游 YueduCoreText（声明 iOS 17），
+    // NoveliaKindle 依赖本地 CLibMobi（声明 iOS 17），因此这里保持 iOS 17。
+    // iOS 15 应用是 Xcode 目标 NoveliaLegacy，直接编译源文件，不使用这两个产品。
     platforms: [.iOS(.v17)],
     products: [
         .library(name: "NoveliaIOSCore", targets: ["NoveliaIOSCore"])

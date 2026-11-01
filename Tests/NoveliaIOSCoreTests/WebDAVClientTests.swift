@@ -274,7 +274,7 @@ final class WebDAVClientTests: XCTestCase {
         session = client?.session
         try? await client?.verifyConnection()
         client = nil
-        for _ in 0..<100 where session != nil { try await Task.sleep(for: .milliseconds(20)) }
+        for _ in 0..<100 where session != nil { try await Task.sleep(nanoseconds: 20_000_000) }
         XCTAssertNil(session)
     }
 

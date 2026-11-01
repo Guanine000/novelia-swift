@@ -54,6 +54,15 @@ class LocalReleaseTests(unittest.TestCase):
         self.assertNotIn("releases/latest", note)
         self.assertNotIn("novelia-ios-port", note)
 
+    def test_public_prerelease_note_matches_tag_and_both_ipas(self):
+        note = release.public_source_note("1.3.0", "129", "main.ipa", "source.tar.gz",
+                                          "dependencies.tar.gz", "legacy.ipa", "v1.3.0-rc.3")
+        self.assertIn("releases/tag/v1.3.0-rc.3\n", note)
+        self.assertIn("main.ipa\nlegacy.ipa", note)
+        for tag in ("v1.2.0-rc.3", "v1.3.0/../../main", "v1.3.0-rc.3?token=secret"):
+            with self.assertRaises(ValueError):
+                release.public_source_note("1.3.0", "129", "a", "s", "d", release_tag=tag)
+
     def test_modified_date_read_from_settings(self):
         self.assertEqual(release.modified_date('    static let modifiedDate = "2026-10-13"\n'), "2026-10-13")
         with self.assertRaises(RuntimeError):

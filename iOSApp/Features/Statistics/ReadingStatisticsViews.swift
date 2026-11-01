@@ -50,10 +50,10 @@ struct ReadingStatisticsView: View {
                     Text("默认关闭。开启后记录 EPUB、TXT 和在线阅读时长；关闭后暂停新增记录，已有统计保留。WebDAV 同步开关及按钮位于“我的 → WebDAV 同步”。")
                 }
                 Section("阅读概览") {
-                    LabeledContent("今日", value: ReadingDuration.text(store.statistics.seconds(days: [today])))
-                    LabeledContent("本周", value: ReadingDuration.text(ReadingDuration.weekSeconds(store.statistics, at: context.date)))
-                    LabeledContent("累计", value: ReadingDuration.text(store.statistics.seconds()))
-                    LabeledContent("阅读天数", value: "\(store.statistics.readingDays) 天")
+                    CompatLabeledContent("今日", value: ReadingDuration.text(store.statistics.seconds(days: [today])))
+                    CompatLabeledContent("本周", value: ReadingDuration.text(ReadingDuration.weekSeconds(store.statistics, at: context.date)))
+                    CompatLabeledContent("累计", value: ReadingDuration.text(store.statistics.seconds()))
+                    CompatLabeledContent("阅读天数", value: "\(store.statistics.readingDays) 天")
                 }
                 Section {
                     ForEach(store.devices) { device in
@@ -87,9 +87,9 @@ struct ReadingStatisticsView: View {
                         let seconds = store.statistics.seconds(kind: kind)
                         let total = store.statistics.seconds()
                         VStack(alignment: .leading, spacing: 6) {
-                            LabeledContent(kind.title, value: ReadingDuration.text(seconds))
+                            CompatLabeledContent(kind.title, value: ReadingDuration.text(seconds))
                             HStack {
-                                ProgressView(value: total > 0 ? seconds / total : 0).tint(color(kind))
+                                ProgressView(value: total > 0 ? seconds / total : 0).tint(readingKindColor(kind))
                                 Text(total > 0 ? String(format: "%.1f%%", seconds / total * 100) : "0%")
                                     .font(.caption).monospacedDigit().foregroundStyle(.secondary)
                             }
@@ -101,27 +101,13 @@ struct ReadingStatisticsView: View {
                         Text("最近 7 天").tag(7)
                         Text("最近 30 天").tag(30)
                     }.pickerStyle(.segmented)
-                    Chart {
-                        ForEach(dates, id: \.self) { date in
-                            ForEach(ReadingKind.allCases) { kind in
-                                let day = ReadingStatistics.dayKey(date, calendar: calendar)
-                                BarMark(x: .value("日期", day),
-                                        y: .value("分钟", store.statistics.seconds(kind: kind, days: [day]) / 60))
-                                    .foregroundStyle(by: .value("类型", kind.title))
-                            }
-                        }
-                    }
-                    .chartForegroundStyleScale(["EPUB": color(.epub), "TXT": color(.txt), "在线阅读": color(.online)])
-                    .chartXAxis { AxisMarks(values: .automatic(desiredCount: 3)) }
-                    .chartYAxisLabel("分钟")
-                    .chartXSelection(value: $selectedDay)
-                    .frame(height: 210)
+                    ReadingDailyTrendChart(dates: dates, calendar: calendar, statistics: store.statistics, selectedDay: $selectedDay)
                     Text("点击或拖动图表选择日期，查看当天三类阅读时长。")
                         .font(.caption).foregroundStyle(.secondary)
                     NavigationLink {
                         ReadingDayStatisticsView(day: selectedDay ?? today)
                     } label: {
-                        LabeledContent(selectedDay ?? today,
+                        CompatLabeledContent(selectedDay ?? today,
                                        value: ReadingDuration.text(store.statistics.seconds(days: [selectedDay ?? today])))
                     }
                 }
@@ -164,13 +150,6 @@ struct ReadingStatisticsView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func color(_ kind: ReadingKind) -> Color {
-        switch kind {
-        case .epub: NoveliaStyle.brandGreen
-        case .txt: .orange
-        case .online: .blue
-        }
-    }
 }
 
 private struct ReadingDayStatisticsView: View {
@@ -180,16 +159,16 @@ private struct ReadingDayStatisticsView: View {
     var body: some View {
         List {
             Section("阅读时长") {
-                LabeledContent("合计", value: ReadingDuration.text(store.statistics.seconds(days: [day])))
+                CompatLabeledContent("合计", value: ReadingDuration.text(store.statistics.seconds(days: [day])))
                 ForEach(ReadingKind.allCases) { kind in
-                    LabeledContent(kind.title, value: ReadingDuration.text(store.statistics.seconds(kind: kind, days: [day])))
+                    CompatLabeledContent(kind.title, value: ReadingDuration.text(store.statistics.seconds(kind: kind, days: [day])))
                 }
             }
             Section("当天阅读的书") {
                 ForEach(store.statistics.books.values.filter { ($0.days[day] ?? 0) > 0 }
                     .sorted { ($0.days[day] ?? 0) > ($1.days[day] ?? 0) }) { entry in
                     NavigationLink { ReadingBookStatisticsView(bookID: entry.id) } label: {
-                        LabeledContent(entry.book.title, value: ReadingDuration.text(entry.days[day] ?? 0))
+                        CompatLabeledContent(entry.book.title, value: ReadingDuration.text(entry.days[day] ?? 0))
                     }
                 }
             }
@@ -208,13 +187,13 @@ private struct ReadingBookStatisticsView: View {
             if let entry = store.statistics.books[bookID] {
                 Section("书籍") {
                     Text(entry.book.title)
-                    LabeledContent("类型", value: entry.book.kind.title)
-                    LabeledContent("累计时长", value: ReadingDuration.text(entry.seconds))
-                    LabeledContent("最后阅读", value: entry.lastReadAt.formatted(date: .abbreviated, time: .shortened))
+                    CompatLabeledContent("类型", value: entry.book.kind.title)
+                    CompatLabeledContent("累计时长", value: ReadingDuration.text(entry.seconds))
+                    CompatLabeledContent("最后阅读", value: entry.lastReadAt.formatted(date: .abbreviated, time: .shortened))
                 }
                 Section("每日记录") {
                     ForEach(entry.days.keys.sorted(by: >), id: \.self) { day in
-                        LabeledContent(day, value: ReadingDuration.text(entry.days[day] ?? 0))
+                        CompatLabeledContent(day, value: ReadingDuration.text(entry.days[day] ?? 0))
                     }
                 }
             }
@@ -243,19 +222,19 @@ private struct ReadingDeviceStatisticsView: View {
                     } else {
                         Text(device.name)
                     }
-                    if let model = device.model { LabeledContent("类型", value: model) }
+                    if let model = device.model { CompatLabeledContent("类型", value: model) }
                 } header: {
                     Text("设备")
                 } footer: {
                     if device.isCurrent { Text("名称会在下次同步后显示在其他设备上。留空恢复为设备类型。") }
                 }
                 Section("阅读概览") {
-                    LabeledContent("今日", value: ReadingDuration.text(stats.seconds(days: [ReadingStatistics.dayKey(now)])))
-                    LabeledContent("本周", value: ReadingDuration.text(ReadingDuration.weekSeconds(stats, at: now)))
-                    LabeledContent("累计", value: ReadingDuration.text(stats.seconds()))
-                    LabeledContent("阅读天数", value: "\(stats.readingDays) 天")
+                    CompatLabeledContent("今日", value: ReadingDuration.text(stats.seconds(days: [ReadingStatistics.dayKey(now)])))
+                    CompatLabeledContent("本周", value: ReadingDuration.text(ReadingDuration.weekSeconds(stats, at: now)))
+                    CompatLabeledContent("累计", value: ReadingDuration.text(stats.seconds()))
+                    CompatLabeledContent("阅读天数", value: "\(stats.readingDays) 天")
                     ForEach(ReadingKind.allCases) { kind in
-                        LabeledContent(kind.title, value: ReadingDuration.text(stats.seconds(kind: kind)))
+                        CompatLabeledContent(kind.title, value: ReadingDuration.text(stats.seconds(kind: kind)))
                     }
                 }
                 Section("书籍") {
@@ -281,5 +260,123 @@ private struct ReadingDeviceStatisticsView: View {
         }
         .navigationTitle("设备阅读记录")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private func readingKindColor(_ kind: ReadingKind) -> Color {
+    switch kind {
+    case .epub: NoveliaStyle.brandGreen
+    case .txt: .orange
+    case .online: .blue
+    }
+}
+
+/// iOS 17 保留 Swift Charts 的点选；iOS 16 用拖动选日期；iOS 15 用手绘柱状图。
+private struct ReadingDailyTrendChart: View {
+    let dates: [Date]
+    let calendar: Calendar
+    let statistics: ReadingStatistics
+    @Binding var selectedDay: String?
+
+    var body: some View {
+        if #available(iOS 16, *) {
+            ReadingDailyTrendChartNative(dates: dates, calendar: calendar, statistics: statistics, selectedDay: $selectedDay)
+        } else {
+            ReadingDailyTrendBars(dates: dates, calendar: calendar, statistics: statistics, selectedDay: $selectedDay)
+        }
+    }
+}
+
+@available(iOS 16, *)
+private struct ReadingDailyTrendChartNative: View {
+    let dates: [Date]
+    let calendar: Calendar
+    let statistics: ReadingStatistics
+    @Binding var selectedDay: String?
+
+    var body: some View {
+        let chart = Chart {
+            ForEach(dates, id: \.self) { date in
+                ForEach(ReadingKind.allCases) { kind in
+                    let day = ReadingStatistics.dayKey(date, calendar: calendar)
+                    BarMark(x: .value("日期", day),
+                            y: .value("分钟", statistics.seconds(kind: kind, days: [day]) / 60))
+                        .foregroundStyle(by: .value("类型", kind.title))
+                }
+            }
+        }
+        .chartForegroundStyleScale(["EPUB": readingKindColor(.epub), "TXT": readingKindColor(.txt), "在线阅读": readingKindColor(.online)])
+        .chartXAxis { AxisMarks(values: .automatic(desiredCount: 3)) }
+        .chartYAxisLabel("分钟")
+        .frame(height: 210)
+
+        if #available(iOS 17, *) {
+            chart.chartXSelection(value: $selectedDay)
+        } else {
+            chart.chartOverlay { proxy in
+                GeometryReader { _ in
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                            if let day: String = proxy.value(atX: value.location.x) {
+                                selectedDay = day
+                            }
+                        })
+                }
+            }
+        }
+    }
+}
+
+/// iOS 15 没有 Swift Charts。柱宽按天数平分，点按一天写入与图表点选相同的日期。
+private struct ReadingDailyTrendBars: View {
+    let dates: [Date]
+    let calendar: Calendar
+    let statistics: ReadingStatistics
+    @Binding var selectedDay: String?
+
+    var body: some View {
+        let days = dates.map { ReadingStatistics.dayKey($0, calendar: calendar) }
+        let totals = days.map { day in
+            ReadingKind.allCases.reduce(0.0) { $0 + statistics.seconds(kind: $1, days: [day]) / 60 }
+        }
+        let maxValue = max(totals.max() ?? 0, 1)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .bottom, spacing: 2) {
+                ForEach(Array(days.enumerated()), id: \.offset) { index, day in
+                    Button { selectedDay = day } label: {
+                        stackedBar(day: day, total: totals[index], maxValue: maxValue, selected: selectedDay == day)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(day)
+                }
+            }
+            .frame(height: 180)
+            HStack(spacing: 10) {
+                ForEach(ReadingKind.allCases) { kind in
+                    HStack(spacing: 4) {
+                        Circle().fill(readingKindColor(kind)).frame(width: 7, height: 7)
+                        Text(kind.title).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .frame(height: 210)
+    }
+
+    private func stackedBar(day: String, total: Double, maxValue: Double, selected: Bool) -> some View {
+        let height = max(2, CGFloat(total / maxValue) * 160)
+        return VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            VStack(spacing: 0) {
+                ForEach(Array(ReadingKind.allCases.reversed())) { kind in
+                    let minutes = statistics.seconds(kind: kind, days: [day]) / 60
+                    Rectangle()
+                        .fill(readingKindColor(kind))
+                        .frame(height: total > 0 ? height * CGFloat(minutes / total) : 0)
+                }
+            }
+            .frame(height: height)
+            .overlay(Rectangle().stroke(selected ? Color.primary : .clear, lineWidth: 1))
+        }
     }
 }

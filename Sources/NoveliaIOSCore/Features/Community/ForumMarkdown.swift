@@ -176,9 +176,9 @@ func parseForumMarkdown(_ markdown: String, mode: ForumMarkdownMode = .article) 
             index += 1
             continue
         }
-        if let details = line.firstMatch(of: /^:::\s*details(?:\s+(.*))?$/) {
+        if let details = forumCaptures(line, ForumLinePattern.details) {
             flushParagraph()
-            let title = String(details.1 ?? "")
+            let title = details[0] ?? ""
             index += 1
             var content: [String] = []
             while index < lines.count, lines[index].trimmingCharacters(in: .whitespaces) != ":::" {
@@ -189,8 +189,8 @@ func parseForumMarkdown(_ markdown: String, mode: ForumMarkdownMode = .article) 
             append(.details(title), content.joined(separator: "\n"))
             continue
         }
-        if let star = line.firstMatch(of: /^:::\s*star\s+([0-9]+(?:\.[0-9]+)?)\s*$/),
-           let value = Double(star.1) {
+        if let star = forumCaptures(line, ForumLinePattern.star),
+           let raw = star.first.flatMap({ $0 }), let value = Double(raw) {
             flushParagraph()
             append(.starRating(min(5, max(0, value))), "")
             index += 1
@@ -218,23 +218,23 @@ func parseForumMarkdown(_ markdown: String, mode: ForumMarkdownMode = .article) 
             index += 1
             continue
         }
-        if mode == .article, let match = line.firstMatch(of: /^(#{1,6})\s+(.+)$/) {
+        if mode == .article, let match = forumCaptures(line, ForumLinePattern.heading) {
             flushParagraph()
-            let title = String(match.2)
+            let title = match[1] ?? ""
             let baseAnchor = forumHeadingSlug(title)
             let duplicateCount = headingAnchorCounts[baseAnchor, default: 0]
             headingAnchorCounts[baseAnchor] = duplicateCount + 1
             let anchor = duplicateCount == 0 ? baseAnchor : "\(baseAnchor)-\(duplicateCount)"
-            append(.heading(match.1.count), title, anchor: anchor)
-        } else if mode == .article, let match = line.firstMatch(of: /^[-+*]\s+(.+)$/) {
+            append(.heading((match[0] ?? "").count), title, anchor: anchor)
+        } else if mode == .article, let match = forumCaptures(line, ForumLinePattern.bullet) {
             flushParagraph()
-            append(.unorderedItem, String(match.1))
-        } else if mode == .article, let match = line.firstMatch(of: /^(\d+)[.)]\s+(.+)$/), let number = Int(match.1) {
+            append(.unorderedItem, match[0] ?? "")
+        } else if mode == .article, let match = forumCaptures(line, ForumLinePattern.numbered), let number = Int(match[0] ?? "") {
             flushParagraph()
-            append(.orderedItem(number), String(match.2))
-        } else if mode == .article, let match = line.firstMatch(of: /^>\s?(.*)$/) {
+            append(.orderedItem(number), match[1] ?? "")
+        } else if mode == .article, let match = forumCaptures(line, ForumLinePattern.quote) {
             flushParagraph()
-            append(.quote, String(match.1))
+            append(.quote, match[0] ?? "")
         } else if mode == .article, isForumMarkdownDivider(line) {
             flushParagraph()
             append(.divider, "")
@@ -371,5 +371,32 @@ final class ForumMarkdownCache: @unchecked Sendable {
                                             conceal: conceal)
         inline.setObject(Inline(rendered), forKey: key)
         return rendered
+    }
+}
+
+/// 行首语法用 Foundation 正则，避免 Swift Regex（运行时要求 iOS 16）。
+private enum ForumLinePattern {
+    static let details = forumLineExpression(#"^:::\s*details(?:\s+(.*))?$"#)
+    static let star = forumLineExpression(#"^:::\s*star\s+([0-9]+(?:\.[0-9]+)?)\s*$"#)
+    static let heading = forumLineExpression(#"^(#{1,6})\s+(.+)$"#)
+    static let bullet = forumLineExpression(#"^[-+*]\s+(.+)$"#)
+    static let numbered = forumLineExpression(#"^(\d+)[.)]\s+(.+)$"#)
+    static let quote = forumLineExpression(#"^>\s?(.*)$"#)
+}
+
+private func forumLineExpression(_ pattern: String) -> NSRegularExpression {
+    do { return try NSRegularExpression(pattern: pattern) }
+    catch { preconditionFailure("论坛行正则无效：\(pattern)") }
+}
+
+/// 捕获组从 1 开始，下标 0 对应第一个括号。整行不匹配时返回 nil。
+private func forumCaptures(_ line: String, _ expression: NSRegularExpression) -> [String?]? {
+    let full = NSRange(line.startIndex..., in: line)
+    guard let match = expression.firstMatch(in: line, range: full),
+          match.range.location == full.location, match.range.length == full.length else { return nil }
+    return (1..<match.numberOfRanges).map { index in
+        let piece = match.range(at: index)
+        guard piece.location != NSNotFound, let range = Range(piece, in: line) else { return nil }
+        return String(line[range])
     }
 }

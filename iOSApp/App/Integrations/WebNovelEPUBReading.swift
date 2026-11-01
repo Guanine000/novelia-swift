@@ -382,12 +382,12 @@ private struct WebNovelEPUBReaderContent: View {
             }
         }
         .task { await model.load(); readerIdentity = model.revision; if model.missing { showingPanel = true } }
-        .onChange(of: model.revision) { _, value in if !showingPanel { readerIdentity = value } }
+        .onValueChange(of: model.revision) { _, value in if !showingPanel { readerIdentity = value } }
         // 操作面板打开期间不重建背后的阅读器；返回时再应用新文件/映射，避免隐藏导航栏抢占面板。
         .sheet(isPresented: $showingPanel, onDismiss: { readerIdentity = model.revision }) { panel }
     }
     private var panel: some View {
-        NavigationStack {
+        CompatNavigationStack {
             Form {
                 if model.context == nil {
                     ProgressView("正在准备本机目录…")
@@ -416,7 +416,7 @@ private struct WebNovelEPUBReaderContent: View {
                     Button("按目录核对章节") { start { await model.verifyAll() } }.disabled(model.verificationProgress != nil || model.updating)
                     Text("待确认 \(model.pendingIndices.count) 章").accessibilityIdentifier("web-epub-pending-count")
                     Toggle("更正已确认章节", isOn: $model.correctingBindings)
-                        .onChange(of: model.correctingBindings) { _, enabled in
+                        .onValueChange(of: model.correctingBindings) { _, enabled in
                             if !enabled, let first = model.pendingIndices.first { model.selectLocal(first) }
                         }
                     if model.correctingBindings || !model.pendingIndices.isEmpty {
@@ -427,7 +427,7 @@ private struct WebNovelEPUBReaderContent: View {
                                 if let index = Int(value) { model.selectLocal(index) }
                             }
                         } label: {
-                            LabeledContent("待确认章节", value: model.localLabel(model.selectedLocal))
+                            CompatLabeledContent("待确认章节", value: model.localLabel(model.selectedLocal))
                         }.accessibilityIdentifier("web-epub-local-selection")
                         Text(model.localNeighbors).font(.caption).foregroundStyle(.secondary)
                         if model.filteringCandidates { ProgressView("正在筛选候选…") }
@@ -440,7 +440,7 @@ private struct WebNovelEPUBReaderContent: View {
                                 model.chooseRemote(value)
                             }
                         } label: {
-                            LabeledContent("网站章节", value: model.remoteOptions.first(where: { $0.id == model.selectedRemote }).map { model.remoteLabel($0) } ?? "请选择")
+                            CompatLabeledContent("网站章节", value: model.remoteOptions.first(where: { $0.id == model.selectedRemote }).map { model.remoteLabel($0) } ?? "请选择")
                         }.accessibilityIdentifier("web-epub-remote-selection")
                         .disabled(model.filteringCandidates && !model.fullDirectory)
                         Text(model.remoteNeighbors).font(.caption).foregroundStyle(.secondary)
@@ -467,7 +467,7 @@ private struct WebNovelEPUBReaderContent: View {
                 if operation != nil { Button("取消当前操作", role: .cancel) { operation?.cancel() } }
                 }
             }
-            .toolbar(.hidden, for: .navigationBar)
+            .compatToolbar(.hidden, for: .navigationBar)
         }
         .safeAreaInset(edge: .top) {
             HStack {
@@ -523,6 +523,6 @@ private struct WebEPUBChapterChoices: View {
         .searchable(text: $search, prompt: "搜索章节标题或序号")
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.visible, for: .navigationBar)
+        .compatToolbar(.visible, for: .navigationBar)
     }
 }

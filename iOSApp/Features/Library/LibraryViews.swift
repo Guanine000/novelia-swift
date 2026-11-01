@@ -35,6 +35,18 @@ struct LibraryView: View {
     }
     private var sortOptions: LibrarySortOptions { state.sortOptions(scope: nil) }
 
+    /// 导入文件类型。iOS 15 目标没有 Kindle 转换，不把 AZW3／MOBI 放进选择器。
+    private var importContentTypes: [UTType] {
+        var types = [
+            UTType(filenameExtension: "txt") ?? .plainText,
+            UTType(filenameExtension: "epub") ?? .data
+        ]
+        #if !NOVELIA_READIUM_ONLY
+        types += KindleEPUBConverter.supportedExtensions.sorted().compactMap { UTType(filenameExtension: $0) }
+        #endif
+        return types
+    }
+
     /// 多选可作用到的书：搜索结果，或“全部书籍”中未归入系列的书。
     private var selectableBooks: [LibraryBook] {
         let books = state.displayBooks(from: allBooks).filter { sourceFilter.includes(isWenku: $0.isWenku) }
@@ -56,7 +68,7 @@ struct LibraryView: View {
                 }
             }
             if sourceBooks.isEmpty {
-                // 空状态放在 overlay 中显示；ContentUnavailableView 作为 List 行时操作按钮会被压成细长色条。
+                // 空状态放在 overlay 中显示；CompatUnavailable 作为 List 行时操作按钮会被压成细长色条。
             } else if isSearching && !LibraryOrganizer.normalized(query).isEmpty {
                 searchResults(books)
             } else {
@@ -76,7 +88,7 @@ struct LibraryView: View {
                 case .books:
                     if ungrouped.isEmpty {
                         sourceFilterMenu.libraryListRow()
-                        ContentUnavailableView {
+                        CompatUnavailable {
                             Label("没有可显示的书籍", systemImage: "books.vertical")
                         } description: {
                             Text("可以切换来源筛选，或到“系列”中查看已归类的书籍。")
@@ -106,7 +118,7 @@ struct LibraryView: View {
         .overlay {
             if webDownloads.isLoading || wenkuDownloads.isLoading { ProgressView("正在读取书库…") }
             else if sourceBooks.isEmpty, let error = webDownloads.storageError ?? wenkuDownloads.storageError {
-                ContentUnavailableView {
+                CompatUnavailable {
                     Label("无法读取书库", systemImage: "exclamationmark.triangle")
                 } description: { Text(error) } actions: {
                     Button("重试") { Task { try? await webDownloads.loadIfNeeded(); await wenkuDownloads.refreshMissingMetadata() } }
@@ -116,30 +128,28 @@ struct LibraryView: View {
         .safeAreaInset(edge: .bottom) {
             if bookActions.isSelecting { LibrarySelectionBar(books: selectable, actions: bookActions) }
         }
-        .onChange(of: segment) { _, _ in bookActions.endSelection() }
-        .scrollDismissesKeyboard(.interactively)
+        .onValueChange(of: segment) { _, _ in bookActions.endSelection() }
+        .compatScrollDismissesKeyboardInteractively()
         .safeAreaInset(edge: .top) { searchBar }
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle("书库")
         // 搜索时改为行内标题，避免大标题区域在搜索栏上方留下空白。
         .navigationBarTitleDisplayMode(isSearching ? .inline : .large)
-        .toolbar {
-            if bookActions.isSelecting {
-                LibrarySelectionToolbar(books: selectable, actions: bookActions)
-            } else {
-                toolbarContent
-            }
-        }
-        .navigationDestination(item: $readerTarget) { book in
+        .modifier(ExclusiveToolbar(
+            useFirst: bookActions.isSelecting,
+            first: LibrarySelectionToolbar(books: selectable, actions: bookActions),
+            second: toolbarContent
+        ))
+        .compatNavigationDestination(item: $readerTarget) { book in
             LibraryReaderDestination(book: book)
         }
-        .onChange(of: readerTarget) { _, target in
+        .onValueChange(of: readerTarget) { _, target in
             if target == nil { state.reloadPositions() }
         }
-        .onChange(of: webDAVSync.isSyncing) { _, syncing in
+        .onValueChange(of: webDAVSync.isSyncing) { _, syncing in
             if !syncing { state.reloadPositions() }
         }
-        .onChange(of: webDAVSync.isEnabled) { _, isEnabled in
+        .onValueChange(of: webDAVSync.isEnabled) { _, isEnabled in
             if !isEnabled { syncTask?.cancel() }
         }
         .onAppear { state.reloadPositions() }
@@ -149,11 +159,7 @@ struct LibraryView: View {
             await state.refreshHashes(for: sourceBooks, librariesReady: webDownloads.isReady && wenkuDownloads.isReady)
         }
         .fullScreenCover(isPresented: $importer.isShowingFileImporter) {
-            EPUBFilePicker(contentTypes: [
-                UTType(filenameExtension: "txt") ?? .plainText,
-                UTType(filenameExtension: "epub") ?? .data
-            ] + KindleEPUBConverter.supportedExtensions.sorted().compactMap { UTType(filenameExtension: $0) },
-            allowsMultipleSelection: true) { urls in
+            EPUBFilePicker(contentTypes: importContentTypes, allowsMultipleSelection: true) { urls in
                 Task { await importer.handlePickedFiles(urls) }
             }
             .ignoresSafeArea()
@@ -165,8 +171,8 @@ struct LibraryView: View {
             }) {
                 syncTask = Task { await webDAVSync.sync(web: webDownloads, wenku: wenkuDownloads) }
             }
-            .presentationDetents([.height(280)])
-            .presentationDragIndicator(.visible)
+            .compatPresentationDetents(.height(280))
+            .compatPresentationDragIndicatorVisible()
         }
         .alert("导入", isPresented: .init(
             get: { importer.importError != nil },
@@ -195,7 +201,7 @@ struct LibraryView: View {
         }
         .overlay { LibraryImportProgressOverlay(model: importer) }
         .modifier(LibraryBookActionDialogs(actions: bookActions))
-        .onChange(of: bookActions.downloadedBookKey) { _, key in
+        .onValueChange(of: bookActions.downloadedBookKey) { _, key in
             guard let key else { return }
             bookActions.downloadedBookKey = nil
             if let book = state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks).first(where: { $0.key == key }) {
@@ -235,10 +241,17 @@ struct LibraryView: View {
         }
     }
 
+    /// 工具栏构建器本身不能写 if/else（iOS 16 才有 buildEither）。是否显示同步按钮在 ToolbarItem 的视图里判断。
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        if webDAVSync.isEnabled {
-            ToolbarItem(placement: .topBarLeading) {
+        syncToolbarItem
+        libraryTrailingToolbar
+    }
+
+    @ToolbarContentBuilder
+    private var syncToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .compatTopBarLeading) {
+            if webDAVSync.isEnabled {
                 Button {
                     if hasTriggeredSync || webDAVSync.isSyncing {
                         isShowingSyncProgress = true
@@ -256,7 +269,11 @@ struct LibraryView: View {
                 .accessibilityLabel(webDAVSync.isSyncing ? "查看同步进度" : "WebDAV 同步")
             }
         }
-        ToolbarItemGroup(placement: .topBarTrailing) {
+    }
+
+    @ToolbarContentBuilder
+    private var libraryTrailingToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .compatTopBarTrailing) {
             Button {
                 withAnimation { isSearching.toggle() }
                 if !isSearching { query = "" }
@@ -283,7 +300,7 @@ struct LibraryView: View {
     }
 
     private var emptyLibrary: some View {
-        ContentUnavailableView {
+        CompatUnavailable {
             Label("书库还没有书", systemImage: "books.vertical")
         } description: {
             Text("导入 TXT 或 EPUB 文件；在发现页下载的网络小说和文库 EPUB 也会显示在这里。")
@@ -307,7 +324,7 @@ struct LibraryView: View {
             .foregroundStyle(NoveliaStyle.muted)
             .libraryListRow()
         if matches.isEmpty {
-            ContentUnavailableView.search(text: query).libraryListRow()
+            CompatSearchUnavailable(text: query).libraryListRow()
         } else {
             ForEach(sorted(matches, options: sortOptions)) { book in
                 LibraryBookRow(book: book, actions: bookActions, open: open,
@@ -339,7 +356,7 @@ struct LibraryView: View {
         sourceFilterMenu.libraryListRow()
         let allSeries = visibleSeries(in: books)
         if allSeries.isEmpty {
-            ContentUnavailableView {
+            CompatUnavailable {
                 Label("还没有系列", systemImage: "rectangle.stack")
             } description: {
                 Text("新建系列后，在书籍的“更多”菜单中选择“移入系列”。导入和下载的书都可以加入。")
@@ -407,19 +424,29 @@ struct LibrarySeriesDetailView: View {
         state.series.series[seriesID].flatMap { $0.deleted ? nil : $0 }
     }
 
-    var body: some View {
-        let all = state.displayBooks(from: state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks))
+    /// 列表和工具栏共用。原先是 body 里的局部常量，抽到属性后工具栏才能读到。
+    private var allBooks: [LibraryBook] {
+        state.displayBooks(from: state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks))
+    }
+
+    private var members: [LibraryBook] {
         let keys = state.series.bookKeys(inSeries: seriesID)
-        let members = all.filter { keys.contains($0.key) && sourceFilter.includes(isWenku: $0.isWenku) }
-        let options = state.sortOptions(scope: seriesID)
-        let visible = LibraryOrganizer.sorted(
+        return allBooks.filter { keys.contains($0.key) && sourceFilter.includes(isWenku: $0.isWenku) }
+    }
+
+    private var options: LibrarySortOptions { state.sortOptions(scope: seriesID) }
+
+    private var visible: [LibraryBook] {
+        LibraryOrganizer.sorted(
             members.filter { LibraryOrganizer.matches(title: $0.title, author: $0.author, query: query) },
             options: options
         ) { state.sortItem(for: $0) }
+    }
 
+    var body: some View {
         List {
             if members.isEmpty {
-                ContentUnavailableView {
+                CompatUnavailable {
                     Label("系列中还没有书", systemImage: "rectangle.stack")
                 } description: {
                     Text("把导入或下载的书移入这个系列。移出后书籍和阅读进度都会保留。")
@@ -434,7 +461,7 @@ struct LibrarySeriesDetailView: View {
                 LibrarySortSummary(options: options, count: members.count) { state.setSortOptions($0, scope: seriesID) }
                     .libraryListRow()
                 if visible.isEmpty {
-                    ContentUnavailableView.search(text: query).libraryListRow()
+                    CompatSearchUnavailable(text: query).libraryListRow()
                 } else {
                     ForEach(visible) { book in
                         LibraryBookRow(book: book, showsSeries: false, actions: bookActions, open: open,
@@ -446,7 +473,7 @@ struct LibrarySeriesDetailView: View {
             }
         }
         .libraryListStyle()
-        .scrollDismissesKeyboard(.interactively)
+        .compatScrollDismissesKeyboardInteractively()
         .safeAreaInset(edge: .top) { searchBar }
         .safeAreaInset(edge: .bottom) {
             if bookActions.isSelecting {
@@ -456,50 +483,25 @@ struct LibrarySeriesDetailView: View {
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle(series?.name ?? "系列")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if bookActions.isSelecting {
-                LibrarySelectionToolbar(books: visible, actions: bookActions)
-            } else {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    withAnimation { isSearching.toggle() }
-                    if !isSearching { query = "" }
-                } label: {
-                    Image(systemName: "magnifyingglass")
-                }
-                .accessibilityLabel("在系列中搜索")
-                LibrarySortMenu(options: options) { state.setSortOptions($0, scope: seriesID) }
-                if !visible.isEmpty {
-                    Button { bookActions.beginSelection() } label: {
-                        Image(systemName: "checklist")
-                    }
-                    .accessibilityLabel("选择")
-                    .accessibilityHint("进入多选，可批量移出系列、删除或压缩分享")
-                }
-                Menu {
-                    Button { isAddingBooks = true } label: { Label("添加书籍", systemImage: "plus") }
-                    LibrarySeriesMenuItems(seriesID: seriesID, name: series?.name ?? "", books: members, actions: bookActions)
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .accessibilityLabel("系列操作")
-            }
-            }
-        }
-        .navigationDestination(item: $readerTarget) { book in
+        .modifier(ExclusiveToolbar(
+            useFirst: bookActions.isSelecting,
+            first: LibrarySelectionToolbar(books: visible, actions: bookActions),
+            second: seriesToolbar
+        ))
+        .compatNavigationDestination(item: $readerTarget) { book in
             LibraryReaderDestination(book: book)
         }
-        .onChange(of: readerTarget) { _, target in
+        .onValueChange(of: readerTarget) { _, target in
             if target == nil { state.reloadPositions() }
         }
-        .onChange(of: series == nil) { _, removed in
+        .onValueChange(of: series == nil) { _, removed in
             if removed { dismiss() }
         }
         .sheet(isPresented: $isAddingBooks) {
-            LibraryAddToSeriesSheet(seriesID: seriesID, books: all)
+            LibraryAddToSeriesSheet(seriesID: seriesID, books: allBooks)
         }
         .modifier(LibraryBookActionDialogs(actions: bookActions))
-        .onChange(of: bookActions.downloadedBookKey) { _, key in
+        .onValueChange(of: bookActions.downloadedBookKey) { _, key in
             guard let key else { return }
             bookActions.downloadedBookKey = nil
             if let book = state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks).first(where: { $0.key == key }) {
@@ -518,6 +520,34 @@ struct LibrarySeriesDetailView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(NoveliaStyle.paper)
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var seriesToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .compatTopBarTrailing) {
+            Button {
+                withAnimation { isSearching.toggle() }
+                if !isSearching { query = "" }
+            } label: {
+                Image(systemName: "magnifyingglass")
+            }
+            .accessibilityLabel("在系列中搜索")
+            LibrarySortMenu(options: options) { state.setSortOptions($0, scope: seriesID) }
+            if !visible.isEmpty {
+                Button { bookActions.beginSelection() } label: {
+                    Image(systemName: "checklist")
+                }
+                .accessibilityLabel("选择")
+                .accessibilityHint("进入多选，可批量移出系列、删除或压缩分享")
+            }
+            Menu {
+                Button { isAddingBooks = true } label: { Label("添加书籍", systemImage: "plus") }
+                LibrarySeriesMenuItems(seriesID: seriesID, name: series?.name ?? "", books: members, actions: bookActions)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .accessibilityLabel("系列操作")
         }
     }
 
@@ -547,7 +577,7 @@ private struct LibraryAddToSeriesSheet: View {
                 && LibraryOrganizer.matches(title: $0.title, author: $0.author, query: query) },
             options: LibrarySortOptions(field: .title, ascending: true)
         ) { state.sortItem(for: $0) }
-        NavigationStack {
+        CompatNavigationStack {
             List(candidates) { book in
                 Button {
                     if selection.contains(book.key) { selection.remove(book.key) } else { selection.insert(book.key) }
@@ -571,7 +601,7 @@ private struct LibraryAddToSeriesSheet: View {
             }
             .overlay {
                 if candidates.isEmpty {
-                    ContentUnavailableView(query.isEmpty ? "没有可添加的书" : "没有找到匹配的书", systemImage: "books.vertical")
+                    CompatUnavailable(query.isEmpty ? "没有可添加的书" : "没有找到匹配的书", systemImage: "books.vertical")
                 }
             }
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索书名或作者")
@@ -718,6 +748,22 @@ final class LibraryBookActions: ObservableObject {
     }
 }
 
+/// 在视图层切换两套工具栏。ToolbarContentBuilder 的 if/else 从 iOS 16 起才有。
+private struct ExclusiveToolbar<First: ToolbarContent, Second: ToolbarContent>: ViewModifier {
+    let useFirst: Bool
+    let first: First
+    let second: Second
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if useFirst {
+            content.toolbar { first }
+        } else {
+            content.toolbar { second }
+        }
+    }
+}
+
 /// 多选时替换页面的工具栏：全选／取消全选与完成。
 struct LibrarySelectionToolbar: ToolbarContent {
     let books: [LibraryBook]
@@ -732,14 +778,14 @@ struct LibrarySelectionToolbar: ToolbarContent {
     }
 
     var body: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
+        ToolbarItem(placement: .compatTopBarLeading) {
             Button(allSelected ? "取消全选" : "全选") {
                 if allSelected { actions.selectAll([]) } else { actions.selectAll(books) }
             }
         }
-        ToolbarItem(placement: .topBarTrailing) {
+        ToolbarItem(placement: .compatTopBarTrailing) {
             Button("完成") { actions.endSelection() }
-                .fontWeight(.semibold)
+                .compatFontWeight(.semibold)
         }
     }
 }
@@ -1188,7 +1234,7 @@ struct LibraryBookRow: View {
                 .accessibilityAction(named: "多选") { actions.beginSelection(with: book) }
                 .accessibilityIdentifier("library-book-\(book.key)")
                 .onAppear { if let hash { wordCounts.request(book, hash: hash) } }
-                .onChange(of: hash) { _, hash in if let hash { wordCounts.request(book, hash: hash) } }
+                .onValueChange(of: hash) { _, hash in if let hash { wordCounts.request(book, hash: hash) } }
                 .onDisappear { if let hash { wordCounts.cancel(hash: hash) } }
             if isSelecting {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
@@ -1272,7 +1318,7 @@ struct LibraryBookRow: View {
             }
             .disabled(actions.updatingNovelID != nil || webDownloads.progress[record.id] != nil)
         }
-        ShareLink(item: book.fileURL) {
+        CompatShareLink(item: book.fileURL) {
             Label("导出", systemImage: "square.and.arrow.up")
         }
         switch book.origin {
@@ -1502,7 +1548,7 @@ struct LibrarySearchField: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(NoveliaStyle.muted)
                 TextField(prompt, text: $query)
                     .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .compatAutocorrectionDisabled()
                     .submitLabel(.search)
                     .focused($isFocused)
                 if !query.isEmpty {
@@ -1596,7 +1642,7 @@ private extension View {
     /// 使用 List 而非 ScrollView + LazyVStack：List 复用行视图，书多时滚动不再逐行重建。
     func libraryListStyle() -> some View {
         listStyle(.plain)
-            .scrollContentBackground(.hidden)
+            .compatScrollContentBackgroundHidden()
     }
 }
 

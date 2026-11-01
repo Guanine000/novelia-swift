@@ -79,7 +79,7 @@ actor TXTBookCache {
     /// 已解码和解析的书籍，优先从缓存获取。
     func book(at url: URL, rules: TXTChapterRuleConfiguration, source: TXTLoadSource,
               trace: String = DiagnosticContext.newTraceID()) async throws -> TXTParsedBook {
-        let start = ContinuousClock.now
+        let start = MonotonicInstant.now
         let identity = try Self.identity(of: url)
         let fingerprint = rules.fingerprint
         if let hash = hashByIdentity[identity], let hit = parsed.value(for: ParsedKey(contentHash: hash, rulesFingerprint: fingerprint)) {
@@ -115,7 +115,7 @@ actor TXTBookCache {
     @discardableResult
     func validateDecodable(at url: URL, source: TXTLoadSource,
                            trace: String = DiagnosticContext.newTraceID()) async throws -> String {
-        let start = ContinuousClock.now
+        let start = MonotonicInstant.now
         let identity = try Self.identity(of: url)
         if let hash = hashByIdentity[identity], let hit = decoded.value(for: hash) {
             statistics.decodedHits += 1
@@ -163,7 +163,7 @@ actor TXTBookCache {
     // MARK: 实际处理（nonisolated：在调用方的分离任务中运行，仅访问缓存表时切回 actor）
 
     private nonisolated func loadBook(url: URL, identity: FileIdentity, knownHash: String?, rules: TXTChapterRuleConfiguration,
-                                      source: TXTLoadSource, trace: String, start: ContinuousClock.Instant) async throws -> TXTParsedBook {
+                                      source: TXTLoadSource, trace: String, start: MonotonicInstant) async throws -> TXTParsedBook {
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
         let hash = knownHash ?? Self.sha256(data)
         await remember(hash: hash, for: identity)
@@ -183,7 +183,7 @@ actor TXTBookCache {
         }
         let text = try await decodedText(data: data, hash: hash, source: source, trace: trace)
         let reason = await parseReason(key)
-        let parseStart = ContinuousClock.now
+        let parseStart = MonotonicInstant.now
         let (chapters, stats) = TXTChapterParser.parseWithStatistics(text.text, rules: rules)
         let tag = DiagnosticContext.bookTag(hash)
         let elapsed = DiagnosticContext.milliseconds(since: parseStart)
@@ -206,7 +206,7 @@ actor TXTBookCache {
             return hit
         }
         let reason = await decodeReason(hash)
-        let decodeStart = ContinuousClock.now
+        let decodeStart = MonotonicInstant.now
         guard let text = TXTTextDecoder.decode(data: data), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             TXTDiagnosticLog.logger.error("TXT decode failed; trace=\(trace, privacy: .public), book=\(tag, privacy: .public), source=\(source.rawValue, privacy: .public), bytes=\(data.count, privacy: .public), elapsedMs=\(DiagnosticContext.milliseconds(since: decodeStart), privacy: .public), attempted=\(TXTTextDecoder.attemptedEncodings, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
             throw TXTTextDecodingError.unrecognizedEncoding
@@ -278,7 +278,7 @@ actor TXTBookCache {
     }
 
     private func logHit(level: String, reason: String, book: TXTParsedBook, source: TXTLoadSource,
-                        trace: String, start: ContinuousClock.Instant) {
+                        trace: String, start: MonotonicInstant) {
         TXTDiagnosticLog.logger.info("TXT cache hit; trace=\(trace, privacy: .public), book=\(DiagnosticContext.bookTag(book.contentHash), privacy: .public), source=\(source.rawValue, privacy: .public), reason=\(reason, privacy: .public), level=\(level, privacy: .public), cacheHit=true, chapters=\(book.chapters.count, privacy: .public), elapsedMs=\(DiagnosticContext.milliseconds(since: start), privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
     }
 

@@ -9,6 +9,7 @@
 在 iPhone 上浏览、下载和阅读 Novelia 网络小说与文库
 
 [![iOS 17+](https://img.shields.io/badge/iOS-17%2B-000000?logo=apple&logoColor=white)](#下载与安装)
+[![iOS 15 Readium](https://img.shields.io/badge/iOS%2015-Readium-555555?logo=apple&logoColor=white)](#下载与安装)
 [![SwiftUI](https://img.shields.io/badge/SwiftUI-F05138?logo=swift&logoColor=white)](DEVELOPMENT.md)
 [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/Guanine000/novelia-swift?label=release)](https://github.com/Guanine000/novelia-swift/releases/latest)
@@ -24,7 +25,7 @@
 | | |
 | --- | --- |
 | 📚 **统一书库** | 导入的 TXT／EPUB（AZW3／MOBI 转换为 EPUB 后导入）与下载的书籍集中管理，支持系列、来源筛选、搜索排序、批量操作（含压缩后分享）与继续阅读；文库和导入书籍可编辑书名、作者、简介与封面 |
-| 📖 **原生分页阅读** | YueduCoreText 单页／双页、跟手翻页与多字选取，书签与书内搜索；可选实验性 Readium 引擎 |
+| 📖 **原生分页阅读** | YueduCoreText 单页／双页、跟手翻页与多字选取，书签与书内搜索；可选实验性 Readium 引擎。iOS 15 安装包没有原生分页，固定使用 Readium |
 | 🌐 **在线章节** | 原文、译文或逐段双语阅读，滚动与分页模式随时切换 |
 | 🔍 **发现与社区** | 网络小说与文库搜索、热度榜、标签筛选与屏蔽；论坛、评论与收藏共用一个账号 |
 | ☁️ **WebDAV 同步** | 手动或自动同步书籍、书签、书库信息、阅读进度、标签、阅读背景、字体和阅读时长；其他设备的书按需下载；网络小说更新时沿用已确认的下载设置（旧记录缺失时先选择），本地承接已确认章节，在书库更多菜单核对后可跨 EPUB 版本同步进度与书签，多设备按时间合并 |
@@ -37,18 +38,18 @@
 
 ## 下载与安装
 
-[下载最新 Release](https://github.com/Guanine000/novelia-swift/releases/latest) · [查看发行记录](https://github.com/Guanine000/novelia-swift/releases)
+[下载最新正式版](https://github.com/Guanine000/novelia-swift/releases/latest) · [查看预发布测试版与发行记录](https://github.com/Guanine000/novelia-swift/releases)
 
 > [!IMPORTANT]
-> Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名。最低系统版本为 **iOS 17**。
+> Release 附件是**未签名 IPA**，安装到常规真机前需要自行签名。含 iOS 15 版本的双安装包目前作为**预发布测试版**提供，请在发行记录中选择预发布版本；最新正式版入口仍指向稳定版。双安装包分别为：`Novelia` 面向 **iOS 17**，默认使用 YueduCoreText 原生分页；文件名含 `ios15` 的 `NoveliaLegacy`（bundle id `cc.novelia.ios.port.ios15`，主屏幕名称为 Novelia 15）面向 **iOS 15**，分页固定为 Readium，不能切回原生分页，也不导入 AZW3／MOBI。
 
-想从源码运行，请用 Xcode 打开 `NoveliaIOS.xcodeproj`，选择 `Novelia` scheme。测试、本机构建与分发流程见[本机构建与分发](docs/BUILD.md)。
+想从源码运行，请用 Xcode 打开 `NoveliaIOS.xcodeproj`。iOS 17 选择 `Novelia` scheme，iOS 15 选择 `NoveliaLegacy` scheme。测试、本机构建与分发流程见[本机构建与分发](docs/BUILD.md)。
 
 参与开发前请阅读[开发文档](DEVELOPMENT.md)，了解模块职责、服务与本地状态的依赖注入、文件读写及数据兼容约定；发布流程包含架构依赖与书库事务故障检查；性能测量方法见[性能基线与故障验收](docs/PERFORMANCE.md)。
 
 ## 已知限制
 
-- Readium 阅读器仍为实验功能，默认关闭，需要更多真机验收。
+- Readium 阅读器在 iOS 17 安装包中仍为实验功能，默认关闭，需要更多真机验收。iOS 15 安装包只能使用 Readium。
 - EPUB 排版、翻页、注脚等交互仍需在更多真机和真实书籍上验证。
 - 网络小说只提供 EPUB 整本下载；TXT 需从本地文件导入。
 - WebDAV 要求 HTTPS；自动同步默认关闭且受 iOS 后台运行时间限制，建议以手动同步为主；只删除本机时保留云端副本。

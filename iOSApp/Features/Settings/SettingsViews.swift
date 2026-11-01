@@ -12,7 +12,9 @@ struct SettingsView: View {
     @State private var isConfirmingLogout = false
     @AppStorage(SettingsKey.appThemeColor) private var themeColorRaw = AppThemeColor.novelia.rawValue
     @AppStorage(SettingsKey.appThemeCustomHex) private var themeCustomHex = "559775"
+    #if !NOVELIA_READIUM_ONLY
     @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = false
+    #endif
     @AppStorage(SettingsKey.readerEPUBDisablesScripts) private var epubDisablesScripts = false
     @AppStorage(SettingsKey.readerBookBackgroundFollow) private var bookBackgroundFollow = ReaderBookBackgroundFollow.default.rawValue
     @EnvironmentObject private var readerSettings: ReaderSettings
@@ -30,11 +32,35 @@ struct SettingsView: View {
         ReaderMode(rawValue: modeRaw) ?? .bilingual
     }
 
+    /// Readium 才使用的阅读选项。iOS 15 目标固定走 Readium，因此始终显示；主目标只在开关打开时显示。
+    @ViewBuilder
+    private var readiumExperienceControls: some View {
+        Toggle(isOn: $epubDisablesScripts) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("禁用书内脚本")
+                Text("Readium 打开 EPUB 时不执行书籍自带的脚本，例如自绘注释气泡，改用统一的注释弹层；依赖脚本的排版效果可能失效。原生分页引擎始终不执行书内脚本。下次打开书籍时生效。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        Picker(selection: Binding(
+            get: { ReaderBookBackgroundFollow(storedValue: bookBackgroundFollow) },
+            set: { bookBackgroundFollow = $0.rawValue }
+        )) {
+            ForEach(ReaderBookBackgroundFollow.allCases) { Text($0.title).tag($0) }
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("书页底色与阅读背景")
+                Text("“忽略白色底色”：正文页面的白色、米白底色透明化，显示阅读背景；保留彩色底色、书内背景图片和局部元素底色。“保留背景图片”：保留书内底色，设置阅读背景图片时边距不跟随书页。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
     var body: some View {
         Form {
             Section("Novelia 账号") {
                 if let username = auth.username {
-                    LabeledContent("已登录", value: username)
+                    CompatLabeledContent("已登录", value: username)
                     Button("退出登录", role: .destructive) { isConfirmingLogout = true }
                         .confirmationDialog("退出登录？", isPresented: $isConfirmingLogout, titleVisibility: .visible) {
                             Button("退出登录", role: .destructive) { auth.logout() }
@@ -72,6 +98,9 @@ struct SettingsView: View {
             }
             Section("阅读体验") {
                 NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
+                #if NOVELIA_READIUM_ONLY
+                readiumExperienceControls
+                #else
                 Toggle(isOn: $epubUsesReadium) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("分页使用 Readium 引擎（实验）")
@@ -80,26 +109,9 @@ struct SettingsView: View {
                     }
                 }
                 if epubUsesReadium {
-                    Toggle(isOn: $epubDisablesScripts) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("禁用书内脚本")
-                            Text("Readium 打开 EPUB 时不执行书籍自带的脚本，例如自绘注释气泡，改用统一的注释弹层；依赖脚本的排版效果可能失效。原生分页引擎始终不执行书内脚本。下次打开书籍时生效。")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    Picker(selection: Binding(
-                        get: { ReaderBookBackgroundFollow(storedValue: bookBackgroundFollow) },
-                        set: { bookBackgroundFollow = $0.rawValue }
-                    )) {
-                        ForEach(ReaderBookBackgroundFollow.allCases) { Text($0.title).tag($0) }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("书页底色与阅读背景")
-                            Text("“忽略白色底色”：正文页面的白色、米白底色透明化，显示阅读背景；保留彩色底色、书内背景图片和局部元素底色。“保留背景图片”：保留书内底色，设置阅读背景图片时边距不跟随书页。")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
+                    readiumExperienceControls
                 }
+                #endif
                 Picker(selection: $themeColorRaw) {
                     ForEach(AppThemeColor.allCases) { option in
                         HStack(spacing: 8) {
@@ -165,8 +177,12 @@ struct SettingsView: View {
                     }
                     .disabled(updates.isCheckingManually)
                 }
-                LabeledContent("当前版本", value: appVersion)
-                LabeledContent("平台", value: "iOS 17+")
+                CompatLabeledContent("当前版本", value: appVersion)
+                #if NOVELIA_READIUM_ONLY
+                CompatLabeledContent("平台", value: "iOS 15+")
+                #else
+                CompatLabeledContent("平台", value: "iOS 17+")
+                #endif
                 NavigationLink("开源许可") {
                     ThirdPartyLicensesView()
                 }
@@ -187,7 +203,7 @@ struct SettingsView: View {
                     .foregroundStyle(NoveliaStyle.muted)
             }
         }
-        .scrollContentBackground(.hidden)
+        .compatScrollContentBackgroundHidden()
         .background(NoveliaStyle.paper)
         .navigationTitle("我的")
         .alert("检查更新", isPresented: .init(get: { updateCheckMessage != nil }, set: { if !$0 { updateCheckMessage = nil } })) {
@@ -284,7 +300,7 @@ private struct TabBarSettingsView: View {
             }
         }
         .environment(\.editMode, .constant(.active))
-        .scrollContentBackground(.hidden)
+        .compatScrollContentBackgroundHidden()
         .background(NoveliaStyle.paper)
         .navigationTitle("自定义底栏")
         .navigationBarTitleDisplayMode(.inline)
@@ -411,17 +427,16 @@ private struct TXTChapterRuleEditor: View {
     }
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationStack {
             Form {
                 Section("规则名称") {
                     TextField("例如：自定义章节格式", text: $name)
                 }
                 Section("整行正则表达式") {
-                    TextField(#"例如：^第\d+节.*$"#, text: $pattern, axis: .vertical)
+                    CompatVerticalTextField(prompt: #"例如：^第\d+节.*$"#, text: $pattern, limit: 2...5)
                         .font(.system(size: 13, design: .monospaced))
-                        .lineLimit(2...5)
                         .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                        .compatAutocorrectionDisabled()
                     Text("使用系统正则语法。规则必须匹配整行；推荐以 ^ 开始、以 $ 结束。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -435,12 +450,12 @@ private struct TXTChapterRuleEditor: View {
             .navigationTitle(originalRule == nil ? "新建分章规则" : "编辑分章规则")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .compatTopBarLeading) {
                     Button("取消") { dismiss() }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .compatTopBarTrailing) {
                     Button("保存") { save() }
-                        .fontWeight(.semibold)
+                        .compatFontWeight(.semibold)
                 }
             }
         }
@@ -547,20 +562,28 @@ private struct LogActivitySheet: UIViewControllerRepresentable {
 private struct ThirdPartyLicensesView: View {
     /// GPL-3.0 第 5(a) 条要求的修改日期。scripts/build_local_release.py 要求它等于
     /// 发布提交的日期，因此每次发布构建时都需更新。
-    static let modifiedDate = "2026-10-31"
-    private let packages: [(name: String, version: String, license: String, file: String)] = [
-        ("SwiftSoup", "2.13.7", "MIT", "SwiftSoup-LICENSE.txt"),
-        ("YueduCoreText", "0.8.0", "MPL-2.0", "YueduCoreText-LICENSE.txt"),
-        ("ZIPFoundation", "3.0.1", "MIT", "ZIPFoundation-LICENSE.txt"),
-        ("Readium swift-toolkit", "3.11.0", "BSD-3-Clause", "swift-toolkit-LICENSE.txt"),
-        ("CryptoSwift", "1.10.0", "CryptoSwift License", "CryptoSwift-LICENSE.txt"),
-        ("DifferenceKit", "1.3.0", "Apache-2.0", "DifferenceKit-LICENSE.txt"),
-        ("Fuzi", "4.0.1", "MIT", "Fuzi-LICENSE.txt"),
-        ("GCDWebServer", "4.0.1", "BSD-3-Clause", "GCDWebServer-LICENSE.txt"),
-        ("SQLite.swift", "0.16.0", "MIT", "SQLite.swift-LICENSE.txt"),
-        ("Zip", "2.1.2", "MIT", "Zip-LICENSE.txt"),
-        ("libmobi", "0.12", "LGPL-3.0-or-later", "libmobi-LICENSE.txt")
-    ]
+    static let modifiedDate = "2026-11-01"
+    /// iOS 15 目标不链接 YueduCoreText 与 libmobi，开源许可页不把它们列为本二进制的组件。
+    private var packages: [(name: String, version: String, license: String, file: String)] {
+        let all: [(name: String, version: String, license: String, file: String)] = [
+            ("SwiftSoup", "2.13.7", "MIT", "SwiftSoup-LICENSE.txt"),
+            ("YueduCoreText", "0.8.0", "MPL-2.0", "YueduCoreText-LICENSE.txt"),
+            ("ZIPFoundation", "3.0.1", "MIT", "ZIPFoundation-LICENSE.txt"),
+            ("Readium swift-toolkit", "3.11.0", "BSD-3-Clause", "swift-toolkit-LICENSE.txt"),
+            ("CryptoSwift", "1.10.0", "CryptoSwift License", "CryptoSwift-LICENSE.txt"),
+            ("DifferenceKit", "1.3.0", "Apache-2.0", "DifferenceKit-LICENSE.txt"),
+            ("Fuzi", "4.0.1", "MIT", "Fuzi-LICENSE.txt"),
+            ("GCDWebServer", "4.0.1", "BSD-3-Clause", "GCDWebServer-LICENSE.txt"),
+            ("SQLite.swift", "0.16.0", "MIT", "SQLite.swift-LICENSE.txt"),
+            ("Zip", "2.1.2", "MIT", "Zip-LICENSE.txt"),
+            ("libmobi", "0.12", "LGPL-3.0-or-later", "libmobi-LICENSE.txt")
+        ]
+        #if NOVELIA_READIUM_ONLY
+        return all.filter { $0.name != "YueduCoreText" && $0.name != "libmobi" }
+        #else
+        return all
+        #endif
+    }
     /// 随 Readium 资源包一起分发的字体和脚本。
     private let readiumAssets: [(name: String, file: String)] = [
         ("ReadiumCSS 字体 AccessibleDfA（SIL OFL 1.1）", "ReadiumCSS-AccessibleDfA-LICENSE.txt"),
@@ -581,7 +604,11 @@ private struct ThirdPartyLicensesView: View {
                 Text("对应源码及第三方许可材料由分发者随本构建提供，或在配套源码说明中注明下载地址。公开项目仓库可能不包含私密测试构建，请按安装包版本和构建号获取配套材料。")
             }
             Section {
+                #if NOVELIA_READIUM_ONLY
+                Text("本应用使用的第三方软件及其原始许可文本。此 iOS 15 版本使用 Readium 分页，不包含 YueduCoreText，也不包含用于 AZW3／MOBI 转换的 libmobi。")
+                #else
                 Text("本应用使用的第三方软件及其原始许可文本。YueduCoreText 的 NOTICE 包含 Unicode License v3。")
+                #endif
             }
             Section("依赖") {
                 ForEach(packages, id: \.name) { package in
@@ -601,10 +628,12 @@ private struct ThirdPartyLicensesView: View {
                 NavigationLink("Zip 内嵌 MiniZip / Info-ZIP 许可") {
                     licenseText("Zip-MiniZip-NOTICE.txt", title: "MiniZip / Info-ZIP")
                 }
+                #if !NOVELIA_READIUM_ONLY
                 NavigationLink("YueduCoreText NOTICE / Unicode License v3") {
                     licenseText("YueduCoreText-NOTICE.txt", title: "附加声明")
                 }
                 Link("YueduCoreText 0.8.0 对应源码", destination: URL(string: "https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/783ce903d5faf4ff5d15c546e32a107537ba5efe")!)
+                #endif
                 Text("CryptoSwift 许可要求的致谢")
                     .font(.caption)
                     .foregroundStyle(.secondary)

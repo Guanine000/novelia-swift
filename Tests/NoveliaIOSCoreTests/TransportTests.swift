@@ -44,12 +44,12 @@ final class TransportTests: XCTestCase {
         session = URLSession(configuration: config)
         TransportMock.outcomes = []
         TransportMock.requests = []
-        NoveliaSessionRenewal.transientRetryDelay = .milliseconds(10)
+        NoveliaSessionRenewal.transientRetryDelayNanoseconds = 10_000_000
     }
 
     override func tearDown() {
         session.invalidateAndCancel()
-        NoveliaSessionRenewal.transientRetryDelay = .seconds(1)
+        NoveliaSessionRenewal.transientRetryDelayNanoseconds = 1_000_000_000
     }
 
     private func request(_ method: String = "GET") -> URLRequest {

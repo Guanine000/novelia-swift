@@ -32,7 +32,7 @@ struct WebDAVAutoSyncTriggers: ViewModifier {
                 // 两个库都尝试读取，单库损坏不能使另一个库一直显示加载中。
                 sync.startAutomaticSync(web: web, wenku: wenku)
             }
-            .onChange(of: scenePhase) { _, phase in sync.scenePhaseDidChange(phase) }
+            .onValueChange(of: scenePhase) { _, phase in sync.scenePhaseDidChange(phase) }
             .onReceive(web.$books.dropFirst()) { _ in sync.localStateDidChange() }
             .onReceive(wenku.$books.dropFirst()) { _ in sync.localStateDidChange() }
             .onReceive(library.objectWillChange) { sync.localStateDidChange() }

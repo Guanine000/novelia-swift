@@ -1,0 +1,92 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    runs-on: macos-26
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build iOS app
+        run: >-
+          xcodebuild
+          -project NoveliaIOS.xcodeproj
+          -scheme Novelia
+          -configuration Release
+          -sdk iphoneos
+          -destination 'generic/platform=iOS'
+          -derivedDataPath "$RUNNER_TEMP/NoveliaDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Build iOS 15 app
+        run: >-
+          xcodebuild
+          -project NoveliaIOS.xcodeproj
+          -scheme NoveliaLegacy
+          -configuration Release
+          -sdk iphoneos
+          -destination 'generic/platform=iOS'
+          -derivedDataPath "$RUNNER_TEMP/NoveliaDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Verify third-party notices
+        run: >-
+          python3 scripts/verify_third_party_notices.py
+          --source-packages "$RUNNER_TEMP/NoveliaDerivedData/SourcePackages/checkouts"
+          --legacy-executable "$RUNNER_TEMP/NoveliaDerivedData/Build/Products/Release-iphoneos/NoveliaLegacy.app/NoveliaLegacy"
+
+      - name: Package and verify both unsigned IPAs
+        shell: bash
+        run: |
+          set -euo pipefail
+          products="$RUNNER_TEMP/NoveliaDerivedData/Build/Products/Release-iphoneos"
+          for app in Novelia NoveliaLegacy; do
+            app_path="$products/$app.app"
+            package_root="$RUNNER_TEMP/NoveliaIPAPackage-$app"
+            ipa_path="$RUNNER_TEMP/$app-unsigned.ipa"
+            test -d "$app_path"
+            mkdir -p "$package_root/Payload"
+            ditto "$app_path" "$package_root/Payload/$app.app"
+            (cd "$package_root" && /usr/bin/zip -qry "$ipa_path" Payload)
+            test -s "$ipa_path"
+            if [ "$app" = NoveliaLegacy ]; then
+              python3 scripts/check_architecture_release.py --readium-only "$app_path/$app"
+            else
+              python3 scripts/check_architecture_release.py "$app_path/$app"
+            fi
+            python3 scripts/verify_release_privacy.py "$ipa_path"
+            shasum -a 256 "$ipa_path"
+          done
+          python3 - <<'PYTHON'
+          import importlib.util
+          import os
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location("release", "scripts/build_local_release.py")
+          release = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(release)
+          version, build = release.project_version(Path("NoveliaIOS.xcodeproj/project.pbxproj").read_text())
+          for app, minimum_os in (("Novelia", "17.0"), ("NoveliaLegacy", "15.0")):
+              release.validate_ipa(Path(os.environ["RUNNER_TEMP"]) / f"{app}-unsigned.ipa",
+                                   version, build, app_name=app, minimum_os=minimum_os)
+          PYTHON
+
+      - name: Upload both IPA artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: Novelia-unsigned-ipas
+          path: |
+            ${{ runner.temp }}/Novelia-unsigned.ipa
+            ${{ runner.temp }}/NoveliaLegacy-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14

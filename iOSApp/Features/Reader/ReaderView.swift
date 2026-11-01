@@ -110,7 +110,7 @@ struct ReaderView: View {
                     VStack(alignment: .leading, spacing: 9) {
                         Text("\(novel.title.uppercased())  ·  \(chapterIndex + 1) / \(novel.chapters.count)")
                             .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .tracking(1.2)
+                            .compatTracking(1.2)
                             .foregroundStyle(NoveliaStyle.brandGreen)
                         Text(chapter.title)
                             .font(.system(size: 27, weight: .bold, design: .rounded))
@@ -131,7 +131,7 @@ struct ReaderView: View {
                         HStack { Spacer(); ProgressView("加载章节…"); Spacer() }
                             .padding(.vertical, 28)
                     } else if let chapterError, chapter.originalText.isEmpty {
-                        ContentUnavailableView {
+                        CompatUnavailable {
                             Label("章节加载失败", systemImage: "wifi.exclamationmark")
                         } description: {
                             Text(chapterError)
@@ -176,7 +176,7 @@ struct ReaderView: View {
                 .frame(maxWidth: .infinity)
             }
             .background(ReaderBackgroundView(dark: appearance.isDark(system: systemColorScheme), fallback: readerBackground).ignoresSafeArea())
-            .onChange(of: chapterIndex) { _, newIndex in
+            .onValueChange(of: chapterIndex) { _, newIndex in
                 guard novel.chapters.indices.contains(newIndex) else { return }
                 savedChapterIndex = newIndex
                 settings.recordWebPosition(id: novel.id, chapterIndex: newIndex)
@@ -185,7 +185,7 @@ struct ReaderView: View {
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .compatTopBarLeading) {
                     NavigationLink {
                         ChapterDirectoryView(novel: novel, selectedIndex: $chapterIndex, appearance: appearance)
                     } label: {
@@ -194,21 +194,21 @@ struct ReaderView: View {
                     }
                     .accessibilityLabel("章节目录")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .compatTopBarTrailing) {
                     Button { settings.pagedTextReading = true } label: {
                         Image(systemName: "book.pages")
                             .foregroundStyle(readerPrimaryText)
                     }
                     .accessibilityLabel("分页阅读")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .compatTopBarTrailing) {
                     Button(action: toggleBookmark) {
                         Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
                             .foregroundStyle(NoveliaStyle.brandGreen)
                     }
                     .accessibilityLabel(isBookmarked ? "移除书签" : "添加书签")
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .compatTopBarTrailing) {
                     Menu {
                         Picker("显示内容", selection: $modeRaw) {
                             ForEach(ReaderMode.allCases) { item in
@@ -256,7 +256,7 @@ struct ReaderView: View {
         }
         .navigationTitle("阅读")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .compatToolbar(.hidden, for: .tabBar)
         .preferredColorScheme(appearance.preferredColorScheme)
     }
 
@@ -441,7 +441,7 @@ private struct ChapterDirectoryView: View {
                 .buttonStyle(.plain)
                 .listRowBackground(appearance.card(system: systemColorScheme))
             }
-            .scrollContentBackground(.hidden)
+            .compatScrollContentBackgroundHidden()
             .background(appearance.background(system: systemColorScheme).ignoresSafeArea())
             .task(id: selectedIndex) {
                 guard novel.chapters.indices.contains(selectedIndex) else { return }
@@ -565,7 +565,9 @@ enum ReaderTextChunker {
 /// 阅读进度、服务器阅读历史和书签与滚动模式一样，仍按章节记录。
 private struct OnlinePagedReader: View {
     @EnvironmentObject private var services: AppServices
+    #if !NOVELIA_READIUM_ONLY
     @AppStorage(SettingsKey.readerEPUBReadium) private var usesReadium = false
+    #endif
     @EnvironmentObject private var settings: ReaderSettings
     @EnvironmentObject private var auth: AccountAuthStore
     @EnvironmentObject private var readingHistory: ReadingHistoryStore
@@ -596,6 +598,10 @@ private struct OnlinePagedReader: View {
     var body: some View {
         // 显示模式或来源变化会重新生成所有章节：从章节开头重新打开。
         Group {
+            #if NOVELIA_READIUM_ONLY
+            ReadiumEPUBReaderView(bookURL: nil, textBook: makeBook(), accessory: AnyView(HStack(spacing: 12) { scrollButton; menu }),
+                                  statisticsBook: ReadingBook(id: "online:\(novel.id)", title: novel.title, kind: .online))
+            #else
             if usesReadium {
                 ReadiumEPUBReaderView(bookURL: nil, textBook: makeBook(), accessory: AnyView(HStack(spacing: 12) { scrollButton; menu }),
                                       statisticsBook: ReadingBook(id: "online:\(novel.id)", title: novel.title, kind: .online))
@@ -603,6 +609,7 @@ private struct OnlinePagedReader: View {
                 EPUBReaderView(bookURL: nil, textBook: makeBook(), accessory: AnyView(HStack(spacing: 12) { scrollButton; menu }),
                                statisticsBook: ReadingBook(id: "online:\(novel.id)", title: novel.title, kind: .online))
             }
+            #endif
         }
         .id("\(modeRaw)|\(translationSourceRaw)")
     }

@@ -26,6 +26,7 @@
   - `EPUBSampleBook.swift` — 可复现样例 EPUB 生成器，仅在 Debug 构建中编译。
 - **上游**：通过 Swift Package Manager 引入并编译上表依赖源码；**没有复制、嵌入或修改 YueduCoreText 或 Yuedu-reader 的任何源码文件**。
 - **修改的上游文件**：无。包引用与版本配置由 Xcode 工程、`Package.swift` 和锁定文件管理，宿主适配不等于修改上游源码。
+- **iOS 15 目标**：`NoveliaLegacy` 不链接 YueduCoreText，也不编译 `EPUBLayoutCoordinator.swift`、`EPUBPageBook.swift`、`EPUBPagerView.swift`、`EPUBReaderModel.swift`。分页只使用 Readium。`EPUBSharedTypes.swift` 里的字体与阅读样式两个目标都编译。CLibMobi 也不链接到这个目标。
 
 ## 许可合规说明（分发 IPA 时）
 

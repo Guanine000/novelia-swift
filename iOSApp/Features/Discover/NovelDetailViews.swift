@@ -59,7 +59,7 @@ struct NovelDetailView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(displayNovel.genres.joined(separator: " · "))
                             .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .tracking(1)
+                            .compatTracking(1)
                             .foregroundStyle(.white.opacity(0.75))
                         Text(displayNovel.title)
                             .font(.system(size: 29, weight: .bold, design: .rounded))
@@ -288,7 +288,7 @@ struct NovelDetailView: View {
                     HStack { Spacer(); ProgressView("加载作品信息…"); Spacer() }
                         .padding(.vertical, 16)
                 } else if let detailError {
-                    ContentUnavailableView {
+                    CompatUnavailable {
                         Label("作品信息加载失败", systemImage: "wifi.exclamationmark")
                     } description: {
                         Text(detailError)
@@ -338,7 +338,7 @@ struct NovelDetailView: View {
             WebNovelDownloadSheet(novel: requestedNovel, availableSources: availableTranslationSources)
         }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .compatTopBarTrailing) {
                 Button {
                     favoriteTapped()
                 } label: {
@@ -475,7 +475,7 @@ private struct WebNovelDownloadSheet: View {
     private var progress: WebNovelDownloadProgress? { downloads.progress[novel.id] }
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationStack {
             Form {
                 Section("下载内容") {
                     Text(novel.title).font(.headline)
@@ -540,7 +540,7 @@ private struct WebNovelDownloadSheet: View {
             .navigationTitle("下载全书")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("关闭") { dismiss() } }
+                ToolbarItem(placement: .compatTopBarLeading) { Button("关闭") { dismiss() } }
             }
         }
     }
@@ -609,7 +609,7 @@ struct NovelCommentsView: View {
                     HStack { Spacer(); ProgressView("加载评论…"); Spacer() }
                         .padding(.vertical, 25)
                 } else if let errorMessage, commentPage == nil {
-                    ContentUnavailableView {
+                    CompatUnavailable {
                         Label("评论加载失败", systemImage: "wifi.exclamationmark")
                     } description: {
                         Text(errorMessage)
@@ -619,7 +619,7 @@ struct NovelCommentsView: View {
                             .tint(NoveliaStyle.brandGreen)
                     }
                 } else if let commentPage, commentPage.items.isEmpty {
-                    ContentUnavailableView("还没有评论", systemImage: "text.bubble", description: Text("来发表第一条评论吧。"))
+                    CompatUnavailable("还没有评论", systemImage: "text.bubble", description: Text("来发表第一条评论吧。"))
                 } else if let commentPage {
                     ForEach(commentPage.items) { comment in
                         commentThread(comment)
@@ -673,7 +673,7 @@ struct NovelCommentsView: View {
             TextEditor(text: $draft)
                 .frame(minHeight: 86)
                 .padding(7)
-                .scrollContentBackground(.hidden)
+                .compatScrollContentBackgroundHidden()
                 .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(alignment: .topLeading) {
                     if draft.isEmpty {

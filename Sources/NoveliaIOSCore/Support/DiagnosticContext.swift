@@ -1,6 +1,75 @@
 import CryptoKit
 import Foundation
 
+/// 用系统启动后的单调时间计时，替代 iOS 16 才提供的 `ContinuousClock`。
+/// 壁钟回拨不影响间隔；诊断日志里的毫秒差与原先的连续时钟一致。
+public struct MonotonicInstant: Sendable, Hashable, Comparable {
+    public let nanoseconds: UInt64
+
+    public init(nanoseconds: UInt64) {
+        self.nanoseconds = nanoseconds
+    }
+
+    public static var now: MonotonicInstant {
+        MonotonicInstant(nanoseconds: DispatchTime.now().uptimeNanoseconds)
+    }
+
+    public static func < (lhs: MonotonicInstant, rhs: MonotonicInstant) -> Bool {
+        lhs.nanoseconds < rhs.nanoseconds
+    }
+
+    public func milliseconds(since earlier: MonotonicInstant) -> Int {
+        Int((nanoseconds &- earlier.nanoseconds) / 1_000_000)
+    }
+
+    public static func milliseconds(since start: MonotonicInstant) -> Int {
+        MonotonicInstant.now.milliseconds(since: start)
+    }
+}
+
+/// `ContinuousClock.measure` 的替代。只用于诊断与测试打印，不参与阅读进度。
+public struct MonotonicDuration: Sendable, Hashable, Comparable, CustomStringConvertible {
+    public var nanoseconds: UInt64
+
+    public init(nanoseconds: UInt64) {
+        self.nanoseconds = nanoseconds
+    }
+
+    public static let zero = MonotonicDuration(nanoseconds: 0)
+
+    public static func seconds(_ value: Double) -> MonotonicDuration {
+        MonotonicDuration(nanoseconds: UInt64(max(0, value) * 1_000_000_000))
+    }
+
+    public static func < (lhs: MonotonicDuration, rhs: MonotonicDuration) -> Bool {
+        lhs.nanoseconds < rhs.nanoseconds
+    }
+
+    public static func += (lhs: inout MonotonicDuration, rhs: MonotonicDuration) {
+        lhs.nanoseconds += rhs.nanoseconds
+    }
+
+    public var description: String {
+        String(format: "%.3f s", Double(nanoseconds) / 1_000_000_000)
+    }
+}
+
+public struct MonotonicClock: Sendable {
+    public init() {}
+
+    public func measure(_ body: () throws -> Void) rethrows -> MonotonicDuration {
+        let start = MonotonicInstant.now
+        try body()
+        return MonotonicDuration(nanoseconds: MonotonicInstant.now.nanoseconds &- start.nanoseconds)
+    }
+
+    public func measure(_ body: () async throws -> Void) async rethrows -> MonotonicDuration {
+        let start = MonotonicInstant.now
+        try await body()
+        return MonotonicDuration(nanoseconds: MonotonicInstant.now.nanoseconds &- start.nanoseconds)
+    }
+}
+
 /// TXT 与 EPUB 诊断共用的关联字段。所有值都不包含原始身份信息：书籍标记
 /// 是加盐哈希，盐值每次启动都会改变，因此一份导出日志可关联同一本书的
 /// 解码、解析和排版过程，而标记不能用于在其他地方识别该文件。
@@ -30,6 +99,13 @@ public enum DiagnosticContext {
         return digest.finalize().prefix(4).map { String(format: "%02x", $0) }.joined()
     }
 
+    public static func milliseconds(since start: MonotonicInstant) -> Int {
+        MonotonicInstant.milliseconds(since: start)
+    }
+
+    /// 原生分页仍用 `ContinuousClock`。该类型从 iOS 16 起才有，只给 iOS 17 的主目标编译；
+    /// iOS 15 目标不编译调用方。计算与改用单调时钟之前相同。
+    @available(iOS 16, *)
     public static func milliseconds(since start: ContinuousClock.Instant) -> Int {
         let elapsed = ContinuousClock.now - start
         return Int(elapsed.components.seconds * 1_000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
