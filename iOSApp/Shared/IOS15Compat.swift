@@ -162,26 +162,25 @@ extension View {
 
     /// 数字键盘上方的完成按钮。iOS 16 及以上只在需要时加入工具栏项；
     /// iOS 15 的工具栏不能写不带 else 的 if，因此始终挂上键盘栏，按钮仍按条件显示，避免重建输入框。
-    @ViewBuilder
     func compatKeyboardJumpToolbar(isPresented: Bool, action: @escaping () -> Void) -> some View {
         if #available(iOS 16, *) {
-            self.toolbar {
+            return AnyView(self.toolbar {
                 if isPresented {
                     ToolbarItemGroup(placement: .keyboard) {
                         Spacer()
                         Button("跳转", action: action)
                     }
                 }
-            }
+            })
         } else {
-            self.toolbar {
+            return AnyView(self.toolbar {
                 ToolbarItemGroup(placement: .keyboard) {
                     if isPresented {
                         Spacer()
                         Button("跳转", action: action)
                     }
                 }
-            }
+            })
         }
     }
 
@@ -249,17 +248,18 @@ struct CompatLabeledContent: View {
         self.value = value
     }
 
+    // 显式返回类型擦除后的视图，避免优化编译将旧系统分支推导为 iOS 26 的 TupleContent。
     var body: some View {
         if #available(iOS 16, *) {
-            LabeledContent(title, value: value)
+            return AnyView(LabeledContent(title, value: value))
         } else {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            return AnyView(HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(title)
                 Spacer(minLength: 12)
                 Text(value)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing)
-            }
+            })
         }
     }
 }
@@ -277,9 +277,9 @@ struct CompatUnavailable<LabelContent: View, Description: View, Actions: View>: 
 
     var body: some View {
         if #available(iOS 17, *) {
-            ContentUnavailableView(label: { label }, description: { description }, actions: { actions })
+            return AnyView(ContentUnavailableView(label: { label }, description: { description }, actions: { actions }))
         } else {
-            VStack(spacing: 12) {
+            return AnyView(VStack(spacing: 12) {
                 label
                 description
                     .font(.callout)
@@ -288,7 +288,7 @@ struct CompatUnavailable<LabelContent: View, Description: View, Actions: View>: 
                 actions
             }
             .padding(24)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity))
         }
     }
 }

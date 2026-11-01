@@ -507,7 +507,7 @@ scripts/check_both_targets.sh
 
 脚本用 `generic/platform=iOS Simulator` 和 `CODE_SIGNING_ALLOWED=NO` 依次编译 `Novelia`、`NoveliaLegacy`。前一个失败就不再编下一个，并以非 0 退出。这是日常检查，不打包 IPA。
 
-发布用 `scripts/build_local_release.py`。它已经对两个 scheme 做 Release 真机构建；`run` 在任一构建非 0 退出时抛错，外层写出 FAILED-DO-NOT-DISTRIBUTE 并重新抛出，不会写出 SUCCESS。手动触发的 `.github/workflows/build-ipa.yml` 同样先编译这两个 scheme，任一失败则该次工作流失败；既有的 `Novelia` IPA 打包与上传步骤不变。
+发布用 `scripts/build_local_release.py`。它已经对两个 scheme 做 Release 真机构建；`run` 在任一构建非 0 退出时抛错，外层写出 FAILED-DO-NOT-DISTRIBUTE 并重新抛出，不会写出 SUCCESS。手动触发的 `.github/workflows/build-ipa.yml` 同样先编译这两个 scheme，任一失败则该次工作流失败；随后分别打包和校验两个 IPA，全部成功后一起上传；复用本地发布脚本的版本、最低系统、签名与许可资源检查，同时运行两个可执行文件的 Release 排除和两个 IPA 的隐私检查。工作流产物只用于构建验证，分发仍使用本地发布脚本生成完整源码和依赖附件。
 
 使用替代后台操作真实页面时，先构建独立验证 App，再执行 UI 脚本：
 
@@ -539,7 +539,7 @@ python3 scripts/check_architecture_release.py '<Release Novelia.app 内的 Novel
 `Novelia` 与 `NoveliaLegacy` 长期共用源码、发布流程，以及同一 `MARKETING_VERSION` 和 `CURRENT_PROJECT_VERSION`。两个 IPA 只是同一构建号下的两个产品。
 
 - 新代码默认必须能在 iOS 15 上编译。主目标的部署版本保持 iOS 17，iOS 15 目标保持 iOS 15.0。
-- iOS 16/17 才有的 SwiftUI 或 UIKit API 放进 `iOSApp/Shared/IOS15Compat.swift`，或写在 `#available` 里。iOS 17 及以上仍走原来的系统控件。
+- iOS 16/17 才有的 SwiftUI 或 UIKit API 放进 `iOSApp/Shared/IOS15Compat.swift`，或写在 `#available` 里。iOS 17 及以上仍走原来的系统控件。 分支返回不同视图类型时，需检查 Release 优化构建的可用性诊断；必要时用显式返回的 `AnyView` 隔离类型，不能只凭非优化类型检查通过。
 - 只有原生分页阅读器相关代码放在 `#if !NOVELIA_READIUM_ONLY` 中。其余共享代码两个目标都编译。不要把 `NOVELIA_READIUM_ONLY` 加到 `Novelia`。
 - 新增源文件时同时检查 Legacy 的 Sources。原生分页和 Kindle 转换以外的文件要加入 `NoveliaLegacy`。`scripts/check_architecture_boundaries.py` 会核对此列表。
 - `ToolbarContentBuilder` 里不能写 `if`、`switch` 或 `#available`。条件放在工具栏项内部，或拆成不含条件的工具栏。

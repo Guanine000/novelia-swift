@@ -21,6 +21,10 @@
 
 单元测试、离线回归、App 编译和 EPUB 排版扫描的命令与选择方法见[开发文档 → 构建与验证](../DEVELOPMENT.md#构建与验证)。
 
+## 手动 Actions 构建验证
+
+手动触发 `Build iOS IPA` 会依次编译两个 scheme，并校验两个 IPA 的版本、最低系统、未签名状态、许可资源、隐私及 Release 验证代码排除。全部成功后，在同一个 `Novelia-unsigned-ipas` artifact 中提供 `Novelia-unsigned.ipa` 与 `NoveliaLegacy-unsigned.ipa`。该工作流不生成完整对应源码和依赖源码附件，不直接作为分发流程；实际分发使用下述本地发布脚本。
+
 ## 本机构建 Release
 
 无需 GitHub Actions 或处理账单即可在 macOS／Xcode 本机构建。先按 [VERSIONING.md](../VERSIONING.md) 设置 Debug／Release 一致的版本与新构建号，再运行：
