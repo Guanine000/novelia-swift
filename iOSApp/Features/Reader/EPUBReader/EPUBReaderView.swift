@@ -27,6 +27,7 @@ struct PagedTextBook {
     var tocWordCounts: (@Sendable () async -> ReaderTOCWordCounts)? = nil
 }
 
+#if !NOVELIA_READIUM_ONLY
 struct EPUBReaderView: View {
     @EnvironmentObject private var settings: ReaderSettings
     let bookURL: URL?
@@ -85,7 +86,7 @@ private struct EPUBReaderViewContent: View {
                 case .idle, .opening:
                     ProgressView(textBook == nil ? "正在解析 EPUB…" : "正在排版…")
                 case .failed(let message):
-                    ContentUnavailableView {
+                    CompatUnavailable {
                         Label("无法读取或排版", systemImage: "exclamationmark.triangle")
                     } description: {
                         Text(message).textSelection(.enabled)
@@ -143,15 +144,15 @@ private struct EPUBReaderViewContent: View {
                     .frame(maxHeight: .infinity, alignment: .bottom)
                     .ignoresSafeArea(edges: .bottom)
             }
-            .onChange(of: geometry.size) { _, newSize in
+            .onValueChange(of: geometry.size) { _, newSize in
                 // 进入后台后系统会按其他方向/尺寸截取快照，这些临时尺寸不触发重排。
                 guard scenePhase != .background else { return }
                 model.viewportSize = newSize
             }
-            .onChange(of: colorScheme) { _, newScheme in
+            .onValueChange(of: colorScheme) { _, newScheme in
                 synchronizeSettings(systemIsDark: newScheme == .dark)
             }
-            .onChange(of: scenePhase) { _, phase in
+            .onValueChange(of: scenePhase) { _, phase in
                 // 回到前台后按当时的真实外观与尺寸补一次同步；没有变化时不会重排。
                 guard phase != .background else { return }
                 synchronizeSettings(systemIsDark: colorScheme == .dark)
@@ -187,8 +188,8 @@ private struct EPUBReaderViewContent: View {
         }
         // 书签／搜索面板弹出键盘时不缩小阅读视口，避免整书重新分页并跳页。
         .ignoresSafeArea(.keyboard)
-        .toolbar(.hidden, for: .navigationBar)
-        .toolbar(.hidden, for: .tabBar)
+        .compatToolbar(.hidden, for: .navigationBar)
+        .compatToolbar(.hidden, for: .tabBar)
         // 阅读器已经在自己的浮层中显示时间和电量。
         // 切换系统状态栏会改变安全区高度，并触发书籍重新分页。
         .statusBarHidden(true)
@@ -210,15 +211,15 @@ private struct EPUBReaderViewContent: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NoveliaImportedFontsChanged"))) { _ in model.refreshBackground() }
-        .onChange(of: settings.fontSize) { _, _ in synchronizeSettings(systemIsDark: colorScheme == .dark) }
-        .onChange(of: settings.appearanceRaw) { _, _ in synchronizeSettings(systemIsDark: colorScheme == .dark) }
-        .onChange(of: model.isAnimating) { _, active in
+        .onValueChange(of: settings.fontSize) { _, _ in synchronizeSettings(systemIsDark: colorScheme == .dark) }
+        .onValueChange(of: settings.appearanceRaw) { _, _ in synchronizeSettings(systemIsDark: colorScheme == .dark) }
+        .onValueChange(of: model.isAnimating) { _, active in
             if !active { synchronizeSettings(systemIsDark: colorScheme == .dark) }
         }
-        .onChange(of: model.isLayingOut) { _, active in
+        .onValueChange(of: model.isLayingOut) { _, active in
             if !active { synchronizeSettings(systemIsDark: colorScheme == .dark) }
         }
-        .onChange(of: backgrounds.revision) { _, _ in model.refreshBackground() }
+        .onValueChange(of: backgrounds.revision) { _, _ in model.refreshBackground() }
         .sheet(isPresented: $isShowingStyle) { styleSheet }
         .sheet(item: $model.activeNote) { note in noteSheet(note) }
         .alert("链接", isPresented: .init(
@@ -381,7 +382,7 @@ private struct EPUBReaderViewContent: View {
     // MARK: 目录
 
     private var tocSheet: some View {
-        NavigationStack {
+        CompatNavigationStack {
             Group {
                 if tocTab == .images, model.imageLibrary.isAvailable {
                     ReaderImageGallery(library: model.imageLibrary, chapterTitle: { model.chapterTitle($0) }) { entry in
@@ -389,7 +390,7 @@ private struct EPUBReaderViewContent: View {
                         model.jump(toImage: entry)
                     }
                 } else if let diagnostic = model.tocDiagnosticText {
-                    ContentUnavailableView {
+                    CompatUnavailable {
                         Label("没有目录", systemImage: "list.bullet.rectangle")
                     } description: {
                         Text(diagnostic)
@@ -456,24 +457,15 @@ private struct EPUBReaderViewContent: View {
             }
             .navigationTitle("目录")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { isShowingTOC = false }
-                }
-                if model.imageLibrary.isAvailable {
-                    ToolbarItem(placement: .principal) {
-                        ReaderTOCTabPicker(selection: $tocTab)
-                    }
-                }
-                let levels = (model.source?.toc ?? []).map(\.level)
-                if tocTab == .contents || !model.imageLibrary.isAvailable, levels.contains(where: { $0 > 0 }) {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        ReaderTOCExpandAllButton(levels: levels, expanded: $tocExpanded)
-                    }
-                }
-            }
+            .modifier(ReaderTOCNavigationToolbar(
+                showsImageTabs: model.imageLibrary.isAvailable,
+                levels: (model.source?.toc ?? []).map(\.level),
+                tocTab: $tocTab,
+                expanded: $tocExpanded,
+                onClose: { isShowingTOC = false }
+            ))
         }
-        .presentationDetents([.medium, .large])
+        .compatPresentationDetents(.medium, .large)
 
     }
 
@@ -484,7 +476,7 @@ private struct EPUBReaderViewContent: View {
     }
 
     private var tocDiagnosticsPrompt: some View {
-        NavigationStack {
+        CompatNavigationStack {
             VStack(alignment: .leading, spacing: 20) {
                 Label("本书有目录与排版说明", systemImage: "info.circle")
                     .font(.headline)
@@ -519,13 +511,13 @@ private struct EPUBReaderViewContent: View {
             .navigationTitle("目录说明")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .compatTopBarTrailing) {
                     Button("知道了") { model.isShowingTOCDiagnosticsPrompt = false }
                 }
             }
         }
-        .presentationDetents([.medium])
-        .presentationDragIndicator(.visible)
+        .compatPresentationDetents(.medium)
+        .compatPresentationDragIndicatorVisible()
         .onAppear { didCopyDiagnostics = false }
     }
 
@@ -539,7 +531,7 @@ private struct EPUBReaderViewContent: View {
     }
 
     private var styleSheet: some View {
-        NavigationStack {
+        CompatNavigationStack {
             Form {
                 Section("背景") { NavigationLink("阅读背景") { ReaderBackgroundSettingsView() } }
                 Section("分页") {
@@ -613,10 +605,10 @@ private struct EPUBReaderViewContent: View {
             .navigationTitle("阅读样式")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .compatTopBarLeading) {
                     Button("取消") { isShowingStyle = false }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .compatTopBarTrailing) {
                     Button("应用") {
                         model.applyStyle(draftStyle)
                         isShowingStyle = false
@@ -625,7 +617,7 @@ private struct EPUBReaderViewContent: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .compatPresentationDetents(.medium, .large)
     }
 
     private func styleSlider(_ label: String, value: Binding<CGFloat>,
@@ -641,7 +633,7 @@ private struct EPUBReaderViewContent: View {
     // MARK: 注脚弹层
 
     private func noteSheet(_ note: EPUBNote) -> some View {
-        NavigationStack {
+        CompatNavigationStack {
             ScrollView {
                 Text(note.text)
                     .font(.system(size: 15))
@@ -651,16 +643,18 @@ private struct EPUBReaderViewContent: View {
             .navigationTitle("注释")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .compatTopBarLeading) {
                     Button("关闭") { model.activeNote = nil }
                 }
             }
         }
-        .presentationDetents([.medium])
+        .compatPresentationDetents(.medium)
         // 半屏 sheet 默认为半透明材质，注释正文需要不透明底色才易读。
-        .presentationBackground(Color(uiColor: .systemBackground))
+        .compatPresentationBackground(Color(uiColor: .systemBackground))
     }
 }
+
+#endif
 
 /// UIFont 列出的字体族包含系统字体以及已安装且对本 App 可见的设备字体。
 struct EPUBFontPicker: View {
@@ -734,7 +728,7 @@ private struct EPUBImportedFontsView: View {
                     .foregroundStyle(.secondary)
             }
             if fonts.isEmpty {
-                ContentUnavailableView("尚未导入字体", systemImage: "textformat",
+                CompatUnavailable("尚未导入字体", systemImage: "textformat",
                                        description: Text("支持从“文件”导入 TTF、OTF、TTC 字体。"))
             } else {
                 ForEach(fonts) { font in
@@ -863,8 +857,10 @@ struct EPUBReaderHost: View {
     var onReachedEnd: (() -> Void)? = nil
     var accessory: AnyView? = nil
     @State private var resolvedURL: URL?
-    /// 实验：EPUB 改由 Readium（WKWebView）排版；TXT 与在线章节不受影响。
+    /// 实验：EPUB 改由 Readium（WKWebView）排版。iOS 15 目标没有原生分页，固定走 Readium。
+    #if !NOVELIA_READIUM_ONLY
     @AppStorage(SettingsKey.readerEPUBReadium) private var usesReadium = false
+    #endif
 
     private func descriptor(for url: URL) -> ReadingBook {
         ReadingBook(id: statisticsID ?? "epub:\(url.lastPathComponent)",
@@ -886,11 +882,15 @@ struct EPUBReaderHost: View {
     var body: some View {
         Group {
             if let resolvedURL {
+                #if NOVELIA_READIUM_ONLY
+                ReadiumEPUBReaderView(bookURL: resolvedURL, accessory: accessory, statisticsBook: descriptor(for: resolvedURL), webContext: webContext, onReachedEnd: onReachedEnd)
+                #else
                 if usesReadium {
                     ReadiumEPUBReaderView(bookURL: resolvedURL, accessory: accessory, statisticsBook: descriptor(for: resolvedURL), webContext: webContext, onReachedEnd: onReachedEnd)
                 } else {
                     EPUBReaderView(bookURL: resolvedURL, accessory: accessory, statisticsBook: descriptor(for: resolvedURL), webContext: webContext, onReachedEnd: onReachedEnd)
                 }
+                #endif
             } else {
                 ProgressView("准备样例书…")
             }
@@ -911,6 +911,7 @@ struct EPUBReaderHost: View {
     }
 }
 
+#if !NOVELIA_READIUM_ONLY
 /// 仅阅读器界面控件变化时复用页面绘制视图。分页、阅读位置或缓存页面
 /// 变化时，模型仍会使此观察视图更新。
 private struct EPUBReaderPageSurface: View, Equatable {
@@ -953,6 +954,8 @@ private struct EPUBReaderPageSurface: View, Equatable {
         .frame(width: size.width, height: size.height)
     }
 }
+
+#endif
 
 // MARK: - 可折叠目录（YueduCoreText 与 Readium 阅读器共用）
 
@@ -1010,8 +1013,8 @@ struct ReaderTOCRow: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(title)
-                            .foregroundStyle(isCurrent ? NoveliaStyle.brandGreen : .primary)
                             .fontWeight(isCurrent ? .semibold : .regular)
+                            .foregroundStyle(isCurrent ? NoveliaStyle.brandGreen : .primary)
                         if let subtitle {
                             Text(subtitle).font(.caption2).foregroundStyle(.secondary)
                         }
@@ -1027,6 +1030,59 @@ struct ReaderTOCRow: View {
             }
             .buttonStyle(.borderless)
             .tint(.primary)
+        }
+    }
+}
+
+/// 目录面板的导航栏按钮。iOS 16 及以上按条件插入项目；
+/// iOS 15 的 `ToolbarContentBuilder` 不能生成 `Optional`，改成确定的按钮组合。
+struct ReaderTOCNavigationToolbar: ViewModifier {
+    let showsImageTabs: Bool
+    let levels: [Int]
+    @Binding var tocTab: ReaderTOCTab
+    @Binding var expanded: Set<Int>
+    let onClose: () -> Void
+
+    private var showsExpand: Bool {
+        (tocTab == .contents || !showsImageTabs) && levels.contains { $0 > 0 }
+    }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 16, *) {
+            content.toolbar {
+                ToolbarItem(placement: .compatTopBarLeading) { Button("关闭", action: onClose) }
+                if showsImageTabs {
+                    ToolbarItem(placement: .principal) { ReaderTOCTabPicker(selection: $tocTab) }
+                }
+                if showsExpand {
+                    ToolbarItem(placement: .compatTopBarTrailing) {
+                        ReaderTOCExpandAllButton(levels: levels, expanded: $expanded)
+                    }
+                }
+            }
+        } else if showsImageTabs && showsExpand {
+            content.toolbar { closeButton; imageTabs; expandButton }
+        } else if showsImageTabs {
+            content.toolbar { closeButton; imageTabs }
+        } else if showsExpand {
+            content.toolbar { closeButton; expandButton }
+        } else {
+            content.toolbar { closeButton }
+        }
+    }
+
+    private var closeButton: some ToolbarContent {
+        ToolbarItem(placement: .compatTopBarLeading) { Button("关闭", action: onClose) }
+    }
+
+    private var imageTabs: some ToolbarContent {
+        ToolbarItem(placement: .principal) { ReaderTOCTabPicker(selection: $tocTab) }
+    }
+
+    private var expandButton: some ToolbarContent {
+        ToolbarItem(placement: .compatTopBarTrailing) {
+            ReaderTOCExpandAllButton(levels: levels, expanded: $expanded)
         }
     }
 }

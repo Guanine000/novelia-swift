@@ -609,7 +609,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     private var pendingWebPositionWrite = false
     /// 导航来源在下一次位置回报时取用并清空；超过 3 秒视为过期。
     /// 点按和拖动观察者也注册来源，未能关联时记为 unattributed。
-    private var pendingLocationCause: (cause: String, time: ContinuousClock.Instant)?
+    private var pendingLocationCause: (cause: String, time: MonotonicInstant)?
     private let diagnosticViews = NSMapTable<WKWebView, NSNumber>.weakToStrongObjects()
     private var nextDiagnosticView = 0
     private var redirectedOperation: Int?
@@ -626,7 +626,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         var cause = "unattributed"
         if previous == nil {
             cause = "open"
-        } else if let pending = pendingLocationCause, ContinuousClock.now - pending.time < .seconds(3) {
+        } else if let pending = pendingLocationCause, MonotonicInstant.now.milliseconds(since: pending.time) < 3_000 {
             cause = pending.cause
         }
         pendingLocationCause = nil
@@ -875,7 +875,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             for _ in 0..<10 {
                 guard let self else { return }
                 if await scrollToImage(path: entry.path) { return }
-                try? await Task.sleep(for: .milliseconds(150))
+                try? await Task.sleep(nanoseconds: 150_000_000)
             }
         }
     }

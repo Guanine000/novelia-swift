@@ -74,11 +74,11 @@ final class BookWordCountTests: XCTestCase {
         let first = Task {
             try await cache.counts(hash: hash) {
                 await calls.increment()
-                try await Task.sleep(for: .milliseconds(300))
+                try await Task.sleep(nanoseconds: 300_000_000)
                 return BookWordCounts(total: 42, chapters: [40, 2])
             }
         }
-        try await Task.sleep(for: .milliseconds(50))
+        try await Task.sleep(nanoseconds: 50_000_000)
         let second = try await cache.counts(hash: hash) {
             await calls.increment()
             return BookWordCounts(total: 0)

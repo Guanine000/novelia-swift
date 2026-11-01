@@ -15,9 +15,9 @@ private struct ReadingTimeModifier: ViewModifier {
         content
             .onAppear { visible = true; update() }
             .onDisappear { visible = false; recorder.end(id: sessionID) }
-            .onChange(of: scenePhase) { _, _ in update() }
-            .onChange(of: ready) { _, _ in update() }
-            .onChange(of: store.isRecordingEnabled) { _, _ in update() }
+            .onValueChange(of: scenePhase) { _, _ in update() }
+            .onValueChange(of: ready) { _, _ in update() }
+            .onValueChange(of: store.isRecordingEnabled) { _, _ in update() }
             // 定期保存检查点；任务条件变化会取消循环，不能在后台继续累计。
             .task(id: visible && ready && scenePhase == .active && store.isRecordingEnabled) {
                 guard visible && ready && scenePhase == .active && store.isRecordingEnabled else { return }

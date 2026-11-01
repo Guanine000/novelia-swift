@@ -8,7 +8,7 @@
 
 WebDAV 强版本读取、坚果云条件头兼容和首次创建流程参考并以 Swift 适配自安卓端 `WebDavClient.kt`，固定来源提交为 [44be26d](https://github.com/nobYoQ/novelia/blob/44be26d51e2a38e98aea74dc31aca1bb0a0261fe/app/src/main/java/cc/novelia/app/data/webdav/WebDavClient.kt)。保留上述安卓贡献者版权和 GPL-3.0-only 许可；适配部分见本仓库 `WebDAVRemote.swift`。未引入 Anx Reader、Joplin 或 restic 的代码与依赖。
 
-第三方组件、YueduCoreText、用户导入字体、Novelia 网站内容、小说与用户内容仍分别适用其自身许可证或权利声明，不被本仓库的 GPL 声明替代或重新授权。完整第三方清单、许可文本和 YueduCoreText 对应源码见下方清单及最新 Release 附件。默认书本图标由维护者使用 GPT 生成并提供，随本项目源码和 IPA 分发；其他非代码资源仍以其各自权利状态为准。
+第三方组件、YueduCoreText、用户导入字体、Novelia 网站内容、小说与用户内容仍分别适用其自身许可证或权利声明，不被本仓库的 GPL 声明替代或重新授权。完整第三方清单、许可文本和 YueduCoreText 对应源码见下方清单及最新 Release 附件。iOS 17 的 `Novelia` 链接 YueduCoreText（MPL-2.0）与 libmobi（LGPL-3.0-or-later）。iOS 15 的 `NoveliaLegacy` 不链接这两项，开源许可页也不把它们列为本二进制的组件；Readium 仍为 BSD-3-Clause。默认书本图标由维护者使用 GPT 生成并提供，随本项目源码和 IPA 分发；其他非代码资源仍以其各自权利状态为准。
 
 ## 第三方软件
 

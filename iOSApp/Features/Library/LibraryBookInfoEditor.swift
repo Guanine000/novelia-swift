@@ -1,4 +1,3 @@
-import PhotosUI
 import SwiftUI
 import UIKit
 import ImageIO
@@ -13,7 +12,6 @@ struct LibraryBookInfoEditor: View {
     @State private var title: String
     @State private var author: String
     @State private var bookDescription: String
-    @State private var pickedItem: PhotosPickerItem?
     @State private var newCover: UIImage?
     @State private var savedCover: UIImage?
     @State private var removesCover = false
@@ -36,7 +34,7 @@ struct LibraryBookInfoEditor: View {
     }
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationStack {
             Form {
                 Section {
                     HStack(alignment: .top, spacing: 16) {
@@ -52,13 +50,20 @@ struct LibraryBookInfoEditor: View {
                         .frame(width: 84, height: 116)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                         VStack(alignment: .leading, spacing: 12) {
-                            PhotosPicker(selection: $pickedItem, matching: .images) {
+                            CompatPhotosPickerButton(onData: { data in
+                                Task {
+                                    let image = await Task.detached(priority: .userInitiated) { Self.decodeCover(data) }.value
+                                    guard !Task.isCancelled else { return }
+                                    guard let image else { errorMessage = "无法读取所选图片。"; return }
+                                    newCover = image
+                                    removesCover = false
+                                }
+                            }) {
                                 Label("从相册选择", systemImage: "photo")
                             }
                             if displayedCover != nil {
                                 Button("移除封面", role: .destructive) {
                                     newCover = nil
-                                    pickedItem = nil
                                     removesCover = true
                                 }
                             }
@@ -69,14 +74,13 @@ struct LibraryBookInfoEditor: View {
                     Text("封面")
                 }
                 Section("书名") {
-                    TextField("书名", text: $title, axis: .vertical)
+                    CompatVerticalTextField(prompt: "书名", text: $title, limit: 1...4)
                 }
                 Section("作者") {
                     TextField("作者", text: $author)
                 }
                 Section {
-                    TextField("简介", text: $bookDescription, axis: .vertical)
-                        .lineLimit(4...12)
+                    CompatVerticalTextField(prompt: "简介", text: $bookDescription, limit: 4...12)
                 } header: {
                     Text("简介")
                 } footer: {
@@ -104,26 +108,12 @@ struct LibraryBookInfoEditor: View {
                 guard !Task.isCancelled else { return }
                 savedCover = image
             }
-            .task(id: pickedItem) { await loadPickedImage() }
             .alert("无法保存", isPresented: .init(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
                 Button("好", role: .cancel) {}
             } message: {
                 Text(errorMessage ?? "")
             }
         }
-    }
-
-    private func loadPickedImage() async {
-        guard let pickedItem else { return }
-        guard let data = try? await pickedItem.loadTransferable(type: Data.self) else {
-            if !Task.isCancelled { errorMessage = "无法读取所选图片。" }
-            return
-        }
-        let image = await Task.detached(priority: .userInitiated) { Self.decodeCover(data) }.value
-        guard !Task.isCancelled else { return }
-        guard let image else { errorMessage = "无法读取所选图片。"; return }
-        newCover = image
-        removesCover = false
     }
 
     /// 只解码长边 900 像素的缩略图，避免在主执行域解码原始大图再缩放。

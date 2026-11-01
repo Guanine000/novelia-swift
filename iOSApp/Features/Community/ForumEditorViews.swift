@@ -67,8 +67,8 @@ private struct ForumInAppLinkDestinations: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.forumLinkActions, ForumLinkActions(openNovel: { novelRoute = $0 }, openNotice: { notice = $0 }))
-            .navigationDestination(item: $novelRoute) { route in ForumNovelRouteView(route: route) }
-            .navigationDestination(item: $notice) { destination in
+            .compatNavigationDestination(item: $novelRoute) { route in ForumNovelRouteView(route: route) }
+            .compatNavigationDestination(item: $notice) { destination in
                 switch destination {
                 case let .category(slug, query): ForumView(initialCategory: slug, initialQuery: query)
                 case .rules: ForumRulesView()
@@ -96,7 +96,7 @@ private struct ForumRulesView: View {
             .id(reloadID)
             if isLoading { ProgressView("正在加载社区守则…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) }
             if let errorMessage {
-                ContentUnavailableView {
+                CompatUnavailable {
                     Label("社区守则加载失败", systemImage: "wifi.exclamationmark")
                 } description: { Text(errorMessage) } actions: {
                     Button("重试") { self.errorMessage = nil; isLoading = true; reloadID = UUID() }
@@ -148,7 +148,7 @@ private struct ForumMarkdownHelpView: View {
     ]
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationStack {
             List {
                 Section {
                     Text("选中文字后点击格式按钮，可为选中内容添加标记；没有选中文字时会插入示例。切换到预览查看效果，返回编辑可继续修改。")
@@ -163,7 +163,7 @@ private struct ForumMarkdownHelpView: View {
             }
             .navigationTitle("Markdown 语法帮助")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .compatTopBarTrailing) { Button("完成") { dismiss() } } }
         }
     }
 }
@@ -181,7 +181,7 @@ struct ForumCommentEditorSheet: View {
     @State private var sendError: String?
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationStack {
             ScrollView {
             VStack(spacing: 12) {
                 HStack {
@@ -207,7 +207,7 @@ struct ForumCommentEditorSheet: View {
             }
             .padding(16)
             }
-            .scrollDismissesKeyboard(.interactively)
+            .compatScrollDismissesKeyboardInteractively()
             .background(NoveliaStyle.paper.ignoresSafeArea())
             .overlay {
                 if let sendError {
@@ -318,7 +318,7 @@ private struct ForumMarkdownEditor: View {
             .font(.footnote)
         }
         .sheet(isPresented: $isHelpPresented) { ForumMarkdownHelpView() }
-        .onChange(of: isPreviewing) { _, preview in if preview { isEditorFocused = false } }
+        .onValueChange(of: isPreviewing) { _, preview in if preview { isEditorFocused = false } }
         .overlay {
             if let sendError { ForumErrorOverlay(message: sendError, onDismiss: { self.sendError = nil }) }
         }
@@ -628,8 +628,7 @@ struct ForumComposeView: View {
                 }
             }
             Section("标题") {
-                TextField("帖子标题（2–100 字）", text: $title, axis: .vertical)
-                    .lineLimit(1...3)
+                CompatVerticalTextField(prompt: "帖子标题（2–100 字）", text: $title, limit: 1...3)
                     .accessibilityIdentifier("forum-post-title")
             }
             Section("正文") {
@@ -649,28 +648,28 @@ struct ForumComposeView: View {
                 .disabled(!canSubmit || selectedCategoryID == nil || !validInput || isSending)
             }
         }
-        .scrollDismissesKeyboard(.interactively)
+        .compatScrollDismissesKeyboardInteractively()
         .task { await loadEditorCategories() }
         .disabled(isSending)
-        .scrollContentBackground(.hidden)
+        .compatScrollContentBackgroundHidden()
         .background(NoveliaStyle.paper)
         .navigationTitle(editingPost == nil ? "新建帖子" : "编辑帖子")
         .forumInAppLinkDestinations()
         .interactiveDismissDisabled(isSending || hasUnsavedEdits)
         .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: selectedCategoryID) { _, _ in
+        .onValueChange(of: selectedCategoryID) { _, _ in
             selectedTagIDs.removeAll()
             saveDraft()
         }
-        .onChange(of: title) { _, _ in saveDraft() }
-        .onChange(of: content) { _, _ in saveDraft() }
-        .onChange(of: selectedTagIDs) { _, _ in saveDraft() }
+        .onValueChange(of: title) { _, _ in saveDraft() }
+        .onValueChange(of: content) { _, _ in saveDraft() }
+        .onValueChange(of: selectedTagIDs) { _, _ in saveDraft() }
         .confirmationDialog("放弃对帖子的修改？", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
             Button("放弃修改", role: .destructive) { dismiss() }
             Button("继续编辑", role: .cancel) {}
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .compatTopBarLeading) {
                 if editingPost != nil {
                     Button("取消") {
                         if hasUnsavedEdits { isConfirmingDiscard = true } else { dismiss() }
@@ -678,7 +677,7 @@ struct ForumComposeView: View {
                     .disabled(isSending)
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) { if isSending { ProgressView() } }
+            ToolbarItem(placement: .compatTopBarTrailing) { if isSending { ProgressView() } }
         }
         .overlay {
             if let errorMessage {

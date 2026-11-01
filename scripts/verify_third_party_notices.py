@@ -70,6 +70,7 @@ def production_scripts(lockfile: Path) -> list[str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-packages", type=Path, help="SwiftPM checkouts after Xcode build")
+    parser.add_argument("--legacy-executable", type=Path, help="NoveliaLegacy executable; must not link YueduCoreText or libmobi")
     args = parser.parse_args()
 
     pins = {pin["identity"]: pin for pin in json.loads(RESOLVED.read_text())["pins"]}
@@ -128,6 +129,16 @@ def main() -> None:
     yuedu_pin = pins["yueducoretext"]
     assert yuedu_pin["state"]["revision"] in index, "Exact YueduCoreText source revision is missing"
     assert (NOTICES / "YueduCoreText-NOTICE.txt").is_file()
+    # 主应用仍链接 YueduCoreText。iOS 15 目标 NoveliaLegacy 不链接它，也不链接 libmobi。
+    project = (ROOT / "NoveliaIOS.xcodeproj/project.pbxproj").read_text()
+    legacy = re.search(r"(?m)^[ \t]*E15E00000000000000000001 /\* NoveliaLegacy \*/ = \{.*?\n\t\t\};", project, re.S)
+    assert legacy and "YueduCoreText" not in legacy.group(0) and "CLibMobi" not in legacy.group(0), "Legacy target still depends on YueduCoreText or CLibMobi"
+    assert "iOS 15 版本使用 Readium" in (ROOT / "iOSApp/Features/Settings/SettingsViews.swift").read_text()
+    if args.legacy_executable:
+        import subprocess
+        symbols = subprocess.check_output(["nm", "-gj", str(args.legacy_executable)], text=True, errors="replace")
+        for marker in ("YueduCoreText", "mobi_init", "mobi_load_filename"):
+            assert marker not in symbols, f"Legacy executable still references {marker}"
     print(f"Verified {len(pins)} Swift Package licenses, libmobi, the YueduCoreText NOTICE and Readium font/script notices")
 
 

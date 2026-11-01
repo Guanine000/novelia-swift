@@ -6,6 +6,8 @@ import subprocess
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('executable', type=Path)
+parser.add_argument('--readium-only', action='store_true',
+                    help='Also reject YueduCoreText and libmobi symbols (iOS 15 NoveliaLegacy)')
 args = parser.parse_args()
 data = args.executable.read_bytes()
 for marker in [b'-architectureValidation', b'-resetArchitectureValidation', b'-architectureReadium', b'-architecturePagination',
@@ -18,4 +20,10 @@ for marker in ['ArchitectureFixtureBackend', 'FixtureTokenStore', 'ArchitectureN
         raise SystemExit('Unexpected validation runtime symbol: ' + marker)
 # 即使 #if DEBUG 移除了全部声明，编译器的源文件表仍可能保留
 # ArchitectureFixtureBackend.swift。因此检查符号与数据，而非文件名。
-print('Release excludes validation backend, in-memory credentials, network trap and launch argument')
+if args.readium_only:
+    for marker in ['YueduCoreText', 'mobi_init', 'mobi_load_filename']:
+        if marker in symbols:
+            raise SystemExit('Legacy binary still links a removed library: ' + marker)
+    print('Release excludes validation backend and does not link YueduCoreText or libmobi')
+else:
+    print('Release excludes validation backend, in-memory credentials, network trap and launch argument')

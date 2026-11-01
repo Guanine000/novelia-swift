@@ -1,7 +1,6 @@
 import SwiftUI
 import OSLog
 import UIKit
-import PhotosUI
 import UniformTypeIdentifiers
 import ImageIO
 
@@ -65,6 +64,6 @@ struct TagBlockingMenu: View {
             .background(NoveliaStyle.brandGreen.opacity(0.10), in: Capsule())
         }
         .buttonStyle(.plain)
-        .navigationDestination(isPresented: $showsManager) { BlockedTagsView() }
+        .compatNavigationDestination(isPresented: $showsManager) { BlockedTagsView() }
     }
 }

@@ -74,7 +74,7 @@ struct DownloadedWebNovelTXTReader: View {
                         .padding(.top, 20)
                         .padding(.bottom, 36)
                     }
-                    .onChange(of: chapterIndex) { _, _ in
+                    .onValueChange(of: chapterIndex) { _, _ in
                         withAnimation(.easeInOut(duration: 0.2)) {
                             proxy.scrollTo("txt-reader-top", anchor: .top)
                         }
@@ -84,7 +84,7 @@ struct DownloadedWebNovelTXTReader: View {
                     }
                 }
             } else if let errorMessage {
-                ContentUnavailableView("无法读取 TXT", systemImage: "doc.text.magnifyingglass", description: Text(errorMessage))
+                CompatUnavailable("无法读取 TXT", systemImage: "doc.text.magnifyingglass", description: Text(errorMessage))
             } else {
                 ProgressView("正在打开 TXT…")
             }
@@ -93,9 +93,9 @@ struct DownloadedWebNovelTXTReader: View {
         .preferredColorScheme(appearance.preferredColorScheme)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .compatToolbar(.hidden, for: .tabBar)
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .compatTopBarTrailing) {
                 Button { settings.pagedTextReading = true } label: {
                     Image(systemName: "book.pages")
                 }
@@ -127,7 +127,7 @@ struct DownloadedWebNovelTXTReader: View {
             }
         }
         .sheet(isPresented: $isShowingContents) {
-            NavigationStack {
+            CompatNavigationStack {
                 List {
                     if let tocWordCounts {
                         ReaderTOCWordCountHeader(total: tocWordCounts.total)
@@ -155,7 +155,7 @@ struct DownloadedWebNovelTXTReader: View {
                 .navigationTitle("章节目录")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: .compatTopBarTrailing) {
                         Button("完成") { isShowingContents = false }
                     }
                 }
@@ -163,7 +163,7 @@ struct DownloadedWebNovelTXTReader: View {
                     if tocWordCounts == nil, let parsedBook { tocWordCounts = await BookWordCounter.txtTOCCounts(parsedBook) }
                 }
             }
-            .presentationDetents([.medium, .large])
+            .compatPresentationDetents(.medium, .large)
         }
         .task(id: url) {
             do {
@@ -187,7 +187,7 @@ struct DownloadedWebNovelTXTReader: View {
                 errorMessage = error.localizedDescription
             }
         }
-        .onChange(of: chapterIndex) { _, newIndex in
+        .onValueChange(of: chapterIndex) { _, newIndex in
             guard let contentHash else { return }
             let saved = settings.positions.txtPosition(hash: contentHash) ?? TXTReadingPosition(chapter: newIndex)
             guard saved.chapter != newIndex || settings.positions.all()["txt:\(contentHash)"] == nil else { return }
@@ -241,13 +241,19 @@ private struct TXTPagedReader: View {
     let title: String
     let rules: TXTChapterRuleConfiguration
     var statisticsID: String? = nil
+    #if !NOVELIA_READIUM_ONLY
     @AppStorage(SettingsKey.readerEPUBReadium) private var usesReadium = false
+    #endif
     @State private var book: PagedTextBook?
     @State private var errorMessage: String?
 
     var body: some View {
         Group {
             if let book {
+                #if NOVELIA_READIUM_ONLY
+                ReadiumEPUBReaderView(bookURL: nil, textBook: book, accessory: AnyView(scrollButton),
+                                      statisticsBook: ReadingBook(id: statisticsID ?? "txt:\(url.lastPathComponent)", title: title, kind: .txt))
+                #else
                 if usesReadium {
                     ReadiumEPUBReaderView(bookURL: nil, textBook: book, accessory: AnyView(scrollButton),
                                           statisticsBook: ReadingBook(id: statisticsID ?? "txt:\(url.lastPathComponent)", title: title, kind: .txt))
@@ -255,15 +261,16 @@ private struct TXTPagedReader: View {
                     EPUBReaderView(bookURL: nil, textBook: book, accessory: AnyView(scrollButton),
                                    statisticsBook: ReadingBook(id: statisticsID ?? "txt:\(url.lastPathComponent)", title: title, kind: .txt))
                 }
+                #endif
             } else if let errorMessage {
-                ContentUnavailableView("无法读取 TXT", systemImage: "doc.text.magnifyingglass", description: Text(errorMessage))
+                CompatUnavailable("无法读取 TXT", systemImage: "doc.text.magnifyingglass", description: Text(errorMessage))
             } else {
                 ProgressView("正在打开 TXT…")
             }
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .compatToolbar(.hidden, for: .tabBar)
         .task(id: url) { await load() }
     }
 

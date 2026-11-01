@@ -78,7 +78,7 @@ struct ForumPostDetailView: View {
                     } else if isLoading {
                         HStack { Spacer(); ProgressView("正在加载帖子…"); Spacer() }
                     } else if let errorMessage {
-                        ContentUnavailableView("帖子加载失败", systemImage: "wifi.exclamationmark", description: Text(errorMessage))
+                        CompatUnavailable("帖子加载失败", systemImage: "wifi.exclamationmark", description: Text(errorMessage))
                         Button("重试") { Task { await load() } }.buttonStyle(.borderedProminent).tint(NoveliaStyle.brandGreen)
                     }
 
@@ -134,7 +134,7 @@ struct ForumPostDetailView: View {
                 }
                 .padding(16)
             }
-            .onChange(of: requestedAnchor) { _, anchor in
+            .onValueChange(of: requestedAnchor) { _, anchor in
                 guard let anchor else { return }
                 Task { @MainActor in
                     await Task.yield()
@@ -155,20 +155,20 @@ struct ForumPostDetailView: View {
         .forumInAppLinkDestinations()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .compatTopBarTrailing) {
                 Button(action: openPostInBrowser) {
                     Image(systemName: "safari")
                 }
                 .accessibilityLabel("在浏览器打开")
             }
         }
-        .navigationDestination(isPresented: $isLinkedPostPresented) {
+        .compatNavigationDestination(isPresented: $isLinkedPostPresented) {
             if let linkedPostRoute {
                 ForumPostDetailView(postID: linkedPostRoute.postID, initialFragment: linkedPostRoute.fragment)
             }
         }
         .sheet(isPresented: $isPostEditorPresented) {
-            NavigationStack {
+            CompatNavigationStack {
                 if let post {
                     ForumComposeView(categories: editCategories, editingPost: post) { updated in
                         self.post = updated
@@ -189,8 +189,8 @@ struct ForumPostDetailView: View {
                     return await saveCommentEdit()
                 }
             )
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .compatPresentationDetents(.large)
+            .compatPresentationDragIndicatorVisible()
         }
         .overlay {
             if let message = operationError ?? errorMessage {

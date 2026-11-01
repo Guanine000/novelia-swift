@@ -423,7 +423,7 @@ final class WebDAVSyncStore: ObservableObject {
         guard autoSyncEnabled, isEnabled, isAppActive else { return }
         pendingLocalChange?.cancel()
         pendingLocalChange = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(WebDAVAutoSyncPolicy.localChangeDelay))
+            try? await Task.sleep(nanoseconds: UInt64(WebDAVAutoSyncPolicy.localChangeDelay * 1_000_000_000))
             guard !Task.isCancelled else { return }
             self?.pendingLocalChange = nil
             self?.requestAutomaticSync(.localChange)
@@ -604,11 +604,11 @@ struct WebDAVSyncView: View {
             Section {
                 TextField("https://example.com/dav/", text: $syncStore.address)
                     .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .compatAutocorrectionDisabled()
                     .keyboardType(.URL)
                 TextField("用户名", text: $syncStore.username)
                     .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .compatAutocorrectionDisabled()
                 SecureField("密码或应用密码", text: $syncStore.password)
                 if syncStore.serverLacksETag {
                     Label {

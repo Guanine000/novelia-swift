@@ -1,5 +1,6 @@
 import XCTest
 import ReadiumShared
+import NoveliaIOSCore
 @testable import NoveliaEPUB
 
 @MainActor
@@ -185,12 +186,12 @@ extension ReadiumTextPublicationTests {
         let source = TextChapterSource(bookTitle: "大 TXT", units: units)
         let publication = ReadiumTextPublication.make(source: source)
         var index: ReadiumNavigationIndex!
-        let setup = ContinuousClock().measure {
+        let setup = MonotonicClock().measure {
             index = ReadiumNavigationIndex(readingOrder: publication.readingOrder,
                                            tableOfContents: publication.manifest.tableOfContents)
         }
         let hrefs = publication.readingOrder.map { $0.url() }
-        let refresh = ContinuousClock().measure {
+        let refresh = MonotonicClock().measure {
             for unit in 0..<count {
                 XCTAssertEqual(index.tocIndex(for: hrefs[unit]), unit)
                 XCTAssertEqual(index.resourceIndex(for: hrefs[unit]), unit)

@@ -6,7 +6,7 @@
 
 ## 从源码运行
 
-使用 Xcode 打开 `NoveliaIOS.xcodeproj`，选择 `Novelia` scheme 和 iPhone 模拟器或已配置签名的设备。依赖由 Swift Package Manager 解析，锁定版本见 `NoveliaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`。
+使用 Xcode 打开 `NoveliaIOS.xcodeproj`。`Novelia` scheme 面向 iOS 17，保留 YueduCoreText。`NoveliaLegacy` scheme 面向 iOS 15（bundle id `cc.novelia.ios.port.ios15`），不链接 YueduCoreText 与 CLibMobi，分页固定为 Readium。依赖由 Swift Package Manager 解析，锁定版本见 `NoveliaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`。本地测试包 `Package.swift` 的平台仍是 iOS 17，因为其中的 EPUB 与 Kindle 测试依赖上述两个库。
 
 ### 目录结构
 
@@ -59,19 +59,23 @@ Release 编译每次仍调用 Xcode，由其做增量构建；生产验证排除
 
 ### 脚本做了什么
 
-脚本运行 Swift 包逻辑／排版测试（不运行模拟器 UI 测试）、架构依赖检查与七项离线回归、Release 真机构建、架构验证代码排除检查、原始依赖许可与包内资源核对、IPA 隐私检查，生成未签名 IPA、完整对应源码、锁定依赖完整源码／许可（含 Readium 阅读器脚本所用 npm 包的原始发布包，按锁定文件 SHA-512 校验，并补充两项发布包缺失的 TypeScript 原始源码及构建配置）、BUILD.json 和 SHA256SUMS。
+脚本运行 Swift 包逻辑／排版测试（不运行模拟器 UI 测试）、架构依赖检查与七项离线回归、两个 scheme 的 Release 真机构建（`Novelia` 与 `NoveliaLegacy`）、架构验证代码排除检查、原始依赖许可与包内资源核对、IPA 隐私检查，生成两个未签名 IPA、完整对应源码、锁定依赖完整源码／许可（含 Readium 阅读器脚本所用 npm 包的原始发布包，按锁定文件 SHA-512 校验，并补充两项发布包缺失的 TypeScript 原始源码及构建配置）、BUILD.json 和 SHA256SUMS。
 
 ### 注意事项
 
 - 开源许可页的 GPL 修改日期（`SettingsViews.swift` 的 `modifiedDate`）必须等于发布提交的日期，否则脚本拒绝构建。
 - Xcode 派生数据默认保存在固定的临时目录缓存中；`--fresh-build` 使用全新目录，成功后删除、失败时保留排查。Release 二进制会记录目标文件路径，`--derived-data` 不得位于用户主目录下，否则 IPA 隐私检查会失败；该参数不能与 `--fresh-build` 同用。
-- 产物位于忽略的 `build/local-releases/<版本>-<构建号>/`；只有出现 SUCCESS 才可分发。
+- `Novelia` 与 `NoveliaLegacy` 的 Release 构建依次执行。任一 scheme 失败会中断本次发布：不写 SUCCESS，并留下 FAILED-DO-NOT-DISTRIBUTE。
+- 产物位于忽略的 `build/local-releases/<版本>-<构建号>/`；只有出现 SUCCESS 才可分发。两个 IPA 使用同一版本号和构建号。
 - 输出目录已存在时拒绝覆盖，源码在构建期间变化也会失败。
 - 脚本不修改版本、不提交、不推送、不发布。
 
 ## 分发
 
-Release 分发时一并提供 IPA、source.tar.gz、dependencies.tar.gz、BUILD.json 与 SHA256SUMS；未签名 IPA 需接收者自行重签。
+Release 分发时一并提供两个 IPA、source.tar.gz、dependencies.tar.gz、BUILD.json 与 SHA256SUMS；未签名 IPA 需接收者自行重签。
+
+- `novelia-<版本>-build<构建号>-unsigned.ipa`：iOS 17，含 YueduCoreText 原生分页与 AZW3／MOBI 转换。
+- `novelia-<版本>-build<构建号>-ios15-unsigned.ipa`：iOS 15，bundle id `cc.novelia.ios.port.ios15`。分页只有 Readium，设置里不能切回原生分页；不包含 YueduCoreText 与 libmobi，不能导入 AZW3／MOBI。iOS 16/17 才有的界面控件在 iOS 15 上有降级，见[功能说明](FEATURES.md#ios-15-版本)。
 
 - **公开正式版**：构建另加 `--public-release`，生成指向本版本固定公开 Release 页的 `novelia-<版本>-build<构建号>-source-info.txt`，并纳入 SHA256SUMS；发布公开 Release 时一并上传该 TXT。
 - **私密测试版**：默认不生成此文件。不要给尚未公开对应源码的私密测试版套用公开版说明。

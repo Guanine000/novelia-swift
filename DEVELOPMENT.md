@@ -19,6 +19,7 @@
 - [数据兼容](#数据兼容)
 - [文件注册与构建配置](#文件注册与构建配置)
 - [构建与验证](#构建与验证)
+- [iOS 15 兼容规则](#ios-15-兼容规则)
 - [性能基线](#性能基线)
 - [架构演进](#架构演进)
 - [文档维护](#文档维护)
@@ -27,17 +28,17 @@
 
 ## 项目概览
 
-Novelia 是面向 iOS 17 及以上系统的第三方小说客户端，使用 Swift、SwiftUI 和 UIKit。主要能力包括网络小说和文库发现、收藏与历史、论坛、本地 TXT/EPUB 书库、在线阅读、EPUB 下载、阅读统计和 WebDAV 同步（手动或自动）。
+Novelia 是第三方小说客户端，使用 Swift、SwiftUI 和 UIKit。主目标 `Novelia` 面向 iOS 17 及以上，默认使用 YueduCoreText 分页。另一个 App 目标 `NoveliaLegacy`（bundle id `cc.novelia.ios.port.ios15`）面向 iOS 15，不链接 YueduCoreText 与 CLibMobi，分页固定为 Readium。主要能力包括网络小说和文库发现、收藏与历史、论坛、本地 TXT/EPUB 书库、在线阅读、EPUB 下载、阅读统计和 WebDAV 同步（手动或自动）。
 
 界面使用 SwiftUI，阅读器按引擎需要结合原生视图和 WebKit。可观察状态通常由 `@MainActor` Store 管理；远端操作使用异步服务接口；Core 保存业务模型、算法和存储逻辑。项目没有统一采用单一大型 ViewModel，每个功能应沿用适合其职责的现有实现。
 
 API 实现在开发时通过组装替换。项目采用服务协议、统一组装、功能目录和跨功能适配；没有用户书源系统或动态插件系统。
 
-Xcode App 当前直接编译 App 与 Core 源文件，功能目录并不是独立编译模块。Swift Package 为 Core 与 EPUB 提供测试目标；不要假设编译器已经阻止所有跨目录依赖。
+Xcode App 当前直接编译 App 与 Core 源文件，功能目录并不是独立编译模块。两个 App 目标编译同一批源文件，差别只在部署版本、编译条件 `NOVELIA_READIUM_ONLY`、被排除的原生分页／Kindle 源文件和链接的包。Swift Package 为 Core 与 EPUB 提供测试目标，平台仍是 iOS 17，因为测试里的 `NoveliaEPUB` 依赖上游 YueduCoreText、`NoveliaKindle` 依赖 CLibMobi；不要假设编译器已经阻止所有跨目录依赖。
 
 ## 开始开发
 
-开发环境：macOS 上的 Xcode（当前在 Xcode 27.1 上维护）、iOS 17 或更高版本的模拟器，以及用于离线回归与发布脚本的 Python 3。App 编译与测试命令见[构建与验证](#构建与验证)。
+开发环境：macOS 上的 Xcode（当前在 Xcode 27.1 上维护）、iOS 17 模拟器（主目标）或 iOS 15 模拟器（`NoveliaLegacy`），以及用于离线回归与发布脚本的 Python 3。App 编译与测试命令见[构建与验证](#构建与验证)。云端环境没有 Xcode，iOS 15 目标需要在 Mac 上编译确认。
 
 每次任务开始：
 
@@ -217,6 +218,8 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 | `ReaderSettings.swift`、`ReaderSettingsAdapters.swift` | 持久化阅读偏好及引擎/界面适配 |
 
 EPUB 默认采用 YueduCoreText 分页；实验性 Readium 开关可用于 EPUB、TXT 和在线分页，开关默认关闭，已有选择继续保留。TXT 和在线内容也支持滚动模式。引擎选择属于 Reader 内部，API 消费方不根据引擎切换后台实现。
+
+`NoveliaLegacy` 定义 `NOVELIA_READIUM_ONLY`。它不编译 `EPUBLayoutCoordinator.swift`、`EPUBPageBook.swift`、`EPUBPagerView.swift`、`EPUBReaderModel.swift`，阅读入口只创建 Readium 阅读器，设置里没有切回原生分页的开关。字体注册与 `EPUBReaderStyle` 在 `EPUBSharedTypes.swift`，两个目标都编译。iOS 16/17 才有的 SwiftUI 调用集中在 `iOSApp/Shared/IOS15Compat.swift`：iOS 17 走原来的系统控件，更低版本走降级实现。该目标也不编译 Kindle 转换源文件，因为 `Vendor/CLibMobi` 的平台声明仍是 iOS 17。
 
 Readium 深浅色切换通过同一导航器的 `submitPreferences` 更新，不为主题重建导航器；默认文字色沿用 Readium，避免静态 RS 文字色导致切回浅色仍沿用深色默认值。主题变化后重用外层背景缓存。原书双向切换点按回归及 `testReadiumThemeSwitchPreservesCenterTap` 验证控件可隐藏/恢复；模拟器证据不代替真机验收。
 
@@ -425,7 +428,7 @@ Readium 与 Yuedu 是 Reader 功能内部的引擎选择。两个模型使用 Ap
 
 新增或移动源文件后检查：
 
-1. `NoveliaIOS.xcodeproj/project.pbxproj` 的文件与 Sources 注册。
+1. `NoveliaIOS.xcodeproj/project.pbxproj` 的文件与 Sources 注册。新增源文件要同时放进 `Novelia` 与 `NoveliaLegacy`，除非它只属于原生分页或 Kindle 转换。
 2. `Package.swift` 的 target 路径、显式 sources、exclude 与测试资源。Kindle 导入源码同时由 App 目标与包目标 `NoveliaKindle`（测试 `NoveliaKindleTests`）编译；`Vendor/CLibMobi` 是本地 Swift 包，App 工程以本地包引用，`scripts/run_package_tests.sh` 会把 `Vendor` 链接进固定的独立包测试工作区。
 3. `scripts/source_layout.json` 中受脚本使用的路径，以及引用这些文件的测试/构建脚本。
 4. 文档、许可资源、Debug/Release 条件编译。
@@ -446,6 +449,7 @@ Readium 与 Yuedu 是 Reader 功能内部的引擎选择。两个模型使用 Ap
 | 进度、统计、书库或同步 | 对应 Core 测试、`test_library_transactions.py`、`test_library_store.py`、`test_reading_statistics_store.py`；旧数据与合并回归 |
 | 阅读器或页面调用链 | 对应 EPUB/Core 测试与相关 UI 回归；必要的真机验收 |
 | 架构边界、验证组装或发布配置 | `check_architecture_boundaries.py`、独立 Debug App UI 与生产 Release 编译、`check_architecture_release.py` |
+| 两个目标都会编译的 Swift、工程成员或 iOS 15 兼容封装 | `scripts/check_both_targets.sh`；发布仍走 `build_local_release.py` |
 | 开源依赖、许可或分发 | `docs/BUILD.md` 发布流程、许可与隐私校验、相关构建回归 |
 
 从仓库根目录运行 Core/EPUB 测试：
@@ -485,6 +489,26 @@ xcodebuild -project NoveliaIOS.xcodeproj -scheme Novelia \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
+iOS 15 目标：
+
+```sh
+xcodebuild -project NoveliaIOS.xcodeproj -scheme NoveliaLegacy \
+  -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO build
+```
+
+主目标的部署版本保持 iOS 17。不要把 `NOVELIA_READIUM_ONLY` 加到 `Novelia`。
+
+改动两个目标都会编译的源码或工程成员后，合并前在 Mac 上运行：
+
+```sh
+scripts/check_both_targets.sh
+```
+
+脚本用 `generic/platform=iOS Simulator` 和 `CODE_SIGNING_ALLOWED=NO` 依次编译 `Novelia`、`NoveliaLegacy`。前一个失败就不再编下一个，并以非 0 退出。这是日常检查，不打包 IPA。
+
+发布用 `scripts/build_local_release.py`。它已经对两个 scheme 做 Release 真机构建；`run` 在任一构建非 0 退出时抛错，外层写出 FAILED-DO-NOT-DISTRIBUTE 并重新抛出，不会写出 SUCCESS。手动触发的 `.github/workflows/build-ipa.yml` 同样先编译这两个 scheme，任一失败则该次工作流失败；既有的 `Novelia` IPA 打包与上传步骤不变。
+
 使用替代后台操作真实页面时，先构建独立验证 App，再执行 UI 脚本：
 
 ```sh
@@ -510,13 +534,24 @@ python3 scripts/check_architecture_release.py '<Release Novelia.app 内的 Novel
 
 不得把合成后台作为生产失败时的数据回退。网络探针只核对 URLSession 外部请求，允许 Readium 本地服务；不要把计数为 0 解释为所有 WebKit 外部请求均已审计。模拟器、合成服务、实际服务器、真机是不同的证据范围，交付时分别说明。外部 EPUB 扫描缺少 `SCAN_EPUB` 的跳过也要说明。
 
+## iOS 15 兼容规则
+
+`Novelia` 与 `NoveliaLegacy` 长期共用源码、发布流程，以及同一 `MARKETING_VERSION` 和 `CURRENT_PROJECT_VERSION`。两个 IPA 只是同一构建号下的两个产品。
+
+- 新代码默认必须能在 iOS 15 上编译。主目标的部署版本保持 iOS 17，iOS 15 目标保持 iOS 15.0。
+- iOS 16/17 才有的 SwiftUI 或 UIKit API 放进 `iOSApp/Shared/IOS15Compat.swift`，或写在 `#available` 里。iOS 17 及以上仍走原来的系统控件。
+- 只有原生分页阅读器相关代码放在 `#if !NOVELIA_READIUM_ONLY` 中。其余共享代码两个目标都编译。不要把 `NOVELIA_READIUM_ONLY` 加到 `Novelia`。
+- 新增源文件时同时检查 Legacy 的 Sources。原生分页和 Kindle 转换以外的文件要加入 `NoveliaLegacy`。`scripts/check_architecture_boundaries.py` 会核对此列表。
+- `ToolbarContentBuilder` 里不能写 `if`、`switch` 或 `#available`。条件放在工具栏项内部，或拆成不含条件的工具栏。
+- 发布时两个 IPA 共用同一版本号和构建号。不要只给其中一个目标改 `MARKETING_VERSION` 或 `CURRENT_PROJECT_VERSION`。
+
 ## 性能基线
 
 性能测量、合成样本、主机微基准／模拟器／实体设备的证据区别和故障验收流程统一见 [性能基线与故障验收](docs/PERFORMANCE.md)。测量时记录源码身份与环境，避免在编译期间采集性能成绩。物理设备或真实服务器未覆盖时保持待验收状态。
 
 ## 架构演进
 
-`check_architecture_boundaries.py` 检查 Domain 不反向引用 UI／App／具体 API、Infrastructure 不引用界面组装、Feature 不直接引用具体 API、阅读器不引用同步 UI／具体统计 Store。它是忽略注释与普通字符串的窄范围静态守卫，不替代 Swift 编译和实际替代服务测试；当前仍保持单 App 编译模块。
+`check_architecture_boundaries.py` 检查 Domain 不反向引用 UI／App／具体 API、Infrastructure 不引用界面组装、Feature 不直接引用具体 API、阅读器不引用同步 UI／具体统计 Store，并核对两个 App 目标的部署版本、`NOVELIA_READIUM_ONLY` 和被排除的源文件。它是忽略注释与普通字符串的窄范围静态守卫，不替代 Swift 编译和实际替代服务测试。两个目标仍编译同一套源文件，没有拆成多个 Swift Package。
 
 架构注释使用中文。关键类型说明职责、实例所有者、依赖与需要保留的兼容行为；复杂流程说明原因和边界。注释应描述实际实现，避免重复类型名、逐行翻译普通代码或写入当次工作成果。调整实现时同步更新相关注释，许可证原文与工具指令保持原样。
 
@@ -556,7 +591,7 @@ python3 scripts/check_architecture_release.py '<Release Novelia.app 内的 Novel
 - [ ] 功能代码是否消费协议，是否出现具体客户端、固定 API 地址或生产回退？
 - [ ] 状态实例是否来自正确所有者，跨功能连接是否位于 App 适配层？
 - [ ] 是否保持数据、会话与引擎契约；改变时是否有明确迁移及验证？
-- [ ] 文件注册、脚本路径与替代实现是否同步，相关验证是否通过？
+- [ ] 文件注册、脚本路径与替代实现是否同步，相关验证是否通过？两个目标都会编译的改动是否符合[iOS 15 兼容规则](#ios-15-兼容规则)，并在 Mac 上跑过 `scripts/check_both_targets.sh`？
 - [ ] 是否引入新开源代码/依赖，许可、声明和对应源码要求是否满足？
 - [ ] 用户可见行为、构建或依赖变化是否已按[文档维护](#文档维护)更新 README、`docs/` 与本文件？
 - [ ] 交付是否写明实际执行的验证、跳过与待验收范围，避免引用旧验证代替当前检查？

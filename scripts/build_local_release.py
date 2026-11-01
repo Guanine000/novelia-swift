@@ -56,11 +56,19 @@ def verify_preferred_sources(directory, packages):
     return entries
 
 
-def public_source_note(version, build, ipa_name, source_name, dependencies_name):
+def public_source_note(version, build, ipa_name, source_name, dependencies_name, legacy_ipa_name=None):
     """指定公开版本的源码获取说明，可与其 IPA 一同分享。"""
+    listed = ipa_name if not legacy_ipa_name else f"{ipa_name}\n{legacy_ipa_name}"
+    variant = ""
+    if legacy_ipa_name:
+        variant = (
+            "文件名含 ios15 的安装包面向 iOS 15，只使用 Readium，不包含 YueduCoreText 与 libmobi。\n"
+            "另一个安装包面向 iOS 17，保留原生分页。\n\n"
+        )
     return (
         f"Novelia {version}（构建 {build}）源码与许可说明\n\n"
-        f"对应安装包：{ipa_name}\n\n"
+        f"对应安装包：\n{listed}\n\n"
+        f"{variant}"
         "本安装包的对应项目源码、第三方依赖源码及许可材料，可从以下公开发行页面免费取得：\n"
         f"https://github.com/Guanine000/novelia-swift/releases/tag/v{version}\n\n"
         "请在该页面的 Assets（附件）中下载：\n"
@@ -160,7 +168,8 @@ def fingerprint(files):
 def project_version(text):
     versions = re.findall(r"MARKETING_VERSION = ([^;]+);", text)
     builds = re.findall(r"CURRENT_PROJECT_VERSION = ([^;]+);", text)
-    if len(versions) != 2 or len(set(versions)) != 1 or len(builds) != 2 or len(set(builds)) != 1:
+    # 主目标与 iOS 15 目标各有 Debug/Release，共 4 处；测试夹具仍使用 2 处。
+    if len(versions) not in (2, 4) or len(set(versions)) != 1 or len(builds) != len(versions) or len(set(builds)) != 1:
         raise RuntimeError("Debug/Release versions or build numbers differ")
     if not re.fullmatch(r"\d+\.\d+\.\d+", versions[0]) or not re.fullmatch(r"[1-9]\d*", builds[0]):
         raise RuntimeError("Invalid project version/build number")
@@ -175,16 +184,18 @@ def check_derived_data(path):
     return path
 
 
-def validate_ipa(ipa, version, build):
+def validate_ipa(ipa, version, build, app_name="Novelia", minimum_os="17.0"):
     with zipfile.ZipFile(ipa) as archive:
         if archive.testzip() is not None:
             raise RuntimeError("IPA ZIP verification failed")
         names = archive.namelist()
-        info = plistlib.loads(archive.read("Payload/Novelia.app/Info.plist"))
+        info = plistlib.loads(archive.read(f"Payload/{app_name}.app/Info.plist"))
         if (info["CFBundleShortVersionString"], info["CFBundleVersion"]) != (version, build):
             raise RuntimeError("Built IPA version does not match project")
-        if info["MinimumOSVersion"] != "17.0":
+        if info["MinimumOSVersion"] != minimum_os:
             raise RuntimeError("Unexpected minimum iOS version")
+        if app_name == "NoveliaLegacy" and info.get("CFBundleIdentifier") != "cc.novelia.ios.port.ios15":
+            raise RuntimeError("Unexpected legacy bundle identifier")
         if any("/_CodeSignature/" in name or name.endswith("embedded.mobileprovision") for name in names):
             raise RuntimeError("Expected an unsigned IPA")
         for file in (ROOT / NOTICES).iterdir():
@@ -256,24 +267,34 @@ def perform_build(args, version, build, status, out, derived, directory, started
         for script in ["check_architecture_boundaries.py", "test_forum_filters.py", "test_unified_login.py", "test_auth_login_bridge.py", "test_library_store.py", "test_library_transactions.py", "test_reading_statistics_store.py", "test_service_consumers.py"]:
             checks.run(["python3", "-I", str(ROOT / "scripts" / script)], log=out / f"{script}.log")
         cache.checkouts_ready(derived / "SourcePackages/checkouts", ROOT / PIN_FILE)
-        run(["xcodebuild", "-project", "NoveliaIOS.xcodeproj", "-scheme", "Novelia", "-configuration", "Release",
-             "-sdk", "iphoneos", "-destination", "generic/platform=iOS", "-derivedDataPath", str(derived),
-             "CODE_SIGNING_ALLOWED=NO", "build"], log=out / "release-build.log")
-        run(["python3", "-I", "scripts/check_architecture_release.py",
-             str(derived / "Build/Products/Release-iphoneos/Novelia.app/Novelia")],
+        products = derived / "Build/Products/Release-iphoneos"
+        # 两个 scheme 都必须成功。run 在非 0 退出时抛错，外层据此整次失败，不写 SUCCESS。
+        for scheme, log_name in (("Novelia", "release-build.log"), ("NoveliaLegacy", "release-build-ios15.log")):
+            run(["xcodebuild", "-project", "NoveliaIOS.xcodeproj", "-scheme", scheme, "-configuration", "Release",
+                 "-sdk", "iphoneos", "-destination", "generic/platform=iOS", "-derivedDataPath", str(derived),
+                 "CODE_SIGNING_ALLOWED=NO", "build"], log=out / log_name)
+        run(["python3", "-I", "scripts/check_architecture_release.py", str(products / "Novelia.app/Novelia")],
             log=out / "architecture-release-check.log")
+        run(["python3", "-I", "scripts/check_architecture_release.py", "--readium-only",
+             str(products / "NoveliaLegacy.app/NoveliaLegacy")],
+            log=out / "architecture-release-check-ios15.log")
         checkouts = derived / "SourcePackages/checkouts"
-        run(["python3", "-I", "scripts/verify_third_party_notices.py", "--source-packages", str(checkouts)], log=out / "licenses.log")
+        run(["python3", "-I", "scripts/verify_third_party_notices.py", "--source-packages", str(checkouts),
+             "--legacy-executable", str(products / "NoveliaLegacy.app/NoveliaLegacy")], log=out / "licenses.log")
         if before != fingerprint(source_files()):
             raise RuntimeError("Source changed during the build; do not distribute this output")
         ipa = out / f"{prefix}-unsigned.ipa"
-        with tempfile.TemporaryDirectory(prefix="novelia-ipa-") as stage:
-            payload = Path(stage) / "Payload"
-            payload.mkdir()
-            run(["ditto", str(derived / "Build/Products/Release-iphoneos/Novelia.app"), str(payload / "Novelia.app")])
-            run(["zip", "-qry", str(ipa), "Payload"], cwd=stage)
+        legacy_ipa = out / f"{prefix}-ios15-unsigned.ipa"
+        for app_name, destination in (("Novelia", ipa), ("NoveliaLegacy", legacy_ipa)):
+            with tempfile.TemporaryDirectory(prefix="novelia-ipa-") as stage:
+                payload = Path(stage) / "Payload"
+                payload.mkdir()
+                run(["ditto", str(products / f"{app_name}.app"), str(payload / f"{app_name}.app")])
+                run(["zip", "-qry", str(destination), "Payload"], cwd=stage)
         validate_ipa(ipa, version, build)
+        validate_ipa(legacy_ipa, version, build, app_name="NoveliaLegacy", minimum_os="15.0")
         run(["python3", "-I", "scripts/verify_release_privacy.py", str(ipa)], log=out / "privacy.log")
+        run(["python3", "-I", "scripts/verify_release_privacy.py", str(legacy_ipa)], log=out / "privacy-ios15.log")
         source = out / f"{prefix}-source.tar.gz"
         with tarfile.open(source, "w:gz") as archive:
             for name, file in files:
@@ -313,18 +334,20 @@ def perform_build(args, version, build, status, out, derived, directory, started
             raise RuntimeError("Source changed during packaging; do not distribute this output")
         # 再对照 IPA 核对，避免 BUILD.json 记录的版本与实际构建不一致。
         validate_ipa(ipa, version, build)
+        validate_ipa(legacy_ipa, version, build, app_name="NoveliaLegacy", minimum_os="15.0")
         metadata = out / "BUILD.json"
         metadata.write_text(json.dumps({"version": version, "build": build, "configuration": "iPhoneOS Release unsigned",
+                                       "apps": ["Novelia", "NoveliaLegacy"],
                                        "commit": git("rev-parse", "HEAD"), "dirty": bool(status), "source": "uncommitted worktree snapshot" if status else "commit",
                                        "source_fingerprint": hashlib.sha256(json.dumps(before, sort_keys=True).encode()).hexdigest(),
                                        "pins": pins, "validation": checks.results + TIMINGS}, indent=2) + "\n")
-        artifacts = [ipa, source, dependencies, metadata]
+        artifacts = [ipa, legacy_ipa, source, dependencies, metadata]
         if args.public_release:
             directions = out / f"{prefix}-source-info.txt"
-            directions.write_text(public_source_note(version, build, ipa.name, source.name, dependencies.name), encoding="utf-8")
+            directions.write_text(public_source_note(version, build, ipa.name, source.name, dependencies.name, legacy_ipa.name), encoding="utf-8")
             artifacts.append(directions)
         (out / "SHA256SUMS").write_text("".join(hashlib.sha256(file.read_bytes()).hexdigest() + "  " + file.name + "\n" for file in artifacts))
-        (out / "SUCCESS").write_text("All checks passed. IPA, source, dependencies and SHA256SUMS are ready.\n")
+        (out / "SUCCESS").write_text("All checks passed. Two IPAs, source, dependencies and SHA256SUMS are ready.\n")
         (out / "TIMINGS.json").write_text(json.dumps({"totalSeconds": round(time.monotonic() - started, 3),
                                                        "stages": TIMINGS + checks.results}, indent=2) + "\n")
         if args.fresh_build:

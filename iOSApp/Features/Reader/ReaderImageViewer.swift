@@ -203,7 +203,7 @@ private struct ReaderZoomableImagePage: View {
             if let image {
                 ReaderZoomableImageView(image: image, onSingleTap: onSingleTap)
             } else if failed {
-                ContentUnavailableView("无法读取图片", systemImage: "photo.badge.exclamationmark",
+                CompatUnavailable("无法读取图片", systemImage: "photo.badge.exclamationmark",
                                        description: Text(path))
                     .foregroundStyle(.white)
                     .contentShape(Rectangle())
@@ -367,7 +367,7 @@ struct ReaderImageGallery: View {
         Group {
             if let images = library.images {
                 if images.isEmpty {
-                    ContentUnavailableView("没有图片", systemImage: "photo.on.rectangle",
+                    CompatUnavailable("没有图片", systemImage: "photo.on.rectangle",
                                            description: Text("本书正文中没有可查看的插图。"))
                 } else {
                     ScrollView {

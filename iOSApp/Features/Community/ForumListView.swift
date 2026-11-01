@@ -48,7 +48,7 @@ private struct ForumContentView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 6)
                     .background(NoveliaStyle.paper)
-                    .onChange(of: store.selectedTagID) { _, _ in
+                    .onValueChange(of: store.selectedTagID) { _, _ in
                         Task { await store.loadPosts(page: 0) }
                     }
                 }
@@ -66,7 +66,7 @@ private struct ForumContentView: View {
                     }
 
                     if store.categories.isEmpty, !store.isLoadingCategories, let error = store.errorMessage {
-                        ContentUnavailableView {
+                        CompatUnavailable {
                             Label("论坛暂时无法访问", systemImage: "wifi.exclamationmark")
                         } description: {
                             Text(error)
@@ -76,7 +76,7 @@ private struct ForumContentView: View {
                         }
                         .listRowBackground(Color.clear)
                     } else if visiblePosts.isEmpty, !store.isLoadingPosts, store.errorMessage == nil {
-                        ContentUnavailableView(store.posts.isEmpty ? "这里还没有帖子" : "本页没有匹配的帖子", systemImage: "bubble.left.and.bubble.right",
+                        CompatUnavailable(store.posts.isEmpty ? "这里还没有帖子" : "本页没有匹配的帖子", systemImage: "bubble.left.and.bubble.right",
                                                description: Text(filtersCurrentPageOnly ? "可翻页查看其他页的帖子。" : "切换分类或调整搜索词。"))
                             .listRowBackground(Color.clear)
                     }
@@ -118,11 +118,11 @@ private struct ForumContentView: View {
                     }
                 }
                 .listStyle(.plain)
-                .scrollContentBackground(.hidden)
+                .compatScrollContentBackgroundHidden()
                 .background(NoveliaStyle.paper)
                 .navigationTitle("论坛")
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: .compatTopBarLeading) {
                         Menu {
                             Button("全部帖子", systemImage: "text.bubble") { Task { await store.selectSource(.all) } }
                             Button("我的帖子", systemImage: "person.text.rectangle") {
@@ -145,7 +145,7 @@ private struct ForumContentView: View {
                                 .labelStyle(.iconOnly)
                         }
                     }
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: .compatTopBarTrailing) {
                         NavigationLink {
                             ForumComposeView(categories: store.categories, initialCategorySlug: store.selectedCategory)
                         } label: {

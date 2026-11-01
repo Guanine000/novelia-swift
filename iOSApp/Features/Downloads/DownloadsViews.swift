@@ -46,7 +46,13 @@ final class LibraryImportModel: ObservableObject {
     }
 
     static func isKindleFile(_ url: URL) -> Bool {
+        #if NOVELIA_READIUM_ONLY
+        // iOS 15 目标不链接 CLibMobi，不能把 AZW3／MOBI 转成 EPUB。
+        _ = url
+        return false
+        #else
         KindleEPUBConverter.supportedExtensions.contains(url.pathExtension.lowercased())
+        #endif
     }
 
     /// 选择器回调：含 AZW3／MOBI 时先请用户确认转换，否则直接导入。
@@ -107,7 +113,7 @@ final class LibraryImportModel: ObservableObject {
     private func importFile(_ pickedURL: URL) async throws {
         try await library.loadIfNeeded()
         let extensionName = pickedURL.pathExtension.lowercased()
-        let start = ContinuousClock.now
+        let start = MonotonicInstant.now
         let trace = DiagnosticContext.newTraceID()
         if extensionName == "txt" {
             TXTDiagnosticLog.logger.info("TXT import started; trace=\(trace, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
@@ -125,7 +131,11 @@ final class LibraryImportModel: ObservableObject {
         FileManager.default.createFile(atPath: destination.path, contents: nil)
         // 协调读取可能需要先从 iCloud 下载，大文件复制也很耗时，都放到主线程之外，进度浮窗保持更新。
         if isKindle {
+            #if NOVELIA_READIUM_ONLY
+            throw LibraryImportError.unsupportedFile
+            #else
             try await convertKindleFile(pickedURL, to: destination, start: start)
+            #endif
         } else {
             let copyResult = await Task.detached(priority: .userInitiated) {
                 Result { try Self.coordinatedCopy(from: pickedURL, to: destination) }
@@ -168,9 +178,10 @@ final class LibraryImportModel: ObservableObject {
         }
     }
 
+    #if !NOVELIA_READIUM_ONLY
     /// 先把选中的文件协调复制到临时目录（可能需要从 iCloud 下载），再在主线程之外转换为 EPUB 写到书库目标。
     /// 任一步失败都删除临时副本与目标占位文件；临时副本在转换后删除，书库不保留原文件。
-    private func convertKindleFile(_ pickedURL: URL, to destination: URL, start: ContinuousClock.Instant) async throws {
+    private func convertKindleFile(_ pickedURL: URL, to destination: URL, start: MonotonicInstant) async throws {
         let format = pickedURL.pathExtension.lowercased()
         kindleImportLog.info("Kindle import started; format=\(format, privacy: .public)")
         isConvertingKindle = true
@@ -211,6 +222,7 @@ final class LibraryImportModel: ObservableObject {
     private enum KindleConversionStageError: Error {
         case copy(Error)
     }
+    #endif
 
     nonisolated private static func coordinatedCopy(from source: URL, to destination: URL) throws {
         var coordinatedError: NSError?
@@ -227,15 +239,14 @@ final class LibraryImportModel: ObservableObject {
         if let error = coordinatedError ?? copyError { throw error }
     }
 
-    private func logEPUBImportFailure(_ error: Error, stage: String, start: ContinuousClock.Instant) {
+    private func logEPUBImportFailure(_ error: Error, stage: String, start: MonotonicInstant) {
         let nsError = error as NSError
         let domain = ShareableLogPolicy.domainLabel(nsError.domain)
         epubImportLog.error("EPUB import failed; stage=\(stage, privacy: .public), domain=\(domain, privacy: .public), code=\(nsError.code, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")
     }
 
-    private static func milliseconds(since start: ContinuousClock.Instant) -> Int {
-        let elapsed = ContinuousClock.now - start
-        return Int(elapsed.components.seconds * 1_000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
+    private static func milliseconds(since start: MonotonicInstant) -> Int {
+        DiagnosticContext.milliseconds(since: start)
     }
 }
 
@@ -286,7 +297,7 @@ struct WebNovelEPUBUpdateOptionsSheet: View {
         return value.isValid ? value : nil
     }
     var body: some View {
-        NavigationStack {
+        CompatNavigationStack {
             Form {
                 Section {
                     Text(book.novel.title)
@@ -315,7 +326,7 @@ struct WebNovelEPUBUpdateOptionsSheet: View {
             }
             .navigationTitle("选择更新设置")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar(.visible, for: .navigationBar)
+            .compatToolbar(.visible, for: .navigationBar)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
         }
     }

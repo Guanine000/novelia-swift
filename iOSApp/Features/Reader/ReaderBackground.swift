@@ -1,7 +1,6 @@
 import SwiftUI
 import OSLog
 import UIKit
-import PhotosUI
 import UniformTypeIdentifiers
 import ImageIO
 
@@ -93,7 +92,6 @@ struct ReaderBackgroundSettingsView: View {
     @EnvironmentObject private var store: ReaderBackgroundStore
     @State private var dark = false
     @State private var landscape = false
-    @State private var selectedPhoto: PhotosPickerItem?
     @State private var importing = false
     @State private var error: String?
     @State private var busy = false
@@ -111,7 +109,19 @@ struct ReaderBackgroundSettingsView: View {
                     get: { AppThemeColor.color(fromHex: store.hex(dark: dark)) },
                     set: { store.setColor($0, dark: dark) }), supportsOpacity: false)
                 Button("恢复默认颜色") { store.restoreDefaultColor(dark: dark); error = nil }.disabled(busy)
-                PhotosPicker("从照片选择图片", selection: $selectedPhoto, matching: .images).disabled(busy)
+                CompatPhotosPickerButton(isDisabled: busy, onData: { data in
+                    let target = dark
+                    let targetLandscape = landscape
+                    busy = true
+                    error = nil
+                    Task {
+                        defer { busy = false }
+                        do { try store.importImage(data, dark: target, landscape: targetLandscape) }
+                        catch { self.error = error.localizedDescription }
+                    }
+                }) {
+                    Text("从照片选择图片")
+                }
                 Button("从文件导入图片") { importing = true }.disabled(busy)
                 Button("移除当前方向图片", role: .destructive) {
                     do { try store.removeImage(dark: dark, landscape: landscape) } catch { self.error = error.localizedDescription }
@@ -132,17 +142,6 @@ struct ReaderBackgroundSettingsView: View {
             }
         }
         .navigationTitle("阅读背景")
-        .onChange(of: selectedPhoto) { _, item in
-            guard let item else { return }
-            let target = dark; let targetLandscape = landscape; busy = true; error = nil
-            Task {
-                defer { busy = false; selectedPhoto = nil }
-                do {
-                    guard let data = try await item.loadTransferable(type: Data.self) else { return }
-                    try store.importImage(data, dark: target, landscape: targetLandscape)
-                } catch { self.error = error.localizedDescription }
-            }
-        }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.image]) { result in
             do {
                 let url = try result.get(); let accessed = url.startAccessingSecurityScopedResource()

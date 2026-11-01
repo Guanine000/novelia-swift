@@ -1,5 +1,6 @@
 import XCTest
 import YueduCoreText
+import NoveliaIOSCore
 @testable import NoveliaEPUB
 
 /// 阅读器不再安装引擎跟踪钩子；这些测试测量该钩子原先产生的记录，
@@ -17,9 +18,9 @@ final class EPUBLayoutLogTests: XCTestCase {
             let plainBook = EPUBPageBook(generation: 2)
             let plain = EPUBLayoutTests.readerConfig(workarounds: true)
             XCTAssertNil(plain.onDiagnostic, "reader config must not install the trace hook")
-            var tracedTime = Duration.zero, plainTime = Duration.zero
+            var tracedTime = MonotonicDuration.zero, plainTime = MonotonicDuration.zero
             for spine in container.spine.indices {
-                let clock = ContinuousClock()
+                let clock = MonotonicClock()
                 tracedTime += try await clock.measure {
                     try await tracedBook.layoutChapter(spine, container: container, config: traced, aspectRatio: 440 / 956)
                 }

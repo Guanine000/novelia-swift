@@ -146,7 +146,7 @@ final class TXTBookCacheTests: XCTestCase {
         let encoding = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringConvertIANACharSetNameToEncoding("GB18030" as CFString)))
         let url = directory.appendingPathComponent("large.txt")
         try XCTUnwrap(text.data(using: encoding)).write(to: url)
-        let clock = ContinuousClock()
+        let clock = MonotonicClock()
         var chaptersBefore = 0
         let before = try clock.measure {
             for _ in 0..<3 {
@@ -292,7 +292,7 @@ extension TXTBookCacheTests {
         let url = directory.appendingPathComponent("large.txt")
         try Data(text.utf8).write(to: url)
         let disk = TXTChapterDiskCache(directory: directory.appendingPathComponent("chapters"))
-        let clock = ContinuousClock()
+        let clock = MonotonicClock()
         var first: TXTParsedBook?
         let cold = try await clock.measure { first = try await TXTBookCache(diskCache: disk).book(at: url, rules: .defaults, source: .open) }
         var second: TXTParsedBook?

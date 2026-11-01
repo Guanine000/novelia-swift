@@ -947,8 +947,9 @@ public actor NoveliaSessionRenewal {
         return try await performRetryingTransientFailures(authenticated, perform: perform)
     }
 
-    /// 临时故障重试前的等待时间；测试中会缩短。
-    nonisolated(unsafe) static var transientRetryDelay: Duration = .seconds(1)
+    /// 临时故障重试前的等待时间（纳秒）；测试中会缩短。
+    /// 使用整数而不是 `Duration`，以便在 iOS 15 上编译。
+    nonisolated(unsafe) static var transientRetryDelayNanoseconds: UInt64 = 1_000_000_000
     static let transientErrors: Set<URLError.Code> = [.networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed]
     static let transientStatuses: Set<Int> = [502, 503, 504]
 
@@ -964,7 +965,7 @@ public actor NoveliaSessionRenewal {
         } catch let error as URLError where idempotent && transientErrors.contains(error.code) {
             // 继续执行下方唯一一次重试。
         }
-        try await Task.sleep(for: transientRetryDelay)
+        try await Task.sleep(nanoseconds: transientRetryDelayNanoseconds)
         return try await perform(request)
     }
 

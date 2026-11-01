@@ -11,7 +11,7 @@ private struct CloudLoginPrompt: View {
     let message: String
 
     var body: some View {
-        ContentUnavailableView {
+        CompatUnavailable {
             Label(title, systemImage: systemImage)
         } description: {
             Text(message)
@@ -39,7 +39,7 @@ struct CloudReadingHistoryListView: View {
                     HStack { Spacer(); ProgressView("正在加载阅读历史…"); Spacer() }
                         .padding(.vertical, 28)
                 } else if readingHistory.items.isEmpty {
-                    ContentUnavailableView {
+                    CompatUnavailable {
                         Label("暂无阅读历史", systemImage: "clock")
                     } description: {
                         Text(readingHistory.errorMessage ?? "网页端最近阅读过的作品会显示在这里。")
@@ -133,7 +133,7 @@ struct CloudFavoritesListView: View {
                     HStack { Spacer(); ProgressView("正在同步网页收藏…"); Spacer() }
                         .padding(.vertical, 28)
                 } else if favorites.novels.isEmpty {
-                    ContentUnavailableView {
+                    CompatUnavailable {
                         Label("网页收藏夹为空", systemImage: "heart")
                     } description: {
                         Text(favorites.errorMessage ?? "在作品详情中收藏后，这里会与网页端保持同步。")

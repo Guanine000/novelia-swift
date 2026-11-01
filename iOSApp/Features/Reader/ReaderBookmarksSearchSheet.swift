@@ -28,7 +28,7 @@ struct ReaderBookmarksSearchSheet: View {
     @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
-        NavigationStack {
+        CompatNavigationStack {
             VStack(spacing: 0) {
                 Picker("内容", selection: $tab) {
                     ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
@@ -44,10 +44,10 @@ struct ReaderBookmarksSearchSheet: View {
             .navigationTitle(tab.rawValue)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("关闭") { dismiss() } }
+                ToolbarItem(placement: .compatTopBarTrailing) { Button("关闭") { dismiss() } }
             }
         }
-        .presentationDetents([.medium, .large])
+        .compatPresentationDetents(.medium, .large)
         .onDisappear { searchTask?.cancel() }
         .alert("书签保存失败", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
             Button("好", role: .cancel) { saveError = nil }
@@ -65,7 +65,7 @@ struct ReaderBookmarksSearchSheet: View {
         }
         return List {
             if bookmarks.isEmpty {
-                ContentUnavailableView("还没有书签", systemImage: "bookmark",
+                CompatUnavailable("还没有书签", systemImage: "bookmark",
                                        description: Text("阅读时点右上角的书签按钮，可为当前页添加书签。"))
                     .listRowBackground(Color.clear)
             }
@@ -111,7 +111,7 @@ struct ReaderBookmarksSearchSheet: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("搜索本书内容", text: $query)
                     .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .compatAutocorrectionDisabled()
                     .submitLabel(.search)
                     .onSubmit(startSearch)
                 if searchTask != nil {
@@ -135,7 +135,7 @@ struct ReaderBookmarksSearchSheet: View {
             .listStyle(.plain)
             .overlay {
                 if searchedQuery != nil, hits.isEmpty, searchTask == nil {
-                    ContentUnavailableView.search(text: searchedQuery ?? "")
+                    CompatSearchUnavailable(text: searchedQuery ?? "")
                 }
             }
         }

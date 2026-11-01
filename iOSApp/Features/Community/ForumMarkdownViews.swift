@@ -103,10 +103,9 @@ private struct ForumMarkdownTable: View {
         ScrollView(.horizontal) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(rows.indices, id: \.self) { row in
-                    ForumTableRowLayout {
+                    ForumTableRow {
                         ForEach(rows[row].indices, id: \.self) { column in
                             ForumInlineMarkdownText(markdown: rows[row][column], baseSize: mode == .comment ? 14 : 15, bold: row == 0)
-                                .fontWeight(row == 0 ? .semibold : .regular)
                                 .lineLimit(nil)
                                 .multilineTextAlignment(.leading)
                                 .frame(width: 220, alignment: .leading)
@@ -123,14 +122,28 @@ private struct ForumMarkdownTable: View {
             }
             .fixedSize(horizontal: true, vertical: false)
         }
-        // 高表格超出可视区域时，保持内容的纵向起点在顶部。
-        .defaultScrollAnchor(.topLeading)
+        // 高表格超出可视区域时，保持内容的纵向起点在顶部。iOS 17 以下滚动视图默认即从顶部开始。
+        .forumDefaultScrollAnchorTop()
         .accessibilityIdentifier("forum-markdown-table")
     }
 }
 
 /// 独立测量每一行，避免扩展后的单元格背景
-/// 改变文字起点或占用其他行的高度。
+/// 改变文字起点或占用其他行的高度。iOS 16 及以上使用 Layout；更早系统按顶对齐排列，
+/// 同行较矮单元格的背景不会拉到最高单元格。
+private struct ForumTableRow<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        if #available(iOS 16, *) {
+            ForumTableRowLayout { content() }
+        } else {
+            HStack(alignment: .top, spacing: 0) { content() }
+        }
+    }
+}
+
+@available(iOS 16, *)
 private struct ForumTableRowLayout: Layout {
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let sizes = subviews.map { $0.sizeThatFits(ProposedViewSize(width: 240, height: nil)) }
@@ -140,6 +153,17 @@ private struct ForumTableRowLayout: Layout {
         for (index, view) in subviews.enumerated() {
             view.place(at: CGPoint(x: bounds.minX + CGFloat(index) * 240, y: bounds.minY),
                        anchor: .topLeading, proposal: ProposedViewSize(width: 240, height: bounds.height))
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func forumDefaultScrollAnchorTop() -> some View {
+        if #available(iOS 17, *) {
+            self.defaultScrollAnchor(.topLeading)
+        } else {
+            self
         }
     }
 }
@@ -156,6 +180,7 @@ private struct ForumInlineMarkdownText: View {
     var body: some View {
         if hasSpoilers && !spoilersRevealed {
             Text(ForumMarkdownCache.shared.inline(markdown, spoilersRevealed: false, conceal: concealForumSpoiler))
+                .fontWeight(bold ? .semibold : .regular)
                 .onTapGesture { spoilersRevealed = true }
         } else if hasSpoilers {
             ForumRevealedSpoilerText(
@@ -164,6 +189,7 @@ private struct ForumInlineMarkdownText: View {
             )
         } else {
             Text(ForumMarkdownCache.shared.inline(markdown, spoilersRevealed: true))
+                .fontWeight(bold ? .semibold : .regular)
         }
     }
 }
@@ -180,7 +206,12 @@ private struct ForumRevealedSpoilerText: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(openURL: openURL) }
 
     func makeUIView(context: Context) -> UITextView {
-        let view = UITextView()
+        let view: UITextView
+        if #available(iOS 16, *) {
+            view = UITextView()
+        } else {
+            view = ForumSizingTextView()
+        }
         view.isEditable = false
         view.isSelectable = true
         view.isScrollEnabled = false
@@ -201,6 +232,7 @@ private struct ForumRevealedSpoilerText: UIViewRepresentable {
         ]
     }
 
+    @available(iOS 16, *)
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
         guard let width = proposal.width, width > 0 else { return nil }
         let size = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
@@ -211,11 +243,40 @@ private struct ForumRevealedSpoilerText: UIViewRepresentable {
         var openURL: OpenURLAction
         init(openURL: OpenURLAction) { self.openURL = openURL }
 
+        @available(iOS 17, *)
         func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem,
                       defaultAction: UIAction) -> UIAction? {
             guard case let .link(url) = textItem.content else { return defaultAction }
             return UIAction { [weak self] _ in self?.openURL(url) }
         }
+
+        func textView(_ textView: UITextView, shouldInteractWith url: URL, in characterRange: NSRange,
+                      interaction: UITextItemInteraction) -> Bool {
+            if #available(iOS 17, *) { return true }
+            openURL(url)
+            return false
+        }
+    }
+}
+
+/// iOS 15 没有 `UIViewRepresentable.sizeThatFits`。只在该系统使用，按自身宽度回报高度。
+private final class ForumSizingTextView: UITextView {
+    private var measuredWidth: CGFloat = 0
+
+    override var intrinsicContentSize: CGSize {
+        let width = bounds.width > 1 ? bounds.width : measuredWidth
+        guard width > 1 else {
+            return CGSize(width: UIView.noIntrinsicMetric, height: UIView.noIntrinsicMetric)
+        }
+        let height = ceil(sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height)
+        return CGSize(width: UIView.noIntrinsicMetric, height: height)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard abs(bounds.width - measuredWidth) > 0.5 else { return }
+        measuredWidth = bounds.width
+        invalidateIntrinsicContentSize()
     }
 }
 
