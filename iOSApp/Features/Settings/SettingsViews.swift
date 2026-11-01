@@ -562,7 +562,7 @@ private struct LogActivitySheet: UIViewControllerRepresentable {
 private struct ThirdPartyLicensesView: View {
     /// GPL-3.0 第 5(a) 条要求的修改日期。scripts/build_local_release.py 要求它等于
     /// 发布提交的日期，因此每次发布构建时都需更新。
-    static let modifiedDate = "2026-10-31"
+    static let modifiedDate = "2026-11-01"
     /// iOS 15 目标不链接 YueduCoreText 与 libmobi，开源许可页不把它们列为本二进制的组件。
     private var packages: [(name: String, version: String, license: String, file: String)] {
         let all: [(name: String, version: String, license: String, file: String)] = [
