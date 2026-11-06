@@ -42,9 +42,14 @@ struct ReaderBookPreferencesView: View {
             }
             .navigationTitle("单书阅读偏好")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .compatTopBarLeading) { Button("关闭") { dismiss() } }
-                ToolbarItem(placement: .compatTopBarTrailing) { Button("应用") { settings.setProjection(draft); dismiss() } }
+            .safeAreaInset(edge: .bottom) {
+                HStack {
+                    Button("关闭") { dismiss() }
+                    Spacer()
+                    Button("应用") { settings.setProjection(draft); dismiss() }
+                        .buttonStyle(.borderedProminent)
+                }
+                .padding().background(.regularMaterial)
             }
             .onAppear { draft = settings.projection }
         }
