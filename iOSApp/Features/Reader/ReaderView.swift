@@ -241,7 +241,7 @@ struct ReaderView: View {
                             selectedSearchHit = nil; chapterIndex = point.chapter; returnAnchor = point.anchor; readingReturnPoint = nil
                         }
                     }
-                    Button("单书阅读偏好") { isShowingBookPreferences = true }
+                    Button("本书文字处理") { isShowingBookPreferences = true }
                     NavigationLink("离线章节") { OfflineChapterManagementView(novel: novel) }
                     NavigationLink {
                         ChapterDirectoryView(novel: novel, selectedIndex: Binding(get: { chapterIndex }, set: { index in
@@ -269,6 +269,8 @@ struct ReaderView: View {
                     .accessibilityLabel(isBookmarked ? "移除书签" : "添加书签")
 
                     Menu {
+                        Toggle("本书使用独立样式", isOn: Binding(get: { settings.usesBookPreferences }, set: { settings.setBookPreferencesEnabled($0) }))
+                        Divider()
                         Picker("显示内容", selection: $modeRaw) {
                             ForEach(ReaderMode.allCases) { item in
                                 Text(item.title).tag(item.rawValue)

@@ -290,7 +290,7 @@ private struct EPUBReaderViewContent: View {
                     Button("回到刚才阅读处") { model.returnToReading() }
                 }
                 Button("书内搜索") { bookmarksTab = .search; isShowingBookmarks = true }
-                Button { isShowingBookPreferences = true } label: { Label("单书阅读偏好", systemImage: "slider.horizontal.3") }
+                Button { isShowingBookPreferences = true } label: { Label("本书文字处理", systemImage: "slider.horizontal.3") }
                 Button {
                     draftStyle = model.style
                     isShowingStyle = true
@@ -560,6 +560,11 @@ private struct EPUBReaderViewContent: View {
     private var styleSheet: some View {
         CompatNavigationStack {
             Form {
+                ReaderBookStyleScopeSection {
+                    draftStyle = settings.defaults.data(forKey: settings.styleStorageKey).flatMap { try? JSONDecoder().decode(EPUBReaderStyle.self, from: $0) } ?? EPUBReaderStyle()
+                    draftStyle.fontSize = CGFloat(settings.fontSize)
+                }
+
                 Section {
                     NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
                     Picker("阅读主题", selection: $settings.appearanceRaw) {
@@ -648,17 +653,14 @@ private struct EPUBReaderViewContent: View {
             }
             .navigationTitle("阅读设置")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .compatTopBarLeading) {
+            .safeAreaInset(edge: .bottom) {
+                HStack {
                     Button("关闭") { isShowingStyle = false }
-                }
-                ToolbarItem(placement: .compatTopBarTrailing) {
-                    Button("应用") {
-                        model.applyStyle(draftStyle)
-                        isShowingStyle = false
-                    }
-                    .disabled(model.isAnimating || model.isLayingOut)
-                }
+                    Spacer()
+                    Button("应用") { model.applyStyle(draftStyle); isShowingStyle = false }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.isAnimating || model.isLayingOut)
+                }.padding().background(.regularMaterial)
             }
         }
         .compatPresentationDetents(.medium, .large)

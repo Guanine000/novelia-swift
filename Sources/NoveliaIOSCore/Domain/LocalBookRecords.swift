@@ -62,6 +62,8 @@ struct LocalWenkuEPUB: Codable, Identifiable, Hashable, Sendable {
     var parentWenkuID: String? = nil
     var parentWenkuTitle: String? = nil
     var volumeID: String? = nil
+    /// 区分明确解除关联与旧客户端尚不认识关联字段。
+    var wenkuAssociationUpdatedAt: Date? = nil
     var resolvedFileFormat: WebNovelFileFormat {
         fileFormat ?? (filename.lowercased().hasSuffix(".txt") ? .txt : .epub)
     }

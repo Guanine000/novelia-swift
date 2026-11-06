@@ -152,7 +152,7 @@ struct DownloadedWebNovelTXTReader: View {
                 if let point = readingReturnPoint {
                     Button("回到刚才阅读处") { selectedSearchHit = nil; chapterIndex = point.chapter; returnAnchor = point.anchor; readingReturnPoint = nil }
                 }
-                Button("单书阅读偏好") { isShowingBookPreferences = true }
+                Button("本书文字处理") { isShowingBookPreferences = true }
                 Button { settings.pagedTextReading = true } label: {
                     Label("分页阅读", systemImage: "book.pages")
                 }
@@ -166,24 +166,27 @@ struct DownloadedWebNovelTXTReader: View {
                     }
                     .accessibilityLabel("章节目录")
                 }
-                Button { settings.adjustFontSize(by: -1) } label: {
-                    Label("缩小字号", systemImage: "textformat.size.smaller")
-                }
-                .accessibilityLabel("缩小字号")
-                Button { settings.adjustFontSize(by: 1) } label: {
-                    Label("放大字号", systemImage: "textformat.size.larger")
-                }
-                .accessibilityLabel("放大字号")
                 Menu {
-                    Picker("阅读主题", selection: $settings.appearanceRaw) {
-                        ForEach(ReaderAppearance.allCases) { option in
-                            Text(option.title).tag(option.rawValue)
-                        }
+                    Toggle("本书使用独立样式", isOn: Binding(get: { settings.usesBookPreferences }, set: { settings.setBookPreferencesEnabled($0) }))
+                    Button { settings.adjustFontSize(by: -1) } label: {
+                        Label("缩小字号", systemImage: "textformat.size.smaller")
                     }
-                } label: {
-                    Label("阅读主题", systemImage: "circle.lefthalf.filled")
-                }
-                .accessibilityLabel("阅读主题")
+                    .accessibilityLabel("缩小字号")
+                    Button { settings.adjustFontSize(by: 1) } label: {
+                        Label("放大字号", systemImage: "textformat.size.larger")
+                    }
+                    .accessibilityLabel("放大字号")
+                    Menu {
+                        Picker("阅读主题", selection: $settings.appearanceRaw) {
+                            ForEach(ReaderAppearance.allCases) { option in
+                                Text(option.title).tag(option.rawValue)
+                            }
+                        }
+                    } label: {
+                        Label("阅读主题", systemImage: "circle.lefthalf.filled")
+                    }
+                    .accessibilityLabel("阅读主题")
+                } label: { Label("阅读设置", systemImage: "textformat.size") }
                 } label: { Image(systemName: "ellipsis.circle") }
                 .accessibilityLabel("阅读菜单")
             }

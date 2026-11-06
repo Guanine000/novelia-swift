@@ -189,6 +189,32 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   precondition(edits.books == [original] && fm.fileExists(atPath: edits.fileURL(for: original).path))
   try await edits.remove(original); precondition(edits.books.isEmpty)
   precondition(!fm.fileExists(atPath: edits.fileURL(for: original).path))
+  // 关联与解除只改元数据；失败不发布，也不改文件、身份或原有阅读信息。
+  let linkDir = root.appendingPathComponent("wenku-link")
+  let linkOriginal = try createBook(linkDir)[0]
+  let linkFaults = Faults(); linkFaults.failWrites = [1]
+  let links = WenkuLocalLibraryStore(directory: linkDir, indexWriter: LocalLibraryIndexWriter(persist: { try linkFaults.persist($0, $1) }))
+  try await links.loadIfNeeded()
+  let linkBytes = try Data(contentsOf: links.fileURL(for: linkOriginal))
+  do { try await links.updateWenkuAssociation(id: linkOriginal.id, parentID: "work", parentTitle: "作品", volumeID: "卷一"); preconditionFailure("must fail association write") } catch {}
+  precondition(links.books == [linkOriginal]); let linkDiskBefore = try disk(linkDir); precondition(linkDiskBefore == [linkOriginal])
+  do { try await links.updateWenkuAssociation(id: linkOriginal.id, parentID: "work", parentTitle: "作品", volumeID: nil); preconditionFailure("must reject missing volume") } catch {}
+  try await links.updateWenkuAssociation(id: linkOriginal.id, parentID: "work", parentTitle: "作品", volumeID: "卷一", now: Date(timeIntervalSince1970: 100))
+  let linked = links.books[0]
+  precondition(linked.id == linkOriginal.id && linked.filename == linkOriginal.filename && linked.lastLocatorJSON == linkOriginal.lastLocatorJSON)
+  precondition(linked.parentWenkuID == "work" && linked.volumeID == "卷一")
+  let linkedBytes = try Data(contentsOf: links.fileURL(for: linked)); precondition(linkedBytes == linkBytes)
+  let reopenedLinks = WenkuLocalLibraryStore(directory: linkDir); try await reopenedLinks.loadIfNeeded()
+  precondition(reopenedLinks.books == links.books)
+  var remoteLink = linked; remoteLink.parentWenkuID = "other"; remoteLink.parentWenkuTitle = "另一作品"; remoteLink.volumeID = "卷二"; remoteLink.metadataUpdatedAt = Date(timeIntervalSince1970: 200); remoteLink.wenkuAssociationUpdatedAt = remoteLink.metadataUpdatedAt
+  try await links.applySyncedMetadata(remoteLink, cover: nil)
+  precondition(links.books[0].parentWenkuID == "other" && links.books[0].volumeID == "卷二")
+  var legacyMetadata = links.books[0]; legacyMetadata.parentWenkuID = nil; legacyMetadata.parentWenkuTitle = nil; legacyMetadata.volumeID = nil; legacyMetadata.wenkuAssociationUpdatedAt = nil; legacyMetadata.metadataUpdatedAt = Date(timeIntervalSince1970: 300)
+  try await links.applySyncedMetadata(legacyMetadata, cover: nil)
+  precondition(links.books[0].parentWenkuID == "other", "Old-client metadata must not unlink a known work")
+  try await links.updateWenkuAssociation(id: linkOriginal.id, parentID: nil, parentTitle: nil, volumeID: nil)
+  precondition(links.books[0].parentWenkuID == nil && links.books[0].volumeID == nil)
+  let unlinkedBytes = try Data(contentsOf: links.fileURL(for: linkOriginal)); precondition(unlinkedBytes == linkBytes)
   // 网络封面下载后才调用实际 Store：旧快照不能覆盖更晚的本机编辑，时间相同也保留本机。
   let syncEditDir = root.appendingPathComponent("sync-metadata")
   let syncOriginal = try createBook(syncEditDir)[0]

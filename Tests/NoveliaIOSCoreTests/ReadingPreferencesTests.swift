@@ -40,6 +40,31 @@ final class ReadingPreferencesTests: XCTestCase {
         let restored = ReaderSettings(defaults: defaults); restored.activateBook("book-a"); XCTAssertEqual(restored.fontSize, 30)
         restored.setBookPreferencesEnabled(false); XCTAssertEqual(restored.fontSize, 22)
     }
+    @MainActor func testTextRulesRemainIndependentFromStyleScope() {
+        let name = "text-style-tests-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: name)!; defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(22.0, forKey: SettingsKey.readerFontSize)
+        let settings = ReaderSettings(defaults: defaults); settings.activateBook("a")
+        var rules = ReadingTextProjection(); rules.replacements = ["旧名": "新名"]
+        settings.setProjection(rules)
+        XCTAssertFalse(settings.usesBookPreferences); XCTAssertEqual(settings.fontSize, 22)
+        settings.setBookPreferencesEnabled(true); settings.fontSize = 30
+        settings.setBookPreferencesEnabled(false)
+        XCTAssertFalse(settings.usesBookPreferences); XCTAssertEqual(settings.fontSize, 22)
+        XCTAssertEqual(settings.projection.apply("旧名"), "新名")
+        let reopened = ReaderSettings(defaults: defaults); reopened.activateBook("a")
+        XCTAssertFalse(reopened.usesBookPreferences); XCTAssertEqual(reopened.projection, rules)
+        reopened.activateBook("b"); XCTAssertEqual(reopened.projection, .init())
+    }
+    @MainActor func testLegacyBookPreferencesStillEnableStyle() throws {
+        let name = "legacy-style-tests-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: name)!; defer { defaults.removePersistentDomain(forName: name) }
+        let old: [String: Any] = ["a": ["fontSize": 28, "appearance": "system", "paged": true,
+                                     "projection": ["chinese": "original", "enabled": true, "replacements": [:]]]]
+        defaults.set(try JSONSerialization.data(withJSONObject: old), forKey: "reader.bookPreferences.v1")
+        let settings = ReaderSettings(defaults: defaults); settings.activateBook("a")
+        XCTAssertTrue(settings.usesBookPreferences); XCTAssertEqual(settings.fontSize, 28); XCTAssertTrue(settings.pagedTextReading)
+    }
     func testOldLocalRecordWithoutVolumeMetadataStillDecodes() throws {
         let old = LocalWenkuEPUB(id: UUID(), title: "旧书", filename: "book.epub", addedAt: Date())
         let decoded = try JSONDecoder().decode(LocalWenkuEPUB.self, from: JSONEncoder().encode(old))

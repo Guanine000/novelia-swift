@@ -119,5 +119,6 @@
   "OnlineChapterOfflineStore.swift": "Sources/NoveliaIOSCore/Features/Reader/OnlineChapterOfflineStore.swift",
   "ReaderBookPreferencesView.swift": "iOSApp/Features/Reader/ReaderBookPreferencesView.swift",
   "OfflineChapterManagementView.swift": "iOSApp/Features/Reader/OfflineChapterManagementView.swift",
-  "LibraryDragSelection.swift": "iOSApp/Features/Library/LibraryDragSelection.swift"
+  "LibraryDragSelection.swift": "iOSApp/Features/Library/LibraryDragSelection.swift",
+  "LibraryWenkuAssociationEditor.swift": "iOSApp/Features/Library/LibraryWenkuAssociationEditor.swift"
 }

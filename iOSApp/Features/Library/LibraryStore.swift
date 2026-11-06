@@ -95,12 +95,6 @@ struct LibraryBook: Identifiable, Hashable {
     }
 }
 
-enum ManualReadingState: String, CaseIterable, Identifiable, Codable {
-    case want, reading, finished
-    var id: String { rawValue }
-    var title: String { switch self { case .want: "想读"; case .reading: "在读"; case .finished: "读完" } }
-}
-
 struct LibraryReadingStatus: Equatable {
     var lastReadAt: Date?
     /// 例如“读到 42%”“第 3 章”“已打开”“未读”。
@@ -116,11 +110,6 @@ struct LibraryReadingStatus: Equatable {
 @MainActor
 final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
 
-    @Published private(set) var manualStates: [String: ManualReadingState] = [:]
-    func setReadingState(_ value: ManualReadingState?, for books: [LibraryBook]) {
-        for book in books { manualStates[book.key] = value }
-        if let data = try? JSONEncoder().encode(manualStates) { defaults.set(data, forKey: "library.manualReadingStates.v1") }
-    }
     /// 已知文库ID使用稳定父项系列，不按书名猜测或覆盖用户已有分组。
     func associateVolumes(_ books: [LibraryBook]) {
         var updated = series
@@ -133,6 +122,17 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
         }
         if updated != series { save(updated) }
     }
+    /// 用户明确选择归入父作品系列时，可重新建立已解散的同名父项。
+    func assignToWenkuSeries(_ book: LibraryBook, parentID: String, title: String) {
+        var updated = series
+        let id = "wenku-work:" + parentID
+        if updated.series[id] == nil || updated.series[id]?.deleted == true {
+            _ = updated.createSeries(named: title, id: id)
+        }
+        updated.assign(book: book.key, to: id)
+        save(updated)
+    }
+
     @Published private(set) var series: LibrarySeriesState
     @Published private(set) var positions: [String: SyncedReadingPosition] = [:]
     @Published private(set) var lastOpened: [String: Date]
@@ -163,7 +163,8 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
         hashes = defaults.dictionary(forKey: Key.hashes) as? [String: String] ?? [:]
         lastOpened = (defaults.data(forKey: Key.lastOpened)).flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
         self.positions = readingPositions.all()
-        manualStates = defaults.data(forKey: "library.manualReadingStates.v1").flatMap { try? JSONDecoder().decode([String: ManualReadingState].self, from: $0) } ?? [:]
+        // 清理已移除的手工状态；实际阅读位置和自动进度不受影响。
+        defaults.removeObject(forKey: "library.manualReadingStates.v1")
     }
 
     // MARK: 书籍
@@ -214,8 +215,7 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
     }
 
     func status(for book: LibraryBook) -> LibraryReadingStatus {
-        var status = readingStatus(for: book)
-        if let manual = manualStates[book.key] { status.detail = manual.title + " · " + status.detail }
+        let status = readingStatus(for: book)
         guard book.isCloudOnly else { return status }
         let label = book.cloudFileMissing ? "云端文件缺失" : "未下载"
         return LibraryReadingStatus(lastReadAt: status.lastReadAt, detail: "\(label) · \(status.detail)", fraction: status.fraction)
@@ -372,7 +372,6 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
         var state = series
         state.transfer(from: oldKey, to: newKey)
         save(state)
-        if let manual = manualStates.removeValue(forKey: oldKey) { manualStates[newKey] = manual; if let data = try? JSONEncoder().encode(manualStates) { defaults.set(data, forKey: "library.manualReadingStates.v1") } }
         if let opened = lastOpened.removeValue(forKey: oldKey) {
             lastOpened[newKey] = opened
             persistLastOpened()

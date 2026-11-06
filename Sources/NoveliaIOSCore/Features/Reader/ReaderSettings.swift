@@ -11,7 +11,11 @@ final class ReaderSettings: ObservableObject {
     @Published var projectionRevision = 0
     let offlineChapters: OnlineChapterOfflineStore
     private static let bookPreferencesKey = "reader.bookPreferences.v1"
-    var usesBookPreferences: Bool { activeBookID.flatMap { bookPreferences[$0] } != nil }
+    var usesBookPreferences: Bool { activeStylePreferences != nil }
+    private var activeStylePreferences: BookReadingPreferences? {
+        guard let value = activePreferences, value.styleOverride ?? true else { return nil }
+        return value
+    }
     var activePreferences: BookReadingPreferences? { activeBookID.flatMap { bookPreferences[$0] } }
     var projection: ReadingTextProjection { activePreferences?.projection ?? .init() }
     var styleStorageKey: String { usesBookPreferences ? "reader.bookStyle.v1." + FileContentHash.sha256(Data((activeBookID ?? "").utf8)) : Self.epubStyleKey }
@@ -19,15 +23,23 @@ final class ReaderSettings: ObservableObject {
     func deactivateBook(_ id: String) { if activeBookID == id { activeBookID = nil } }
     func setBookPreferencesEnabled(_ enabled: Bool) {
         guard let id = activeBookID else { return }
-        if enabled, bookPreferences[id] == nil {
-            bookPreferences[id] = .init(fontSize: fontSize, appearance: appearanceRaw, paged: pagedTextReading, layout: defaults.data(forKey: Self.epubStyleKey))
+        if enabled, !usesBookPreferences {
+            let textProjection = projection
+            bookPreferences[id] = .init(fontSize: fontSize, appearance: appearanceRaw, paged: pagedTextReading,
+                                        layout: defaults.data(forKey: Self.epubStyleKey), styleOverride: true, projection: textProjection)
             if let data = bookPreferences[id]?.layout { defaults.set(data, forKey: styleStorageKey) }
-        } else if !enabled { bookPreferences[id] = nil; defaults.removeObject(forKey: "reader.bookStyle.v1." + FileContentHash.sha256(Data(id.utf8))) }
+        } else if !enabled {
+            bookPreferences[id]?.styleOverride = false
+            defaults.removeObject(forKey: "reader.bookStyle.v1." + FileContentHash.sha256(Data(id.utf8)))
+        }
         saveBookPreferences(); projectionRevision += 1
     }
     func setProjection(_ value: ReadingTextProjection) {
-        if !usesBookPreferences { setBookPreferencesEnabled(true) }
         guard let id = activeBookID else { return }
+        if bookPreferences[id] == nil {
+            bookPreferences[id] = .init(fontSize: storedFontSize, appearance: storedAppearance, paged: storedPagedText,
+                                        layout: nil, styleOverride: false)
+        }
         bookPreferences[id]?.projection = value.normalized
         saveBookPreferences(); projectionRevision += 1
     }
@@ -64,7 +76,7 @@ final class ReaderSettings: ObservableObject {
     }
 
     var fontSize: Double {
-        get { activePreferences.map { Self.normalizedFontSize($0.fontSize) } ?? storedFontSize }
+        get { activeStylePreferences.map { Self.normalizedFontSize($0.fontSize) } ?? storedFontSize }
         set {
             let value = Self.normalizedFontSize(newValue)
             if usesBookPreferences, let id = activeBookID { bookPreferences[id]?.fontSize = value; saveBookPreferences(); return }
@@ -82,7 +94,7 @@ final class ReaderSettings: ObservableObject {
     }
 
     var appearanceRaw: String {
-        get { activePreferences.map { Self.normalizedAppearance($0.appearance) } ?? storedAppearance }
+        get { activeStylePreferences.map { Self.normalizedAppearance($0.appearance) } ?? storedAppearance }
         set {
             let value = Self.normalizedAppearance(newValue)
             if usesBookPreferences, let id = activeBookID { bookPreferences[id]?.appearance = value; saveBookPreferences(); return }
@@ -93,7 +105,7 @@ final class ReaderSettings: ObservableObject {
 
     /// 在线小说与 TXT 使用分页阅读器；默认仍为滚动模式。
     var pagedTextReading: Bool {
-        get { activePreferences?.paged ?? storedPagedText }
+        get { activeStylePreferences?.paged ?? storedPagedText }
         set {
             if usesBookPreferences, let id = activeBookID { bookPreferences[id]?.paged = newValue; saveBookPreferences(); return }
             if storedPagedText != newValue { storedPagedText = newValue }

@@ -79,7 +79,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
         restored = LocalWenkuEPUB(id: book.id, title: book.title, filename: destination.lastPathComponent,
             addedAt: book.addedAt, lastLocatorJSON: book.lastLocatorJSON, bookDescription: book.bookDescription,
             author: book.author, coverFilename: nil, metadataLoaded: book.metadataLoaded,
-            fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel, metadataUpdatedAt: book.metadataUpdatedAt, parentWenkuID: book.parentWenkuID, parentWenkuTitle: book.parentWenkuTitle, volumeID: book.volumeID)
+            fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel, metadataUpdatedAt: book.metadataUpdatedAt, parentWenkuID: book.parentWenkuID, parentWenkuTitle: book.parentWenkuTitle, volumeID: book.volumeID, wenkuAssociationUpdatedAt: book.wenkuAssociationUpdatedAt)
         do {
             try await fileCopier.copy(from: source, to: destination)
             copied.append(destination)
@@ -106,7 +106,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
         var replacement = LocalWenkuEPUB(id: book.id, title: book.title, filename: destination.lastPathComponent,
             addedAt: book.addedAt, lastLocatorJSON: book.lastLocatorJSON, bookDescription: book.bookDescription,
             author: book.author, coverFilename: nil, metadataLoaded: book.metadataLoaded,
-            fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel, metadataUpdatedAt: book.metadataUpdatedAt, parentWenkuID: book.parentWenkuID, parentWenkuTitle: book.parentWenkuTitle, volumeID: book.volumeID)
+            fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel, metadataUpdatedAt: book.metadataUpdatedAt, parentWenkuID: book.parentWenkuID, parentWenkuTitle: book.parentWenkuTitle, volumeID: book.volumeID, wenkuAssociationUpdatedAt: book.wenkuAssociationUpdatedAt)
         do {
             try await fileCopier.copy(from: source, to: destination)
             copied.append(destination)
@@ -124,6 +124,23 @@ final class WenkuLocalLibraryStore: ObservableObject {
             }
         } catch { await fileCopier.remove(copied); throw error }
         await fileCopier.remove([fileURL(for: old)] + [coverFileURL(for: old)].compactMap { $0 })
+    }
+
+    /// 手工关联只修改索引，不改文件、身份或阅读位置；与书库信息共用修改时间参与同步。
+    func updateWenkuAssociation(id: UUID, parentID: String?, parentTitle: String?, volumeID: String?, now: Date = Date()) async throws {
+        let parent = Self.cleaned(parentID), volume = Self.cleaned(volumeID)
+        guard (parent == nil && volume == nil) || (parent != nil && volume != nil) else {
+            throw WenkuLocalLibraryError.invalidAssociation
+        }
+        try await loadIfNeeded()
+        try await commit { records in
+            guard let index = records.firstIndex(where: { $0.id == id }) else { throw CocoaError(.fileNoSuchFile) }
+            records[index].parentWenkuID = parent
+            records[index].parentWenkuTitle = parent == nil ? nil : (Self.cleaned(parentTitle) ?? parent)
+            records[index].volumeID = volume
+            records[index].wenkuAssociationUpdatedAt = now
+            records[index].metadataUpdatedAt = now
+        }
     }
 
     enum CoverChange {
@@ -179,6 +196,15 @@ final class WenkuLocalLibraryStore: ObservableObject {
         book.bookDescription = remote.bookDescription
         book.metadataLoaded = true
         book.metadataUpdatedAt = remote.metadataUpdatedAt
+        // 旧客户端缺少关联字段时，普通信息编辑不能被解释为解除关联。
+        let explicitAssociation = remote.wenkuAssociationUpdatedAt.map { $0 > (old.wenkuAssociationUpdatedAt ?? .distantPast) } ?? false
+        let legacyKnownAssociation = remote.wenkuAssociationUpdatedAt == nil && old.wenkuAssociationUpdatedAt == nil && remote.parentWenkuID != nil
+        if explicitAssociation || legacyKnownAssociation {
+            book.parentWenkuID = remote.parentWenkuID
+            book.parentWenkuTitle = remote.parentWenkuTitle
+            book.volumeID = remote.volumeID
+            book.wenkuAssociationUpdatedAt = remote.wenkuAssociationUpdatedAt
+        }
         var copied: [URL] = []
         do {
             if remote.coverFilename == nil { book.coverFilename = nil }
@@ -463,12 +489,14 @@ struct LocalLibraryDuplicateError: LocalizedError {
 }
 
 private enum WenkuLocalLibraryError: LocalizedError {
+    case invalidAssociation
     case invalidEPUB
     case invalidTXT
     case unsupportedFile
 
     var errorDescription: String? {
         switch self {
+        case .invalidAssociation: "请同时选择文库作品和分卷。"
         case .invalidEPUB: "该文件不是有效的 EPUB 压缩包。"
         case .invalidTXT: "TXT 文件为空或编码无法识别，暂时无法导入。"
         case .unsupportedFile: "目前只支持导入 .epub 或 .txt 文件。"

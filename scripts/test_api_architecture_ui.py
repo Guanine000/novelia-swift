@@ -573,31 +573,77 @@ final class TapTests: XCTestCase {
   XCTAssertTrue(more.waitForExistence(timeout: 10))
   zeroExternalRequests(app)
  }
- func testSingleBookPreferencesAndReplacement() {
-  let app = openDownloadedNetworkBook(readium: false); defer { app.terminate() }
-  readerAction(app, "单书阅读偏好").tap()
-  let perBook = app.switches["仅应用于这本书"].firstMatch
-  XCTAssertTrue(perBook.waitForExistence(timeout: 10)); if perBook.value as? String != "1" { perBook.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap() }
-  let original = app.textFields["原词，例如人名"]; reveal(original, app: app); original.tap(); original.typeText("替代服务\n")
-  let replacement = app.textFields["替换为（可留空）"]; replacement.typeText("本书替换\n")
-  app.buttons["添加或更新"].tap()
-  XCTAssertTrue(app.buttons["应用"].firstMatch.waitForExistence(timeout: 10)); app.buttons["应用"].firstMatch.tap()
-  XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 20))
-  readerAction(app, "单书阅读偏好").tap()
-  XCTAssertTrue(app.staticTexts["替代服务"].waitForExistence(timeout: 10))
-  XCTAssertTrue(app.staticTexts["本书替换"].exists)
-  app.buttons["关闭"].firstMatch.tap()
+ func checkBookStyleAndText(readium: Bool) {
+  let app = openDownloadedNetworkBook(readium: readium); defer { app.terminate() }
   readerAction(app, "阅读设置").tap()
+  let scope = app.switches["本书使用独立样式"].firstMatch
+  XCTAssertTrue(scope.waitForExistence(timeout: 10))
+  if scope.value as? String != "1" { scope.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap() }
   let increase = app.buttons["放大字号"]; reveal(increase, app: app); increase.tap()
-  XCTAssertTrue(app.buttons["应用"].firstMatch.waitForExistence(timeout: 10)); app.buttons["应用"].firstMatch.tap()
-  XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 20))
-  readerAction(app, "单书阅读偏好").tap()
-  app.switches["仅应用于这本书"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
   app.buttons["应用"].firstMatch.tap()
-  readerAction(app, "单书阅读偏好").tap()
-  XCTAssertEqual(app.switches["仅应用于这本书"].firstMatch.value as? String, "0")
+  readerAction(app, "本书文字处理").tap()
+  XCTAssertFalse(app.switches["本书使用独立样式"].exists)
+  let original = app.textFields["原词，例如人名"]; reveal(original, app: app); original.tap(); original.typeText("替代服务\n")
+  app.textFields["替换为（可留空）"].typeText("本书替换\n")
+  app.buttons["添加或更新"].tap(); app.buttons["应用"].firstMatch.tap()
+  readerAction(app, "阅读设置").tap()
+  XCTAssertTrue(scope.waitForExistence(timeout: 10)); XCTAssertEqual(scope.value as? String, "1")
+  scope.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+  app.buttons["应用"].firstMatch.tap()
+  readerAction(app, "本书文字处理").tap()
+  XCTAssertTrue(app.staticTexts["本书替换"].waitForExistence(timeout: 10))
   app.buttons["关闭"].firstMatch.tap()
+  zeroExternalRequests(app)
  }
+ func testSingleBookPreferencesAndReplacement() { checkBookStyleAndText(readium: false) }
+ func testReadiumBookStyleAndText() { checkBookStyleAndText(readium: true) }
+ func checkManualWenkuAssociation(groupWithWork: Bool) {
+  let app = start(txt: true); defer { app.terminate() }
+  app.buttons["书库"].firstMatch.tap()
+  let more = app.buttons["更多操作：架构验证TXT"]
+  XCTAssertTrue(more.waitForExistence(timeout: 15)); more.tap()
+  XCTAssertFalse(app.buttons["阅读状态"].exists)
+  app.buttons["关联文库作品／分卷"].tap()
+  let search = app.buttons["搜索作品"]; XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap()
+  let result = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "架构验证文库", "wenku-one")).firstMatch
+  XCTAssertTrue(result.waitForExistence(timeout: 15)); result.tap()
+  let volume = app.buttons["volume-one.epub"].firstMatch
+  for _ in 0..<6 {
+   if volume.exists && volume.frame.midY < app.frame.height * 0.70 && volume.frame.minY > 100 { break }
+   app.collectionViews.allElementsBoundByIndex.last?.swipeUp()
+  }
+  XCTAssertTrue(volume.exists && volume.isHittable); volume.tap()
+  if !groupWithWork {
+   let group = app.switches["同时归入作品系列"].firstMatch
+   for _ in 0..<6 {
+    if group.exists && group.frame.midY < app.frame.height * 0.70 && group.frame.minY > 100 { break }
+    app.collectionViews.allElementsBoundByIndex.last?.swipeUp()
+   }
+   group.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+   XCTAssertEqual(group.value as? String, "0")
+  }
+  let save = app.buttons["保存关联"]
+  XCTAssertTrue(save.isEnabled, "Selecting a volume must enable saving")
+  save.tap()
+  expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.navigationBars["关联文库作品／分卷"])
+  waitForExpectations(timeout: 15)
+  if groupWithWork {
+  let seriesSegment = app.segmentedControls.buttons.matching(NSPredicate(format: "label CONTAINS %@", "系列")).firstMatch
+  XCTAssertTrue(seriesSegment.waitForExistence(timeout: 15)); seriesSegment.tap()
+  let series = app.staticTexts["架构验证文库"].firstMatch
+  XCTAssertTrue(series.waitForExistence(timeout: 15)); series.tap()
+  }
+  XCTAssertTrue(more.waitForExistence(timeout: 15)); more.tap(); app.buttons["关联文库作品／分卷"].tap()
+  XCTAssertTrue(app.staticTexts["volume-one.epub"].waitForExistence(timeout: 10))
+  let unlink = app.buttons["解除关联"]; reveal(unlink, app: app); unlink.tap()
+  let confirm = app.buttons["确认解除关联"].firstMatch
+  XCTAssertTrue(confirm.waitForExistence(timeout: 10)); confirm.tap()
+  expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.navigationBars["关联文库作品／分卷"])
+  waitForExpectations(timeout: 15)
+  zeroExternalRequests(app)
+ }
+ func testManualWenkuAssociation() { checkManualWenkuAssociation(groupWithWork: true) }
+ func testManualWenkuAssociationKeepsSeries() { checkManualWenkuAssociation(groupWithWork: false) }
  func checkExactSearchAndReturn(readium: Bool) {
   let app = openDownloadedNetworkBook(readium: readium); defer { app.terminate() }
   readerAction(app, "书签与搜索").tap()

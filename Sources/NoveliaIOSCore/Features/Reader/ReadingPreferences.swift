@@ -66,6 +66,8 @@ struct BookReadingPreferences: Codable, Equatable {
     var appearance: String
     var paged: Bool
     var layout: Data?
+    /// 旧记录缺字段时仍按原单书样式解释；新建文字规则不自动开启样式覆盖。
+    var styleOverride: Bool? = nil
     var projection: ReadingTextProjection = .init()
 }
 

@@ -701,6 +701,7 @@ final class LibraryBookActions: ObservableObject {
     /// 正在编辑书库信息的文库／导入书籍。
     @Published var chapterUpdateBook: DownloadedWebNovel?
     @Published var editingBook: LibraryBook?
+    @Published var associatingBook: LibraryBook?
     /// 下载完成的书，页面据此打开阅读。
     @Published var downloadedBookKey: String?
     /// 多选：长按书籍进入，点击切换选择。
@@ -825,13 +826,6 @@ struct LibrarySelectionBar: View {
                 .foregroundStyle(NoveliaStyle.ink)
             Spacer(minLength: 4)
             Menu {
-                ForEach(ManualReadingState.allCases) { value in
-                    Button(value.title) { state.setReadingState(value, for: selected); actions.endSelection() }
-                }
-                Button("按实际进度显示") { state.setReadingState(nil, for: selected); actions.endSelection() }
-            } label: { barLabel("状态", systemImage: "book.closed") }
-            .disabled(selected.isEmpty)
-            Menu {
                 ForEach(state.series.activeSeries) { series in
                     Button(series.name) {
                         selected.forEach { state.assign($0, to: series.id) }
@@ -915,6 +909,11 @@ struct LibraryBookActionDialogs: ViewModifier {
                         try await wenkuDownloads.updateMetadata(id: current.id, title: title, author: author,
                                                           description: description, cover: cover)
                     }
+                }
+            }
+            .sheet(item: $actions.associatingBook) { book in
+                if case .wenku(let record) = book.origin {
+                    LibraryWenkuAssociationEditor(book: book, record: record)
                 }
             }
             .sheet(item: $actions.shareArchive, onDismiss: { actions.shareArchive = nil }) { archive in
@@ -1287,14 +1286,6 @@ struct LibraryBookRow: View {
     @ViewBuilder
     private func menuItems(for book: LibraryBook) -> some View {
         let currentSeries = state.series.seriesID(forBook: book.key)
-        Menu {
-            ForEach(ManualReadingState.allCases) { value in
-                Button { state.setReadingState(value, for: [book]) } label: {
-                    Label(value.title, systemImage: state.manualStates[book.key] == value ? "checkmark" : "circle")
-                }
-            }
-            Button("按实际进度显示") { state.setReadingState(nil, for: [book]) }
-        } label: { Label("阅读状态", systemImage: "book.closed") }
         if book.isCloudOnly {
             Button { open(book) } label: {
                 Label(book.cloudDownloadSizeText.map { "下载（\($0)）" } ?? "下载", systemImage: "icloud.and.arrow.down")
@@ -1352,6 +1343,9 @@ struct LibraryBookRow: View {
                 Label("移至文库", systemImage: "arrow.right.arrow.left")
             }
         case .wenku(let record):
+            Button { actions.associatingBook = book } label: {
+                Label("关联文库作品／分卷", systemImage: "link")
+            }
             Button {
                 Task {
                     do { try await LibraryMover.moveToNetwork(record, web: webDownloads, wenku: wenkuDownloads, state: state) }
