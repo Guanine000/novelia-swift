@@ -23,7 +23,7 @@ code += '\n' + forum[forum.index('@MainActor\nfinal class ForumStore'):]
 wenku = (root / layout['WenkuStore.swift']).read_text()
 code += '\n' + wenku[wenku.index('@MainActor\nfinal class WenkuStore'):]
 reader = (root / layout['ReaderView.swift']).read_text()
-code += '\n' + reader[reader.index('@MainActor\nprivate final class OnlineChapterCache'):]
+code += '\n' + reader[reader.index('@MainActor\nprivate final class OnlineChapterCache'):].split('private extension NovelChapter')[0]
 
 # 未覆盖的协议方法生成为显式失败，而不是回退到生产实现。
 # 下方被覆盖的方法实现合成后台行为。

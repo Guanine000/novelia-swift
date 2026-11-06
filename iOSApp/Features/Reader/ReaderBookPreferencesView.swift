@@ -41,9 +41,10 @@ struct ReaderBookPreferencesView: View {
                 Section("效果预览") { Text(draft.apply(source.isEmpty ? "这是本书的文字预览，閱讀偏好只影响显示。" : source)) }
             }
             .navigationTitle("单书阅读偏好")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("应用") { settings.setProjection(draft); dismiss() } }
+                ToolbarItem(placement: .compatTopBarLeading) { Button("关闭") { dismiss() } }
+                ToolbarItem(placement: .compatTopBarTrailing) { Button("应用") { settings.setProjection(draft); dismiss() } }
             }
             .onAppear { draft = settings.projection }
         }
