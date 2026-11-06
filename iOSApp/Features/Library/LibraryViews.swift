@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// 书库：导入和下载的书、系列、统一搜索与排序；点击整行打开阅读。
 struct LibraryView: View {
     private enum Segment: String, CaseIterable, Identifiable {
-        case books, series
+        case all, books, series
         var id: String { rawValue }
     }
 
@@ -17,7 +17,7 @@ struct LibraryView: View {
     @EnvironmentObject private var state: LibraryStateStore
     @StateObject private var importer = LibraryImportModel()
     @StateObject private var bookActions = LibraryBookActions()
-    @State private var segment = Segment.books
+    @State private var segment = Segment.all
     @State private var sourceFilter = LibrarySourceFilter.all
     @State private var query = ""
     @State private var isSearching = false
@@ -47,13 +47,17 @@ struct LibraryView: View {
         return types
     }
 
-    /// 多选可作用到的书：搜索结果，或“未分组”中的书。
+    /// 多选范围与当前列表一致：全部、未分组，或统一搜索结果。
     private var selectableBooks: [LibraryBook] {
         let books = state.displayBooks(from: allBooks).filter { sourceFilter.includes(isWenku: $0.isWenku) }
         if isSearching, !LibraryOrganizer.normalized(query).isEmpty {
             return books.filter { LibraryOrganizer.matches(title: $0.title, author: $0.author, query: query) }
         }
-        return segment == .books ? books.filter { state.series.seriesID(forBook: $0.key) == nil } : []
+        switch segment {
+        case .all: return books
+        case .books: return books.filter { state.series.seriesID(forBook: $0.key) == nil }
+        case .series: return []
+        }
     }
 
     var body: some View {
@@ -76,22 +80,24 @@ struct LibraryView: View {
                     LibraryContinueReadingCard(book: recent) { open(recent) }
                         .libraryListRow()
                 }
-                // 已移入系列的书只在“系列”中显示，不在“未分组”中重复出现。
+                // 全部包含已归入系列的书；未分组只列出没有系列归属的书。
                 let ungrouped = books.filter { state.series.seriesID(forBook: $0.key) == nil }
                 Picker("书库内容", selection: $segment) {
+                    Text("全部 \(books.count)").tag(Segment.all)
                     Text("未分组 \(ungrouped.count)").tag(Segment.books)
                     Text("系列 \(visibleSeries(in: books).count)").tag(Segment.series)
                 }
                 .pickerStyle(.segmented)
                 .libraryListRow()
                 switch segment {
-                case .books:
-                    if ungrouped.isEmpty {
+                case .all, .books:
+                    let listedBooks = segment == .all ? books : ungrouped
+                    if listedBooks.isEmpty {
                         sourceFilterMenu.libraryListRow()
                         CompatUnavailable {
                             Label("没有可显示的书籍", systemImage: "books.vertical")
                         } description: {
-                            Text("可以切换来源筛选，或到“系列”中查看已归类的书籍。")
+                            Text(segment == .books ? "可以切换来源筛选，或到“全部”中查看已归类的书籍。" : "可以切换来源筛选，查看其他来源的书籍。")
                         }
                         .padding(.top, 20)
                         .libraryListRow()
@@ -102,7 +108,7 @@ struct LibraryView: View {
                             LibrarySortSummary(options: sortOptions) { state.setSortOptions($0, scope: nil) }
                         }
                         .libraryListRow()
-                        ForEach(sorted(ungrouped, options: sortOptions)) { book in
+                        ForEach(sorted(listedBooks, options: sortOptions)) { book in
                             LibraryBookRow(book: book, actions: bookActions, open: open,
                                            isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
                                            isSelected: bookActions.selectedKeys.contains(book.key))

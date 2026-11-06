@@ -368,7 +368,7 @@ LocalBookRecords定义WebNovelEPUBUpdateConfiguration及DownloadedWebNovel.epubU
 
 ## 书库、文件与统计实现
 
-书库页面聚合网络小说下载记录和本地文库/导入记录。`LibraryStateStore` 管理展示与组织状态，Core 的 `LibraryOrganizer` 提供整理逻辑；它不负责远端小说请求。
+书库页面聚合网络小说下载记录和本地文库/导入记录。“全部／未分组／系列”默认选中全部；全部包含系列内书籍，多选和拖选使用当前分段与来源筛选后的列表；非空搜索仍覆盖整个书库。`LibraryStateStore` 管理展示与组织状态，Core 的 `LibraryOrganizer` 提供整理逻辑；它不负责远端小说请求。
 
 `WebNovelDownloadStore` 通过 `NovelDownloadService` 下载网络小说 EPUB，并在 Application Support 的 `WebNovelDownloads/` 管理文件与 `library.json`。`WenkuLocalLibraryStore` 在 `WenkuEPUB/` 管理文库及导入文件和索引，使用 `LocalLibraryIndexWriter` 写入索引。记录类型为 `DownloadedWebNovel` 和 `LocalWenkuEPUB`，定义在 Domain。
 

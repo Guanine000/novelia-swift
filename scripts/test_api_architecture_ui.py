@@ -844,6 +844,17 @@ final class TapTests: XCTestCase {
   XCTAssertTrue(field.waitForExistence(timeout: 20))
   field.typeText("验收系列")
   app.buttons["创建并移入"].tap()
+  // 全部保留系列内书籍；未分组只剩另一本，多选范围随分段变化。
+  let allSegment = app.segmentedControls.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "全部 ")).firstMatch
+  XCTAssertTrue(allSegment.waitForExistence(timeout: 20)); allSegment.tap()
+  XCTAssertTrue(app.staticTexts["验收样本甲"].firstMatch.waitForExistence(timeout: 20))
+  XCTAssertTrue(app.staticTexts["验收样本乙"].firstMatch.exists)
+  booksSegment(app)
+  XCTAssertFalse(app.staticTexts["验收样本甲"].exists)
+  beginSelection(app, title: "验收样本乙"); app.buttons["取消全选"].tap(); selectedCount(app, 0)
+  app.buttons["全选"].tap(); selectedCount(app, 1); app.buttons["完成"].tap()
+  allSegment.tap()
+  beginSelection(app, title: "验收样本甲"); app.buttons["全选"].tap(); selectedCount(app, 2); app.buttons["完成"].tap()
   seriesSegment(app)
   let series = app.staticTexts["验收系列"].firstMatch
   XCTAssertTrue(series.waitForExistence(timeout: 20))
