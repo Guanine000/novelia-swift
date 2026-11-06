@@ -766,6 +766,18 @@ final class EPUBReaderModel: ObservableObject {
         pageBook?.pageCount(spineIndex: spineIndex) ?? 0
     }
 
+    /// 底栏默认位置文字：只保留页（TXT 带章），诊断版另见 `locationDescription`。
+    var pageDescription: String {
+        guard let source else { return "" }
+        let total = max(pageCount(spineIndex: location.spineIndex), 1)
+        let page = "第 \(min(location.pageIndex + 1, total))/\(total) 页"
+        guard container != nil else {
+            let chapter = (source as? TextChapterSource)?.tocEntry(containingUnit: location.spineIndex)
+            return "第 \((chapter ?? location.spineIndex) + 1)/\(max(source.toc.count, 1)) 章 · \(page)"
+        }
+        return page
+    }
+
     var locationDescription: String {
         guard let source else { return "" }
         let total = pageCount(spineIndex: location.spineIndex)
@@ -775,6 +787,27 @@ final class EPUBReaderModel: ObservableObject {
             return "第 \((chapter ?? location.spineIndex) + 1)/\(max(source.toc.count, 1)) 章 · \(page)"
         }
         return "spine \(location.spineIndex + 1)/\(source.chapterCount) · \(page) · gen \(generation)"
+    }
+
+    /// 当前章内的页码进度，供底栏切换「本章进度」。
+    var chapterProgressDescription: String {
+        let total = max(pageCount(spineIndex: location.spineIndex), 1)
+        let page = min(location.pageIndex + 1, total)
+        return "本章 \(Int((Double(page) / Double(total) * 100).rounded()))%"
+    }
+
+    /// 全书进度百分比，供底栏切换「全书进度」。
+    var bookProgressDescription: String {
+        "全书 \(Int((overallProgress * 100).rounded()))%"
+    }
+
+    /// 进度条拖动预览用：按章节平均权重换算目标章节标题。
+    /// 与 `seek(to:)` 使用同一套换算，保证预览与松手后的落点一致。
+    func chapterTitle(forProgress progress: Double) -> String? {
+        guard let source, source.chapterCount > 0 else { return nil }
+        let fraction = min(max(progress, 0), 1)
+        let index = min(Int(fraction * Double(source.chapterCount)), source.chapterCount - 1)
+        return chapterTitle(index)
     }
 
     /// 全书进度估计（0...1）：spine 粒度 + 当前章内页进度。

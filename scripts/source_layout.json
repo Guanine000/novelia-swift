@@ -110,5 +110,6 @@
   "LibraryWenkuAssociationEditor.swift": "iOSApp/Features/Library/LibraryWenkuAssociationEditor.swift",
   "WenkuVolumeSnapshot.swift": "Sources/NoveliaIOSCore/Features/Library/WenkuVolumeSnapshot.swift",
   "WenkuSeriesNewVolumesView.swift": "iOSApp/Features/Library/WenkuSeriesNewVolumesView.swift",
-  "ReaderTextHighlight.swift": "iOSApp/Features/Reader/ReaderTextHighlight.swift"
+  "ReaderTextHighlight.swift": "iOSApp/Features/Reader/ReaderTextHighlight.swift",
+  "ReaderChromeSupport.swift": "iOSApp/Features/Reader/ReaderChromeSupport.swift"
 }

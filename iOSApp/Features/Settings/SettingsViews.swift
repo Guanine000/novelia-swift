@@ -23,6 +23,8 @@ struct SettingsView: View {
     @State private var isShowingLogShare = false
     @State private var logFileURL: URL?
     @State private var logExportError: String?
+    /// 目录诊断说明与 spine 编号默认隐藏，只在需要排查排版问题时显示。
+    @AppStorage(ReaderDebugOptions.showsTOCDiagnosticsKey) private var showsTOCDiagnostics = false
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
@@ -81,11 +83,9 @@ struct SettingsView: View {
                     .tint(NoveliaStyle.brandGreen)
                 }
             }
-            Section("内容") {
+            Section("阅读数据") {
                 NavigationLink("离线章节管理") { OfflineChapterManagementView() }
                 NavigationLink("标签屏蔽") { BlockedTagsView() }
-            }
-            Section("阅读统计") {
                 NavigationLink { ReadingStatisticsView() } label: {
                     Label("阅读统计", systemImage: "chart.bar.xaxis")
                 }
@@ -164,7 +164,7 @@ struct SettingsView: View {
                     Label("WebDAV 同步", systemImage: "arrow.triangle.2.circlepath")
                 }
             }
-            Section("关于") {
+            Section("关于与高级") {
                 Toggle("启动时检查更新", isOn: $checksUpdates)
                 if services.performsUpdateChecks {
                     Button {
@@ -187,8 +187,13 @@ struct SettingsView: View {
                 NavigationLink("开源许可") {
                     ThirdPartyLicensesView()
                 }
-            }
-            Section("高级") {
+                Toggle(isOn: $showsTOCDiagnostics) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("显示目录诊断信息")
+                        Text("在目录里显示书籍结构解析说明、章节 spine 编号与诊断提示。排查排版问题时打开，平时保持关闭。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Button {
                     exportLogs()
                 } label: {

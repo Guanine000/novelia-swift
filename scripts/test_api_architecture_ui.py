@@ -724,9 +724,11 @@ final class TapTests: XCTestCase {
   }
  }
  func waitForEPUB(_ app: XCUIApplication) {
-  let next = app.buttons["下一页"]
-  XCTAssertTrue(next.waitForExistence(timeout: 30))
-  let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: next)
+  // 底栏不再固定显示“下一页”，改用进度滑块判断分页就绪；旧构建仍优先用按钮。
+  let next = app.buttons["下一页"].firstMatch
+  let ready: XCUIElement = next.exists ? next : app.sliders["阅读进度"].firstMatch
+  XCTAssertTrue(ready.waitForExistence(timeout: 30))
+  let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: ready)
   XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 30), .completed)
  }
  func testDLaunchAndOpenSampleEPUB() {
@@ -813,12 +815,14 @@ if args.epub_failure:
   app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "可读章节")).firstMatch.tap()
   XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "无法读取或排版")).firstMatch.waitForExistence(timeout: 5), "跳到可读章节后失败页必须消失")
   XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "相邻章节加载失败")).firstMatch.exists, "永久缺失的相邻章节不应弹重试横幅")
-  let next = app.buttons["下一页"]
-  XCTAssertTrue(next.waitForExistence(timeout: 30))
-  expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: next)
+  // 底栏翻页按钮已移除：改用进度滑块确认就绪，再滑动翻页。
+  let next = app.buttons["下一页"].firstMatch
+  let ready: XCUIElement = next.exists ? next : app.sliders["阅读进度"].firstMatch
+  XCTAssertTrue(ready.waitForExistence(timeout: 30))
+  expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: ready)
   waitForExpectations(timeout: 30)
   XCTAssertFalse(app.buttons["关闭阅读器"].exists)
-  next.tap()
+  if next.exists { next.tap() } else { app.swipeLeft() }
 '''
     launch_args = ('["-architectureValidation", "-resetArchitectureValidation", "-openEPUBPrototype"'
                    + (', "-architectureReadium"' if args.epub_failure == 'spine' else '') + ']')

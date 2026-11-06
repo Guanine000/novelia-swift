@@ -61,6 +61,8 @@ private struct EPUBReaderViewContent: View {
     @State private var isShowingBookmarks = false
     @State private var bookmarksTab = ReaderBookmarksSearchSheet.Tab.bookmarks
     @State private var didCopyDiagnostics = false
+    /// 目录诊断说明与 spine 编号默认隐藏，在设置里打开调试选项后才显示。
+    @AppStorage(ReaderDebugOptions.showsTOCDiagnosticsKey) private var showsTOCDiagnostics = false
     @State private var showChrome = true
     @State private var isScrubbing = false
     @State private var scrubProgress = 0.0
@@ -112,6 +114,14 @@ private struct EPUBReaderViewContent: View {
                 case .ready:
                     EPUBReaderPageSurface(model: model, showChrome: $showChrome, size: geometry.size, searchRects: model.searchHighlightRects)
                         .equatable()
+                        // 底栏不再放上一页／下一页按钮，保留 VoiceOver 的翻页动作。
+                        .accessibilityAdjustableAction { direction in
+                            switch direction {
+                            case .increment: model.commitTurn(forward: true)
+                            case .decrement: model.commitTurn(forward: false)
+                            @unknown default: break
+                            }
+                        }
                 }
                 if model.isLayingOut {
                     ProgressView().scaleEffect(1.4)
@@ -120,9 +130,9 @@ private struct EPUBReaderViewContent: View {
                 }
             }
             .overlay(alignment: .top) {
-                VStack(spacing: 0) {
-                    if showChrome { topBar }
-                    chapterHeader
+                if showChrome {
+                    topBar
+                        .transition(.opacity)
                 }
             }
             .overlay(alignment: .bottom) {
@@ -188,7 +198,11 @@ private struct EPUBReaderViewContent: View {
             .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in
                 updateBatteryLevel()
             }
-            .sheet(isPresented: $model.isShowingTOCDiagnosticsPrompt) { tocDiagnosticsPrompt }
+            .sheet(isPresented: Binding(get: { showsTOCDiagnostics && model.isShowingTOCDiagnosticsPrompt },
+                                        set: { model.isShowingTOCDiagnosticsPrompt = $0 })) { tocDiagnosticsPrompt }
+            .onValueChange(of: showsTOCDiagnostics) { _, enabled in
+                if !enabled { model.isShowingTOCDiagnosticsPrompt = false }
+            }
         }
         // 书签／搜索面板弹出键盘时不缩小阅读视口，避免整书重新分页并跳页。
         .ignoresSafeArea(.keyboard)
@@ -251,10 +265,19 @@ private struct EPUBReaderViewContent: View {
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("返回")
-            Text(model.source?.bookTitle ?? "阅读器")
-                .font(.system(size: 14, weight: .medium))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity)
+            VStack(spacing: 1) {
+                Text(model.source?.bookTitle ?? "阅读器")
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                if !currentChapterTitle.isEmpty {
+                    Text(currentChapterTitle)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .combine)
             Menu {
                 if let accessory { accessory }
                 if let key = model.bookmarkKey {
@@ -276,7 +299,6 @@ private struct EPUBReaderViewContent: View {
                 if model.readingReturnPoint != nil {
                     Button("回到刚才阅读处") { model.returnToReading() }
                 }
-                Button("书内搜索") { bookmarksTab = .search; isShowingBookmarks = true }
                 Button { isShowingBookPreferences = true } label: { Label("本书文字处理", systemImage: "slider.horizontal.3") }
                 Button {
                     draftStyle = model.style
@@ -298,19 +320,6 @@ private struct EPUBReaderViewContent: View {
         .disabled(!showChrome)
     }
 
-    private var chapterHeader: some View {
-        Text(currentChapterTitle)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 18)
-            .padding(.top, 6)
-            .padding(.bottom, 4)
-            .background(model.pageBackgroundColor.opacity(0.92))
-            .allowsHitTesting(false)
-    }
-
     private var currentChapterTitle: String {
         guard let source = model.source else { return "" }
         if let index = model.currentTOCIndex {
@@ -324,27 +333,16 @@ private struct EPUBReaderViewContent: View {
     private var bottomBar: some View {
         VStack(spacing: 8) {
             if showChrome {
-                HStack {
-                    Button {
-                        model.commitTurn(forward: false)
-                    } label: { Image(systemName: "chevron.left") }
-                    .disabled(!model.canTurn(forward: false))
-                    .accessibilityLabel("上一页")
-                    Spacer()
-                    Text(model.locationDescription)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        model.commitTurn(forward: true)
-                    } label: { Image(systemName: "chevron.right") }
-                    .disabled(!model.canTurn(forward: true) && !model.canShowWebNovelEnd)
-                    .accessibilityLabel("下一页")
-                }
+                positionAndScrub
+                    .transition(.opacity)
             }
             HStack {
                 Text(batteryLevel >= 0 ? "电量 \(Int((batteryLevel * 100).rounded()))%" : "电量 —")
                 Spacer()
+                // 工具栏隐藏时也保留进度百分比，兼顾沉浸阅读与位置感知。
+                if !showChrome {
+                    Text(FractionText.percent(model.overallProgress))
+                }
                 TimelineView(.periodic(from: .now, by: 60)) { context in
                     Text(context.date, format: .dateTime.hour().minute())
                 }
@@ -352,32 +350,9 @@ private struct EPUBReaderViewContent: View {
             .font(.system(size: 11, design: .monospaced))
             .foregroundStyle(.secondary)
             .allowsHitTesting(false)
-            if showChrome {
-                HStack(spacing: 10) {
-                    Slider(value: Binding(
-                        get: { isScrubbing ? scrubProgress : model.overallProgress },
-                        set: { scrubProgress = $0 }
-                    ), in: 0...1, onEditingChanged: { editing in
-                        if editing {
-                            scrubProgress = model.overallProgress
-                            isScrubbing = true
-                        } else {
-                            isScrubbing = false
-                            model.seek(to: scrubProgress)
-                        }
-                    })
-                    .tint(NoveliaStyle.brandGreen)
-                    .disabled(model.status != .ready || model.isAnimating || model.isLayingOut)
-                    .accessibilityLabel("阅读进度")
-                    Text("\(Int((isScrubbing ? scrubProgress : model.overallProgress) * 100))%")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(minWidth: 36, alignment: .trailing)
-                }
-            }
         }
         .padding(.horizontal, 18)
-        .padding(.top, showChrome ? 10 : 4)
+        .padding(.top, showChrome ? 8 : 4)
         .padding(.bottom, 10)
         .background {
             if showChrome {
@@ -386,6 +361,63 @@ private struct EPUBReaderViewContent: View {
                 model.pageBackgroundColor.opacity(0.92)
             }
         }
+        .animation(.easeInOut(duration: 0.18), value: showChrome)
+    }
+
+    /// 位置、进度条与百分比。拆成独立视图，避免 `body` 的类型推导过重。
+    private var positionAndScrub: some View {
+        VStack(spacing: 4) {
+            if isScrubbing {
+                Text(scrubPreviewText)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(.thinMaterial, in: Capsule())
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+            // 位置、进度与翻页都收在一行；上一页／下一页交给手势与 VoiceOver 动作。
+            HStack(spacing: 10) {
+                ReaderPositionLabel(texts: [
+                    .chapterPage: showsTOCDiagnostics ? model.locationDescription : model.pageDescription,
+                    .chapterProgress: model.chapterProgressDescription,
+                    .bookProgress: model.bookProgressDescription
+                ])
+                Slider(value: scrubBinding, in: 0...1, onEditingChanged: handleScrub)
+                    .tint(NoveliaStyle.brandGreen)
+                    .disabled(model.status != .ready || model.isAnimating || model.isLayingOut)
+                    .accessibilityLabel("阅读进度")
+                Text(FractionText.percent(isScrubbing ? scrubProgress : model.overallProgress))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 36, alignment: .trailing)
+            }
+        }
+    }
+
+    private var scrubBinding: Binding<Double> {
+        Binding(get: { isScrubbing ? scrubProgress : model.overallProgress },
+                set: { scrubProgress = $0 })
+    }
+
+    private func handleScrub(editing: Bool) {
+        if editing {
+            scrubProgress = model.overallProgress
+            withAnimation(.easeInOut(duration: 0.15)) { isScrubbing = true }
+        } else {
+            withAnimation(.easeInOut(duration: 0.15)) { isScrubbing = false }
+            model.seek(to: scrubProgress)
+        }
+    }
+
+    /// 拖动进度条时预览目标位置：章节名来自与 `seek(to:)` 相同的章节权重换算。
+    private var scrubPreviewText: String {
+        let progress = isScrubbing ? scrubProgress : model.overallProgress
+        let percent = FractionText.percent(progress)
+        if let title = model.chapterTitle(forProgress: progress) {
+            return "\(title) · 全书 \(percent)"
+        }
+        return "全书 \(percent)"
     }
 
     private func updateBatteryLevel() {
@@ -411,7 +443,7 @@ private struct EPUBReaderViewContent: View {
                 } else {
                     ScrollViewReader { proxy in
                         List {
-                            if !model.tocDiagnosticMessages.isEmpty {
+                            if showsTOCDiagnostics, !model.tocDiagnosticMessages.isEmpty {
                                 Section {
                                     DisclosureGroup(isExpanded: $model.isTOCDiagnosticsExpanded) {
                                         VStack(alignment: .leading, spacing: 12) {
@@ -441,7 +473,7 @@ private struct EPUBReaderViewContent: View {
                                 let entry = tocEntries[index]
                                 ReaderTOCRow(title: entry.title, level: entry.level,
                                              subtitle: ReaderTOCRow.subtitle(wordCount: tocWordCounts?.entry(index),
-                                                                             detail: model.container != nil ? entry.spineIndex.map { "spine \($0 + 1)" } : nil),
+                                                                             detail: showsTOCDiagnostics && model.container != nil ? entry.spineIndex.map { "spine \($0 + 1)" } : nil),
                                              isCurrent: currentIndex == index,
                                              hasChildren: hasChildren[index],
                                              isExpanded: tocExpanded.contains(index),
@@ -544,124 +576,21 @@ private struct EPUBReaderViewContent: View {
     }
 
     private var styleSheet: some View {
-        CompatNavigationStack {
-            Form {
-                ReaderBookStyleScopeSection {
-                    draftStyle = settings.defaults.data(forKey: settings.styleStorageKey).flatMap { try? JSONDecoder().decode(EPUBReaderStyle.self, from: $0) } ?? EPUBReaderStyle()
-                    draftStyle.fontSize = CGFloat(settings.fontSize)
-                }
-
-                Section {
-                    NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
-                    Picker("阅读主题", selection: $settings.appearanceRaw) {
-                        ForEach(ReaderAppearance.allCases) { option in
-                            Text(option.title).tag(option.rawValue)
-                        }
-                    }
-                } header: { Text("主题与背景") } footer: {
-                    Text("主题与背景即时生效；字体、字号和排版调整点击“应用”后保存。")
-                }
-                Section("分页") {
-                    Toggle("双页模式", isOn: Binding(get: { draftStyle.doublePage == true }, set: { draftStyle.doublePage = $0 }))
-                    Text("每次显示两页；横屏或 iPad 上阅读更舒适。章节末尾不足两页时保留空白页。")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Section("字体") {
-                    NavigationLink {
-                        EPUBFontPicker(selection: $draftStyle.fontFamily) { deletedFamily in
-                            if model.style.fontFamily == deletedFamily {
-                                var fallback = model.style
-                                fallback.fontFamily = nil
-                                model.applyStyle(fallback)
-                            }
-                        }
-                    } label: {
-                        HStack {
-                            Text("字体选择")
-                            Spacer()
-                            Text(draftStyle.fontFamily ?? "书籍默认")
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    HStack {
-                        Text("字号")
-                        Spacer(minLength: 8)
-                        Button { draftStyle.fontSize = max(12, draftStyle.fontSize - 1) } label: {
-                            Text("A−").frame(minWidth: 44, minHeight: 44)
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(draftStyle.fontSize <= 12)
-                        .accessibilityLabel("缩小字号")
-                        Text("\(Int(draftStyle.fontSize))")
-                            .monospacedDigit().frame(minWidth: 32)
-                            .accessibilityLabel("字号 \(Int(draftStyle.fontSize)) 点")
-                        Button { draftStyle.fontSize = min(36, draftStyle.fontSize + 1) } label: {
-                            Text("A+").frame(minWidth: 44, minHeight: 44)
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(draftStyle.fontSize >= 36)
-                        .accessibilityLabel("放大字号")
-                    }
-                }
-                Section("段落") {
-                    styleSlider("行间距", value: $draftStyle.lineSpacing, range: 0...24)
-                    styleSlider("段落间距", value: $draftStyle.paragraphSpacing, range: 0...40)
-                    Picker("首行缩进", selection: Binding(
-                        get: { Int(draftStyle.firstLineIndentEm ?? -1) },
-                        set: { draftStyle.firstLineIndentEm = $0 < 0 ? nil : CGFloat($0) }
-                    )) {
-                        Text("沿用书籍").tag(-1)
-                        Text("无").tag(0)
-                        ForEach(1...4, id: \.self) { value in
-                            Text("\(value) 字宽").tag(value)
-                        }
-                    }
-                }
-                Section("页面边距") {
-                    styleSlider("上", value: $draftStyle.topMargin, range: 0...120)
-                    styleSlider("下", value: $draftStyle.bottomMargin, range: 0...120)
-                    styleSlider("左", value: $draftStyle.leftMargin, range: 0...80)
-                    styleSlider("右", value: $draftStyle.rightMargin, range: 0...80)
-                }
-                Section {
-                    Button("恢复默认样式", systemImage: "arrow.counterclockwise") {
-                        draftStyle = EPUBReaderStyle()
-                    }
-                    Text("恢复后点击右上角“应用”才会重新排版并保存。")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                Section {
-                    Text("点击“应用”后重新分页，并按当前章节的页数比例恢复位置；文字位置可能略有变化。缩进选择“沿用书籍”可恢复原排版。")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                ReaderIssueMarkSection { model.markIssue() }
-            }
-            .navigationTitle("阅读设置")
-            .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .bottom) {
-                HStack {
-                    Button("关闭") { isShowingStyle = false }
-                    Spacer()
-                    Button("应用") { model.applyStyle(draftStyle); isShowingStyle = false }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.isAnimating || model.isLayingOut)
-                }.padding().background(.regularMaterial)
-            }
-        }
-        .compatPresentationDetents(.medium, .large)
-    }
-
-    private func styleSlider(_ label: String, value: Binding<CGFloat>,
-                             range: ClosedRange<CGFloat>) -> some View {
-        HStack {
-            Text(label).frame(width: 68, alignment: .leading)
-            Slider(value: value, in: range, step: 1)
-                .accessibilityLabel(label)
-                .accessibilityValue("\(Int(value.wrappedValue))")
-            Text("\(Int(value.wrappedValue))")
-                .monospacedDigit().frame(width: 30, alignment: .trailing)
-        }
+        ReaderStyleSheet(draftStyle: $draftStyle,
+                         canApply: !(model.isAnimating || model.isLayingOut),
+                         onApply: {
+                             model.applyStyle(draftStyle)
+                             isShowingStyle = false
+                         },
+                         onClose: { isShowingStyle = false },
+                         onDeletedFont: { deletedFamily in
+                             if model.style.fontFamily == deletedFamily {
+                                 var fallback = model.style
+                                 fallback.fontFamily = nil
+                                 model.applyStyle(fallback)
+                             }
+                         },
+                         onMarkIssue: { model.markIssue() })
     }
 
     // MARK: 注脚弹层
@@ -1013,69 +942,6 @@ struct ReaderTOCWordCountHeader: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
             .accessibilityLabel("全书字数 \(BookWordCount.format(total))")
-    }
-}
-
-/// 目录中的一行：按层级缩进；有子项的分组左侧显示展开/折叠按钮，点标题仍跳到该章。
-struct ReaderTOCRow: View {
-    let title: String
-    let level: Int
-    var subtitle: String? = nil
-    let isCurrent: Bool
-    let hasChildren: Bool
-    let isExpanded: Bool
-    /// 目录没有任何分组时不留出展开按钮的位置（TXT、在线小说等扁平目录）。
-    var showsDisclosureColumn = true
-    let toggle: () -> Void
-
-    /// 副标题：本章字数在前，其他说明在后。
-    static func subtitle(wordCount: String?, detail: String?) -> String? {
-        let parts = [wordCount, detail].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-    let select: () -> Void
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Group {
-                if hasChildren {
-                    Button(action: toggle) {
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel(isExpanded ? "折叠\(title)" : "展开\(title)")
-                } else if showsDisclosureColumn {
-                    Color.clear.frame(width: 28, height: 1)
-                }
-            }
-            .padding(.leading, CGFloat(min(level, 6)) * 14)
-            Button(action: select) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(title)
-                            .fontWeight(isCurrent ? .semibold : .regular)
-                            .foregroundStyle(isCurrent ? NoveliaStyle.brandGreen : .primary)
-                        if let subtitle {
-                            Text(subtitle).font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer()
-                    if isCurrent {
-                        Image(systemName: "book.fill")
-                            .font(.caption)
-                            .foregroundStyle(NoveliaStyle.brandGreen)
-                    }
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            .tint(.primary)
-        }
     }
 }
 

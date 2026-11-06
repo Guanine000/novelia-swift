@@ -66,6 +66,8 @@ struct ReaderView: View {
     @State private var chapterError: String?
     @State private var loadAttempt = 0
     @State private var isShowingBookPreferences = false
+    /// 章节目录改为半屏卡片，便于边看正文边跳章。
+    @State private var isShowingChapterDirectory = false
     @State private var isShowingSearch = false
     @State private var selectedSearchHit: BookTextSearch.Hit?
     @State private var readingReturnPoint: ScrollReadingReturnPoint?
@@ -212,11 +214,8 @@ struct ReaderView: View {
                     }
                     Button("本书文字处理") { isShowingBookPreferences = true }
                     NavigationLink("离线章节") { OfflineChapterManagementView(novel: novel) }
-                    NavigationLink {
-                        ChapterDirectoryView(novel: novel, selectedIndex: Binding(get: { chapterIndex }, set: { index in
-                            if index != chapterIndex, readingReturnPoint == nil { readingReturnPoint = .init(chapter: chapterIndex, anchor: visibleAnchor) }
-                            chapterIndex = index
-                        }), appearance: appearance)
+                    Button {
+                        isShowingChapterDirectory = true
                     } label: {
                         Label("章节目录", systemImage: "list.bullet")
                             .foregroundStyle(readerPrimaryText)
@@ -298,7 +297,29 @@ struct ReaderView: View {
                 }, tab: .search)
         }
         .sheet(isPresented: $isShowingBookPreferences) { ReaderBookPreferencesView() }
+        .sheet(isPresented: $isShowingChapterDirectory) {
+            ChapterDirectoryView(novel: novel, selectedIndex: Binding(get: { chapterIndex }, set: { index in
+                if index != chapterIndex, readingReturnPoint == nil { readingReturnPoint = .init(chapter: chapterIndex, anchor: visibleAnchor) }
+                chapterIndex = index
+            }), appearance: appearance)
+        }
         .environment(\.readerSearchRange, selectedSearchHit.flatMap { $0.chapterIndex == chapterIndex ? $0.utf16Offset..<($0.utf16Offset + $0.match.utf16.count) : nil })
+        .toolbar {
+            // 与分页阅读器一致：顶栏同时显示书名与当前章节。
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 1) {
+                    Text(novel.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    if !chapter.title.isEmpty {
+                        Text(chapter.title)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+        }
         .navigationTitle("阅读")
         .navigationBarTitleDisplayMode(.inline)
         .compatToolbar(.hidden, for: .tabBar)
@@ -485,58 +506,63 @@ private struct ChapterDirectoryView: View {
     @EnvironmentObject private var settings: ReaderSettings
     @EnvironmentObject private var auth: AccountAuthStore
     @State private var cachedIDs = Set<String>()
+    @State private var query = ""
+    @State private var isReversed = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var systemColorScheme
     let novel: Novel
     @Binding var selectedIndex: Int
     let appearance: ReaderAppearance
 
+    /// 搜索过滤后的章节；倒序只影响显示顺序，跳转仍用原始序号。
+    private var rows: [(index: Int, chapter: NovelChapter)] {
+        let all = novel.chapters.enumerated().map { (index: $0.offset, chapter: $0.element) }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filtered = trimmed.isEmpty ? all : all.filter { $0.chapter.title.localizedCaseInsensitiveContains(trimmed) }
+        return isReversed ? Array(filtered.reversed()) : filtered
+    }
+
     var body: some View {
-        ScrollViewReader { proxy in
-            List(Array(novel.chapters.enumerated()), id: \.element.id) { index, chapter in
-                Button {
-                    selectedIndex = index
-                    dismiss()
-                } label: {
-                    HStack(spacing: 12) {
-                        Text("\(index + 1)")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(appearance.secondaryText(system: systemColorScheme))
-                            .frame(minWidth: 32, alignment: .trailing)
-                        VStack(alignment: .leading) {
-                        Text(chapter.title)
-                            .font(.system(size: 14, weight: index == selectedIndex ? .semibold : .regular))
-                            .foregroundStyle(appearance.primaryText(system: systemColorScheme))
-                            .lineLimit(2)
-                        if cachedIDs.contains(chapter.id) { Text("已缓存 · 可离线阅读").font(.caption2).foregroundStyle(.secondary) }
-                        }
-                        Spacer(minLength: 8)
-                        if index == selectedIndex {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(NoveliaStyle.brandGreen)
-                        }
+        let rows = self.rows
+        CompatNavigationStack {
+            ScrollViewReader { proxy in
+                List(rows, id: \.chapter.id) { row in
+                    let chapter = row.chapter
+                    ReaderTOCRow(title: chapter.title, level: 0,
+                                 subtitle: cachedIDs.contains(chapter.id) ? "已缓存，可离线阅读" : nil,
+                                 isCurrent: row.index == selectedIndex,
+                                 showsDisclosureColumn: false,
+                                 titleColor: appearance.primaryText(system: systemColorScheme)) {
+                        selectedIndex = row.index
+                        dismiss()
                     }
-                    .contentShape(Rectangle())
+                    .listRowBackground(appearance.card(system: systemColorScheme))
                 }
-                .id(chapter.id)
-                .buttonStyle(.plain)
-                .listRowBackground(appearance.card(system: systemColorScheme))
+                .compatScrollContentBackgroundHidden()
+                .background(appearance.background(system: systemColorScheme).ignoresSafeArea())
+                .task(id: selectedIndex) {
+                    guard novel.chapters.indices.contains(selectedIndex) else { return }
+                    let chapterID = novel.chapters[selectedIndex].id
+                    // 等待新打开的 List 完成首次布局，再定位惰性加载的行。
+                    do { try await Task.sleep(nanoseconds: 100_000_000) }
+                    catch { return }
+                    guard !Task.isCancelled else { return }
+                    proxy.scrollTo(chapterID, anchor: .center)
+                }
+                .task { cachedIDs = Set((try? await settings.offlineChapters.entries(account: auth.offlineAccountScope))?.filter { $0.bookID == novel.id }.map { $0.chapter.id } ?? []) }
+                .navigationTitle("章节目录")
+                .navigationBarTitleDisplayMode(.inline)
+                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索章节标题")
+                .toolbar {
+                    ToolbarItem(placement: .compatTopBarLeading) {
+                        Button(isReversed ? "正序" : "倒序") { isReversed.toggle() }
+                            .accessibilityLabel(isReversed ? "切换为从第一章开始" : "切换为从最后一章开始")
+                    }
+                    ToolbarItem(placement: .compatTopBarTrailing) {
+                        Button("完成") { dismiss() }
+                    }
+                }
             }
-            .compatScrollContentBackgroundHidden()
-            .background(appearance.background(system: systemColorScheme).ignoresSafeArea())
-            .task(id: selectedIndex) {
-                guard novel.chapters.indices.contains(selectedIndex) else { return }
-                let chapterID = novel.chapters[selectedIndex].id
-                // 等待新打开的 List 完成首次布局，再定位惰性加载的行。
-                do { try await Task.sleep(nanoseconds: 100_000_000) }
-                catch { return }
-                guard !Task.isCancelled else { return }
-                proxy.scrollTo(chapterID, anchor: .center)
-            }
-            .task { cachedIDs = Set((try? await settings.offlineChapters.entries(account: auth.offlineAccountScope))?.filter { $0.bookID == novel.id }.map { $0.chapter.id } ?? []) }
-            .navigationTitle("章节目录")
-            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }

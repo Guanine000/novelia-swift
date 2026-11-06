@@ -1014,6 +1014,17 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         return "\(position) / \(positionCount)"
     }
 
+    /// 当前章内进度（Locator progression），供底栏切换「本章进度」。
+    var chapterProgressDescription: String {
+        guard let progression = locator?.locations.progression else { return "本章 —" }
+        return "本章 \(Int((progression * 100).rounded()))%"
+    }
+
+    /// 全书进度百分比，供底栏切换「全书进度」。
+    var bookProgressDescription: String {
+        "全书 \(Int((overallProgress * 100).rounded()))%"
+    }
+
     var currentChapterTitle: String {
         if let index = currentTOCIndex, toc.indices.contains(index) { return toc[index].title }
         return locator?.title ?? bookTitle

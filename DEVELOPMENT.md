@@ -134,7 +134,7 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 
 社区使用 `ForumStore` 持有列表/分类/查询状态，帖子、评论和编辑页面消费 `ForumService`。Core 的 `ForumMarkdown.swift` 提供 Markdown 相关处理与链接路由，`ReplyPaging.swift` 提供论坛评论与小说书评共用的“加载更多回复”分页，界面层负责渲染、展开剧透等交互。修改富文本或链接时保留配置来源检查、相对链接处理与内部导航，不在渲染组件中建立另一套 API 请求。
 
-设置页面按账号、内容、阅读统计、阅读、界面、同步、关于及高级分组，App 主题色位于“界面”；分组只改变展示，沿用已有绑定与存储键。书库菜单复用既有导入、系列、多选、排序及书籍操作处理，分页阅读设置的字号加减只更新 `draftStyle`，由原有“应用”入口保存与重排。
+设置页面按账号、阅读数据、阅读、界面、同步、关于与高级分组，App 主题色位于“界面”；“关于与高级”里另有“显示目录诊断信息”开关，分组只改变展示，沿用已有绑定与存储键。书库菜单复用既有导入、系列、多选、排序及书籍操作处理，分页阅读设置的字号加减只更新 `draftStyle`，由原有“应用”入口保存与重排。
 
 设置通过 `SettingsKeys.swift` 中的已有键及对应状态对象保存偏好。背景、字体、标签和分章规则有各自的存储/适配；设置界面负责用户操作，阅读器负责消费结果，同步通过 App 适配获取可同步部分。新增设置时明确默认值、已保存值、立即生效范围和是否同步。
 
@@ -250,6 +250,10 @@ Readium 分页使用两层横向滚动视图：章节 WebView 自己的滚动视
 在线阅读沿用原文、译文、双语及译源选择，保留段落顺序、次要文字样式与缺译提示。进度、书签和服务端历史仍为章节级；显示模式或译源改变时从该章开头恢复，不能把一份译文的字符偏移直接套用到其他正文。正文 HTTP/HTTPS 链接通过既有打开方式处理，EPUB 包内链接另行解析。
 
 Resource 每次请求重新创建，避免将一次加载失败固化为缓存结果。EPUB 文件在创建 Readium Publication 前必须先走 `EPUBContainer.open` 与 `validateForReadium()`（校验 spine 完整性、章节条目 CRC 与解压长度），失败直接进入 `.failed`；Readium navigator 在加载期或运行期报资源失败时用 `didFailToLoadResourceAt` 转失败页并保留「重新打开 / 复制错误说明 / 关闭阅读器」，不能停在加载态。`EPUBContainer.chapterHTML(at:)` 与 `validateForReadium()` 都不能解压图片，避免打开变慢。重试可以重建 Readium 导航器并恢复失败位置；章节请求、位置换算和预取保持取消检查，不能让旧请求覆盖当前章节，也不能为翻页阻塞主线程。
+
+### 阅读器界面共用组件
+
+阅读器界面中跨引擎的部分集中在 `iOSApp/Features/Reader/ReaderChromeSupport.swift`：`ReaderPositionLabel` 负责底栏位置的三态切换（`reader.positionStyle` 偏好），`ReaderTOCRow` 是 EPUB、TXT 与在线小说共用的目录行（层级缩进、当前章竖条与“当前”标签、可选展开列与副标题），`ReaderStyleSheet` 是两个分页引擎共用的“阅读设置”面板（只编辑草稿样式，能否立即重排由调用方引擎状态决定），`ReaderDebugOptions.showsTOCDiagnosticsKey` 控制目录诊断说明与 `spine N` 副标题（默认关闭）。调整这些组件时同时核对默认引擎、Readium、TXT 滚动与在线小说分页，不要新增第三套样式或入口。在线小说章节目录以半屏卡片呈现，搜索与倒序只影响显示，跳转仍使用原始章节序号。两种分页引擎的阅读页顶栏统一为“书名＋当前章节”两行，底栏分两行（位置、进度条与百分比；电量与时间），工具栏隐藏时保留位置与百分比；拖动进度条只预览目标位置，松手才 `seek`，预览章节名依赖 `EPUBReaderModel.chapterTitle(forProgress:)`，Readium 只有全书百分比。底栏默认只显示页码（`pageDescription`），开启「显示目录诊断信息」后才用 `locationDescription` 附带 spine 与 gen 编号。
 
 ### 书签与书内搜索
 

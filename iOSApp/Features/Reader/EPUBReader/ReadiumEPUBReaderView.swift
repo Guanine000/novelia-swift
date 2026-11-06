@@ -31,6 +31,8 @@ private struct ReadiumEPUBReaderViewContent: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var showChrome = true
     @State private var isShowingTOC = false
+    /// 目录诊断说明默认隐藏，在设置里打开调试选项后才显示。
+    @AppStorage(ReaderDebugOptions.showsTOCDiagnosticsKey) private var showsTOCDiagnostics = false
     /// 目录中已展开的分组（条目序号）；每次打开目录时重置为只展开当前章节所在分组。
     @State private var tocExpanded = Set<Int>()
     @State private var tocTab = ReaderTOCTab.contents
@@ -90,12 +92,20 @@ private struct ReadiumEPUBReaderViewContent: View {
                         .id(model.navigatorRevision)
                         // 只延伸到上下边缘；横屏时左右仍避开刘海。
                         .ignoresSafeArea(edges: .vertical)
+                        // 底栏不再放上一页／下一页按钮，保留 VoiceOver 的翻页动作。
+                        .accessibilityAdjustableAction { direction in
+                            switch direction {
+                            case .increment: model.goForward()
+                            case .decrement: model.goBackward()
+                            @unknown default: break
+                            }
+                        }
                 }
             }
             .overlay(alignment: .top) {
-                VStack(spacing: 0) {
-                    if showChrome { topBar }
-                    chapterHeader
+                if showChrome {
+                    topBar
+                        .transition(.opacity)
                 }
             }
             .overlay(alignment: .bottom) {
@@ -204,10 +214,23 @@ private struct ReadiumEPUBReaderViewContent: View {
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("返回")
-            Text(model.bookTitle.isEmpty ? "阅读器" : model.bookTitle)
-                .font(.system(size: 14, weight: .medium))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity)
+            VStack(spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(model.bookTitle.isEmpty ? "阅读器" : model.bookTitle)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    // 在线分页仍需区分实验引擎，标识随章节名一起放进顶栏。
+                    if textBook != nil { engineBadge }
+                }
+                if !model.currentChapterTitle.isEmpty {
+                    Text(model.currentChapterTitle)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .combine)
             Menu {
                 if textBook == nil { Text("Readium 阅读引擎") }
                 if let accessory { accessory }
@@ -232,7 +255,6 @@ private struct ReadiumEPUBReaderViewContent: View {
                 if model.readingReturnPoint != nil {
                     Button("回到刚才阅读处") { model.returnToReading() }
                 }
-                Button("书内搜索") { bookmarksTab = .search; isShowingBookmarks = true }
                 Button { isShowingBookPreferences = true } label: { Label("本书文字处理", systemImage: "slider.horizontal.3") }
                 Button {
                     draftStyle = model.style
@@ -262,43 +284,21 @@ private struct ReadiumEPUBReaderViewContent: View {
             .accessibilityLabel("Readium 实验引擎")
     }
 
-    private var chapterHeader: some View {
-        HStack {
-            Text(model.currentChapterTitle)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            // 在线分页还需容纳滚动切换及译源菜单，标识放到章节栏以免挤出控件。
-            if textBook != nil { engineBadge }
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 6)
-        .padding(.bottom, 4)
-        .allowsHitTesting(false)
-    }
-
     // MARK: 底栏
 
     private var bottomBar: some View {
         VStack(spacing: 8) {
             if showChrome {
-                HStack {
-                    Button { model.goBackward() } label: { Image(systemName: "chevron.left") }
-                        .accessibilityLabel("上一页")
-                    Spacer()
-                    Text(model.locationDescription)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button { model.goForward() } label: { Image(systemName: "chevron.right") }
-                        .accessibilityLabel("下一页")
-                }
-                .disabled(model.status != .ready)
+                positionAndScrub
+                    .transition(.opacity)
             }
             HStack {
                 Text(batteryLevel >= 0 ? "电量 \(Int((batteryLevel * 100).rounded()))%" : "电量 —")
                 Spacer()
+                // 工具栏隐藏时也保留进度百分比，兼顾沉浸阅读与位置感知。
+                if !showChrome {
+                    Text(FractionText.percent(model.overallProgress))
+                }
                 TimelineView(.periodic(from: .now, by: 60)) { context in
                     Text(context.date, format: .dateTime.hour().minute())
                 }
@@ -306,36 +306,66 @@ private struct ReadiumEPUBReaderViewContent: View {
             .font(.system(size: 11, design: .monospaced))
             .foregroundStyle(.secondary)
             .allowsHitTesting(false)
-            if showChrome {
-                HStack(spacing: 10) {
-                    Slider(value: Binding(
-                        get: { isScrubbing ? scrubProgress : model.overallProgress },
-                        set: { scrubProgress = $0 }
-                    ), in: 0...1, onEditingChanged: { editing in
-                        if editing {
-                            scrubProgress = model.overallProgress
-                            isScrubbing = true
-                        } else {
-                            isScrubbing = false
-                            model.seek(to: scrubProgress)
-                        }
-                    })
-                    .tint(NoveliaStyle.brandGreen)
-                    .disabled(model.status != .ready)
-                    .accessibilityLabel("阅读进度")
-                    Text("\(Int((isScrubbing ? scrubProgress : model.overallProgress) * 100))%")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(minWidth: 36, alignment: .trailing)
-                }
-            }
         }
         .padding(.horizontal, 18)
-        .padding(.top, showChrome ? 10 : 4)
+        .padding(.top, showChrome ? 8 : 4)
         .padding(.bottom, 10)
         .background {
             if showChrome { Rectangle().fill(.thinMaterial) }
         }
+        .animation(.easeInOut(duration: 0.18), value: showChrome)
+    }
+
+    /// 位置、进度条与百分比。拆成独立视图，避免 `body` 的类型推导过重。
+    private var positionAndScrub: some View {
+        VStack(spacing: 4) {
+            if isScrubbing {
+                Text(scrubPreviewText)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(.thinMaterial, in: Capsule())
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+            // 位置、进度与翻页都收在一行；上一页／下一页交给手势与 VoiceOver 动作。
+            HStack(spacing: 10) {
+                ReaderPositionLabel(texts: [
+                    .chapterPage: model.locationDescription,
+                    .chapterProgress: model.chapterProgressDescription,
+                    .bookProgress: model.bookProgressDescription
+                ])
+                Slider(value: scrubBinding, in: 0...1, onEditingChanged: handleScrub)
+                    .tint(NoveliaStyle.brandGreen)
+                    .disabled(model.status != .ready)
+                    .accessibilityLabel("阅读进度")
+                Text(FractionText.percent(isScrubbing ? scrubProgress : model.overallProgress))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 36, alignment: .trailing)
+            }
+            .disabled(model.status != .ready)
+        }
+    }
+
+    private var scrubBinding: Binding<Double> {
+        Binding(get: { isScrubbing ? scrubProgress : model.overallProgress },
+                set: { scrubProgress = $0 })
+    }
+
+    private func handleScrub(editing: Bool) {
+        if editing {
+            scrubProgress = model.overallProgress
+            withAnimation(.easeInOut(duration: 0.15)) { isScrubbing = true }
+        } else {
+            withAnimation(.easeInOut(duration: 0.15)) { isScrubbing = false }
+            model.seek(to: scrubProgress)
+        }
+    }
+
+    /// 拖动进度条时预览目标位置。Readium 的章节定位需要按进展异步查询，这里只给全书百分比。
+    private var scrubPreviewText: String {
+        "全书 \(FractionText.percent(isScrubbing ? scrubProgress : model.overallProgress))"
     }
 
     // MARK: 目录
@@ -369,7 +399,7 @@ private struct ReadiumEPUBReaderViewContent: View {
     private var tocList: some View {
         ScrollViewReader { proxy in
             List {
-                if !model.tocDiagnosticMessages.isEmpty {
+                if showsTOCDiagnostics, !model.tocDiagnosticMessages.isEmpty {
                 Section {
                     DisclosureGroup(isExpanded: $model.isTOCDiagnosticsExpanded) {
                         VStack(alignment: .leading, spacing: 12) {
@@ -434,118 +464,21 @@ private struct ReadiumEPUBReaderViewContent: View {
     // MARK: 阅读设置
 
     private var styleSheet: some View {
-        CompatNavigationStack {
-            Form {
-                ReaderBookStyleScopeSection {
-                    draftStyle = settings.defaults.data(forKey: settings.styleStorageKey).flatMap { try? JSONDecoder().decode(EPUBReaderStyle.self, from: $0) } ?? EPUBReaderStyle()
-                    draftStyle.fontSize = CGFloat(settings.fontSize)
-                }
-
-                Section {
-                    NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
-                    Picker("阅读主题", selection: $settings.appearanceRaw) {
-                        ForEach(ReaderAppearance.allCases) { option in
-                            Text(option.title).tag(option.rawValue)
-                        }
-                    }
-                } header: { Text("主题与背景") } footer: {
-                    Text("主题与背景即时生效；字体、字号和排版调整点击“应用”后保存。")
-                }
-                Section("分页") {
-                    Toggle("双页模式", isOn: Binding(get: { draftStyle.doublePage == true }, set: { draftStyle.doublePage = $0 }))
-                }
-                Section("字体") {
-                    NavigationLink {
-                        EPUBFontPicker(selection: $draftStyle.fontFamily) { deletedFamily in
-                            if model.style.fontFamily == deletedFamily {
-                                var fallback = model.style
-                                fallback.fontFamily = nil
-                                model.applyStyle(fallback)
-                            }
-                        }
-                    } label: {
-                        HStack {
-                            Text("字体选择")
-                            Spacer()
-                            Text(draftStyle.fontFamily ?? "书籍默认")
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    HStack {
-                        Text("字号")
-                        Spacer(minLength: 8)
-                        Button { draftStyle.fontSize = max(12, draftStyle.fontSize - 1) } label: {
-                            Text("A−").frame(minWidth: 44, minHeight: 44)
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(draftStyle.fontSize <= 12)
-                        .accessibilityLabel("缩小字号")
-                        Text("\(Int(draftStyle.fontSize))")
-                            .monospacedDigit().frame(minWidth: 32)
-                            .accessibilityLabel("字号 \(Int(draftStyle.fontSize)) 点")
-                        Button { draftStyle.fontSize = min(36, draftStyle.fontSize + 1) } label: {
-                            Text("A+").frame(minWidth: 44, minHeight: 44)
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(draftStyle.fontSize >= 36)
-                        .accessibilityLabel("放大字号")
-                    }
-                }
-                Section("段落") {
-                    styleSlider("行间距", value: $draftStyle.lineSpacing, range: 0...24)
-                    styleSlider("段落间距", value: $draftStyle.paragraphSpacing, range: 0...40)
-                    Picker("首行缩进", selection: Binding(
-                        get: { Int(draftStyle.firstLineIndentEm ?? -1) },
-                        set: { draftStyle.firstLineIndentEm = $0 < 0 ? nil : CGFloat($0) }
-                    )) {
-                        Text("沿用书籍").tag(-1)
-                        Text("无").tag(0)
-                        ForEach(1...4, id: \.self) { value in
-                            Text("\(value) 字宽").tag(value)
-                        }
-                    }
-                }
-                Section("页面边距") {
-                    styleSlider("上", value: $draftStyle.topMargin, range: 0...120)
-                    styleSlider("下", value: $draftStyle.bottomMargin, range: 0...120)
-                    styleSlider("左", value: $draftStyle.leftMargin, range: 0...80)
-                    styleSlider("右", value: $draftStyle.rightMargin, range: 0...80)
-                }
-                Section {
-                    Button("恢复默认样式", systemImage: "arrow.counterclockwise") {
-                        draftStyle = EPUBReaderStyle()
-                    }
-                    Text("行间距、段落间距、首行缩进设为非默认值时会覆盖书籍原有的段落样式；全部保持默认则沿用书籍排版。左右边距取两者平均值。")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                ReaderIssueMarkSection { model.markIssue() }
-            }
-            .navigationTitle("阅读设置")
-            .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .bottom) {
-                HStack {
-                    Button("关闭") { isShowingStyle = false }
-                    Spacer()
-                    Button("应用") { model.applyStyle(draftStyle); isShowingStyle = false }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.status != .ready)
-                }.padding().background(.regularMaterial)
-            }
-        }
-        .compatPresentationDetents(.medium, .large)
-    }
-
-    private func styleSlider(_ label: String, value: Binding<CGFloat>,
-                             range: ClosedRange<CGFloat>) -> some View {
-        HStack {
-            Text(label).frame(width: 68, alignment: .leading)
-            Slider(value: value, in: range, step: 1)
-                .accessibilityLabel(label)
-                .accessibilityValue("\(Int(value.wrappedValue))")
-            Text("\(Int(value.wrappedValue))")
-                .monospacedDigit().frame(width: 30, alignment: .trailing)
-        }
+        ReaderStyleSheet(draftStyle: $draftStyle,
+                         canApply: model.status == .ready,
+                         onApply: {
+                             model.applyStyle(draftStyle)
+                             isShowingStyle = false
+                         },
+                         onClose: { isShowingStyle = false },
+                         onDeletedFont: { deletedFamily in
+                             if model.style.fontFamily == deletedFamily {
+                                 var fallback = model.style
+                                 fallback.fontFamily = nil
+                                 model.applyStyle(fallback)
+                             }
+                         },
+                         onMarkIssue: { model.markIssue() })
     }
 
     // MARK: 注脚

@@ -1,6 +1,12 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// 书库书籍的呈现方式。列表是默认视图（支持拖动多选），网格只改变浏览方式。
+enum LibraryBooksLayout: String, CaseIterable {
+    case list
+    case grid
+}
+
 // MARK: - 书库（底部导航第一项）
 
 /// 书库：导入和下载的书、系列、统一搜索与排序；点击整行打开阅读。
@@ -27,6 +33,8 @@ struct LibraryView: View {
     @State private var syncTask: Task<Void, Never>?
     @State private var hasTriggeredSync = false
     @State private var isShowingSyncProgress = false
+    /// 列表与封面网格之间切换；选择记在偏好里，下次打开书库沿用。
+    @AppStorage("library.booksLayout") private var booksLayout: LibraryBooksLayout = .list
 
     private var allBooks: [LibraryBook] {
         // 只给哈希／孤立状态清理完整书库，不能把尚未读取的另一库误判为已删除。
@@ -108,11 +116,19 @@ struct LibraryView: View {
                             LibrarySortSummary(options: sortOptions) { state.setSortOptions($0, scope: nil) }
                         }
                         .libraryListRow()
-                        ForEach(sorted(listedBooks, options: sortOptions)) { book in
-                            LibraryBookRow(book: book, actions: bookActions, open: open,
-                                           isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
-                                           isSelected: bookActions.selectedKeys.contains(book.key))
+                        let booksToShow = sorted(listedBooks, options: sortOptions)
+                        if booksLayout == .grid {
+                            LibraryBooksGrid(books: booksToShow, actions: bookActions, open: open,
+                                             isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
+                                             selectedKeys: bookActions.selectedKeys)
                                 .libraryListRow()
+                        } else {
+                            ForEach(booksToShow) { book in
+                                LibraryBookRow(book: book, actions: bookActions, open: open,
+                                               isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
+                                               isSelected: bookActions.selectedKeys.contains(book.key))
+                                    .libraryListRow()
+                            }
                         }
                     }
                 case .series:
@@ -306,6 +322,11 @@ struct LibraryView: View {
                     Label("新建系列", systemImage: "rectangle.stack.badge.plus")
                 }
                 Divider()
+                Picker("书库布局", selection: $booksLayout) {
+                    Label("列表视图", systemImage: "list.bullet").tag(LibraryBooksLayout.list)
+                    Label("封面网格", systemImage: "square.grid.3x3").tag(LibraryBooksLayout.grid)
+                }
+                Divider()
                 LibrarySortMenu(options: sortOptions) { state.setSortOptions($0, scope: nil) }.menuContent
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -485,7 +506,7 @@ struct LibrarySeriesDetailView: View {
                     CompatSearchUnavailable(text: query).libraryListRow()
                 } else {
                     ForEach(visible) { book in
-                        LibraryBookRow(book: book, showsSeries: false, actions: bookActions, open: open,
+                        LibraryBookRow(book: book, actions: bookActions, open: open,
                                        isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
                                        isSelected: bookActions.selectedKeys.contains(book.key))
                             .libraryListRow()
@@ -720,6 +741,8 @@ final class LibraryBookActions: ObservableObject {
     @Published var editingBook: LibraryBook?
     @Published var associatingBook: LibraryBook?
     @Published var wenkuDetail: WenkuNovelOutline?
+    /// 列表行只保留核心信息，其余元数据在详细信息里查看。
+    @Published var detailBook: LibraryBook?
     /// 下载完成的书，页面据此打开阅读。
     @Published var downloadedBookKey: String?
     /// 多选：长按书籍进入，点击切换选择。
@@ -934,6 +957,9 @@ struct LibraryBookActionDialogs: ViewModifier {
                 if case .wenku(let record) = book.origin {
                     LibraryWenkuAssociationEditor(book: book, record: record)
                 }
+            }
+            .sheet(item: $actions.detailBook) { book in
+                LibraryBookDetailView(book: book)
             }
             .sheet(item: $actions.shareArchive, onDismiss: { actions.shareArchive = nil }) { archive in
                 LibraryArchiveShareSheet(url: archive.url)
@@ -1240,8 +1266,6 @@ struct LibraryBookActionDialogs: ViewModifier {
 struct LibraryBookRow: View {
     @EnvironmentObject private var dragFrames: LibrarySelectionFrames
     let book: LibraryBook
-    /// 系列详情中不重复显示系列名。
-    var showsSeries = true
     /// 只用于触发弹窗，不观察其变化，弹窗状态改变时列表行不必重算。
     let actions: LibraryBookActions
     let open: (LibraryBook) -> Void
@@ -1257,7 +1281,7 @@ struct LibraryBookRow: View {
     var body: some View {
         let hash = state.hashByBook[book.key] ?? book.cloudFileHash
         HStack(alignment: .center, spacing: 4) {
-            LibraryBookRowContent(book: book, status: state.status(for: book), seriesName: showsSeries ? state.seriesName(for: book) : nil,
+            LibraryBookRowContent(book: book, status: state.status(for: book),
                                   wordCount: wordCounts.total(hash: hash))
                 .contentShape(Rectangle())
                 // 点击负责打开或切换选择；页面的长按桥接负责连续拖选。
@@ -1304,7 +1328,25 @@ struct LibraryBookRow: View {
 
     @ViewBuilder
     private func menuItems(for book: LibraryBook) -> some View {
+        LibraryBookMenuItems(book: book, actions: actions, open: open)
+    }
+}
+
+/// 书籍的“更多”操作：列表行的菜单与封面网格的长按菜单共用同一套项目。
+struct LibraryBookMenuItems: View {
+    @EnvironmentObject private var webDownloads: WebNovelDownloadStore
+    @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
+    @EnvironmentObject private var state: LibraryStateStore
+    let book: LibraryBook
+    let actions: LibraryBookActions
+    let open: (LibraryBook) -> Void
+
+    var body: some View {
         let currentSeries = state.series.seriesID(forBook: book.key)
+        Button { actions.detailBook = book } label: {
+            Label("显示详细信息", systemImage: "info.circle")
+        }
+        Divider()
         if case .wenku(let record) = book.origin, let parent = record.parentWenkuID {
             Button {
                 actions.wenkuDetail = WenkuNovelOutline(id: parent, title: record.parentWenkuTitle ?? book.title)
@@ -1408,10 +1450,90 @@ struct LibraryBookRow: View {
     }
 }
 
+/// 书库封面网格：三列自适应封面，点击打开（多选时切换选择），长按显示与列表相同的操作菜单。
+struct LibraryBooksGrid: View {
+    let books: [LibraryBook]
+    let actions: LibraryBookActions
+    let open: (LibraryBook) -> Void
+    var isSelecting = false
+    var selectedKeys = Set<String>()
+
+    private let columns = [GridItem(.adaptive(minimum: 96, maximum: 140), spacing: 14)]
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+            ForEach(books) { book in
+                LibraryBookGridCell(book: book, actions: actions, open: open,
+                                    isSelecting: isSelecting,
+                                    isSelected: selectedKeys.contains(book.key))
+            }
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+private struct LibraryBookGridCell: View {
+    @EnvironmentObject private var state: LibraryStateStore
+    let book: LibraryBook
+    let actions: LibraryBookActions
+    let open: (LibraryBook) -> Void
+    var isSelecting = false
+    var isSelected = false
+
+    var body: some View {
+        let status = state.status(for: book)
+        VStack(alignment: .leading, spacing: 5) {
+            ZStack(alignment: .topTrailing) {
+                LibraryCoverView(book: book, width: 96, height: 134)
+                    .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 2)
+                if isSelecting {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 20))
+                        .foregroundStyle(isSelected ? NoveliaStyle.brandGreen : NoveliaStyle.muted)
+                        .background(Circle().fill(NoveliaStyle.paper))
+                        .offset(x: 4, y: -4)
+                } else if book.cloudFileMissing {
+                    Image(systemName: "exclamationmark.icloud")
+                        .foregroundStyle(.orange)
+                        .padding(4)
+                        .background(Circle().fill(NoveliaStyle.paper))
+                        .offset(x: 4, y: -4)
+                        .accessibilityLabel("云端文件缺失")
+                } else if book.isCloudOnly {
+                    Image(systemName: "icloud")
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .padding(4)
+                        .background(Circle().fill(NoveliaStyle.paper))
+                        .offset(x: 4, y: -4)
+                        .accessibilityLabel("未下载")
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            Text(book.title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(NoveliaStyle.ink)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            Text(status.detail)
+                .font(.system(size: 10))
+                .foregroundStyle(status.isUnread ? NoveliaStyle.muted : NoveliaStyle.brandGreen)
+                .lineLimit(1)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { if isSelecting { actions.toggleSelection(book) } else { open(book) } }
+        .contextMenu { LibraryBookMenuItems(book: book, actions: actions, open: open) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(book.title)，\(book.author)，\(status.detail)")
+        .accessibilityHint(isSelecting ? "切换选择" : "打开阅读")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("library-book-\(book.key)")
+    }
+}
+
 private struct LibraryBookRowContent: View {
     let book: LibraryBook
     let status: LibraryReadingStatus
-    let seriesName: String?
     /// 全书字数；尚未统计或无法统计时不显示。
     let wordCount: Int?
 
@@ -1428,9 +1550,6 @@ private struct LibraryBookRowContent: View {
                     .font(.system(size: 12))
                     .foregroundStyle(NoveliaStyle.muted)
                     .lineLimit(1)
-                if case .wenku(let record) = book.origin, let parent = record.parentWenkuTitle, let volume = record.volumeID {
-                    Text("\(parent) · \(volume)").font(.caption2).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
-                }
                 HStack(spacing: 6) {
                     if book.cloudFileMissing {
                         Image(systemName: "exclamationmark.icloud")
@@ -1447,8 +1566,7 @@ private struct LibraryBookRowContent: View {
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(NoveliaStyle.brandGreen.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                    Text(([book.categoryTitle] + [wordCount.map(BookWordCount.format), seriesName.map { "系列：\($0)" }].compactMap { $0 })
-                        .joined(separator: " · "))
+                    Text(wordCount.map(BookWordCount.format) ?? "")
                         .lineLimit(1)
                     Spacer(minLength: 4)
                     Text(status.detail)
@@ -1731,5 +1849,94 @@ struct LibraryReaderDestination: View {
         } else {
             EPUBReaderHost(initialURL: book.fileURL, statisticsID: book.key, statisticsTitle: book.title)
         }
+    }
+}
+
+// MARK: - 书籍详细信息
+
+/// 书库列表只保留书名、作者、格式与字数；来源、系列、文库分卷、阅读状态和文件信息集中在这里。
+struct LibraryBookDetailView: View {
+    let book: LibraryBook
+
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var state: LibraryStateStore
+    @EnvironmentObject private var wordCounts: LibraryWordCountStore
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter
+    }()
+
+    private var hash: String? { state.hashByBook[book.key] ?? book.cloudFileHash }
+
+    var body: some View {
+        let status = state.status(for: book)
+        CompatNavigationStack {
+            Form {
+                Section {
+                    HStack(alignment: .top, spacing: 14) {
+                        LibraryCoverView(book: book, width: 72, height: 100)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(book.title)
+                                .font(.headline)
+                                .foregroundStyle(NoveliaStyle.ink)
+                            Text(book.author.isEmpty ? "未知作者" : book.author)
+                                .font(.subheadline)
+                                .foregroundStyle(NoveliaStyle.muted)
+                            Text(book.format.title)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(NoveliaStyle.brandGreen)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(NoveliaStyle.brandGreen.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.vertical, 4)
+                }
+                Section("书籍") {
+                    CompatLabeledContent("来源", value: book.categoryTitle)
+                    if case .wenku(let record) = book.origin {
+                        CompatLabeledContent("文库作品", value: record.parentWenkuTitle ?? "未关联")
+                        CompatLabeledContent("分卷", value: record.volumeID ?? "未关联")
+                    }
+                    CompatLabeledContent("系列", value: state.seriesName(for: book) ?? "未分组")
+                    CompatLabeledContent("字数", value: wordCounts.total(hash: hash).map(BookWordCount.format) ?? "正在统计…")
+                }
+                Section("阅读") {
+                    CompatLabeledContent("状态", value: status.detail)
+                    CompatLabeledContent("最近阅读", value: status.lastReadAt.map { Self.dateFormatter.string(from: $0) } ?? "尚未阅读")
+                }
+                Section("文件") {
+                    CompatLabeledContent("导入时间", value: Self.dateFormatter.string(from: book.importedAt))
+                    CompatLabeledContent("本机文件", value: localFileText)
+                    CompatLabeledContent("云端", value: cloudStateText)
+                }
+            }
+            .navigationTitle("详细信息")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+            .task {
+                if let hash { wordCounts.request(book, hash: hash) }
+            }
+        }
+    }
+
+    private var localFileText: String {
+        guard !book.isCloudOnly else { return "仅云端，未下载" }
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: book.fileURL.path),
+              let size = attributes[.size] as? Int64 else { return "—" }
+        return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+    }
+
+    private var cloudStateText: String {
+        if book.cloudFileMissing { return "云端文件已移除" }
+        if book.isCloudOnly { return "仅云端，未下载" }
+        return book.cloudFileHash == nil ? "仅本机" : "本机与云端"
     }
 }

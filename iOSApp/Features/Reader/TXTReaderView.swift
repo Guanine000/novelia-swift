@@ -125,6 +125,20 @@ struct DownloadedWebNovelTXTReader: View {
         .navigationBarTitleDisplayMode(.inline)
         .compatToolbar(.hidden, for: .tabBar)
         .toolbar {
+            // 与分页阅读器一致：顶栏同时显示书名与当前章节。
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    if let chapterTitle = chapters?[chapterIndex].title, !chapterTitle.isEmpty {
+                        Text(chapterTitle)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
             ToolbarItem(placement: .compatTopBarTrailing) {
                 Menu {
                 Button("书内搜索") { isShowingSearch = true }
@@ -186,29 +200,13 @@ struct DownloadedWebNovelTXTReader: View {
                         }
                         if let chapters {
                             ForEach(chapters.indices, id: \.self) { index in
-                                Button {
+                                ReaderTOCRow(title: chapters[index].title, level: 0,
+                                             subtitle: ReaderTOCRow.subtitle(wordCount: tocWordCounts?.entry(index),
+                                                                             detail: chapters[index].volumeTitle),
+                                             isCurrent: index == chapterIndex,
+                                             showsDisclosureColumn: false) {
                                     chapterIndex = index
                                     isShowingContents = false
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        if let volume = chapters[index].volumeTitle {
-                                            Text(volume).font(.caption).foregroundStyle(.secondary)
-                                        }
-                                        HStack(spacing: 8) {
-                                            if index == chapterIndex {
-                                                Capsule().fill(NoveliaStyle.brandGreen).frame(width: 3, height: 20)
-                                            }
-                                            Text(chapters[index].title)
-                                                .foregroundStyle(index == chapterIndex ? NoveliaStyle.brandGreen : .primary)
-                                            if index == chapterIndex {
-                                                Text("当前").font(.caption).foregroundStyle(NoveliaStyle.brandGreen)
-                                            }
-                                        }
-                                        if let count = tocWordCounts?.entry(index) {
-                                            Text(count).font(.caption2).foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    .frame(minHeight: 44, alignment: .leading)
                                 }
                                 .id(index)
                                 .accessibilityAddTraits(index == chapterIndex ? .isSelected : [])
