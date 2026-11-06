@@ -31,6 +31,7 @@ final class EPUBReaderModel: ObservableObject {
     private(set) var pageBook: EPUBPageBook?
     @Published private(set) var location = EPUBReadingLocation(spineIndex: 0, pageIndex: 0) {
         didSet {
+            refreshSpeechHighlight()
             trimPageCaches()
             logLocationChange(from: oldValue)
             guard !isRestoringPosition, activeRelayouts == 0, status == .ready else { return }
@@ -47,6 +48,10 @@ final class EPUBReaderModel: ObservableObject {
             }
         }
     }
+    @Published private(set) var speechHighlightRects: [CGRect] = []
+    var onManualNavigation: (() -> Void)?
+    private var speechPosition: SpeechReadingPosition?
+    private var speechSettings = SpeechSettings.default
     private var openedBookHash: String?
     private var isRestoringPosition = false
     /// 正在进行的重排数量。重排期间位置会临时归零，此时的变化不写入阅读位置；
@@ -133,7 +138,7 @@ final class EPUBReaderModel: ObservableObject {
         self.webContext = webContext; self.onReachedEnd = onReachedEnd
         self.layoutCoordinator = layoutCoordinator
         EPUBLocalFonts.registerSavedFonts()
-        if let data = UserDefaults.standard.data(forKey: Self.styleDefaultsKey),
+        if let data = settings.defaults.data(forKey: settings.styleStorageKey),
            let saved = try? JSONDecoder().decode(EPUBReaderStyle.self, from: data) {
             style = saved
         }
@@ -283,6 +288,8 @@ final class EPUBReaderModel: ObservableObject {
 
     func start(textBook: PagedTextBook) {
         guard status == .idle, openTask == nil else { return }
+        if let id = textBook.preferenceKey ?? textBook.bookmarkKey { settings.activateBook(id) }
+        reloadStoredStyle()
         textBookmarkKey = textBook.bookmarkKey
         textTOCWordCounts = textBook.tocWordCounts
         openTask = Task { [weak self] in
@@ -348,6 +355,7 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     func open(url: URL) async {
+        reloadStoredStyle()
         status = .opening
         isRestoringPosition = true
         bookKind = "epub"
@@ -364,10 +372,11 @@ final class EPUBReaderModel: ObservableObject {
             stage = "container"
             let container = try await EPUBContainer.open(fileURL: url)
             try Task.checkCancellation()
+            container.displayProjection = settings.projection
             self.source = container
             imageLibrary.attach(container)
             openedBookHash = bookHash
-            layoutBookID = "epub|" + bookHash
+            layoutBookID = "epub|" + bookHash + "|" + settings.projection.identity
             stage = "layout"
             lastLayoutFailure = nil
             // 直接排版保存位置的章节，避免先排版第 0 章再恢复位置。
@@ -408,8 +417,9 @@ final class EPUBReaderModel: ObservableObject {
         status = .opening
         isRestoringPosition = true
         positionHandler = onPosition
+        if let text = source as? TextChapterSource { text.displayProjection = settings.projection }
         self.source = source
-        layoutBookID = (source as? TextChapterSource)?.layoutIdentity
+        layoutBookID = (source as? TextChapterSource)?.layoutIdentity.map { $0 + "|" + settings.projection.identity }
         bookKind = layoutBookID == nil ? "online" : "txt"
         let startTime = ContinuousClock.now
         EPUBLayoutLog.logger.info("\(EPUBLayoutLog.label(kind: self.bookKind), privacy: .public) open started; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), source=open, mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
@@ -948,6 +958,7 @@ final class EPUBReaderModel: ObservableObject {
 
     /// 写入位置并标明来源，供 `logLocationChange` 区分用户操作与无人操作的移动。
     private func moveLocation(to target: EPUBReadingLocation, cause: String) {
+        if cause != "speech" { onManualNavigation?() }
         locationCause = cause
         location = target
         locationCause = nil
@@ -977,6 +988,7 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     func jump(to entry: EPUBTOCEntry) {
+        rememberReadingPoint()
         guard !isAnimating, !isLayingOut, let spineIndex = entry.spineIndex else { return }
         navigateToSpine(spineIndex)
     }
@@ -1090,6 +1102,13 @@ final class EPUBReaderModel: ObservableObject {
         return String(text[index...].prefix(ReaderBookmark.maxSnippetLength))
     }
 
+    var speechAnchor: SpeechAnchor {
+        let index = location.spineIndex
+        let offset = pageBook?.sourceOffset(spineIndex: index, pageIndex: location.pageIndex)
+        return SpeechAnchor(chapterIndex: index, progression: currentPageRange?.range.lowerBound ?? 0,
+                            chapterUTF16Length: pageBook?.sourceLength(spineIndex: index) ?? 0,
+                            startIndexHint: nil, sourceUTF16Offset: offset, startsAtVisibleOffset: true)
+    }
     var chapterCount: Int { source?.chapterCount ?? 0 }
 
     /// 一章的纯文本（书内搜索与书签摘要使用），换算口径与阅读位置一致。
@@ -1098,15 +1117,75 @@ final class EPUBReaderModel: ObservableObject {
         return BookTextSearch.plainText(html: try await source.chapterHTML(at: index))
     }
 
+    /// 朗读直接消费排版源文本，避免 HTML 纯文本抽取的空白规则与页面坐标不一致。
+    func speechChapterText(_ index: Int) async throws -> String {
+        guard let source, let book = pageBook, (0..<source.chapterCount).contains(index) else { throw CancellationError() }
+        if !book.isChapterComplete(index) {
+            try await book.layoutChapter(index, container: source, config: makeConfig(),
+                                         aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                         context: layoutContext(.navigate))
+        }
+        try Task.checkCancellation()
+        guard pageBook === book, let text = book.sourceText(spineIndex: index) else { throw CancellationError() }
+        return text
+    }
+
+    /// 跟读只定位已经为朗读准备好的章节，不启动独立导航请求；手动翻页会暂停朗读。
+    func updateSpeechPosition(_ position: SpeechReadingPosition?, settings: SpeechSettings) {
+        speechPosition = position
+        speechSettings = settings
+        if let position, settings.followsReadingPosition, !isAnimating, !isLayingOut,
+           let book = pageBook, book.isChapterComplete(position.chapterIndex),
+           let rawPage = book.pageIndex(spineIndex: position.chapterIndex, containingSourceOffset: position.currentOffset) {
+            let page = usesDoublePage ? (rawPage / 2) * 2 : rawPage
+            let target = EPUBReadingLocation(spineIndex: position.chapterIndex, pageIndex: page)
+            if target != location {
+                moveLocation(to: target, cause: "speech")
+                prefetchNeighbors(of: position.chapterIndex)
+            }
+        }
+        refreshSpeechHighlight()
+    }
+
+    @Published private(set) var searchHighlightRects: [CGRect] = []
+    @Published private(set) var readingReturnPoint: (chapter: Int, progression: Double)?
+    private var searchHit: BookTextSearch.Hit?
+    private func rememberReadingPoint() {
+        if readingReturnPoint == nil { readingReturnPoint = (location.spineIndex, currentPageRange?.range.lowerBound ?? 0) }
+    }
+    func returnToReading() {
+        guard let point = readingReturnPoint else { return }
+        jump(toChapter: point.chapter, progression: point.progression, returning: true)
+    }
+    func showSearchHit(_ hit: BookTextSearch.Hit) {
+        searchHit = hit
+        jump(toChapter: hit.chapterIndex, progression: hit.progression, exactOffset: hit.utf16Offset)
+    }
+    private func refreshSearchHighlight() {
+        guard let hit = searchHit, hit.chapterIndex == location.spineIndex else { searchHighlightRects = []; return }
+        searchHighlightRects = selectionRects(for: NSRange(location: hit.utf16Offset, length: hit.match.utf16.count))
+    }
+    private func refreshSpeechHighlight() {
+        refreshSearchHighlight()
+        let rects: [CGRect]
+        if let position = speechPosition, speechSettings.highlightsSpokenText,
+           location.spineIndex == position.chapterIndex {
+            rects = selectionRects(for: NSRange(location: position.sentenceRange.lowerBound,
+                                                length: position.sentenceRange.count))
+        } else { rects = [] }
+        if rects != speechHighlightRects { speechHighlightRects = rects }
+    }
+
     /// 章节标题：取 spine 不晚于该章的最后一个目录项。
     func chapterTitle(_ index: Int) -> String? {
         source?.toc.last { ($0.spineIndex ?? .max) <= index }?.title
     }
 
     /// 跳到书签或搜索结果：目标章未排版时先排版，再按章内比例找到所在页。属于用户操作，会记录阅读位置。
-    func jump(toChapter spineIndex: Int, progression: Double) {
+    func jump(toChapter spineIndex: Int, progression: Double, exactOffset: Int? = nil, returning: Bool = false) {
         guard !isAnimating, !isLayingOut, let container = source, let book = pageBook,
               (0..<container.chapterCount).contains(spineIndex) else { return }
+        if !returning { rememberReadingPoint() }
         if let navigateTaskID, let previous = layoutTasks.removeValue(forKey: navigateTaskID) { previous.cancel() }
         navigateTaskID = track { [weak self] in
             guard let self else { return }
@@ -1119,13 +1198,15 @@ final class EPUBReaderModel: ObservableObject {
                                                  context: layoutContext(.navigate))
                 }
                 guard pageBook === book else { return }
-                let offset = book.sourceLength(spineIndex: spineIndex).map {
+                let offset = exactOffset ?? book.sourceLength(spineIndex: spineIndex).map {
                     EPUBChapterProgress.offset(progression: progression, length: $0)
                 }
                 var page = offset.flatMap { book.pageIndex(spineIndex: spineIndex, containingSourceOffset: $0) } ?? 0
                 if usesDoublePage { page = (page / 2) * 2 }
                 markReadyAfterRecovery(spineIndex: spineIndex)
                 moveLocation(to: EPUBReadingLocation(spineIndex: spineIndex, pageIndex: page), cause: "navigate")
+                refreshSearchHighlight()
+                if returning { readingReturnPoint = nil; searchHit = nil; searchHighlightRects = [] }
                 prefetchNeighbors(of: spineIndex)
             } catch {
                 guard pageBook === book, EPUBLayoutLog.failure(error).kind != "cancelled" else { return }
@@ -1172,6 +1253,19 @@ final class EPUBReaderModel: ObservableObject {
         navigateToSpine(unit)
     }
 
+    private func reloadStoredStyle() {
+        style = settings.defaults.data(forKey: settings.styleStorageKey).flatMap { try? JSONDecoder().decode(EPUBReaderStyle.self, from: $0) } ?? EPUBReaderStyle()
+        style.fontSize = CGFloat(settings.fontSize)
+    }
+    func reloadBookPreferences() {
+        searchHit = nil; searchHighlightRects = []; readingReturnPoint = nil
+        reloadStoredStyle()
+        (source as? EPUBContainer)?.displayProjection = settings.projection
+        (source as? TextChapterSource)?.displayProjection = settings.projection
+        layoutBookID = (openedBookHash.map { "epub|" + $0 } ?? UUID().uuidString) + "|" + settings.projection.identity
+        scheduleRelayout(.styleChange)
+    }
+
     func applyStyle(_ requested: EPUBReaderStyle) {
         guard !isAnimating, !isLayingOut else { return }
         var updated = requested
@@ -1189,7 +1283,7 @@ final class EPUBReaderModel: ObservableObject {
         let fontChanged = updated.fontSize != style.fontSize
         style = updated
         if let data = try? JSONEncoder().encode(updated) {
-            UserDefaults.standard.set(data, forKey: Self.styleDefaultsKey)
+            settings.defaults.set(data, forKey: settings.styleStorageKey)
         }
         settings.fontSize = Double(updated.fontSize)
         scheduleRelayout(fontChanged ? .fontChange : .styleChange)

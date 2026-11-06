@@ -5,6 +5,15 @@ import XCTest
 /// 已存储在设备上的设置通过这些精确字符串查找；修改任一名称
 /// 都会无提示地重置所有现有用户的对应设置。
 final class SettingsKeysTests: XCTestCase {
+    func testEdgeKeysAreStable() {
+        XCTAssertEqual(SettingsKey.Speech.edgeVoiceCatalog, "speech.edgeVoiceCatalog.v1")
+        XCTAssertEqual(SettingsKey.Speech.volume, "speech.volume.v1")
+        XCTAssertEqual(SettingsKey.Speech.pitch, "speech.pitch.v1")
+        XCTAssertEqual(SettingsKey.Speech.edgePrefetchEnabled, "speech.edgePrefetchEnabled.v1")
+        XCTAssertEqual(SettingsKey.Speech.edgeConsent, "speech.edgeConsent.v1")
+        XCTAssertEqual(SettingsKey.Speech.edgeVoiceIdentifier, "speech.edgeVoice.v1")
+    }
+
     func testPersistedKeysAreUnchanged() {
         XCTAssertEqual(SettingsKey.readerFontSize, "readerFontSize")
         XCTAssertEqual(SettingsKey.readerAppearance, "readerAppearance")
@@ -20,6 +29,11 @@ final class SettingsKeysTests: XCTestCase {
         XCTAssertEqual(SettingsKey.tabBarLastSelected, "tabBar.lastSelected")
         XCTAssertEqual(SettingsKey.importedFontSync, "readerFonts.sync.v1")
         XCTAssertEqual(SettingsKey.bookmarks(novelID: "syosetu/n1"), "bookmarks.syosetu/n1")
+        XCTAssertEqual([SettingsKey.Speech.voiceIdentifier, SettingsKey.Speech.rate,
+                        SettingsKey.Speech.followsReadingPosition, SettingsKey.Speech.highlightsSpokenText,
+                        SettingsKey.Speech.preferredEngine, SettingsKey.Speech.sleepTimerMinutes],
+                       ["speech.voice.v1", "speech.rate.v1", "speech.follow.v1",
+                        "speech.highlight.v1", "speech.engine.v1", "speech.sleepTimer.v1"])
         XCTAssertEqual([SettingsKey.WebDAV.enabled, SettingsKey.WebDAV.address, SettingsKey.WebDAV.username,
                         SettingsKey.WebDAV.syncBooks, SettingsKey.WebDAV.syncTags, SettingsKey.WebDAV.syncBackgrounds,
                         SettingsKey.WebDAV.syncFonts, SettingsKey.WebDAV.fileHashes],

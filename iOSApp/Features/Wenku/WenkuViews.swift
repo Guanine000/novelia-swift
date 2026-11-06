@@ -484,6 +484,10 @@ struct WenkuDetailView: View {
                             Text("原文章节 (volume.total)").font(.caption).foregroundStyle(NoveliaStyle.muted)
                         }
                         Spacer()
+                        if let local = localLibrary.books.first(where: { $0.parentWenkuID == detail.id && $0.volumeID == volume.volumeId }) {
+                            NavigationLink("阅读本地卷") { LibraryReaderDestination(book: LibraryBook(origin: .wenku(local), fileURL: localLibrary.fileURL(for: local), coverURL: localLibrary.coverFileURL(for: local))) }
+                                .buttonStyle(.bordered).tint(NoveliaStyle.brandGreen)
+                        }
                         Button { downloadRequest = WenkuDownloadRequest(detail: detail, volume: volume) } label: {
                             Label("下载 EPUB", systemImage: "arrow.down.to.line")
                                 .font(.system(size: 12, weight: .semibold))
@@ -656,7 +660,7 @@ private struct WenkuDownloadSheet: View {
                 filenameAuthors: detail.authors,
                 translationsMode: translationsMode
             )
-            try await localLibrary.registerDownloadedFile(at: destination, title: "\(detail.displayTitle) · \(volume.volumeId)")
+            try await localLibrary.registerDownloadedFile(at: destination, title: "\(detail.displayTitle) · \(volume.volumeId)", parentWenkuID: detail.id, parentWenkuTitle: detail.displayTitle, volumeID: volume.volumeId)
             finished = true
         } catch { errorMessage = error.localizedDescription }
     }

@@ -79,7 +79,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
         restored = LocalWenkuEPUB(id: book.id, title: book.title, filename: destination.lastPathComponent,
             addedAt: book.addedAt, lastLocatorJSON: book.lastLocatorJSON, bookDescription: book.bookDescription,
             author: book.author, coverFilename: nil, metadataLoaded: book.metadataLoaded,
-            fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel, metadataUpdatedAt: book.metadataUpdatedAt)
+            fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel, metadataUpdatedAt: book.metadataUpdatedAt, parentWenkuID: book.parentWenkuID, parentWenkuTitle: book.parentWenkuTitle, volumeID: book.volumeID)
         do {
             try await fileCopier.copy(from: source, to: destination)
             copied.append(destination)
@@ -106,7 +106,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
         var replacement = LocalWenkuEPUB(id: book.id, title: book.title, filename: destination.lastPathComponent,
             addedAt: book.addedAt, lastLocatorJSON: book.lastLocatorJSON, bookDescription: book.bookDescription,
             author: book.author, coverFilename: nil, metadataLoaded: book.metadataLoaded,
-            fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel, metadataUpdatedAt: book.metadataUpdatedAt)
+            fileFormat: book.fileFormat, sourceWebNovel: book.sourceWebNovel, metadataUpdatedAt: book.metadataUpdatedAt, parentWenkuID: book.parentWenkuID, parentWenkuTitle: book.parentWenkuTitle, volumeID: book.volumeID)
         do {
             try await fileCopier.copy(from: source, to: destination)
             copied.append(destination)
@@ -231,7 +231,8 @@ final class WenkuLocalLibraryStore: ObservableObject {
     }
 
     func registerDownloadedFile(at fileURL: URL, title: String, source: TXTLoadSource = .download,
-                                trace: String = DiagnosticContext.newTraceID()) async throws {
+                                trace: String = DiagnosticContext.newTraceID(), parentWenkuID: String? = nil,
+                                parentWenkuTitle: String? = nil, volumeID: String? = nil) async throws {
         try await loadIfNeeded()
         guard fileURL.deletingLastPathComponent().standardizedFileURL == directory.standardizedFileURL else {
             throw WenkuLocalLibraryError.invalidEPUB
@@ -260,7 +261,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
             }
             let book = LocalWenkuEPUB(
                 id: UUID(), title: title, filename: fileURL.lastPathComponent,
-                addedAt: Date(), metadataLoaded: true, fileFormat: .txt
+                addedAt: Date(), metadataLoaded: true, fileFormat: .txt, parentWenkuID: parentWenkuID, parentWenkuTitle: parentWenkuTitle, volumeID: volumeID
             )
             do { try await insertImported(book, hash: newHash) }
             catch {
@@ -299,7 +300,7 @@ final class WenkuLocalLibraryStore: ObservableObject {
             author: metadata.author,
             coverFilename: coverFilename,
             metadataLoaded: true,
-            fileFormat: .epub
+            fileFormat: .epub, parentWenkuID: parentWenkuID, parentWenkuTitle: parentWenkuTitle, volumeID: volumeID
         )
         do { try await insertImported(book, hash: newHash) }
         catch {

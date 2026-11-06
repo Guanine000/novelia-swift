@@ -6,6 +6,34 @@ import Foundation
 /// EPUB 专属排版选项仍保存在原有样式对象中。
 @MainActor
 final class ReaderSettings: ObservableObject {
+    @Published private(set) var activeBookID: String?
+    @Published private(set) var bookPreferences: [String: BookReadingPreferences] = [:]
+    @Published var projectionRevision = 0
+    let offlineChapters: OnlineChapterOfflineStore
+    private static let bookPreferencesKey = "reader.bookPreferences.v1"
+    var usesBookPreferences: Bool { activeBookID.flatMap { bookPreferences[$0] } != nil }
+    var activePreferences: BookReadingPreferences? { activeBookID.flatMap { bookPreferences[$0] } }
+    var projection: ReadingTextProjection { activePreferences?.projection ?? .init() }
+    var styleStorageKey: String { usesBookPreferences ? "reader.bookStyle.v1." + FileContentHash.sha256(Data((activeBookID ?? "").utf8)) : Self.epubStyleKey }
+    func activateBook(_ id: String) { if activeBookID != id { activeBookID = id } }
+    func deactivateBook(_ id: String) { if activeBookID == id { activeBookID = nil } }
+    func setBookPreferencesEnabled(_ enabled: Bool) {
+        guard let id = activeBookID else { return }
+        if enabled, bookPreferences[id] == nil {
+            bookPreferences[id] = .init(fontSize: fontSize, appearance: appearanceRaw, paged: pagedTextReading, layout: defaults.data(forKey: Self.epubStyleKey))
+            if let data = bookPreferences[id]?.layout { defaults.set(data, forKey: styleStorageKey) }
+        } else if !enabled { bookPreferences[id] = nil; defaults.removeObject(forKey: "reader.bookStyle.v1." + FileContentHash.sha256(Data(id.utf8))) }
+        saveBookPreferences(); projectionRevision += 1
+    }
+    func setProjection(_ value: ReadingTextProjection) {
+        if !usesBookPreferences { setBookPreferencesEnabled(true) }
+        guard let id = activeBookID else { return }
+        bookPreferences[id]?.projection = value.normalized
+        saveBookPreferences(); projectionRevision += 1
+    }
+    private func saveBookPreferences() {
+        if let data = try? JSONEncoder().encode(bookPreferences) { defaults.set(data, forKey: Self.bookPreferencesKey) }
+    }
     static let fontRange: ClosedRange<Double> = 12...36
     static let epubStyleKey = "epubPrototype.readerStyle.v1"
     let positions: any ReadingPositionProviding
@@ -18,10 +46,13 @@ final class ReaderSettings: ObservableObject {
     @Published private var storedPagedText: Bool
 
     init(defaults: UserDefaults = .standard, positions: (any ReadingPositionProviding)? = nil,
-         bookmarks: ReaderBookmarkStore? = nil) {
+         bookmarks: ReaderBookmarkStore? = nil, offlineDirectory: URL? = nil) {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        offlineChapters = OnlineChapterOfflineStore(directory: offlineDirectory ?? (defaults === UserDefaults.standard ? support.appendingPathComponent("OfflineChapters") : FileManager.default.temporaryDirectory.appendingPathComponent("OfflineChapters-" + UUID().uuidString)))
         self.positions = positions ?? ReadingPositionStore(defaults: defaults)
         self.bookmarks = bookmarks ?? ReaderBookmarkStore()
         self.defaults = defaults
+        bookPreferences = defaults.data(forKey: Self.bookPreferencesKey).flatMap { try? JSONDecoder().decode([String: BookReadingPreferences].self, from: $0) } ?? [:]
         self.webEPUBMaps = WebNovelEPUBMapStore(defaults: defaults)
         let epubStyle = defaults.data(forKey: Self.epubStyleKey)
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
@@ -33,9 +64,10 @@ final class ReaderSettings: ObservableObject {
     }
 
     var fontSize: Double {
-        get { storedFontSize }
+        get { activePreferences.map { Self.normalizedFontSize($0.fontSize) } ?? storedFontSize }
         set {
             let value = Self.normalizedFontSize(newValue)
+            if usesBookPreferences, let id = activeBookID { bookPreferences[id]?.fontSize = value; saveBookPreferences(); return }
             if storedFontSize != value { storedFontSize = value }
             defaults.set(value, forKey: SettingsKey.readerFontSize)
             // 保持旧版应用能够读取 EPUB 样式，并保留未知字段。
@@ -50,9 +82,10 @@ final class ReaderSettings: ObservableObject {
     }
 
     var appearanceRaw: String {
-        get { storedAppearance }
+        get { activePreferences.map { Self.normalizedAppearance($0.appearance) } ?? storedAppearance }
         set {
             let value = Self.normalizedAppearance(newValue)
+            if usesBookPreferences, let id = activeBookID { bookPreferences[id]?.appearance = value; saveBookPreferences(); return }
             if storedAppearance != value { storedAppearance = value }
             defaults.set(value, forKey: SettingsKey.readerAppearance)
         }
@@ -60,8 +93,9 @@ final class ReaderSettings: ObservableObject {
 
     /// 在线小说与 TXT 使用分页阅读器；默认仍为滚动模式。
     var pagedTextReading: Bool {
-        get { storedPagedText }
+        get { activePreferences?.paged ?? storedPagedText }
         set {
+            if usesBookPreferences, let id = activeBookID { bookPreferences[id]?.paged = newValue; saveBookPreferences(); return }
             if storedPagedText != newValue { storedPagedText = newValue }
             defaults.set(newValue, forKey: SettingsKey.readerPagedText)
         }

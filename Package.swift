@@ -38,6 +38,7 @@ let package = Package(
                 .product(name: "YueduCoreText", package: "YueduCoreText"),
                 .product(name: "ReadiumZIPFoundation", package: "ZIPFoundation"),
                 .product(name: "ReadiumShared", package: "swift-toolkit"),
+                .product(name: "SwiftSoup", package: "SwiftSoup"),
             ],
             path: "iOSApp/Features/Reader/EPUBReader",
             exclude: [

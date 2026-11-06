@@ -18,10 +18,13 @@ struct ReaderBookmarksSearchSheet: View {
     var legacyBookKey: String? = nil
     var chapterIDAtIndex: (Int) -> String? = { _ in nil }
     var resolveChapter: ((ReaderBookmark) -> Int?)? = nil
+    var scopeDescription: String? = nil
+    var onSearchHit: ((BookTextSearch.Hit) -> Void)? = nil
     @State var tab: Tab = .bookmarks
     @Environment(\.dismiss) private var dismiss
     @State private var saveError: String?
     @State private var query = ""
+    @FocusState private var isSearchFocused: Bool
     @State private var hits: [BookTextSearch.Hit] = []
     @State private var searchedQuery: String?
     @State private var searchedChapters = 0
@@ -107,13 +110,18 @@ struct ReaderBookmarksSearchSheet: View {
 
     private var searchPane: some View {
         VStack(spacing: 0) {
+            if let scopeDescription { Text(scopeDescription).font(.footnote).foregroundStyle(.secondary).padding(.horizontal) }
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("搜索本书内容", text: $query)
                     .textInputAutocapitalization(.never)
                     .compatAutocorrectionDisabled()
                     .submitLabel(.search)
+                    .focused($isSearchFocused)
                     .onSubmit(startSearch)
+                Button("查找", action: startSearch)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || searchTask != nil)
                 if searchTask != nil {
                     ProgressView().controlSize(.small)
                 }
@@ -125,7 +133,7 @@ struct ReaderBookmarksSearchSheet: View {
                 if let searchedQuery {
                     Section {
                         ForEach(hits) { hit in
-                            Button { jump(hit.chapterIndex, hit.progression) } label: { hitRow(hit) }
+                            hitRow(hit)
                         }
                     } header: {
                         Text(summary(for: searchedQuery))
@@ -148,6 +156,9 @@ struct ReaderBookmarksSearchSheet: View {
     }
 
     private func hitRow(_ hit: BookTextSearch.Hit) -> some View {
+        Button {
+            if let onSearchHit { onSearchHit(hit); dismiss() } else { jump(hit.chapterIndex, hit.progression) }
+        } label: {
         VStack(alignment: .leading, spacing: 4) {
             Text(chapterTitle(hit.chapterIndex) ?? "第 \(hit.chapterIndex + 1) 章")
                 .font(.caption.weight(.semibold))
@@ -157,11 +168,14 @@ struct ReaderBookmarksSearchSheet: View {
                 .foregroundStyle(.primary)
                 .lineLimit(3)
         }
+        }
+        .buttonStyle(.plain)
     }
 
     private func startSearch() {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        isSearchFocused = false
         searchTask?.cancel()
         hits = []
         searchedQuery = text
@@ -212,8 +226,7 @@ struct ReaderBookmarkButton: View {
                 }
             }
         } label: {
-            Image(systemName: existing.isEmpty ? "bookmark" : "bookmark.fill")
-                .frame(width: 36, height: 36)
+            Label(existing.isEmpty ? "添加书签" : "移除书签", systemImage: existing.isEmpty ? "bookmark" : "bookmark.fill")
         }
         .disabled(pageRange == nil)
         .accessibilityLabel(existing.isEmpty ? "添加书签" : "移除书签")
