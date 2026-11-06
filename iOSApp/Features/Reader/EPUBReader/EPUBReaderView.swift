@@ -383,10 +383,8 @@ private struct EPUBReaderViewContent: View {
                     .chapterProgress: model.chapterProgressDescription,
                     .bookProgress: model.bookProgressDescription
                 ])
-                Slider(value: scrubBinding, in: 0...1, onEditingChanged: handleScrub)
-                    .tint(NoveliaStyle.brandGreen)
+                ReaderScrubber(value: scrubBinding, onEditingChanged: handleScrub)
                     .disabled(model.status != .ready || model.isAnimating || model.isLayingOut)
-                    .accessibilityLabel("阅读进度")
                 Text(FractionText.percent(isScrubbing ? scrubProgress : model.overallProgress))
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)

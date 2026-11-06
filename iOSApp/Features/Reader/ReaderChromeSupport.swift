@@ -53,6 +53,73 @@ struct ReaderPositionLabel: View {
     }
 }
 
+/// 阅读页底栏的进度拖动条：细轨道加小圆点，拖动中放大；两个分页引擎共用。
+/// 系统滑杆自 iOS 26 起使用大尺寸旋钮，与 11pt 的位置文字不成比例，这里自行绘制。
+/// 拖动语义与原 Slider 一致：开始时回调 editing，移动中更新 value，松手才真正跳转。
+struct ReaderScrubber: View {
+    @Binding var value: Double
+    let onEditingChanged: (Bool) -> Void
+
+    @State private var isDragging = false
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let fraction = min(1, max(0, value))
+            let thumbSize: CGFloat = isDragging ? 16 : 10
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.25))
+                    .frame(height: 4)
+                Capsule()
+                    .fill(NoveliaStyle.brandGreen)
+                    .frame(width: width * fraction, height: 4)
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: thumbSize, height: thumbSize)
+                    .shadow(color: .black.opacity(0.18), radius: 1.5, y: 0.5)
+                    .offset(x: width * fraction - thumbSize / 2)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { gesture in
+                        if !isDragging {
+                            isDragging = true
+                            onEditingChanged(true)
+                        }
+                        guard width > 0 else { return }
+                        value = min(1, max(0, gesture.location.x / width))
+                    }
+                    .onEnded { _ in
+                        isDragging = false
+                        onEditingChanged(false)
+                    }
+            )
+        }
+        .frame(height: 28)
+        .animation(.easeInOut(duration: 0.12), value: isDragging)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("阅读进度")
+        .accessibilityValue("\(Int(min(1, max(0, value)) * 100))%")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: scrub(by: 0.05)
+            case .decrement: scrub(by: -0.05)
+            @unknown default: break
+            }
+        }
+    }
+
+    /// VoiceOver 调节走完整的一次拖动：先进入编辑态，再提交跳转。
+    private func scrub(by delta: Double) {
+        onEditingChanged(true)
+        value = min(1, max(0, value + delta))
+        onEditingChanged(false)
+    }
+}
+
 /// 阅读页调试信息开关。默认关闭；打开后目录显示解析诊断说明与 spine 编号。
 enum ReaderDebugOptions {
     static let showsTOCDiagnosticsKey = "reader.showTOCDiagnostics"

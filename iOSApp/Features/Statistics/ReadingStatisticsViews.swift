@@ -140,7 +140,7 @@ struct ReadingStatisticsView: View {
                 }
             }
         }
-        .alert("开启阅读时长同步？", isPresented: $showsSyncOffer) {
+        .confirmationDialog("开启阅读时长同步？", isPresented: $showsSyncOffer, titleVisibility: .visible) {
             Button("开启同步") { syncStore.syncStatistics = true }
             Button("暂不开启", role: .cancel) {}
         } message: {

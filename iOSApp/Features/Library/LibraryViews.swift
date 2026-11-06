@@ -965,10 +965,11 @@ struct LibraryBookActionDialogs: ViewModifier {
                 LibraryArchiveShareSheet(url: archive.url)
                     .ignoresSafeArea()
             }
-            .alert("《\(actions.missingCloudBook?.title ?? "")》的云端文件缺失",
-                   isPresented: .init(get: { actions.missingCloudBook != nil },
-                                      set: { if !$0 { actions.missingCloudBook = nil } }),
-                   presenting: actions.missingCloudBook) { book in
+            .confirmationDialog("《\(actions.missingCloudBook?.title ?? "")》的云端文件缺失",
+                                isPresented: .init(get: { actions.missingCloudBook != nil },
+                                                   set: { if !$0 { actions.missingCloudBook = nil } }),
+                                titleVisibility: .visible,
+                                presenting: actions.missingCloudBook) { book in
                 Button("从云端删除", role: .destructive) {
                     actions.missingCloudBook = nil
                     delete([book], fromCloud: true)
@@ -978,10 +979,11 @@ struct LibraryBookActionDialogs: ViewModifier {
             } message: { _ in
                 Text("WebDAV 中已找不到这本书的文件，本机也没有。若其他设备仍有这本书，在那台设备上手动同步一次即可补传；不再需要时可从云端删除书目，阅读进度和统计会保留。")
             }
-            .alert("下载《\(actions.pendingCloudDownload?.title ?? "")》？",
-                   isPresented: .init(get: { actions.pendingCloudDownload != nil },
-                                      set: { if !$0 { actions.pendingCloudDownload = nil } }),
-                   presenting: actions.pendingCloudDownload) { book in
+            .confirmationDialog("下载《\(actions.pendingCloudDownload?.title ?? "")》？",
+                                isPresented: .init(get: { actions.pendingCloudDownload != nil },
+                                                   set: { if !$0 { actions.pendingCloudDownload = nil } }),
+                                titleVisibility: .visible,
+                                presenting: actions.pendingCloudDownload) { book in
                 Button("取消", role: .cancel) { actions.pendingCloudDownload = nil }
                 Button("下载") { download(book) }
             } message: { book in

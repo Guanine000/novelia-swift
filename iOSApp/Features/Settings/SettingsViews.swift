@@ -84,14 +84,26 @@ struct SettingsView: View {
                 }
             }
             Section("阅读数据") {
-                NavigationLink("离线章节管理") { OfflineChapterManagementView() }
-                NavigationLink("标签屏蔽") { BlockedTagsView() }
+                NavigationLink {
+                    OfflineChapterManagementView()
+                } label: {
+                    Label("离线章节管理", systemImage: "internaldrive")
+                }
+                NavigationLink {
+                    BlockedTagsView()
+                } label: {
+                    Label("标签屏蔽", systemImage: "tag.slash")
+                }
                 NavigationLink { ReadingStatisticsView() } label: {
                     Label("阅读统计", systemImage: "chart.bar.xaxis")
                 }
             }
             Section("阅读") {
-                NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
+                NavigationLink {
+                    ReaderBackgroundSettingsView()
+                } label: {
+                    Label("阅读背景", systemImage: "paintbrush")
+                }
                 #if NOVELIA_READIUM_ONLY
                 readiumExperienceControls
                 #else
@@ -184,8 +196,10 @@ struct SettingsView: View {
                 #else
                 CompatLabeledContent("平台", value: "iOS 17+")
                 #endif
-                NavigationLink("开源许可") {
+                NavigationLink {
                     ThirdPartyLicensesView()
+                } label: {
+                    Label("开源许可", systemImage: "doc.plaintext")
                 }
                 Toggle(isOn: $showsTOCDiagnostics) {
                     VStack(alignment: .leading, spacing: 2) {
