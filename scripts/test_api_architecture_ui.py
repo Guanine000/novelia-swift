@@ -577,7 +577,7 @@ final class TapTests: XCTestCase {
   let app = openDownloadedNetworkBook(readium: false); defer { app.terminate() }
   readerAction(app, "单书阅读偏好").tap()
   let perBook = app.switches["仅应用于这本书"].firstMatch
-  XCTAssertTrue(perBook.waitForExistence(timeout: 10)); perBook.tap()
+  XCTAssertTrue(perBook.waitForExistence(timeout: 10)); if perBook.value as? String != "1" { perBook.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap() }
   let original = app.textFields["原词，例如人名"]; reveal(original, app: app); original.tap(); original.typeText("替代服务\n")
   let replacement = app.textFields["替换为（可留空）"]; replacement.typeText("本书替换\n")
   app.buttons["添加或更新"].tap()
@@ -592,7 +592,7 @@ final class TapTests: XCTestCase {
   XCTAssertTrue(app.buttons["应用"].firstMatch.waitForExistence(timeout: 10)); app.buttons["应用"].firstMatch.tap()
   XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 20))
   readerAction(app, "单书阅读偏好").tap()
-  app.switches["仅应用于这本书"].firstMatch.tap()
+  app.switches["仅应用于这本书"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
   app.buttons["应用"].firstMatch.tap()
   readerAction(app, "单书阅读偏好").tap()
   XCTAssertEqual(app.switches["仅应用于这本书"].firstMatch.value as? String, "0")

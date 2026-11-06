@@ -13,36 +13,39 @@ struct ReaderBookPreferencesView: View {
         CompatNavigationStack {
             Form {
                 Section {
-                    Toggle("仅应用于这本书", isOn: Binding(get: { settings.usesBookPreferences }, set: { settings.setBookPreferencesEnabled($0); draft = settings.projection }))
+                    Toggle("仅应用于这本书", isOn: Binding(
+                        get: { settings.usesBookPreferences },
+                        set: { enabled in settings.setBookPreferencesEnabled(enabled); draft = settings.projection }
+                    ))
                 } footer: { Text("单书保存字号、主题、分页与排版。关闭后重新继承全局默认；不会改动其他书籍。文字转换与替换规则只属于本书。") }
                 Group {
-                Section("文字显示") {
-                    Picker("简繁转换", selection: $draft.chinese) {
-                        ForEach(ReadingTextProjection.Chinese.allCases) { Text($0.title).tag($0) }
+                    Section("文字显示") {
+                        Picker("简繁转换", selection: $draft.chinese) {
+                            ForEach(ReadingTextProjection.Chinese.allCases) { Text($0.title).tag($0) }
+                        }
+                        Toggle("启用本书文字替换", isOn: $draft.enabled)
                     }
-                    Toggle("启用本书文字替换", isOn: $draft.enabled)
-                }
-                Section("添加替换规则") {
-                    TextField("原词，例如人名", text: $source).focused($editingRule, equals: .source)
-                        .submitLabel(.next).onSubmit { editingRule = .replacement }
-                    TextField("替换为（可留空）", text: $replacement).focused($editingRule, equals: .replacement)
-                        .submitLabel(.done).onSubmit { editingRule = nil }
-                    Button("添加或更新") {
-                        draft.replacements[source] = replacement; source = ""; replacement = ""; editingRule = nil
+                    Section("添加替换规则") {
+                        TextField("原词，例如人名", text: $source).focused($editingRule, equals: .source)
+                            .submitLabel(.next).onSubmit { editingRule = .replacement }
+                        TextField("替换为（可留空）", text: $replacement).focused($editingRule, equals: .replacement)
+                            .submitLabel(.done).onSubmit { editingRule = nil }
+                        Button("添加或更新") {
+                            draft.replacements[source] = replacement; source = ""; replacement = ""; editingRule = nil
+                        }
+                        .disabled(source.isEmpty || source.utf16.count > 120 || replacement.utf16.count > 120 || draft.replacements.count >= 1000)
                     }
-                    .disabled(source.isEmpty || source.utf16.count > 120 || replacement.utf16.count > 120 || draft.replacements.count >= 1000)
-                }
-                Section("本书规则") {
-                    ForEach(draft.replacements.keys.sorted(), id: \.self) { key in
-                        HStack { Text(key); Image(systemName: "arrow.right"); Text(draft.replacements[key] ?? ""); Spacer() }
-                            .contentShape(Rectangle())
-                            .onTapGesture { source = key; replacement = draft.replacements[key] ?? "" }
-                            .swipeActions { Button("删除", role: .destructive) { draft.replacements[key] = nil } }
+                    Section("本书规则") {
+                        ForEach(draft.replacements.keys.sorted(), id: \.self) { key in
+                            HStack { Text(key); Image(systemName: "arrow.right"); Text(draft.replacements[key] ?? ""); Spacer() }
+                                .contentShape(Rectangle())
+                                .onTapGesture { source = key; replacement = draft.replacements[key] ?? "" }
+                                .swipeActions { Button("删除", role: .destructive) { draft.replacements[key] = nil } }
+                        }
+                        Text("先简繁转换，再按最长词优先替换一次；不改原文件。应用时暂停朗读并重新排版。")
+                            .font(.footnote).foregroundStyle(.secondary)
                     }
-                    Text("先简繁转换，再按最长词优先替换一次；不改原文件。应用时暂停朗读并重新排版。")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                Section("效果预览") { Text(draft.apply(source.isEmpty ? "这是本书的文字预览，閱讀偏好只影响显示。" : source)) }
+                    Section("效果预览") { Text(draft.apply(source.isEmpty ? "这是本书的文字预览，閱讀偏好只影响显示。" : source)) }
                 }.disabled(!settings.usesBookPreferences)
             }
             .navigationTitle("单书阅读偏好")
