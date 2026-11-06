@@ -141,6 +141,7 @@ enum TextChapterXHTML {
 /// 在内存中生成或按需加载的章节，由 EPUB 分页书籍对象排版。
 /// 每个单元的 `load` 运行一次；加载失败时在下次请求中重试。
 final class TextChapterSource: EPUBChapterSource {
+    var displayProjection = ReadingTextProjection()
     struct Unit {
         let tocTitle: String?
         let load: @MainActor () async throws -> TextChapterContent
@@ -170,10 +171,10 @@ final class TextChapterSource: EPUBChapterSource {
     func chapterHref(at index: Int) -> String { "chapter-\(index).xhtml" }
 
     func chapterHTML(at index: Int) async throws -> String {
-        if let cached = cache[index] { return cached }
+        if let cached = cache[index] { return displayProjection.applyHTML(cached) }
         let html = TextChapterXHTML.document(try await units[index].load())
         cache[index] = html
-        return html
+        return displayProjection.applyHTML(html)
     }
 
     func cssTexts(forChapterHTML html: String, chapterHref: String, aspectRatio: CGFloat) async -> [String] {

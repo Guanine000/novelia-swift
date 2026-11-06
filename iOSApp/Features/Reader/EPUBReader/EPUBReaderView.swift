@@ -21,8 +21,10 @@ struct PagedTextBook {
     /// TXT 的 Readium Locator 独立保存，身份包含内容哈希及分章规则。
     var readiumIdentity: String? = nil
     var positionUpdatedAt: Date? = nil
-    /// 书签与书内搜索使用的身份（本地 TXT 为 `txt:<文件哈希>`）；在线小说为 nil，不提供这两项功能。
+    /// 书签与书内搜索使用的身份（本地 TXT 为 `txt:<文件哈希>`）；在线小说书签身份为 nil，搜索通过本机缓存回调提供。
     var bookmarkKey: String? = nil
+    var preferenceKey: String? = nil
+    var searchChapterText: ((Int) async throws -> String)? = nil
     /// 目录字数（本地 TXT）；在线小说为 nil，不显示字数。
     var tocWordCounts: (@Sendable () async -> ReaderTOCWordCounts)? = nil
 }
@@ -54,8 +56,12 @@ private struct EPUBReaderViewContent: View {
     @State private var tocExpanded = Set<Int>()
     @State private var tocTab = ReaderTOCTab.contents
     @State private var tocWordCounts: ReaderTOCWordCounts?
+    @State private var isShowingBookPreferences = false
     @State private var isShowingStyle = false
+    @StateObject private var speech = SpeechPlaybackController()
+    @State private var isShowingSpeech = false
     @State private var isShowingBookmarks = false
+    @State private var bookmarksTab = ReaderBookmarksSearchSheet.Tab.bookmarks
     @State private var didCopyDiagnostics = false
     @State private var showChrome = true
     @State private var isScrubbing = false
@@ -106,7 +112,7 @@ private struct EPUBReaderViewContent: View {
                         Button("关闭阅读器") { dismiss() }
                     }
                 case .ready:
-                    EPUBReaderPageSurface(model: model, showChrome: $showChrome, size: geometry.size)
+                    EPUBReaderPageSurface(model: model, speech: speech, showChrome: $showChrome, size: geometry.size, speechRects: model.speechHighlightRects, searchRects: model.searchHighlightRects)
                         .equatable()
                 }
                 if model.isLayingOut {
@@ -161,6 +167,7 @@ private struct EPUBReaderViewContent: View {
                 }
             }
             .onAppear {
+                model.onManualNavigation = { speech.pause() }
                 wasBatteryMonitoringEnabled = UIDevice.current.isBatteryMonitoringEnabled
                 UIDevice.current.isBatteryMonitoringEnabled = true
                 updateBatteryLevel()
@@ -175,6 +182,8 @@ private struct EPUBReaderViewContent: View {
                 }
             }
             .onDisappear {
+                speech.stop()
+                model.onManualNavigation = nil
                 // 停止已关闭书籍的排版；重新打开时复用缓存中已完成的章节。
                 model.close()
                 if !wasBatteryMonitoringEnabled {
@@ -196,22 +205,32 @@ private struct EPUBReaderViewContent: View {
         .trackReadingTime(statisticsBook ?? ReadingBook(id: "epub:\(bookURL?.lastPathComponent ?? "sample")",
                                                        title: bookURL?.deletingPathExtension().lastPathComponent ?? "样例书", kind: .epub),
                           ready: model.status == .ready)
+        .modifier(ReaderSpeechPresentation(controller: speech, isPresented: $isShowingSpeech,
+                                  anchor: { model.speechAnchor },
+                                  title: model.source?.bookTitle ?? "阅读器") {
+                SystemSpeechEngine(chapterCount: model.chapterCount,
+                                   onReadingPosition: { position, settings in model.updateSpeechPosition(position, settings: settings) }) { index in
+                    try await model.speechChapterText(index)
+                }
+            })
         .sheet(isPresented: $isShowingTOC) { tocSheet }
         .modifier(ReaderImagePresenter(library: model.imageLibrary, chapterTitle: { model.chapterTitle($0) },
                                        onJump: { model.jump(toImage: $0) }))
         .sheet(isPresented: $isShowingBookmarks) {
-            if let key = model.bookmarkKey {
+            if let key = model.bookmarkKey ?? settings.activeBookID {
                 ReaderBookmarksSearchSheet(store: settings.bookmarks, bookKey: key, chapterCount: model.chapterCount,
                                            chapterTitle: { model.chapterTitle($0) },
-                                           chapterText: { try await model.chapterPlainText($0) },
+                                           chapterText: { index in if let cached = textBook?.searchChapterText { _ = try await cached(index) }; return try await model.speechChapterText(index) },
                                            onJump: { model.jump(toChapter: $0, progression: $1) },
                                            legacyBookKey: model.legacyBookmarkKey,
                                            chapterIDAtIndex: { model.webChapterID($0) },
-                                           resolveChapter: { model.bookmarkIndex($0) })
+                                           resolveChapter: { model.bookmarkIndex($0) }, scopeDescription: textBook?.searchChapterText == nil ? nil : "仅搜索已缓存章节，不会下载未缓存正文。", onSearchHit: { model.showSearchHit($0) }, tab: bookmarksTab)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NoveliaImportedFontsChanged"))) { _ in model.refreshBackground() }
         .onValueChange(of: settings.fontSize) { _, _ in synchronizeSettings(systemIsDark: colorScheme == .dark) }
+        .sheet(isPresented: $isShowingBookPreferences) { ReaderBookPreferencesView() }
+        .onValueChange(of: settings.projectionRevision) { _, _ in speech.stop(); model.reloadBookPreferences() }
         .onValueChange(of: settings.appearanceRaw) { _, _ in synchronizeSettings(systemIsDark: colorScheme == .dark) }
         .onValueChange(of: model.isAnimating) { _, active in
             if !active { synchronizeSettings(systemIsDark: colorScheme == .dark) }
@@ -241,7 +260,7 @@ private struct EPUBReaderViewContent: View {
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.title3)
-                    .frame(width: 40, height: 36)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("返回")
@@ -249,33 +268,41 @@ private struct EPUBReaderViewContent: View {
                 .font(.system(size: 14, weight: .medium))
                 .lineLimit(1)
                 .frame(maxWidth: .infinity)
-            if let accessory { accessory }
-            if let key = model.bookmarkKey {
-                ReaderBookmarkButton(store: settings.bookmarks, bookKey: model.currentBookmarkKey ?? key, pageRange: model.currentPageRange,
-                                     chapterTitle: currentChapterTitle, snippet: { model.currentPageSnippet }, chapterID: model.currentPageRange.flatMap { model.webChapterID($0.chapter) })
-                Button {
-                    isShowingBookmarks = true
-                } label: {
-                    Image(systemName: "magnifyingglass")
-                        .frame(width: 36, height: 36)
+            Menu {
+                if let accessory { accessory }
+                if let key = model.bookmarkKey {
+                    ReaderBookmarkButton(store: settings.bookmarks, bookKey: model.currentBookmarkKey ?? key, pageRange: model.currentPageRange,
+                                         chapterTitle: currentChapterTitle, snippet: { model.currentPageSnippet }, chapterID: model.currentPageRange.flatMap { model.webChapterID($0.chapter) })
+                    Button {
+                        bookmarksTab = .bookmarks; isShowingBookmarks = true
+                    } label: {
+                        Label("书签与搜索", systemImage: "magnifyingglass")
+                    }
+                    .accessibilityLabel("书签与搜索")
                 }
-                .accessibilityLabel("书签与搜索")
-            }
-            Button {
-                isShowingTOC = true
+                Button {
+                    isShowingTOC = true
+                } label: {
+                    Label("目录", systemImage: "list.bullet")
+                }
+                .accessibilityLabel("目录")
+                if model.readingReturnPoint != nil {
+                    Button("回到刚才阅读处") { model.returnToReading() }
+                }
+                Button("书内搜索") { bookmarksTab = .search; isShowingBookmarks = true }
+                Button { isShowingBookPreferences = true } label: { Label("单书阅读偏好", systemImage: "slider.horizontal.3") }
+                Button {
+                    draftStyle = model.style
+                    isShowingStyle = true
+                } label: {
+                    Label("阅读设置", systemImage: "textformat.size")
+                }
+                .accessibilityLabel("阅读设置")
+                Button { isShowingSpeech = true } label: { Label("朗读", systemImage: "speaker.wave.2") }
             } label: {
-                Image(systemName: "list.bullet")
-                    .frame(width: 36, height: 36)
+                Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
             }
-            .accessibilityLabel("目录")
-            Button {
-                draftStyle = model.style
-                isShowingStyle = true
-            } label: {
-                Image(systemName: "textformat.size")
-                    .frame(width: 36, height: 36)
-            }
-            .accessibilityLabel("阅读样式")
+            .accessibilityLabel("阅读菜单")
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 10)
@@ -521,7 +548,7 @@ private struct EPUBReaderViewContent: View {
         .onAppear { didCopyDiagnostics = false }
     }
 
-    // MARK: 阅读样式（二级面板；点击应用后一次性重排）
+    // MARK: 阅读设置（二级面板；点击应用后一次性重排）
 
     private func synchronizeSettings(systemIsDark: Bool) {
         // 进入后台后系统会分别以浅色和深色截取快照，环境外观会短暂来回切换；
@@ -533,7 +560,16 @@ private struct EPUBReaderViewContent: View {
     private var styleSheet: some View {
         CompatNavigationStack {
             Form {
-                Section("背景") { NavigationLink("阅读背景") { ReaderBackgroundSettingsView() } }
+                Section {
+                    NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
+                    Picker("阅读主题", selection: $settings.appearanceRaw) {
+                        ForEach(ReaderAppearance.allCases) { option in
+                            Text(option.title).tag(option.rawValue)
+                        }
+                    }
+                } header: { Text("主题与背景") } footer: {
+                    Text("主题与背景即时生效；字体、字号和排版调整点击“应用”后保存。")
+                }
                 Section("分页") {
                     Toggle("双页模式", isOn: Binding(get: { draftStyle.doublePage == true }, set: { draftStyle.doublePage = $0 }))
                     Text("每次显示两页；横屏或 iPad 上阅读更舒适。章节末尾不足两页时保留空白页。")
@@ -559,17 +595,25 @@ private struct EPUBReaderViewContent: View {
                     }
                     HStack {
                         Text("字号")
-                        Slider(value: $draftStyle.fontSize, in: 12...36, step: 1)
+                        Spacer(minLength: 8)
+                        Button { draftStyle.fontSize = max(12, draftStyle.fontSize - 1) } label: {
+                            Text("A−").frame(minWidth: 44, minHeight: 44)
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(draftStyle.fontSize <= 12)
+                        .accessibilityLabel("缩小字号")
                         Text("\(Int(draftStyle.fontSize))")
-                            .monospacedDigit().frame(width: 28, alignment: .trailing)
+                            .monospacedDigit().frame(minWidth: 32)
+                            .accessibilityLabel("字号 \(Int(draftStyle.fontSize)) 点")
+                        Button { draftStyle.fontSize = min(36, draftStyle.fontSize + 1) } label: {
+                            Text("A+").frame(minWidth: 44, minHeight: 44)
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(draftStyle.fontSize >= 36)
+                        .accessibilityLabel("放大字号")
                     }
                 }
                 Section("段落") {
-                    Picker("阅读主题", selection: $settings.appearanceRaw) {
-                        ForEach(ReaderAppearance.allCases) { option in
-                            Text(option.title).tag(option.rawValue)
-                        }
-                    }
                     styleSlider("行间距", value: $draftStyle.lineSpacing, range: 0...24)
                     styleSlider("段落间距", value: $draftStyle.paragraphSpacing, range: 0...40)
                     Picker("首行缩进", selection: Binding(
@@ -602,11 +646,11 @@ private struct EPUBReaderViewContent: View {
                 }
                 ReaderIssueMarkSection { model.markIssue() }
             }
-            .navigationTitle("阅读样式")
+            .navigationTitle("阅读设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .compatTopBarLeading) {
-                    Button("取消") { isShowingStyle = false }
+                    Button("关闭") { isShowingStyle = false }
                 }
                 ToolbarItem(placement: .compatTopBarTrailing) {
                     Button("应用") {
@@ -625,6 +669,8 @@ private struct EPUBReaderViewContent: View {
         HStack {
             Text(label).frame(width: 68, alignment: .leading)
             Slider(value: value, in: range, step: 1)
+                .accessibilityLabel(label)
+                .accessibilityValue("\(Int(value.wrappedValue))")
             Text("\(Int(value.wrappedValue))")
                 .monospacedDigit().frame(width: 30, alignment: .trailing)
         }
@@ -723,7 +769,7 @@ private struct EPUBImportedFontsView: View {
                 Label("从“文件”导入字体", systemImage: "plus")
             }
             if let importedFamily {
-                Text("已导入并选中：\(importedFamily)。返回阅读样式后点击“应用”生效。")
+                Text("已导入并选中：\(importedFamily)。返回阅读设置后点击“应用”生效。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -850,6 +896,8 @@ struct EPUBFilePicker: UIViewControllerRepresentable {
 // MARK: - 打开入口（注入样例书或指定 EPUB；以全屏页方式呈现）
 
 struct EPUBReaderHost: View {
+    @EnvironmentObject private var settings: ReaderSettings
+    @State private var preferenceID: String?
     let initialURL: URL?
     var statisticsID: String? = nil
     var statisticsTitle: String? = nil
@@ -895,11 +943,15 @@ struct EPUBReaderHost: View {
                 ProgressView("准备样例书…")
             }
         }
+        .onDisappear { if let preferenceID { settings.deactivateBook(preferenceID) } }
         .task {
             if resolvedURL == nil {
                 if let debugBookURL {
                     resolvedURL = debugBookURL
                 } else if let initialURL {
+                    let hash = try? await Task.detached { try FileContentHash.sha256(initialURL) }.value
+                    let id = webContext?.bookKey ?? hash.map { "epub:\($0)" } ?? "file:\(initialURL.lastPathComponent)"
+                    settings.activateBook(id); preferenceID = id
                     resolvedURL = initialURL
                 } else {
                     #if DEBUG
@@ -916,12 +968,16 @@ struct EPUBReaderHost: View {
 /// 变化时，模型仍会使此观察视图更新。
 private struct EPUBReaderPageSurface: View, Equatable {
     @ObservedObject var model: EPUBReaderModel
+    let speech: SpeechPlaybackController
     @Environment(\.openURL) private var openURL
     @Binding var showChrome: Bool
     let size: CGSize
+    let speechRects: [CGRect]
+    let searchRects: [CGRect]
+    @Environment(\.readerSpeechActions) private var speechActions
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.model === rhs.model && lhs.size == rhs.size
+        lhs.model === rhs.model && lhs.size == rhs.size && lhs.speechRects == rhs.speechRects && lhs.searchRects == rhs.searchRects
     }
 
     var body: some View {
@@ -949,8 +1005,18 @@ private struct EPUBReaderPageSurface: View, Equatable {
             selectionRangeAt: { point in model.selectionRange(at: point) },
             selectionRects: { range in model.selectionRects(for: range) },
             selectedText: { range in model.selectedText(for: range) },
+            speechRects: speechRects,
+            onSpeechTap: { speech.toggleHighlightedSpeech() },
+            onSpeakSelection: { range in
+                speechActions.start(SpeechAnchor(chapterIndex: model.location.spineIndex, progression: 0,
+                                                chapterUTF16Length: 0, startIndexHint: nil, sourceUTF16Offset: range.location))
+            },
             images: model.pagerImages()
         )
+        .overlay {
+            Path { path in for rect in searchRects { path.addRect(rect) } }
+                .fill(Color.yellow.opacity(0.35)).allowsHitTesting(false).accessibilityHidden(true)
+        }
         .frame(width: size.width, height: size.height)
     }
 }

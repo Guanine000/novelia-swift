@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(NoveliaIOSCore)
+import NoveliaIOSCore
+#endif
 import ImageIO
 import OSLog
 import ReadiumZIPFoundation
@@ -100,6 +103,7 @@ enum EPUBError: LocalizedError {
 }
 
 final class EPUBContainer {
+    var displayProjection = ReadingTextProjection()
     static let tocLog = Logger(subsystem: "cc.novelia.ios.port", category: "epubcontainer")
     let fileURL: URL
     let bookTitle: String
@@ -309,7 +313,7 @@ final class EPUBContainer {
                                        rgb: themeTextColor.rgbComponents)
         stripped = Self.rewriteUnsupportedFlexGrid(in: stripped, counter: &flexGridRewriteCount)
         stripped = Self.rewriteUnsupportedPositioning(in: stripped, counter: &positionRewriteCount)
-        return Self.rewriteEightDigitColors(in: stripped)
+        return displayProjection.applyHTML(Self.rewriteEightDigitColors(in: stripped))
     }
 
     /// Readium 实验引擎打开前的容器预检：确认容器结构、spine 各章节都存在，

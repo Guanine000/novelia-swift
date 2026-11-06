@@ -8,7 +8,7 @@ struct DiscoverHomeView: View {
     private enum Catalog: String, CaseIterable, Identifiable {
         case webNovel, wenku
         var id: String { rawValue }
-        var title: String { self == .webNovel ? "网络小说" : "文库" }
+        var title: String { self == .webNovel ? "网络小说" : "文库小说" }
     }
 
     @SceneStorage("discover.catalog") private var catalog = Catalog.webNovel
@@ -55,6 +55,7 @@ struct DiscoverShortcutChip: View {
             .foregroundStyle(NoveliaStyle.ink)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            .frame(minHeight: 44)
             .background(NoveliaStyle.card, in: Capsule())
             .overlay(Capsule().stroke(NoveliaStyle.muted.opacity(0.18), lineWidth: 1))
     }

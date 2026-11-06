@@ -338,6 +338,7 @@ struct NovelDetailView: View {
             WebNovelDownloadSheet(novel: requestedNovel, availableSources: availableTranslationSources)
         }
         .toolbar {
+            ToolbarItem(placement: .compatTopBarLeading) { NavigationLink("离线章节") { OfflineChapterManagementView(novel: displayNovel) } }
             ToolbarItem(placement: .compatTopBarTrailing) {
                 Button {
                     favoriteTapped()

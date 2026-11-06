@@ -1,3 +1,4 @@
+import ReadiumNavigator
 import SwiftUI
 import UIKit
 
@@ -21,6 +22,7 @@ struct ReadiumEPUBReaderView: View {
 }
 
 private struct ReadiumEPUBReaderViewContent: View {
+    @EnvironmentObject private var services: AppServices
     @ObservedObject private var settings: ReaderSettings
     @ObservedObject private var backgrounds: ReaderBackgroundStore
     @StateObject private var model: ReadiumEPUBReaderModel
@@ -33,8 +35,11 @@ private struct ReadiumEPUBReaderViewContent: View {
     @State private var tocExpanded = Set<Int>()
     @State private var tocTab = ReaderTOCTab.contents
     @State private var tocWordCounts: ReaderTOCWordCounts?
+    @State private var isShowingBookPreferences = false
     @State private var isShowingStyle = false
+    @State private var isShowingSpeech = false
     @State private var isShowingBookmarks = false
+    @State private var bookmarksTab = ReaderBookmarksSearchSheet.Tab.bookmarks
     @State private var isScrubbing = false
     @State private var scrubProgress = 0.0
     @State private var draftStyle = EPUBReaderStyle()
@@ -46,7 +51,7 @@ private struct ReadiumEPUBReaderViewContent: View {
     var accessory: AnyView? = nil
     var statisticsBook: ReadingBook? = nil
 
-    private var pageBackground: Color {
+    private var pageBackground: SwiftUI.Color {
         settings.appearance.background(system: model.isDarkMode ? .dark : .light)
     }
 
@@ -141,10 +146,12 @@ private struct ReadiumEPUBReaderViewContent: View {
             model.onCenterTap = { withAnimation(.easeInOut(duration: 0.15)) { showChrome.toggle() } }
         }
         .task {
+            model.speechSelection = services.speech
             if let textBook { await model.open(textBook: textBook, systemIsDark: colorScheme == .dark) }
             else if let bookURL { await model.open(url: bookURL, systemIsDark: colorScheme == .dark) }
         }
         .onDisappear {
+            model.speech.stop()
             if !wasBatteryMonitoringEnabled {
                 UIDevice.current.isBatteryMonitoringEnabled = false
             }
@@ -161,6 +168,8 @@ private struct ReadiumEPUBReaderViewContent: View {
             if phase != .background { model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         }
         .onValueChange(of: settings.fontSize) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
+        .sheet(isPresented: $isShowingBookPreferences) { ReaderBookPreferencesView() }
+        .onValueChange(of: settings.projectionRevision) { _, _ in model.reloadBookPreferences(url: bookURL) }
         .onValueChange(of: settings.appearanceRaw) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         .onValueChange(of: backgrounds.revision) { _, _ in model.refreshBackground() }
         .onValueChange(of: bookBackgroundFollow) { _, _ in model.refreshPageBackgroundRule() }
@@ -171,17 +180,25 @@ private struct ReadiumEPUBReaderViewContent: View {
         .modifier(ReaderImagePresenter(library: model.imageLibrary, chapterTitle: { model.imageChapterTitle($0) },
                                        onJump: { model.jump(toImage: $0) }))
         .sheet(isPresented: $isShowingBookmarks) {
-            if let key = model.bookmarkKey {
+            if let key = model.bookmarkKey ?? settings.activeBookID {
                 ReaderBookmarksSearchSheet(store: settings.bookmarks, bookKey: key, chapterCount: model.chapterCount,
                                            chapterTitle: { model.chapterTitle($0) },
-                                           chapterText: { try await model.chapterPlainText($0) },
+                                           chapterText: { index in if let cached = textBook?.searchChapterText { return try await cached(index) }; return try await model.chapterPlainText(index) },
                                            onJump: { model.jump(toChapter: $0, progression: $1) },
                                            legacyBookKey: model.legacyBookmarkKey,
                                            chapterIDAtIndex: { model.webChapterID($0) },
-                                           resolveChapter: { model.bookmarkIndex($0) })
+                                           resolveChapter: { model.bookmarkIndex($0) }, scopeDescription: textBook?.searchChapterText == nil ? nil : "仅搜索已缓存章节，不会下载未缓存正文。", onSearchHit: { model.showSearchHit($0) }, tab: bookmarksTab)
             }
         }
         .sheet(isPresented: $isShowingStyle) { styleSheet }
+        .overlay(alignment: .bottomTrailing) {
+            ReaderSpeechQuickControls(controller: model.speech, openPanel: { isShowingSpeech = true })
+                .padding(.trailing, 16).padding(.bottom, 110)
+        }
+        .sheet(isPresented: $isShowingSpeech) {
+            SpeechControlView(controller: model.speech, session: model.speech.session,
+                              anchor: model.speechAnchor, title: model.bookTitle, onEngineChange: { model.prepareSpeech() }, onStart: { model.startSpeechFromVisiblePage() })
+        }
         .sheet(item: $model.activeNote) { note in noteSheet(note) }
     }
 
@@ -194,7 +211,7 @@ private struct ReadiumEPUBReaderViewContent: View {
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.title3)
-                    .frame(width: 40, height: 36)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("返回")
@@ -202,34 +219,52 @@ private struct ReadiumEPUBReaderViewContent: View {
                 .font(.system(size: 14, weight: .medium))
                 .lineLimit(1)
                 .frame(maxWidth: .infinity)
-            if textBook == nil { engineBadge }
-            if let accessory { accessory }
-            if let key = model.bookmarkKey, model.status == .ready {
-                ReaderBookmarkButton(store: settings.bookmarks, bookKey: model.currentBookmarkKey ?? key, pageRange: model.currentPageRange,
-                                     chapterTitle: model.currentChapterTitle, snippet: { await model.currentPageSnippet() }, chapterID: model.currentPageRange.flatMap { model.webChapterID($0.chapter) })
-                Button {
-                    isShowingBookmarks = true
-                } label: {
-                    Image(systemName: "magnifyingglass").frame(width: 36, height: 36)
+            Menu {
+                if textBook == nil { Text("Readium 阅读引擎") }
+                if let accessory { accessory }
+                if let key = model.bookmarkKey, model.status == .ready {
+                    ReaderBookmarkButton(store: settings.bookmarks, bookKey: model.currentBookmarkKey ?? key, pageRange: model.currentPageRange,
+                                         chapterTitle: model.currentChapterTitle, snippet: { await model.currentPageSnippet() }, chapterID: model.currentPageRange.flatMap { model.webChapterID($0.chapter) })
+                    Button {
+                        bookmarksTab = .bookmarks; isShowingBookmarks = true
+                    } label: {
+                        Label("书签与搜索", systemImage: "magnifyingglass")
+                    }
+                    .accessibilityLabel("书签与搜索")
                 }
-                .accessibilityLabel("书签与搜索")
-            }
-            Button {
-                model.isTOCDiagnosticsExpanded = false
-                isShowingTOC = true
+                Button {
+                    model.isTOCDiagnosticsExpanded = false
+                    isShowingTOC = true
+                } label: {
+                    Label("目录", systemImage: "list.bullet")
+                }
+                .accessibilityLabel("目录")
+                .disabled(model.status != .ready)
+                if model.readingReturnPoint != nil {
+                    Button("回到刚才阅读处") { model.returnToReading() }
+                }
+                Button("书内搜索") { bookmarksTab = .search; isShowingBookmarks = true }
+                Button { isShowingBookPreferences = true } label: { Label("单书阅读偏好", systemImage: "slider.horizontal.3") }
+                Button {
+                    draftStyle = model.style
+                    isShowingStyle = true
+                } label: {
+                    Label("阅读设置", systemImage: "textformat.size")
+                }
+                .accessibilityLabel("阅读设置")
+                .disabled(model.status != .ready)
+                Button {
+                    model.prepareSpeech()
+                    isShowingSpeech = true
+                } label: {
+                    Label("朗读", systemImage: "speaker.wave.2")
+                }
+                .accessibilityLabel("朗读")
+                .disabled(model.status != .ready)
             } label: {
-                Image(systemName: "list.bullet").frame(width: 36, height: 36)
+                Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
             }
-            .accessibilityLabel("目录")
-            .disabled(model.status != .ready)
-            Button {
-                draftStyle = model.style
-                isShowingStyle = true
-            } label: {
-                Image(systemName: "textformat.size").frame(width: 36, height: 36)
-            }
-            .accessibilityLabel("阅读样式")
-            .disabled(model.status != .ready)
+            .accessibilityLabel("阅读菜单")
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 10)
@@ -415,12 +450,21 @@ private struct ReadiumEPUBReaderViewContent: View {
         }
     }
 
-    // MARK: 阅读样式
+    // MARK: 阅读设置
 
     private var styleSheet: some View {
         CompatNavigationStack {
             Form {
-                Section("背景") { NavigationLink("阅读背景") { ReaderBackgroundSettingsView() } }
+                Section {
+                    NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
+                    Picker("阅读主题", selection: $settings.appearanceRaw) {
+                        ForEach(ReaderAppearance.allCases) { option in
+                            Text(option.title).tag(option.rawValue)
+                        }
+                    }
+                } header: { Text("主题与背景") } footer: {
+                    Text("主题与背景即时生效；字体、字号和排版调整点击“应用”后保存。")
+                }
                 Section("分页") {
                     Toggle("双页模式", isOn: Binding(get: { draftStyle.doublePage == true }, set: { draftStyle.doublePage = $0 }))
                 }
@@ -444,17 +488,25 @@ private struct ReadiumEPUBReaderViewContent: View {
                     }
                     HStack {
                         Text("字号")
-                        Slider(value: $draftStyle.fontSize, in: 12...36, step: 1)
+                        Spacer(minLength: 8)
+                        Button { draftStyle.fontSize = max(12, draftStyle.fontSize - 1) } label: {
+                            Text("A−").frame(minWidth: 44, minHeight: 44)
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(draftStyle.fontSize <= 12)
+                        .accessibilityLabel("缩小字号")
                         Text("\(Int(draftStyle.fontSize))")
-                            .monospacedDigit().frame(width: 28, alignment: .trailing)
+                            .monospacedDigit().frame(minWidth: 32)
+                            .accessibilityLabel("字号 \(Int(draftStyle.fontSize)) 点")
+                        Button { draftStyle.fontSize = min(36, draftStyle.fontSize + 1) } label: {
+                            Text("A+").frame(minWidth: 44, minHeight: 44)
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(draftStyle.fontSize >= 36)
+                        .accessibilityLabel("放大字号")
                     }
                 }
                 Section("段落") {
-                    Picker("阅读主题", selection: $settings.appearanceRaw) {
-                        ForEach(ReaderAppearance.allCases) { option in
-                            Text(option.title).tag(option.rawValue)
-                        }
-                    }
                     styleSlider("行间距", value: $draftStyle.lineSpacing, range: 0...24)
                     styleSlider("段落间距", value: $draftStyle.paragraphSpacing, range: 0...40)
                     Picker("首行缩进", selection: Binding(
@@ -483,11 +535,11 @@ private struct ReadiumEPUBReaderViewContent: View {
                 }
                 ReaderIssueMarkSection { model.markIssue() }
             }
-            .navigationTitle("阅读样式")
+            .navigationTitle("阅读设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .compatTopBarLeading) {
-                    Button("取消") { isShowingStyle = false }
+                    Button("关闭") { isShowingStyle = false }
                 }
                 ToolbarItem(placement: .compatTopBarTrailing) {
                     Button("应用") {
@@ -505,6 +557,8 @@ private struct ReadiumEPUBReaderViewContent: View {
         HStack {
             Text(label).frame(width: 68, alignment: .leading)
             Slider(value: value, in: range, step: 1)
+                .accessibilityLabel(label)
+                .accessibilityValue("\(Int(value.wrappedValue))")
             Text("\(Int(value.wrappedValue))")
                 .monospacedDigit().frame(width: 30, alignment: .trailing)
         }
@@ -543,6 +597,7 @@ private struct ReadiumNavigatorHost: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> ReadiumNavigatorContainer {
         let container = ReadiumNavigatorContainer()
+        container.onSpeakSelection = { [weak model] selection in model?.startSpeech(selection: selection) }
         if let navigator = model.navigator { container.embed(navigator) }
         return container
     }
@@ -554,7 +609,12 @@ private struct ReadiumNavigatorHost: UIViewControllerRepresentable {
     }
 }
 
-private final class ReadiumNavigatorContainer: UIViewController {
+final class ReadiumNavigatorContainer: UIViewController {
+    var onSpeakSelection: ((Selection) -> Void)?
+    @objc func speakSelection() {
+        guard let selection = (embedded as? EPUBNavigatorViewController)?.currentSelection else { return }
+        onSpeakSelection?(selection)
+    }
     private(set) weak var embedded: UIViewController?
 
     override func viewDidLoad() {

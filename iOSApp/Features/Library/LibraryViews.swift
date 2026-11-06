@@ -47,7 +47,7 @@ struct LibraryView: View {
         return types
     }
 
-    /// 多选可作用到的书：搜索结果，或“全部书籍”中未归入系列的书。
+    /// 多选可作用到的书：搜索结果，或“未分组”中的书。
     private var selectableBooks: [LibraryBook] {
         let books = state.displayBooks(from: allBooks).filter { sourceFilter.includes(isWenku: $0.isWenku) }
         if isSearching, !LibraryOrganizer.normalized(query).isEmpty {
@@ -76,10 +76,10 @@ struct LibraryView: View {
                     LibraryContinueReadingCard(book: recent) { open(recent) }
                         .libraryListRow()
                 }
-                // 已移入系列的书只在“系列”中显示，不在“全部书籍”中重复出现。
+                // 已移入系列的书只在“系列”中显示，不在“未分组”中重复出现。
                 let ungrouped = books.filter { state.series.seriesID(forBook: $0.key) == nil }
                 Picker("书库内容", selection: $segment) {
-                    Text("全部书籍 \(ungrouped.count)").tag(Segment.books)
+                    Text("未分组 \(ungrouped.count)").tag(Segment.books)
                     Text("系列 \(visibleSeries(in: books).count)").tag(Segment.series)
                 }
                 .pickerStyle(.segmented)
@@ -115,6 +115,7 @@ struct LibraryView: View {
             }
         }
         .libraryListStyle()
+        .modifier(LibraryDragSelectionModifier(books: sorted(selectable, options: sortOptions), actions: bookActions))
         .overlay {
             if webDownloads.isLoading || wenkuDownloads.isLoading { ProgressView("正在读取书库…") }
             else if sourceBooks.isEmpty, let error = webDownloads.storageError ?? wenkuDownloads.storageError {
@@ -156,6 +157,7 @@ struct LibraryView: View {
         .task { importer.attach(wenkuDownloads) }
         .task { await wenkuDownloads.refreshMissingMetadata() }
         .task(id: sourceBooks) {
+            state.associateVolumes(sourceBooks)
             await state.refreshHashes(for: sourceBooks, librariesReady: webDownloads.isReady && wenkuDownloads.isReady)
         }
         .fullScreenCover(isPresented: $importer.isShowingFileImporter) {
@@ -281,21 +283,28 @@ struct LibraryView: View {
                 Image(systemName: "magnifyingglass")
             }
             .accessibilityLabel("搜索书库")
-            LibrarySortMenu(options: sortOptions) { state.setSortOptions($0, scope: nil) }
-            if !selectableBooks.isEmpty {
-                Button { bookActions.beginSelection() } label: {
-                    Image(systemName: "checklist")
-                }
-                .accessibilityLabel("选择")
-                .accessibilityHint("进入多选，可批量移入系列、删除或压缩分享")
-            }
             Button {
                 importer.isShowingFileImporter = true
             } label: {
-                Image(systemName: "square.and.arrow.down")
+                Image(systemName: "plus")
             }
             .accessibilityLabel("导入 TXT 或 EPUB")
             .disabled(importer.isImporting)
+            Menu {
+                if !selectableBooks.isEmpty {
+                    Button { bookActions.beginSelection() } label: {
+                        Label("选择书籍", systemImage: "checklist")
+                    }
+                }
+                Button { isCreatingSeries = true; newSeriesName = "" } label: {
+                    Label("新建系列", systemImage: "rectangle.stack.badge.plus")
+                }
+                Divider()
+                LibrarySortMenu(options: sortOptions) { state.setSortOptions($0, scope: nil) }.menuContent
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .accessibilityLabel("书库菜单")
         }
     }
 
@@ -473,6 +482,7 @@ struct LibrarySeriesDetailView: View {
             }
         }
         .libraryListStyle()
+        .modifier(LibraryDragSelectionModifier(books: visible, actions: bookActions))
         .compatScrollDismissesKeyboardInteractively()
         .safeAreaInset(edge: .top) { searchBar }
         .safeAreaInset(edge: .bottom) {
@@ -718,6 +728,10 @@ final class LibraryBookActions: ObservableObject {
         if selectedKeys.contains(book.key) { selectedKeys.remove(book.key) } else { selectedKeys.insert(book.key) }
     }
 
+    func applyDragSelection(_ keys: Set<String>, selecting: Bool = true) {
+        isSelecting = selecting; selectedKeys = keys
+    }
+
     func selectAll(_ books: [LibraryBook]) { selectedKeys = Set(books.map(\.key)) }
 
     func endSelection() {
@@ -809,6 +823,13 @@ struct LibrarySelectionBar: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(NoveliaStyle.ink)
             Spacer(minLength: 4)
+            Menu {
+                ForEach(ManualReadingState.allCases) { value in
+                    Button(value.title) { state.setReadingState(value, for: selected); actions.endSelection() }
+                }
+                Button("按实际进度显示") { state.setReadingState(nil, for: selected); actions.endSelection() }
+            } label: { barLabel("状态", systemImage: "book.closed") }
+            .disabled(selected.isEmpty)
             Menu {
                 ForEach(state.series.activeSeries) { series in
                     Button(series.name) {
@@ -1219,16 +1240,10 @@ struct LibraryBookRow: View {
             LibraryBookRowContent(book: book, status: state.status(for: book), seriesName: showsSeries ? state.seriesName(for: book) : nil,
                                   wordCount: wordCounts.total(hash: hash))
                 .contentShape(Rectangle())
-                // 长按优先于点击：普通状态点击打开、长按进入多选；多选时点击或长按都切换选择。
+                // 点击负责打开或切换选择；页面的长按桥接负责连续拖选。
                 // 在 List 行中分别挂 onTapGesture/onLongPressGesture 时点击会抢先触发，故显式组合。
-                .gesture(LongPressGesture(minimumDuration: 0.45).exclusively(before: TapGesture()).onEnded { value in
-                    switch value {
-                    case .first:
-                        if isSelecting { actions.toggleSelection(book) } else { actions.beginSelection(with: book) }
-                    case .second:
-                        if isSelecting { actions.toggleSelection(book) } else { open(book) }
-                    }
-                })
+                .background(GeometryReader { geometry in Color.clear.preference(key: LibraryRowFrames.self, value: [book.key: geometry.frame(in: .global)]) })
+                .onTapGesture { if isSelecting { actions.toggleSelection(book) } else { open(book) } }
                 .accessibilityAddTraits(.isButton)
                 .accessibilityHint(isSelecting ? "切换选择" : "打开阅读")
                 .accessibilityAction(named: "多选") { actions.beginSelection(with: book) }
@@ -1240,7 +1255,7 @@ struct LibraryBookRow: View {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
                     .foregroundStyle(isSelected ? NoveliaStyle.brandGreen : NoveliaStyle.muted)
-                    .frame(width: 36, height: 44)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
                     .onTapGesture { actions.toggleSelection(book) }
                     .accessibilityLabel(isSelected ? "已选择：\(book.title)" : "未选择：\(book.title)")
@@ -1252,7 +1267,7 @@ struct LibraryBookRow: View {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(NoveliaStyle.muted)
-                        .frame(width: 36, height: 44)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel("更多操作：\(book.title)")
@@ -1266,12 +1281,26 @@ struct LibraryBookRow: View {
     @ViewBuilder
     private func menuItems(for book: LibraryBook) -> some View {
         let currentSeries = state.series.seriesID(forBook: book.key)
+        Menu {
+            ForEach(ManualReadingState.allCases) { value in
+                Button { state.setReadingState(value, for: [book]) } label: {
+                    Label(value.title, systemImage: state.manualStates[book.key] == value ? "checkmark" : "circle")
+                }
+            }
+            Button("按实际进度显示") { state.setReadingState(nil, for: [book]) }
+        } label: { Label("阅读状态", systemImage: "book.closed") }
         if book.isCloudOnly {
             Button { open(book) } label: {
                 Label(book.cloudDownloadSizeText.map { "下载（\($0)）" } ?? "下载", systemImage: "icloud.and.arrow.down")
             }
         } else {
             Button { open(book) } label: { Label("阅读", systemImage: "book") }
+        }
+        Divider()
+        if case .wenku = book.origin, !book.isCloudOnly {
+            Button { actions.editingBook = book } label: {
+                Label("编辑信息", systemImage: "pencil")
+            }
         }
         Menu {
             ForEach(state.series.activeSeries.filter { $0.id != currentSeries }) { series in
@@ -1305,22 +1334,7 @@ struct LibraryBookRow: View {
 
     @ViewBuilder
     private func localFileItems(for book: LibraryBook) -> some View {
-        if case .webNovel(let record) = book.origin, record.novel.isRemote, record.resolvedFileFormat == .epub {
-            Button { actions.chapterUpdateBook = record } label: {
-                Label("章节同步与更新", systemImage: "arrow.triangle.2.circlepath")
-            }
-            Button { actions.pendingEPUBUpdate = record } label: {
-                Label("更新到最新章节", systemImage: "arrow.clockwise")
-            }
-            .disabled(actions.updatingNovelID != nil || webDownloads.progress[record.id] != nil)
-            Button { actions.pendingCloudEPUBUpdate = record } label: {
-                Label("从 WebDAV 获取新版 EPUB", systemImage: "icloud.and.arrow.down")
-            }
-            .disabled(actions.updatingNovelID != nil || webDownloads.progress[record.id] != nil)
-        }
-        CompatShareLink(item: book.fileURL) {
-            Label("导出", systemImage: "square.and.arrow.up")
-        }
+        Divider()
         switch book.origin {
         case .webNovel(let record):
             Button {
@@ -1332,9 +1346,6 @@ struct LibraryBookRow: View {
                 Label("移至文库", systemImage: "arrow.right.arrow.left")
             }
         case .wenku(let record):
-            Button { actions.editingBook = book } label: {
-                Label("编辑信息", systemImage: "pencil")
-            }
             Button {
                 Task {
                     do { try await LibraryMover.moveToNetwork(record, web: webDownloads, wenku: wenkuDownloads, state: state) }
@@ -1343,6 +1354,28 @@ struct LibraryBookRow: View {
             } label: {
                 Label("移至网络小说", systemImage: "arrow.right.arrow.left")
             }
+        }
+        if case .webNovel(let record) = book.origin, record.novel.isRemote, record.resolvedFileFormat == .epub {
+            Divider()
+            Menu {
+                Button { actions.chapterUpdateBook = record } label: {
+                    Label("章节同步与更新", systemImage: "arrow.triangle.2.circlepath")
+                }
+                Button { actions.pendingEPUBUpdate = record } label: {
+                    Label("更新到最新章节", systemImage: "arrow.clockwise")
+                }
+                .disabled(actions.updatingNovelID != nil || webDownloads.progress[record.id] != nil)
+                Button { actions.pendingCloudEPUBUpdate = record } label: {
+                    Label("从 WebDAV 获取新版 EPUB", systemImage: "icloud.and.arrow.down")
+                }
+                .disabled(actions.updatingNovelID != nil || webDownloads.progress[record.id] != nil)
+            } label: {
+                Label("同步与更新", systemImage: "arrow.triangle.2.circlepath")
+            }
+        }
+        Divider()
+        CompatShareLink(item: book.fileURL) {
+            Label("导出", systemImage: "square.and.arrow.up")
         }
         Divider()
         Button(role: .destructive) { actions.pendingDelete = [book] } label: {
@@ -1371,6 +1404,9 @@ private struct LibraryBookRowContent: View {
                     .font(.system(size: 12))
                     .foregroundStyle(NoveliaStyle.muted)
                     .lineLimit(1)
+                if case .wenku(let record) = book.origin, let parent = record.parentWenkuTitle, let volume = record.volumeID {
+                    Text("\(parent) · \(volume)").font(.caption2).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
+                }
                 HStack(spacing: 6) {
                     if book.cloudFileMissing {
                         Image(systemName: "exclamationmark.icloud")
@@ -1472,12 +1508,19 @@ private struct LibraryContinueReadingCard: View {
                         .foregroundStyle(NoveliaStyle.muted)
                 }
                 Spacer(minLength: 0)
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 30))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(NoveliaStyle.brandGreen)
+                    .frame(width: 44, height: 44)
+                    .background(NoveliaStyle.brandGreen.opacity(0.10), in: Circle())
             }
-            .padding(12)
+            .padding(16)
             .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 17))
+            .overlay(alignment: .leading) {
+                Capsule().fill(NoveliaStyle.brandGreen)
+                    .frame(width: 3).padding(.vertical, 18)
+                    .accessibilityHidden(true)
+            }
             .contentShape(RoundedRectangle(cornerRadius: 17))
         }
         .buttonStyle(.plain)
@@ -1554,13 +1597,16 @@ struct LibrarySearchField: View {
                 if !query.isEmpty {
                     Button { query = "" } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(NoveliaStyle.muted)
+                            .frame(width: 44, height: 44).contentShape(Rectangle())
                     }
                     .accessibilityLabel("清除搜索")
                 }
             }
-            .padding(11)
+            .frame(minHeight: 44)
+            .padding(.horizontal, 11)
             .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 13))
             Button("取消", action: onCancel)
+                .frame(minWidth: 44, minHeight: 44)
                 .tint(NoveliaStyle.brandGreen)
         }
         .onAppear { isFocused = true }

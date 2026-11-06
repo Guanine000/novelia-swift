@@ -1,4 +1,5 @@
 import Foundation
+import SwiftSoup
 import OSLog
 import UIKit
 import YueduCoreText
@@ -158,12 +159,17 @@ final class EPUBPageBook {
         let images = await container.images(forChapterHTML: html, chapterHref: chapterHref)
         try Task.checkCancellation()
 
-        let document = HTMLLayoutDocument(
+        var document = HTMLLayoutDocument(
             html: html,
             css: css,
             configuration: config,
             images: images
         )
+        // 当前引擎只接受一部分横排ruby；只在能力检查明确拒绝时降为底文，正常注音保持原样。
+        if document.capabilities().unsupportedFeatures.contains(.ruby) {
+            document = HTMLLayoutDocument(html: try Self.rubyBaseTextFallback(html), css: css, configuration: config, images: images)
+            EPUBLayoutLog.logger.notice("Unsupported ruby rendered as base text; source file preserved")
+        }
         let session = try document.makePageSession()
         // 先构建流水线（不排版页面），使 sourceText 就绪——DisplayList 文本切片依赖它。
         _ = try session.prepare()
@@ -183,6 +189,14 @@ final class EPUBPageBook {
         }
         layout.footnotes = session.pipelineFootnotes
         return layout
+    }
+
+    static func rubyBaseTextFallback(_ html: String) throws -> String {
+        let document = try SwiftSoup.parse(html)
+        document.outputSettings().prettyPrint(pretty: false)
+        try document.select("rt, rp, rtc").remove()
+        try document.select("ruby, rb").unwrap()
+        return try document.outerHtml()
     }
 
     func isChapterComplete(_ spineIndex: Int) -> Bool {

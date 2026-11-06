@@ -58,7 +58,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("Novelia 账号") {
+            Section("账号") {
                 if let username = auth.username {
                     CompatLabeledContent("已登录", value: username)
                     Button("退出登录", role: .destructive) { isConfirmingLogout = true }
@@ -81,23 +81,18 @@ struct SettingsView: View {
                     .tint(NoveliaStyle.brandGreen)
                 }
             }
-            Section("内容筛选") {
+            Section("内容") {
+                NavigationLink("离线章节管理") { OfflineChapterManagementView() }
                 NavigationLink("标签屏蔽") { BlockedTagsView() }
-            }
-            Section("界面") {
-                NavigationLink {
-                    TabBarSettingsView()
-                } label: {
-                    Label("自定义底栏", systemImage: "dock.rectangle")
-                }
             }
             Section("阅读统计") {
                 NavigationLink { ReadingStatisticsView() } label: {
                     Label("阅读统计", systemImage: "chart.bar.xaxis")
                 }
             }
-            Section("阅读体验") {
+            Section("阅读") {
                 NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
+                NavigationLink("朗读") { SpeechSettingsView() }
                 #if NOVELIA_READIUM_ONLY
                 readiumExperienceControls
                 #else
@@ -112,6 +107,33 @@ struct SettingsView: View {
                     readiumExperienceControls
                 }
                 #endif
+                Picker("显示语言", selection: $modeRaw) {
+                    ForEach(ReaderMode.allCases) { mode in
+                        Text(mode.title).tag(mode.rawValue)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack {
+                        Text("正文字号")
+                        Spacer()
+                        Text("\(Int(readerSettings.fontSize)) pt")
+                            .foregroundStyle(NoveliaStyle.muted)
+                    }
+                    Slider(value: $readerSettings.fontSize, in: ReaderSettings.fontRange, step: 1)
+                        .tint(NoveliaStyle.brandGreen)
+                        .accessibilityLabel("正文字号")
+                        .accessibilityValue("\(Int(readerSettings.fontSize)) 点")
+                }
+                NavigationLink {
+                    TXTChapterRulesView()
+                } label: {
+                    Label("TXT 分章规则", systemImage: "text.alignleft")
+                }
+            }
+            Section("界面") {
+                NavigationLink { TabBarSettingsView() } label: {
+                    Label("自定义底栏", systemImage: "dock.rectangle")
+                }
                 Picker(selection: $themeColorRaw) {
                     ForEach(AppThemeColor.allCases) { option in
                         HStack(spacing: 8) {
@@ -135,26 +157,6 @@ struct SettingsView: View {
                         supportsOpacity: false
                     )
                 }
-                Picker("显示语言", selection: $modeRaw) {
-                    ForEach(ReaderMode.allCases) { mode in
-                        Text(mode.title).tag(mode.rawValue)
-                    }
-                }
-                VStack(alignment: .leading, spacing: 9) {
-                    HStack {
-                        Text("正文字号")
-                        Spacer()
-                        Text("\(Int(readerSettings.fontSize)) pt")
-                            .foregroundStyle(NoveliaStyle.muted)
-                    }
-                    Slider(value: $readerSettings.fontSize, in: ReaderSettings.fontRange, step: 1)
-                        .tint(NoveliaStyle.brandGreen)
-                }
-                NavigationLink {
-                    TXTChapterRulesView()
-                } label: {
-                    Label("TXT 分章规则", systemImage: "text.alignleft")
-                }
             }
             Section("同步") {
                 NavigationLink {
@@ -163,7 +165,7 @@ struct SettingsView: View {
                     Label("WebDAV 同步", systemImage: "arrow.triangle.2.circlepath")
                 }
             }
-            Section("版本") {
+            Section("关于") {
                 Toggle("启动时检查更新", isOn: $checksUpdates)
                 if services.performsUpdateChecks {
                     Button {
@@ -187,7 +189,7 @@ struct SettingsView: View {
                     ThirdPartyLicensesView()
                 }
             }
-            Section("诊断") {
+            Section("高级") {
                 Button {
                     exportLogs()
                 } label: {
@@ -562,7 +564,7 @@ private struct LogActivitySheet: UIViewControllerRepresentable {
 private struct ThirdPartyLicensesView: View {
     /// GPL-3.0 第 5(a) 条要求的修改日期。scripts/build_local_release.py 要求它等于
     /// 发布提交的日期，因此每次发布构建时都需更新。
-    static let modifiedDate = "2026-11-01"
+    static let modifiedDate = "2026-11-06"
     /// iOS 15 目标不链接 YueduCoreText 与 libmobi，开源许可页不把它们列为本二进制的组件。
     private var packages: [(name: String, version: String, license: String, file: String)] {
         let all: [(name: String, version: String, license: String, file: String)] = [
@@ -576,7 +578,8 @@ private struct ThirdPartyLicensesView: View {
             ("GCDWebServer", "4.0.1", "BSD-3-Clause", "GCDWebServer-LICENSE.txt"),
             ("SQLite.swift", "0.16.0", "MIT", "SQLite.swift-LICENSE.txt"),
             ("Zip", "2.1.2", "MIT", "Zip-LICENSE.txt"),
-            ("libmobi", "0.12", "LGPL-3.0-or-later", "libmobi-LICENSE.txt")
+            ("libmobi", "0.12", "LGPL-3.0-or-later", "libmobi-LICENSE.txt"),
+            ("edge-tts 协议适配", "bd44c1d", "LGPL-3.0-only", "edge-tts-LICENSE.txt")
         ]
         #if NOVELIA_READIUM_ONLY
         return all.filter { $0.name != "YueduCoreText" && $0.name != "libmobi" }

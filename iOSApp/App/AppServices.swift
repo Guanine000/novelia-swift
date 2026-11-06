@@ -13,10 +13,12 @@ final class AppServices: ObservableObject {
     let api: APIServiceCollection
     let account: AccountAuthStore
     let forumAccount: ForumAuthStore
+    let speech: any SpeechEngineSelecting
 
     init(configuration: APIConfiguration, api: APIServiceCollection,
-         account: AccountAuthStore, forumAccount: ForumAuthStore, local: LocalAppServices? = nil, performsUpdateChecks: Bool = true) {
+         account: AccountAuthStore, forumAccount: ForumAuthStore, local: LocalAppServices? = nil, performsUpdateChecks: Bool = true, speechService: (any CloudSpeechSynthesizing)? = nil) {
         self.performsUpdateChecks = performsUpdateChecks
+        self.speech = AppSpeechEngineFactory(service: speechService)
         self.local = local ?? LocalAppServices()
         self.configuration = configuration
         self.api = api
@@ -37,7 +39,7 @@ final class AppServices: ObservableObject {
             configuration: configuration, session: session,
             novelToken: { [store = account.tokenStore] in store.read() },
             forumToken: { [store = forum.tokenStore] in store.read() })
-        return AppServices(configuration: configuration, api: api, account: account, forumAccount: forum)
+        return AppServices(configuration: configuration, api: api, account: account, forumAccount: forum, speechService: EdgeSpeechClient())
     }
 }
 
