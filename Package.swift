@@ -12,7 +12,7 @@ let package = Package(
     ],
     dependencies: [
         // 版本固定与 Xcode 项目一致（NoveliaIOS.xcodeproj 的 Package.resolved）。
-        .package(url: "https://github.com/CHANG-JUI-LIN/YueduCoreText.git", exact: "0.8.0"),
+        .package(url: "https://github.com/CHANG-JUI-LIN/YueduCoreText.git", exact: "0.18.1"),
         .package(url: "https://github.com/readium/ZIPFoundation.git", exact: "3.0.1"),
         .package(url: "https://github.com/readium/swift-toolkit.git", exact: "3.11.0"),
         // 与 YueduCoreText 精确依赖的版本一致；Kindle 导入直接用它整理旧版 MOBI 的 HTML。

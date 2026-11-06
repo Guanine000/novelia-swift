@@ -12,7 +12,7 @@ WebDAV 强版本读取、坚果云条件头兼容和首次创建流程参考并�
 
 ## 第三方软件
 
-App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完整依赖清单](../iOSApp/Resources/ThirdPartyLicenses/INDEX.md)列出 `Package.resolved` 中全部 10 个 Swift Package 的版本、来源及许可文件，以及实验性 Readium EPUB 阅读器随附的字体与脚本声明。IPA 随附 Zip 内嵌 MiniZip / Info-ZIP 的独立版权与完整许可，以及这些原始许可文本、YueduCoreText 的 MPL-2.0 许可和包含 Unicode License v3 的 NOTICE。YueduCoreText 对应源码为[精确锁定的提交](https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/783ce903d5faf4ff5d15c546e32a107537ba5efe)，本项目没有修改该依赖的上游源码。ruby注音转换在宿主阅读器中使用现有SwiftSoup（MIT）解析并改写为「底文（读音）」文本，不修改原书或Yuedu依赖。用户自行导入的字体保存在本机 App 文档目录，不随本项目 IPA 分发；字体文件仍受其自身许可约束。
+App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完整依赖清单](../iOSApp/Resources/ThirdPartyLicenses/INDEX.md)列出 `Package.resolved` 中全部 10 个 Swift Package 的版本、来源及许可文件，以及实验性 Readium EPUB 阅读器随附的字体与脚本声明。IPA 随附 Zip 内嵌 MiniZip / Info-ZIP 的独立版权与完整许可，以及这些原始许可文本、YueduCoreText 的 MPL-2.0 许可和包含 Unicode License v3 的 NOTICE。YueduCoreText 对应源码为[精确锁定的提交](https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/5cc346abddd5801fd82d10509bf7f78af5ec0d49)，本项目没有修改该依赖的上游源码。ruby注音转换在宿主阅读器中使用现有SwiftSoup（MIT）解析并改写为「底文（读音）」文本，不修改原书或Yuedu依赖。用户自行导入的字体保存在本机 App 文档目录，不随本项目 IPA 分发；字体文件仍受其自身许可约束。
 
 阅读器依赖的版本、用途与代码分类见[阅读器依赖](../iOSApp/Features/Reader/EPUBReader/DEPENDENCIES.md)。
 

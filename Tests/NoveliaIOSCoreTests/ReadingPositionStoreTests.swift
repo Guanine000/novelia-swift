@@ -126,3 +126,40 @@ final class ReadingPositionStoreTests: XCTestCase {
         XCTAssertEqual(store.all()["txt:book"]?.chapterIndex, 2)
     }
 }
+
+extension ReadingPositionStoreTests {
+    func testNativeOffsetsAreOptionalAndPreserveLegacyCoordinates() throws {
+        let oldJSON = Data("{\"chapterIndex\":2,\"chapterOffset\":10,\"updatedAt\":0}".utf8)
+        let old = try JSONDecoder().decode(SyncedReadingPosition.self, from: oldJSON)
+        XCTAssertNil(old.nativeChapterOffset)
+        XCTAssertNil(old.nativeSourceHash)
+        var native = old
+        native.nativeChapterOffset = 12
+        native.nativeSourceHash = "source-fingerprint"
+        let store = ReadingPositionStore(defaults: preferences())
+        store.mergePosition(key: "epub:book", position: native)
+        let loaded = try XCTUnwrap(store.epubPosition(hash: "book"))
+        XCTAssertEqual(loaded.chapterOffset, 10)
+        XCTAssertEqual(loaded.nativeChapterOffset, 12)
+        XCTAssertEqual(try JSONDecoder().decode(SyncedReadingPosition.self, from: JSONEncoder().encode(loaded)), native)
+        store.recordEPUB(hash: "book", fraction: 0.5, spineIndex: 2, chapterOffset: 20, chapterProgression: 0.4)
+        XCTAssertNil(store.epubPosition(hash: "book")?.nativeChapterOffset, "其他引擎重新保存后不得沿用旧精确坐标")
+    }
+}
+
+extension ReadingPositionStoreTests {
+    func testUserReadingReplacesFutureTimestampWithBothCoordinatesAtomically() throws {
+        let store = ReadingPositionStore(defaults: preferences())
+        store.mergePosition(key: "epub:book", position: SyncedReadingPosition(chapterIndex: 0, fraction: 0,
+                            updatedAt: Date().addingTimeInterval(3600), chapterOffset: 1))
+        let boundary: any ReadingPositionProviding = store
+        boundary.recordEPUB(hash: "book", fraction: 0.5, spineIndex: 1, chapterOffset: 20, chapterProgression: 0.5,
+                            nativeChapterOffset: 22, nativeSourceHash: "text")
+        let saved = try XCTUnwrap(store.epubPosition(hash: "book"))
+        XCTAssertEqual(saved.chapterIndex, 1)
+        XCTAssertEqual(saved.chapterOffset, 20)
+        XCTAssertEqual(saved.nativeChapterOffset, 22)
+        XCTAssertEqual(saved.nativeSourceHash, "text")
+        XCTAssertLessThan(saved.updatedAt, Date().addingTimeInterval(1))
+    }
+}

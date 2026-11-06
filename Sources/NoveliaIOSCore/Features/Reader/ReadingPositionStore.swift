@@ -38,10 +38,16 @@ final class ReadingPositionStore: ReadingPositionSynchronizing {
     }
 
     func recordEPUB(hash: String, fraction: Double, spineIndex: Int, chapterOffset: Int?, chapterProgression: Double?) {
+        recordEPUB(hash: hash, fraction: fraction, spineIndex: spineIndex, chapterOffset: chapterOffset,
+                   chapterProgression: chapterProgression, nativeChapterOffset: nil, nativeSourceHash: nil)
+    }
+
+    func recordEPUB(hash: String, fraction: Double, spineIndex: Int, chapterOffset: Int?, chapterProgression: Double?,
+                    nativeChapterOffset: Int?, nativeSourceHash: String?) {
         var positions = all()
         positions["epub:\(hash)"] = SyncedReadingPosition(chapterIndex: spineIndex,
             fraction: min(1, max(0, fraction)), updatedAt: Date(), chapterOffset: chapterOffset,
-            chapterProgression: chapterProgression.map { min(1, max(0, $0)) })
+            nativeChapterOffset: nativeChapterOffset, nativeSourceHash: nativeSourceHash, chapterProgression: chapterProgression.map { min(1, max(0, $0)) })
         save(positions)
     }
 

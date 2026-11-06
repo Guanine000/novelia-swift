@@ -10,6 +10,7 @@ protocol ReadingPositionProviding: AnyObject {
     func mergePosition(key: String, position: SyncedReadingPosition, replacingEqualTimestamp: Bool)
     func recordWeb(id: String, chapterIndex: Int)
     func recordEPUB(hash: String, fraction: Double, spineIndex: Int, chapterOffset: Int?, chapterProgression: Double?)
+    func recordEPUB(hash: String, fraction: Double, spineIndex: Int, chapterOffset: Int?, chapterProgression: Double?, nativeChapterOffset: Int?, nativeSourceHash: String?)
     func epubPosition(hash: String) -> SyncedReadingPosition?
     func recordTXT(hash: String, position: TXTReadingPosition)
     func txtPosition(hash: String) -> TXTReadingPosition?
@@ -20,6 +21,16 @@ protocol ReadingPositionProviding: AnyObject {
 
 @MainActor
 extension ReadingPositionProviding {
+    /// 替代存储沿用旧接口；生产存储覆写为一次落盘，保持同一时间戳。
+    func recordEPUB(hash: String, fraction: Double, spineIndex: Int, chapterOffset: Int?, chapterProgression: Double?,
+                    nativeChapterOffset: Int?, nativeSourceHash: String?) {
+        recordEPUB(hash: hash, fraction: fraction, spineIndex: spineIndex, chapterOffset: chapterOffset, chapterProgression: chapterProgression)
+        guard var saved = epubPosition(hash: hash) else { return }
+        saved.nativeChapterOffset = nativeChapterOffset
+        saved.nativeSourceHash = nativeSourceHash
+        mergePosition(key: "epub:\(hash)", position: saved, replacingEqualTimestamp: true)
+    }
+
     func mergePosition(key: String, position: SyncedReadingPosition) {
         mergePosition(key: key, position: position, replacingEqualTimestamp: false)
     }

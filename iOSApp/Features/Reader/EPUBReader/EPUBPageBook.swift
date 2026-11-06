@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import SwiftSoup
 import OSLog
 import UIKit
@@ -65,9 +66,9 @@ final class EPUBPageBook {
     /// 每排出一页回调一次（主线程）；宿主借此刷新"下一页已就绪"的可用性。
     var onPagesChanged: (() -> Void)?
 
-    init(generation: Int, coordinator: EPUBLayoutCoordinator = .shared) {
+    init(generation: Int, coordinator: EPUBLayoutCoordinator? = nil) {
         self.generation = generation
-        self.coordinator = coordinator
+        self.coordinator = coordinator ?? .shared
     }
 
     /// YueduCoreText 0.8.0 仅调整一行中部分字符的字距来实现两端对齐。
@@ -79,8 +80,7 @@ final class EPUBPageBook {
     }
 
     /// 把一章交给 YueduCoreText 逐页排版（经 EPUBLayoutCoordinator 去重与缓存）。
-    /// 每页之间让路主线程（yield）并立即发布已完成的页——真实书籍整章一次排完
-    /// 会冻结 UI 数秒（卡顿），逐页增量让第一页立即可用、翻页预览尽早就绪。
+    /// 后台 actor 准备与分页；主线程只构建显示列表并逐页发布，不持有可变会话。
     func layoutChapter(_ spineIndex: Int, container: any EPUBChapterSource,
                        config: BrowserLayoutConfig, aspectRatio: CGFloat = 0.5,
                        readerCSS: String? = nil, context: EPUBLayoutContext = EPUBLayoutContext()) async throws {
@@ -159,38 +159,35 @@ final class EPUBPageBook {
         let images = await container.images(forChapterHTML: html, chapterHref: chapterHref)
         try Task.checkCancellation()
 
-        // 原生引擎统一把 ruby 注音改写为「底文（读音）」文本：保留读音，
-        // 也避免复杂注音结构阻断整章排版；Readium 仍使用原书注音排版。
-        let document = HTMLLayoutDocument(
-            html: try Self.rubyParentheticalText(html),
-            css: css,
-            configuration: config,
-            images: images
-        )
-        let session = try document.makePageSession()
-        // 先构建流水线（不排版页面），使 sourceText 就绪——DisplayList 文本切片依赖它。
-        _ = try session.prepare()
+        let worker = EPUBBackgroundLayout()
+        let prepared = try await worker.prepare(html: html, css: css, config: config, images: images)
+        let owner = prepared.owner
         var layout = EPUBChapterLayout(
-            pages: [], sourceText: session.sourceText, displayLists: [], linkRegions: [], footnotes: [:]
+            pages: [], sourceText: prepared.facts.sourceText, displayLists: [], linkRegions: [], footnotes: prepared.facts.footnotes,
+            positionMap: prepared.positionMap, tableFallback: prepared.tableFallback, sourceHash: SHA256.hash(data: Data(prepared.facts.sourceText.utf8)).map { String(format: "%02x", $0) }.joined()
         )
-        while let page = try await session.layoutNextPage() {
-            let list = DisplayListBuilder.build(for: page, sourceText: session.sourceText)
-            layout.pages.append(page)
-            layout.displayLists.append(list)
-            layout.linkRegions.append(LinkInteractionRegionSet.build(
-                from: list, spineIndex: spineIndex, anchors: session.pipelineLinkAnchors
-            ))
-            publish(layout)
-            await Task.yield()
-            try Task.checkCancellation()
+        return try await withTaskCancellationHandler {
+            while let page = try await owner.layoutNextPage() {
+                try Task.checkCancellation()
+                let list = DisplayListBuilder.build(for: page, sourceText: layout.sourceText)
+                layout.pages.append(page)
+                layout.pageRanges.append(contentsOf: BrowserPageGeometry.buildPageRanges([page], sourceText: layout.sourceText))
+                layout.displayLists.append(list)
+                layout.linkRegions.append(LinkInteractionRegionSet.build(
+                    from: list, spineIndex: spineIndex, anchors: prepared.facts.linkAnchors
+                ))
+                publish(layout)
+            }
+            layout.mainThreadLayoutSteps = await owner.mainThreadStepCount()
+            return layout
+        } onCancel: {
+            owner.cancel()
         }
-        layout.footnotes = session.pipelineFootnotes
-        return layout
     }
 
     /// 把章节 HTML 中的 ruby 注音改写为「底文（读音）」纯文本。
     /// 只影响本次排版结果，不修改原书；没有注音标签的章节原样返回。
-    static func rubyParentheticalText(_ html: String) throws -> String {
+    nonisolated static func rubyParentheticalText(_ html: String) throws -> String {
         // 先做廉价的字符串检查，避免给普通章节增加一次完整解析。
         let rubyTags = ["<ruby", "<rb", "<rp", "<rt"]
         guard rubyTags.contains(where: { html.range(of: $0, options: .caseInsensitive) != nil }) else { return html }
@@ -206,13 +203,12 @@ final class EPUBPageBook {
         // （SwiftSoup 解析这类无效标记时本身就会丢弃 rt 外壳，只留下文字。）
         try document.select("rb").unwrap()
         try document.select("rt, rp, rtc").remove()
-        EPUBLayoutLog.logger.notice("Ruby rendered as parenthetical text; source file preserved")
         return try document.outerHtml()
     }
 
     /// 把一个 ruby 元素的内容重建为「底文（读音）」；多个 rt 按出现顺序逐对生成。
     /// `<rp>` 里的圆括号不再输出，统一改用全角括号，避免读入重复括号。
-    private static func rubyParentheticalMarkup(of ruby: Element) throws -> String {
+    nonisolated private static func rubyParentheticalMarkup(of ruby: Element) throws -> String {
         var markup = ""
         var base: [Node] = []
         for child in ruby.getChildNodes() {
@@ -242,13 +238,13 @@ final class EPUBPageBook {
 
     /// 底文按源码格式换行书写时，标签之间会留下只用于排版的空白；
     /// 去掉首尾空白，读音才能紧跟底文显示，而不是隔着一个空格。
-    private static func rubyBaseMarkup(_ nodes: [Node]) throws -> String {
+    nonisolated private static func rubyBaseMarkup(_ nodes: [Node]) throws -> String {
         var markup = ""
         for node in nodes { markup += try node.outerHtml() }
         return markup.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func escapedHTMLText(_ text: String) -> String {
+    nonisolated private static func escapedHTMLText(_ text: String) -> String {
         text
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
@@ -268,13 +264,18 @@ final class EPUBPageBook {
     }
 
     /// 页面首段文字在章节源文本中的 UTF-16 偏移量；
-    /// 无文字的页面（整页图片）为 `nil`。
+    /// 包含图片字符，因此纯插图页也有独立的章内位置。
     func sourceOffset(spineIndex: Int, pageIndex: Int) -> Int? {
         guard let chapter = chapters[spineIndex], chapter.displayLists.indices.contains(pageIndex) else { return nil }
-        return chapter.displayLists[pageIndex].items.compactMap { item -> Int? in
-            guard case .text(let text) = item, text.sourceRange.length > 0 else { return nil }
-            return text.sourceRange.location
-        }.min()
+        return chapter.pageRanges.indices.contains(pageIndex) ? chapter.pageRanges[pageIndex].location : nil
+    }
+
+    var tableFallbackChapterCount: Int { chapters.values.filter(\.tableFallback).count }
+
+    func sourceHash(spineIndex: Int) -> String? { chapters[spineIndex]?.sourceHash }
+    func mainThreadLayoutSteps(spineIndex: Int) -> Int? { chapters[spineIndex]?.mainThreadLayoutSteps }
+    func savedLength(spineIndex: Int) -> Int? {
+        chapters[spineIndex].map { $0.positionMap.legacy($0.sourceText.utf16.count) }
     }
 
     /// 已排版章节的源文本（`sourceOffset` 所度量的文本）；未排版时为 nil。
@@ -297,6 +298,17 @@ final class EPUBPageBook {
             result = index
         }
         return result
+    }
+
+    /// 磁盘与同步继续使用旧版括号注音、无图片字符的偏移口径。
+    func savedOffset(spineIndex: Int, pageIndex: Int) -> Int? {
+        sourceOffset(spineIndex: spineIndex, pageIndex: pageIndex).map {
+            chapters[spineIndex]?.positionMap.legacy($0) ?? $0
+        }
+    }
+
+    func restoredOffset(spineIndex: Int, savedOffset: Int) -> Int {
+        chapters[spineIndex]?.positionMap.current(savedOffset) ?? savedOffset
     }
 
     func isPageAvailable(_ id: EPUBPageID) -> Bool {
@@ -564,5 +576,138 @@ final class EPUBLayoutTraceTally: @unchecked Sendable {
 
     func logSummary(spineIndex: Int) {
         EPUBLayoutLog.trace.debug("\(self.summary(spineIndex: spineIndex), privacy: .public)")
+    }
+}
+
+/// 一个请求独占的后台准备器；DOM、会话与配置闭包不会被并发访问。
+private actor EPUBBackgroundLayout {
+    struct Prepared: Sendable {
+        let owner: BrowserPageLayoutOwner
+        let facts: BrowserPageChapterFacts
+        let positionMap: EPUBSourcePositionMap
+        let tableFallback: Bool
+    }
+
+    private static func blockTableDisplay(_ css: String) -> String {
+        css.replacingOccurrences(of: #"(?i)\bdisplay\s*:\s*table(?:-[a-z-]+)?\b"#,
+                                 with: "display: block", options: .regularExpression)
+    }
+
+    func prepare(html: String, css: [String], config: BrowserLayoutConfig,
+                 images: [String: UIImage]) async throws -> Prepared {
+        try Task.checkCancellation()
+        var layoutHTML = html, layoutCSS = css
+        var input = CSSFrontendInput.currentCompatibility(html: layoutHTML, cssTexts: layoutCSS)
+        var evaluation = try BrowserChapterDocument(input: input).evaluate(configuration: config)
+        var tableFallback = false
+        if evaluation.capabilities.unsupportedFeatures.contains(.table) {
+            let document = try SwiftSoup.parse(html)
+            // 真正的 table 保留原结构与错误；只恢复旧书以 div 模拟居中表格的兼容路径。
+            if try document.select("table").isEmpty() {
+                document.outputSettings().prettyPrint(pretty: false)
+                for element in try document.select("[style]").array() {
+                    try element.attr("style", Self.blockTableDisplay(try element.attr("style")))
+                }
+                for element in try document.select("style").array() {
+                    try element.html(Self.blockTableDisplay(try element.html()))
+                }
+                layoutHTML = try document.outerHtml()
+                layoutCSS = css.map(Self.blockTableDisplay)
+                tableFallback = true
+                input = .currentCompatibility(html: layoutHTML, cssTexts: layoutCSS)
+                evaluation = try BrowserChapterDocument(input: input).evaluate(configuration: config)
+            }
+        }
+        let legacyHTML = try EPUBPageBook.rubyParentheticalText(layoutHTML)
+        if evaluation.capabilities.unsupportedFeatures.contains(.ruby) {
+            EPUBLayoutLog.logger.notice("Unsupported ruby rendered as parenthetical text; source file preserved")
+            input = .currentCompatibility(html: legacyHTML, cssTexts: layoutCSS)
+            evaluation = try BrowserChapterDocument(input: input).evaluate(configuration: config)
+        }
+        guard evaluation.capabilities.supported else {
+            throw HTMLLayoutError.unsupported(evaluation.capabilities.unsupportedFeatures)
+        }
+        let owner = try BrowserPageLayoutOwner(evaluation: evaluation, imageLoader: { images[$0] }, generation: 0)
+        let facts = try await withTaskCancellationHandler {
+            try await owner.prepare()
+        } onCancel: { owner.cancel() }
+        try Task.checkCancellation()
+        let legacyText: String
+        if legacyHTML != layoutHTML {
+            let session = try HTMLLayoutDocument(html: legacyHTML, css: layoutCSS, configuration: config, images: images).makePageSession()
+            _ = try session.prepare()
+            legacyText = session.sourceText.replacingOccurrences(of: "\u{FFFC}", with: "")
+        } else {
+            legacyText = facts.sourceText.replacingOccurrences(of: "\u{FFFC}", with: "")
+        }
+        return Prepared(owner: owner, facts: facts,
+                        positionMap: EPUBSourcePositionMap(legacy: legacyText, current: facts.sourceText), tableFallback: tableFallback)
+    }
+}
+
+/// 将新版显示文本和旧版持久化文本的 UTF-16 边界对应起来。
+/// 插入的图片与移除的括号注音没有共同字符时，定位到最近的正文边界。
+struct EPUBSourcePositionMap: Sendable {
+    private var legacyToCurrent: [Int] = []
+    private var currentToLegacy: [Int] = []
+
+    init(legacy: String, current: String) {
+        guard legacy != current else { return }
+        let old = Array(legacy.utf16), new = Array(current.utf16)
+        var removed = Set<Int>(), inserted = Set<Int>()
+        // 常见变化只有移除括号读音与插入图片字符，先线性对齐。
+        // 数万处注音直接做通用差异计算会随编辑距离变慢。
+        var oldIndex = 0, newIndex = 0
+        var aligned = true
+        while oldIndex < old.count || newIndex < new.count {
+            if oldIndex < old.count, newIndex < new.count, old[oldIndex] == new[newIndex] {
+                oldIndex += 1; newIndex += 1
+            } else if newIndex < new.count, new[newIndex] == 0xFFFC {
+                inserted.insert(newIndex); newIndex += 1
+            } else if oldIndex < old.count, old[oldIndex] == 0xFF08 {
+                var end = oldIndex + 1, depth = 1
+                while end < old.count, depth > 0 {
+                    if old[end] == 0xFF08 { depth += 1 }
+                    if old[end] == 0xFF09 { depth -= 1 }
+                    end += 1
+                }
+                guard depth == 0 else { aligned = false; break }
+                removed.formUnion(oldIndex..<end)
+                oldIndex = end
+            } else {
+                aligned = false; break
+            }
+        }
+        if !aligned {
+            removed.removeAll(); inserted.removeAll()
+            for change in new.difference(from: old) {
+                switch change {
+                case .remove(let offset, _, _): removed.insert(offset)
+                case .insert(let offset, _, _): inserted.insert(offset)
+                }
+            }
+        }
+        legacyToCurrent = Array(repeating: 0, count: old.count + 1)
+        currentToLegacy = Array(repeating: 0, count: new.count + 1)
+        var i = 0, j = 0
+        while i < old.count || j < new.count {
+            if i < old.count, removed.contains(i) {
+                legacyToCurrent[i] = j; i += 1
+            } else if j < new.count, inserted.contains(j) {
+                currentToLegacy[j] = i; j += 1
+            } else {
+                legacyToCurrent[i] = j; currentToLegacy[j] = i
+                i += 1; j += 1
+            }
+        }
+        legacyToCurrent[old.count] = new.count
+        currentToLegacy[new.count] = old.count
+    }
+
+    func current(_ offset: Int) -> Int {
+        legacyToCurrent.isEmpty ? max(0, offset) : legacyToCurrent[min(max(0, offset), legacyToCurrent.count - 1)]
+    }
+    func legacy(_ offset: Int) -> Int {
+        currentToLegacy.isEmpty ? max(0, offset) : currentToLegacy[min(max(0, offset), currentToLegacy.count - 1)]
     }
 }

@@ -287,10 +287,6 @@ final class EPUBContainer {
     /// 已按设备条件求值的 @media 规则块数量（引擎不支持 media queries；
     /// print/amzn-mobi 丢弃，not amzn-mobi 保留内容，aspect-ratio 按视口求值）。
     private(set) var mediaQueryRewriteCount = 0
-    /// 已剥离的 `display: table/table-cell`、`vertical-align: middle` 声明数量。
-    /// 多看风格插图页用它们垂直居中；在当前引擎中会让图片整页丢失（实测定位），
-    /// 去掉后图片按内容高度正常布局，仅失去"垂直居中"这一装饰效果。
-    private(set) var tableDisplayStripCount = 0
     /// 已将 Flex/Grid 布局降级为普通块布局的声明数量。
     /// 内容仍会显示，但 Flex/Grid 专属的对齐与间距效果不保留。
     private(set) var flexGridRewriteCount = 0
@@ -432,7 +428,6 @@ final class EPUBContainer {
         var result = Self.filterMediaQueries(in: css, aspectRatio: aspectRatio, counter: &mediaCounter)
         result = Self.rewriteOpacity(in: result, counter: &opacityRewriteCount,
                                      rgb: themeTextColor.rgbComponents)
-        result = Self.stripTableDisplayRules(in: result, counter: &tableDisplayStripCount)
         result = Self.rewriteUnsupportedFlexGrid(in: result, counter: &flexGridRewriteCount)
         result = Self.rewriteUnsupportedPositioning(in: result, counter: &positionRewriteCount)
         result = Self.rewriteTextShadow(in: result, counter: &textShadowRewriteCount)
@@ -539,20 +534,7 @@ final class EPUBContainer {
         return result
     }
 
-    /// 剥离 `display: table`/`table-cell` 与 `vertical-align: middle` 声明。
-    /// 多看风格插图页用它们垂直居中图片；在当前排版引擎中该组合会让图片
-    /// 在布局阶段被整体丢弃（整页空白，真实书籍实测定位）。
-    static func stripTableDisplayRules(in css: String, counter: inout Int) -> String {
-        guard let regex = try? NSRegularExpression(
-            pattern: "(display\\s*:\\s*(table|table-cell)\\s*;?)|(vertical-align\\s*:\\s*middle\\s*;?)",
-            options: [.caseInsensitive]) else { return css }
-        let ns = css as NSString
-        let matches = regex.matches(in: css, range: NSRange(location: 0, length: ns.length))
-        guard !matches.isEmpty else { return css }
-        counter += matches.count
-        return regex.stringByReplacingMatches(
-            in: css, range: NSRange(location: 0, length: ns.length), withTemplate: "")
-    }
+
 
     /// @media 按设备条件求值：匹配的规则块替换为其内容，不匹配的整块移除。
     /// 支持 print（丢弃）、amzn-mobi（Kindle 专用，丢弃）、not amzn-mobi（保留）、

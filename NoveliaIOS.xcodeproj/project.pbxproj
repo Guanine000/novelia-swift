@@ -676,7 +676,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 			repositoryURL = "https://github.com/CHANG-JUI-LIN/YueduCoreText.git";
 			requirement = {
 				kind = exactVersion;
-				version = 0.8.0;
+				version = 0.18.1;
 			};
 		};
 		F30000000000000000000003 /* XCRemoteSwiftPackageReference "ReadiumZIPFoundation" */ = {

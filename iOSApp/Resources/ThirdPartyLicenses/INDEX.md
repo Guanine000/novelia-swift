@@ -5,7 +5,7 @@
 | 软件包 | 版本 | 许可证 | 源码 | 许可文件 |
 | --- | --- | --- | --- | --- |
 | SwiftSoup | 2.13.7 | MIT | https://github.com/scinfu/SwiftSoup | [SwiftSoup-LICENSE.txt](SwiftSoup-LICENSE.txt) |
-| YueduCoreText | 0.8.0 | MPL-2.0 | https://github.com/CHANG-JUI-LIN/YueduCoreText | [YueduCoreText-LICENSE.txt](YueduCoreText-LICENSE.txt) |
+| YueduCoreText | 0.18.1 | MPL-2.0 | https://github.com/CHANG-JUI-LIN/YueduCoreText | [YueduCoreText-LICENSE.txt](YueduCoreText-LICENSE.txt) |
 | ZIPFoundation | 3.0.1 | MIT | https://github.com/readium/ZIPFoundation | [ZIPFoundation-LICENSE.txt](ZIPFoundation-LICENSE.txt) |
 | swift-toolkit | 3.11.0 | BSD-3-Clause | https://github.com/readium/swift-toolkit | [swift-toolkit-LICENSE.txt](swift-toolkit-LICENSE.txt) |
 | CryptoSwift | 1.10.0 | CryptoSwift License (zlib-style, attribution) | https://github.com/krzyzanowskim/CryptoSwift | [CryptoSwift-LICENSE.txt](CryptoSwift-LICENSE.txt) |
@@ -46,7 +46,7 @@ swift-toolkit 3.11.0 的资源包随 App 分发以下第三方内容：
 
 ## YueduCoreText 对应源码
 
-本应用使用的 YueduCoreText 0.8.0 精确锁定至提交 `783ce903d5faf4ff5d15c546e32a107537ba5efe`。其 MPL-2.0 覆盖源码可从 [上游对应提交](https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/783ce903d5faf4ff5d15c546e32a107537ba5efe) 获取；若该链接不可用，请联系本项目维护者取得本次分发对应的源码。许可正文见上方 `YueduCoreText-LICENSE.txt`。
+本应用使用的 YueduCoreText 0.18.1 精确锁定至提交 `5cc346abddd5801fd82d10509bf7f78af5ec0d49`。其 MPL-2.0 覆盖源码可从 [上游对应提交](https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/5cc346abddd5801fd82d10509bf7f78af5ec0d49) 获取；若该链接不可用，请联系本项目维护者取得本次分发对应的源码。许可正文见上方 `YueduCoreText-LICENSE.txt`。
 
 ## Novelia 安卓参考实现
 

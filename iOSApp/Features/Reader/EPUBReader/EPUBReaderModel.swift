@@ -36,20 +36,28 @@ final class EPUBReaderModel: ObservableObject {
             logLocationChange(from: oldValue)
             guard !isRestoringPosition, activeRelayouts == 0, status == .ready else { return }
             if let positionHandler {
-                positionHandler(location.spineIndex, pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex))
+                positionHandler(location.spineIndex, pageBook?.savedOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex))
             } else if let openedBookHash {
                 guard webContext == nil || locationCause != nil else { return }
-                let offset = pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex)
-                let length = pageBook?.sourceLength(spineIndex: location.spineIndex)
-                settings.recordEPUBPosition(
-                    hash: openedBookHash, fraction: overallProgress, spineIndex: location.spineIndex,
-                    chapterOffset: offset,
-                    chapterProgression: offset.flatMap { offset in length.map { EPUBChapterProgress.progression(offset: offset, length: $0) } }, context: webContext, paths: webChapterPaths)
+                let offset = pageBook?.savedOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex)
+                let length = pageBook?.savedLength(spineIndex: location.spineIndex)
+                let progression = offset.flatMap { offset in length.map { EPUBChapterProgress.progression(offset: offset, length: $0) } }
+                if webContext == nil {
+                    settings.positions.recordEPUB(
+                        hash: openedBookHash, fraction: overallProgress, spineIndex: location.spineIndex, chapterOffset: offset,
+                        chapterProgression: progression,
+                        nativeChapterOffset: pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex),
+                        nativeSourceHash: pageBook?.sourceHash(spineIndex: location.spineIndex))
+                } else {
+                    settings.recordEPUBPosition(hash: openedBookHash, fraction: overallProgress, spineIndex: location.spineIndex,
+                                               chapterOffset: offset, chapterProgression: progression, context: webContext, paths: webChapterPaths)
+                }
             }
         }
     }
     private var openedBookHash: String?
     private var isRestoringPosition = false
+    private var restoredNativePosition: (offset: Int, hash: String)?
     /// 正在进行的重排数量。重排期间位置会临时归零，此时的变化不写入阅读位置；
     /// 用计数而不是保存/恢复布尔值，避免新重排取消旧重排时旧任务的收尾把状态写乱。
     private var activeRelayouts = 0
@@ -57,6 +65,7 @@ final class EPUBReaderModel: ObservableObject {
     /// 若它被下一次重排取消（例如切到后台时系统截图导致深浅色或尺寸来回切换），
     /// 后一次必须沿用这里的锚点，不能从已归零的状态重新计算，否则会落到本章第一页。
     /// `page`／`pages` 是重排前实际显示的页码与本章页数，只用于诊断日志。
+    private var pendingRelayoutUsesSavedOffset = false
     private var pendingRelayoutAnchor: (spine: Int, offset: Int?, fraction: CGFloat, page: Int, pages: Int)?
     /// 当前这次位置写入的来源（翻页、目录跳转、进度条等），只用于诊断日志，写入后立即清空。
     private var locationCause: String?
@@ -206,8 +215,8 @@ final class EPUBReaderModel: ObservableObject {
         if container.mediaQueryRewriteCount > 0 {
             messages.append("本书包含 \(container.mediaQueryRewriteCount) 个 @media 规则块，已按设备条件求值（当前排版引擎不支持媒体查询；不匹配的规则被忽略）。")
         }
-        if container.tableDisplayStripCount > 0 {
-            messages.append("本书包含 \(container.tableDisplayStripCount) 处表格化垂直居中声明（display:table/vertical-align:middle），已剥离以正常显示图片，插图不再垂直居中。")
+        if let count = pageBook?.tableFallbackChapterCount, count > 0 {
+            messages.append("已排版章节中有 \(count) 章使用不受支持的伪表格结构，已改为普通块布局；插图保留，表格化居中效果不保留。")
         }
         if container.flexGridRewriteCount > 0 {
             messages.append("本书包含 \(container.flexGridRewriteCount) 处 Flex/Grid 布局声明，已回退为普通块布局以显示内容；相关内容的专属对齐和间距效果可能不同。")
@@ -353,6 +362,7 @@ final class EPUBReaderModel: ObservableObject {
     func open(url: URL) async {
         reloadStoredStyle()
         status = .opening
+        restoredNativePosition = nil
         isRestoringPosition = true
         bookKind = "epub"
         let start = ContinuousClock.now
@@ -377,6 +387,9 @@ final class EPUBReaderModel: ObservableObject {
             lastLayoutFailure = nil
             // 直接排版保存位置的章节，避免先排版第 0 章再恢复位置。
             let saved = settings.epubPosition(hash: bookHash, context: webContext, paths: webChapterPaths)
+            if let offset = saved?.nativeChapterOffset, let hash = saved?.nativeSourceHash {
+                restoredNativePosition = (offset, hash)
+            }
             if let spine = saved?.chapterIndex, let offset = saved?.chapterOffset, container.spine.indices.contains(spine) {
                 restored = true
                 await relayout(keepingCurrentSpine: false, reason: .restore, target: (spine, offset))
@@ -411,6 +424,7 @@ final class EPUBReaderModel: ObservableObject {
     func open(source: any EPUBChapterSource, unit: Int, offset: Int?,
               onPosition: @escaping (Int, Int?) -> Void) async {
         status = .opening
+        restoredNativePosition = nil
         isRestoringPosition = true
         positionHandler = onPosition
         if let text = source as? TextChapterSource { text.displayProjection = settings.projection }
@@ -429,7 +443,7 @@ final class EPUBReaderModel: ObservableObject {
         await relayout(keepingCurrentSpine: false, reason: offset == nil ? .first : .restore, target: (start, offset))
         isRestoringPosition = false
         if status == .ready {
-            onPosition(location.spineIndex, pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex))
+            onPosition(location.spineIndex, pageBook?.savedOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex))
         }
     }
 
@@ -582,10 +596,13 @@ final class EPUBReaderModel: ObservableObject {
         layoutTasks.removeAll()
         let anchor: (spine: Int, offset: Int?, fraction: CGFloat, page: Int, pages: Int)
         let resumed: Bool
+        let usesSavedOffset: Bool
         if target == nil, keepingCurrentSpine, let pending = pendingRelayoutAnchor {
             anchor = pending
+            usesSavedOffset = pendingRelayoutUsesSavedOffset
             resumed = true
         } else {
+            usesSavedOffset = target != nil && reason == .restore
             let spine = target?.spine ?? (keepingCurrentSpine ? location.spineIndex : 0)
             let previousCount = max(pageCount(spineIndex: spine), 1)
             // 重新分页时保持屏幕上显示同一段文本；比例仅用于
@@ -601,6 +618,7 @@ final class EPUBReaderModel: ObservableObject {
             resumed = false
         }
         pendingRelayoutAnchor = anchor
+        pendingRelayoutUsesSavedOffset = usesSavedOffset
         let spineIndex = anchor.spine
         let previousFraction = anchor.fraction
         let previousOffset = anchor.offset
@@ -625,9 +643,14 @@ final class EPUBReaderModel: ObservableObject {
                 pendingRelayoutAnchor = nil
                 status = .ready
                 location.spineIndex = spineIndex
-                let restoreOffset = previousOffset ?? targetProgression.flatMap { progression in
+                var restoreOffset = previousOffset.map { usesSavedOffset ? book.restoredOffset(spineIndex: spineIndex, savedOffset: $0) : $0 } ?? targetProgression.flatMap { progression in
                     book.sourceLength(spineIndex: spineIndex).map { EPUBChapterProgress.offset(progression: progression, length: $0) }
                 }
+                if usesSavedOffset, let native = restoredNativePosition,
+                   book.sourceHash(spineIndex: spineIndex) == native.hash {
+                    restoreOffset = native.offset
+                }
+                restoredNativePosition = nil
                 let anchorKind: String
                 if let restoreOffset, let page = book.pageIndex(spineIndex: spineIndex, containingSourceOffset: restoreOffset) {
                     location.pageIndex = page
@@ -1141,6 +1164,7 @@ final class EPUBReaderModel: ObservableObject {
     @Published private(set) var searchHighlightRects: [CGRect] = []
     @Published private(set) var readingReturnPoint: (chapter: Int, progression: Double)?
     private var searchHit: BookTextSearch.Hit?
+    private var searchPositionMap: (chapter: Int, hash: String?, map: EPUBSourcePositionMap)?
     private func rememberReadingPoint() {
         if readingReturnPoint == nil { readingReturnPoint = (location.spineIndex, currentPageRange?.range.lowerBound ?? 0) }
     }
@@ -1154,7 +1178,11 @@ final class EPUBReaderModel: ObservableObject {
     }
     private func refreshSearchHighlight() {
         guard let hit = searchHit, hit.chapterIndex == location.spineIndex else { searchHighlightRects = []; return }
-        searchHighlightRects = selectionRects(for: NSRange(location: hit.utf16Offset, length: hit.match.utf16.count))
+        guard let mapping = searchPositionMap, mapping.chapter == hit.chapterIndex,
+              mapping.hash == pageBook?.sourceHash(spineIndex: hit.chapterIndex) else { searchHighlightRects = []; return }
+        let start = mapping.map.current(hit.utf16Offset)
+        let end = mapping.map.current(hit.utf16Offset + hit.match.utf16.count)
+        searchHighlightRects = end > start ? selectionRects(for: NSRange(location: start, length: end - start)) : []
     }
 
     /// 章节标题：取 spine 不晚于该章的最后一个目录项。
@@ -1179,7 +1207,17 @@ final class EPUBReaderModel: ObservableObject {
                                                  context: layoutContext(.navigate))
                 }
                 guard pageBook === book else { return }
-                let offset = exactOffset ?? book.sourceLength(spineIndex: spineIndex).map {
+                var mappedOffset: Int?
+                if let exactOffset, let text = book.sourceText(spineIndex: spineIndex) {
+                    let plain = BookTextSearch.plainText(html: try await container.chapterHTML(at: spineIndex))
+                    let map = await Task.detached(priority: .userInitiated) {
+                        EPUBSourcePositionMap(legacy: plain, current: text)
+                    }.value
+                    guard pageBook === book, !Task.isCancelled else { return }
+                    searchPositionMap = (spineIndex, book.sourceHash(spineIndex: spineIndex), map)
+                    mappedOffset = map.current(exactOffset)
+                }
+                let offset = mappedOffset ?? book.sourceLength(spineIndex: spineIndex).map {
                     EPUBChapterProgress.offset(progression: progression, length: $0)
                 }
                 var page = offset.flatMap { book.pageIndex(spineIndex: spineIndex, containingSourceOffset: $0) } ?? 0

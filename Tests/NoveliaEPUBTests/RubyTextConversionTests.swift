@@ -106,3 +106,108 @@ extension RubyTextConversionTests {
         XCTAssertTrue(source.html.contains("<rtc>"), "原书内容不能被改写")
     }
 }
+
+@MainActor
+private final class UpgradedLayoutSource: EPUBChapterSource {
+    var bookTitle = "新版排版回归"
+    var chapterCount = 1
+    var toc = [EPUBTOCEntry(title: "章", spineIndex: 0)]
+    var themeTextColor: UIColor = .black
+    let html: String
+    let css: [String]
+    let images: [String: UIImage]
+    init(html: String, css: [String] = [], images: [String: UIImage] = [:]) {
+        self.html = html; self.css = css; self.images = images
+    }
+    func chapterHref(at index: Int) -> String { "chapter.xhtml" }
+    func chapterHTML(at index: Int) async throws -> String { html }
+    func cssTexts(forChapterHTML html: String, chapterHref: String, aspectRatio: CGFloat) async -> [String] { css }
+    func images(forChapterHTML html: String, chapterHref: String) async -> [String: UIImage] { images }
+    func spineIndex(forLinkHref href: String, relativeTo chapterHref: String) -> Int? { nil }
+}
+
+extension RubyTextConversionTests {
+    func testSupportedRubyRemainsNativeAndMapsOldPosition() async throws {
+        let source = UpgradedLayoutSource(html: "<p>前文<ruby>漢字<rt>かんじ</rt></ruby>后文</p>")
+        let book = EPUBPageBook(generation: 1)
+        try await book.layoutChapter(0, container: source, config: EPUBLayoutTests.readerConfig(workarounds: true))
+        let text = try XCTUnwrap(book.sourceText(spineIndex: 0))
+        XCTAssertTrue(text.contains("漢字"))
+        XCTAssertFalse(text.contains("（かんじ）"))
+        let oldOffset = ("前文漢字（かんじ）后文" as NSString).range(of: "后文").location
+        let newOffset = (text as NSString).range(of: "后文").location
+        XCTAssertEqual(book.restoredOffset(spineIndex: 0, savedOffset: oldOffset), newOffset)
+        XCTAssertEqual(book.mainThreadLayoutSteps(spineIndex: 0), 0)
+    }
+
+    func testTablePreservesCellContents() async throws {
+        let source = UpgradedLayoutSource(html: "<table><tr><td>人物甲</td><td>人物乙</td></tr><tr><td>资料甲</td><td>资料乙</td></tr></table>",
+                                         css: ["table { border-collapse: separate; border-spacing: 4px } td { vertical-align: middle; border: 1px solid black }"])
+        let book = EPUBPageBook(generation: 1)
+        try await book.layoutChapter(0, container: source, config: EPUBLayoutTests.readerConfig(workarounds: true))
+        let text = try XCTUnwrap(book.sourceText(spineIndex: 0))
+        for expected in ["人物甲", "人物乙", "资料甲", "资料乙"] { XCTAssertTrue(text.contains(expected)) }
+        XCTAssertGreaterThan(book.pageCount(spineIndex: 0), 0)
+    }
+
+    func testPicturePagesHaveDistinctOffsetsAndRestoreToThemselves() async throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 200, height: 400)).image { context in
+            UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 200, height: 400))
+        }
+        let source = UpgradedLayoutSource(html: "<img src='a.png'/><img src='a.png'/><p>后文</p>",
+                                         css: ["body { margin: 0 } img { display: block; width: 100%; height: 100vh; page-break-after: always }"],
+                                         images: ["a.png": image])
+        let book = EPUBPageBook(generation: 1)
+        try await book.layoutChapter(0, container: source, config: EPUBLayoutTests.readerConfig(workarounds: true))
+        XCTAssertGreaterThanOrEqual(book.pageCount(spineIndex: 0), 3)
+        var previous = -1
+        for page in 0..<book.pageCount(spineIndex: 0) {
+            let offset = try XCTUnwrap(book.sourceOffset(spineIndex: 0, pageIndex: page))
+            XCTAssertGreaterThan(offset, previous)
+            XCTAssertEqual(book.pageIndex(spineIndex: 0, containingSourceOffset: offset), page)
+            previous = offset
+        }
+    }
+
+    func testLargeRubyPositionMapKeepsEveryBaseBoundary() {
+        let count = 13_500
+        let oldUnit = "前漢（かん）後文", newUnit = "前漢後文"
+        let map = EPUBSourcePositionMap(legacy: String(repeating: oldUnit, count: count),
+                                        current: String(repeating: newUnit, count: count))
+        for index in stride(from: 0, to: count, by: 97) {
+            let old = index * oldUnit.utf16.count + 6
+            let current = index * newUnit.utf16.count + 2
+            XCTAssertEqual(map.current(old), current)
+            XCTAssertEqual(map.legacy(current), old)
+        }
+    }
+
+    func testPositionMapHandlesSurrogatesAndRepeatedReadings() {
+        let old = "😀前漢（かん）後漢（かん）末"
+        let new = "😀前漢後\u{FFFC}漢末"
+        let map = EPUBSourcePositionMap(legacy: old, current: new)
+        for word in ["前", "後", "末"] {
+            let a = (old as NSString).range(of: word).location
+            let b = (new as NSString).range(of: word).location
+            XCTAssertEqual(map.current(a), b)
+            XCTAssertEqual(map.legacy(b), a)
+        }
+    }
+}
+
+extension RubyTextConversionTests {
+    func testPseudoTableImageKeepsLegacyFallback() async throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 100, height: 180)).image { context in
+            UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 100, height: 180))
+        }
+        let source = UpgradedLayoutSource(html: "<div class='page'><div class='cell'><img src='a.png'/></div></div>",
+                                         css: [".page { display: table; width: 100% } .cell { display: table-cell; vertical-align: middle }"],
+                                         images: ["a.png": image])
+        let book = EPUBPageBook(generation: 1)
+        try await book.layoutChapter(0, container: source, config: EPUBLayoutTests.readerConfig(workarounds: true))
+        XCTAssertEqual(book.tableFallbackChapterCount, 1)
+        XCTAssertTrue(book.displayLists(spineIndex: 0).contains { list in
+            list.items.contains { if case .image(let item) = $0 { return !item.isBackgroundPaint }; return false }
+        }, "伪表格降级后必须仍绘制原插图")
+    }
+}

@@ -10,8 +10,7 @@ import NoveliaIOSCore
 // 同一本书、同一章、同一组排版参数只排一次：进行中的请求共享一个任务（逐页进度
 // 同步推给所有等待者），完成结果进入 LRU，重开同一本书或字号改回原值时直接复用。
 // 最后一个等待者取消时底层任务才取消；预取排在当前章之后，同一时间最多一个。
-// YueduCoreText 0.8.0 的 BrowserLayoutSession 是 @MainActor，排版本身只能在主线程
-// 逐页执行（每页之间让路）；这里减少的是重复与过期的主线程工作量。
+// 后台 BrowserPageLayoutOwner 独占章节会话；协调器在主线程管理等待者与不可变结果。
 
 /// 请求章节排版的原因（用于诊断；原始值会被导出）。
 enum EPUBLayoutReason: String {
@@ -22,7 +21,7 @@ enum EPUBLayoutReason: String {
 /// `BrowserLayoutConfig` 与章节请求中所有会影响分页的内容。
 struct EPUBLayoutParameters: Hashable {
     /// 相同输入对应的阅读器排版结果发生变化时递增（例如 CSS 或兼容处理变化）。
-    static let layoutVersion = 2
+    static let layoutVersion = 3
 
     let renderWidth: CGFloat
     let renderHeight: CGFloat
@@ -76,6 +75,11 @@ struct EPUBChapterLayout {
     var linkRegions: [LinkInteractionRegionSet]
     /// 本章注脚文本：noteID（不含 #）→ 文本。
     var footnotes: [String: String]
+    var positionMap = EPUBSourcePositionMap(legacy: "", current: "")
+    var tableFallback = false
+    var sourceHash = ""
+    var mainThreadLayoutSteps = 0
+    var pageRanges: [NSRange] = []
 }
 
 @MainActor

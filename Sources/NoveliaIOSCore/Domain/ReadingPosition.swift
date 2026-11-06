@@ -10,6 +10,10 @@ struct SyncedReadingPosition: Codable, Equatable {
     /// EPUB：页面首段文字在章节源文本中的 UTF-16 偏移量，
     /// 字体或布局变化后重新分页时仍可用于恢复位置。
     var chapterOffset: Int? = nil
+    /// 新版原生引擎的精确偏移，包含图片字符；旧客户端继续读 chapterOffset。
+    /// 仅源文本摘要相同时采用，避免文字处理或排版版本改变后误用。
+    var nativeChapterOffset: Int? = nil
+    var nativeSourceHash: String? = nil
     /// 仅 TXT：分页单元及单元总数；此时 `chapterOffset` 表示该单元内的偏移量。
     /// 旧版应用解码时忽略这两个字段。
     var unit: Int? = nil
