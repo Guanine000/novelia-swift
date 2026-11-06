@@ -37,7 +37,6 @@ private struct ReadiumEPUBReaderViewContent: View {
     @State private var tocWordCounts: ReaderTOCWordCounts?
     @State private var isShowingBookPreferences = false
     @State private var isShowingStyle = false
-    @State private var isShowingSpeech = false
     @State private var isShowingBookmarks = false
     @State private var bookmarksTab = ReaderBookmarksSearchSheet.Tab.bookmarks
     @State private var isScrubbing = false
@@ -146,12 +145,10 @@ private struct ReadiumEPUBReaderViewContent: View {
             model.onCenterTap = { withAnimation(.easeInOut(duration: 0.15)) { showChrome.toggle() } }
         }
         .task {
-            model.speechSelection = services.speech
             if let textBook { await model.open(textBook: textBook, systemIsDark: colorScheme == .dark) }
             else if let bookURL { await model.open(url: bookURL, systemIsDark: colorScheme == .dark) }
         }
         .onDisappear {
-            model.speech.stop()
             if !wasBatteryMonitoringEnabled {
                 UIDevice.current.isBatteryMonitoringEnabled = false
             }
@@ -191,14 +188,6 @@ private struct ReadiumEPUBReaderViewContent: View {
             }
         }
         .sheet(isPresented: $isShowingStyle) { styleSheet }
-        .overlay(alignment: .bottomTrailing) {
-            ReaderSpeechQuickControls(controller: model.speech, openPanel: { isShowingSpeech = true })
-                .padding(.trailing, 16).padding(.bottom, 110)
-        }
-        .sheet(isPresented: $isShowingSpeech) {
-            SpeechControlView(controller: model.speech, session: model.speech.session,
-                              anchor: model.speechAnchor, title: model.bookTitle, onEngineChange: { model.prepareSpeech() }, onStart: { model.startSpeechFromVisiblePage() })
-        }
         .sheet(item: $model.activeNote) { note in noteSheet(note) }
     }
 
@@ -252,14 +241,6 @@ private struct ReadiumEPUBReaderViewContent: View {
                     Label("阅读设置", systemImage: "textformat.size")
                 }
                 .accessibilityLabel("阅读设置")
-                .disabled(model.status != .ready)
-                Button {
-                    model.prepareSpeech()
-                    isShowingSpeech = true
-                } label: {
-                    Label("朗读", systemImage: "speaker.wave.2")
-                }
-                .accessibilityLabel("朗读")
                 .disabled(model.status != .ready)
             } label: {
                 Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
@@ -600,7 +581,6 @@ private struct ReadiumNavigatorHost: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> ReadiumNavigatorContainer {
         let container = ReadiumNavigatorContainer()
-        container.onSpeakSelection = { [weak model] selection in model?.startSpeech(selection: selection) }
         if let navigator = model.navigator { container.embed(navigator) }
         return container
     }

@@ -110,6 +110,16 @@ struct LibraryReadingStatus: Equatable {
 @MainActor
 final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
 
+    private var wenkuVolumeHistory = WenkuVolumeHistory()
+    private static let wenkuVolumeHistoryKey = "library.wenkuVolumeHistory.v1"
+
+    /// 检查记录只在本机保存并按账号隔离；空目录不清空有效基准。
+    func recordWenkuVolumeCheck(_ detail: WenkuNovelDetail, account: String, now: Date = Date()) -> WenkuVolumeCheckReport {
+        let report = wenkuVolumeHistory.record(detail, account: account, now: now)
+        if let data = try? JSONEncoder().encode(wenkuVolumeHistory) { defaults.set(data, forKey: Self.wenkuVolumeHistoryKey) }
+        return report
+    }
+
     /// 已知文库ID使用稳定父项系列，不按书名猜测或覆盖用户已有分组。
     func associateVolumes(_ books: [LibraryBook]) {
         var updated = series
@@ -163,6 +173,7 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
         hashes = defaults.dictionary(forKey: Key.hashes) as? [String: String] ?? [:]
         lastOpened = (defaults.data(forKey: Key.lastOpened)).flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
         self.positions = readingPositions.all()
+        wenkuVolumeHistory = defaults.data(forKey: Self.wenkuVolumeHistoryKey).flatMap { try? JSONDecoder().decode(WenkuVolumeHistory.self, from: $0) } ?? WenkuVolumeHistory()
         // 清理已移除的手工状态；实际阅读位置和自动进度不受影响。
         defaults.removeObject(forKey: "library.manualReadingStates.v1")
     }

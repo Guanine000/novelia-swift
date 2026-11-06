@@ -51,7 +51,3 @@ swift-toolkit 3.11.0 的资源包随 App 分发以下第三方内容：
 ## Novelia 安卓参考实现
 
 WebDAV 强版本读取与坚果云首次创建流程参考并适配自 Novelia 安卓端 `WebDavClient.kt`（提交 `44be26d51e2a38e98aea74dc31aca1bb0a0261fe`，GPL-3.0-only）。Copyright (C) 2026 Novelia Android contributors. Swift 平台适配与修改日期：2026-10-17。源码来源与修改范围见项目 `docs/LICENSES.md`；完整许可见 [GPL-3.0-only.txt](GPL-3.0-only.txt)。
-
-## 协议移植源码
-
-- **edge-tts（LGPL-3.0-only）**：用于 Edge 消费端 TTS WebSocket 与 v2 时间令牌的 Swift 适配；固定提交 [bd44c1d](https://github.com/rany2/edge-tts/tree/bd44c1d1aaebdc1db7f47456ee12431b42ec7cac)，Copyright (c) 2025- rany <rany@riseup.net>；Swift 修改 Copyright (C) 2026 Novelia iOS contributors，2026-11-04。保留原始 [完整许可证](edge-tts-LICENSE.txt)。非 Swift Package，无 Python 运行时；对应改编源码在 Core Infrastructure/API 的 EdgeSpeechToken.swift 与 EdgeSpeechClient.swift，随完整 App 源码提供。

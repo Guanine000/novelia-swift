@@ -202,22 +202,3 @@ extension ReadiumTextPublicationTests {
         XCTAssertLessThan(refresh, .seconds(2))
     }
 }
-
-extension ReadiumTextPublicationTests {
-    func testTextContentServiceSupportsSpeechAndRemainsLazy() async throws {
-        var loads = [0, 0]
-        let source = TextChapterSource(bookTitle: "朗读", units: (0..<2).map { index in
-            .init(tocTitle: "第\(index)章") {
-                loads[index] += 1
-                return TextChapterContent(title: "第\(index)章", paragraphs: [.init(text: "正文\(index)。")])
-            }
-        })
-        let publication = ReadiumTextPublication.make(source: source)
-        let content = try XCTUnwrap(publication.content(from: nil))
-        XCTAssertEqual(loads, [0, 0], "Providing the speech service must not prefetch the book")
-        let text = await content.text()
-        XCTAssertTrue(text?.contains("正文0。") == true)
-        XCTAssertTrue(text?.contains("正文1。") == true)
-        XCTAssertEqual(loads, [1, 1])
-    }
-}

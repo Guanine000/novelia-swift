@@ -92,7 +92,6 @@ struct SettingsView: View {
             }
             Section("阅读") {
                 NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
-                NavigationLink("朗读") { SpeechSettingsView() }
                 #if NOVELIA_READIUM_ONLY
                 readiumExperienceControls
                 #else
@@ -578,8 +577,7 @@ private struct ThirdPartyLicensesView: View {
             ("GCDWebServer", "4.0.1", "BSD-3-Clause", "GCDWebServer-LICENSE.txt"),
             ("SQLite.swift", "0.16.0", "MIT", "SQLite.swift-LICENSE.txt"),
             ("Zip", "2.1.2", "MIT", "Zip-LICENSE.txt"),
-            ("libmobi", "0.12", "LGPL-3.0-or-later", "libmobi-LICENSE.txt"),
-            ("edge-tts 协议适配", "bd44c1d", "LGPL-3.0-only", "edge-tts-LICENSE.txt")
+            ("libmobi", "0.12", "LGPL-3.0-or-later", "libmobi-LICENSE.txt")
         ]
         #if NOVELIA_READIUM_ONLY
         return all.filter { $0.name != "YueduCoreText" && $0.name != "libmobi" }

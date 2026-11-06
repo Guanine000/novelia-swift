@@ -12,7 +12,7 @@ WebDAV 强版本读取、坚果云条件头兼容和首次创建流程参考并�
 
 ## 第三方软件
 
-App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完整依赖清单](../iOSApp/Resources/ThirdPartyLicenses/INDEX.md)列出 `Package.resolved` 中全部 10 个 Swift Package 的版本、来源及许可文件，以及实验性 Readium EPUB 阅读器随附的字体与脚本声明。IPA 随附 Zip 内嵌 MiniZip / Info-ZIP 的独立版权与完整许可，以及这些原始许可文本、YueduCoreText 的 MPL-2.0 许可和包含 Unicode License v3 的 NOTICE。YueduCoreText 对应源码为[精确锁定的提交](https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/783ce903d5faf4ff5d15c546e32a107537ba5efe)，本项目没有修改该依赖的上游源码。复杂ruby回退在宿主阅读器中使用现有SwiftSoup（MIT）解析并保留底文，不修改原书或Yuedu依赖。用户自行导入的字体保存在本机 App 文档目录，不随本项目 IPA 分发；字体文件仍受其自身许可约束。
+App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完整依赖清单](../iOSApp/Resources/ThirdPartyLicenses/INDEX.md)列出 `Package.resolved` 中全部 10 个 Swift Package 的版本、来源及许可文件，以及实验性 Readium EPUB 阅读器随附的字体与脚本声明。IPA 随附 Zip 内嵌 MiniZip / Info-ZIP 的独立版权与完整许可，以及这些原始许可文本、YueduCoreText 的 MPL-2.0 许可和包含 Unicode License v3 的 NOTICE。YueduCoreText 对应源码为[精确锁定的提交](https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/783ce903d5faf4ff5d15c546e32a107537ba5efe)，本项目没有修改该依赖的上游源码。ruby注音转换在宿主阅读器中使用现有SwiftSoup（MIT）解析并改写为「底文（读音）」文本，不修改原书或Yuedu依赖。用户自行导入的字体保存在本机 App 文档目录，不随本项目 IPA 分发；字体文件仍受其自身许可约束。
 
 阅读器依赖的版本、用途与代码分类见[阅读器依赖](../iOSApp/Features/Reader/EPUBReader/DEPENDENCIES.md)。
 
@@ -25,7 +25,3 @@ App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完�
 最新 Release 附有本项目对应版本源码归档，以及 YueduCoreText 锁定提交的源码和许可材料。分发 IPA 时应同时提供同一版本的完整对应源码与第三方许可材料。构建流程使用 [`scripts/verify_third_party_notices.py`](../scripts/verify_third_party_notices.py) 核对锁定依赖、许可清单和原始文件，并检查许可资源是否进入 IPA。发布前还需运行 `python3 scripts/verify_release_privacy.py <IPA路径>`，检查包内是否包含开发者主目录路径或常见凭据特征。
 
 登录网页适配依据官网 [auto-novel/auto-novel](https://github.com/auto-novel/auto-novel/tree/52d84e55ed5d66982a282f1f18d28ff2261d9b76) 与认证组件 [auto-novel/web-kit](https://github.com/auto-novel/web-kit/tree/9c479ae742335830fc4383f1fdb451809a4d56d0) 的公开行为和接口核对（2026-10-27，GNU GPL v3）；未复制其实现或引入运行时依赖。
-
-## Edge TTS 协议适配
-
-`Sources/NoveliaIOSCore/Infrastructure/API/EdgeSpeechToken.swift` 与 `EdgeSpeechClient.swift` 参考并移植 [rany2/edge-tts](https://github.com/rany2/edge-tts/tree/bd44c1d1aaebdc1db7f47456ee12431b42ec7cac) 的时间令牌与消费端 WebSocket 协议；上游相关部分为 **LGPL-3.0-only**（MIT 仅适用于未采用的 srt_composer.py）。保留 rany 的版权、固定提交与 Swift 修改日期见文件头（客户端更新至 2026-11-05），完整上游许可见 [edge-tts-LICENSE.txt](../iOSApp/Resources/ThirdPartyLicenses/edge-tts-LICENSE.txt)。这两个改编文件保留 LGPL-3.0-only 标识，与其余 GPL-3.0-only App 组合使用；没有引入 Python 运行时或新 Swift Package，也没有修改远端上游。分发时须提供本仓库完整对应源码和构建材料，使修改后的协议组件与 App 可重新构建；不得遗漏这两个文件与许可材料。本次协议支持不代表获得微软服务或小说内容的额外授权。 音色目录请求与地区音色名称转换同样参考该提交的 `voices.py`、`data_classes.py`，保留既有 LGPL-3.0-only 归属与源码声明。

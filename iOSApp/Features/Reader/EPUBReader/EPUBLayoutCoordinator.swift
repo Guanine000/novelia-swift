@@ -22,7 +22,7 @@ enum EPUBLayoutReason: String {
 /// `BrowserLayoutConfig` 与章节请求中所有会影响分页的内容。
 struct EPUBLayoutParameters: Hashable {
     /// 相同输入对应的阅读器排版结果发生变化时递增（例如 CSS 或兼容处理变化）。
-    static let layoutVersion = 1
+    static let layoutVersion = 2
 
     let renderWidth: CGFloat
     let renderHeight: CGFloat

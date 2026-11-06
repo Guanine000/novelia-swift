@@ -29,9 +29,6 @@ struct DownloadedWebNovelTXTReader: View {
     /// 目录字数的来源（已解析的书），打开目录时才统计。
     @State private var parsedBook: TXTParsedBook?
     @State private var tocWordCounts: ReaderTOCWordCounts?
-    @StateObject private var speech = SpeechPlaybackController()
-    @State private var isShowingSpeech = false
-    @State private var speechPosition: SpeechReadingPosition?
 
     private var appearance: ReaderAppearance {
         settings.appearance
@@ -74,14 +71,12 @@ struct DownloadedWebNovelTXTReader: View {
                                 .font(.system(size: 25, weight: .bold, design: .rounded))
                                 .foregroundStyle(appearance.primaryText(system: systemColorScheme))
                             if bodyChunksChapterIndex == chapterIndex {
-                                let ranges = SpeechText.sourceRanges(of: bodyChunks, in: settings.projection.apply(chapter.body))
+                                let ranges = ReaderTextRanges.sourceRanges(of: bodyChunks, in: settings.projection.apply(chapter.body))
                                 LazyVStack(alignment: .leading, spacing: 0) {
                                     ForEach(bodyChunks.indices, id: \.self) { index in
-                                        SpeechTXTChunk(value: highlightedChunk(bodyChunks[index], sourceRange: ranges[index]),
-                                                       text: bodyChunks[index], baseOffset: ranges[index]?.lowerBound ?? 0,
-                                                       chapter: chapterIndex)
-                                            .id("speech-chunk-\(index)")
-                                            .background(GeometryReader { geometry in Color.clear.preference(key: ReaderScrollFrames.self, value: ["speech-chunk-\(index)": geometry.frame(in: .global)]) })
+                                        Text(highlightedChunk(bodyChunks[index], sourceRange: ranges[index]))
+                                            .id("text-chunk-\(index)")
+                                            .background(GeometryReader { geometry in Color.clear.preference(key: ReaderScrollFrames.self, value: ["text-chunk-\(index)": geometry.frame(in: .global)]) })
                                             .font(.system(size: fontSize, design: .serif))
                                             .lineSpacing(9)
                                             .foregroundStyle(appearance.primaryText(system: systemColorScheme))
@@ -104,19 +99,16 @@ struct DownloadedWebNovelTXTReader: View {
                             proxy.scrollTo("txt-reader-top", anchor: .top)
                         }
                     }
-                    .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in speech.pause() })
                     .onPreferenceChange(ReaderScrollFrames.self) { visibleAnchor = ReaderScrollFrames.visible($0) }
                     .task(id: "\(selectedSearchHit?.id ?? "")|\(bodyChunksChapterIndex ?? -1)|\(returnAnchor ?? "")") {
                         guard bodyChunksChapterIndex == chapterIndex else { return }
                         await Task.yield()
                         if let anchor = returnAnchor { proxy.scrollTo(anchor, anchor: .top); returnAnchor = nil }
                         else if let hit = selectedSearchHit, hit.chapterIndex == chapterIndex,
-                            let index = SpeechText.sourceRanges(of: bodyChunks, in: settings.projection.apply(chapter.body)).firstIndex(where: { $0?.contains(hit.utf16Offset) == true }) {
-                            proxy.scrollTo("speech-chunk-\(index)", anchor: .center)
+                            let index = ReaderTextRanges.sourceRanges(of: bodyChunks, in: settings.projection.apply(chapter.body)).firstIndex(where: { $0?.contains(hit.utf16Offset) == true }) {
+                            proxy.scrollTo("text-chunk-\(index)", anchor: .center)
                         }
                     }
-                    .onValueChange(of: speechPosition) { _, _ in scrollToSpeech(proxy) }
-                    .onValueChange(of: bodyChunksChapterIndex) { _, _ in scrollToSpeech(proxy) }
                     .safeAreaInset(edge: .bottom) {
                         chapterControls(count: chapters.count)
                     }
@@ -132,19 +124,6 @@ struct DownloadedWebNovelTXTReader: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .compatToolbar(.hidden, for: .tabBar)
-        .modifier(ReaderSpeechPresentation(controller: speech, isPresented: $isShowingSpeech,
-                                          anchor: { SpeechAnchor(chapterIndex: chapterIndex, progression: 0,
-                                                               chapterUTF16Length: 0, startIndexHint: nil) },
-                                          title: title) {
-                        let current = chapters ?? []
-                        return SystemSpeechEngine(chapterCount: current.count, onReadingPosition: { position, preferences in
-                            speechPosition = position
-                            if let position, preferences.followsReadingPosition { chapterIndex = position.chapterIndex }
-                        }) { index in
-                            guard current.indices.contains(index) else { return "" }
-                            return settings.projection.apply(current[index].body)
-                        }
-                    })
         .toolbar {
             ToolbarItem(placement: .compatTopBarTrailing) {
                 Menu {
@@ -157,9 +136,6 @@ struct DownloadedWebNovelTXTReader: View {
                     Label("分页阅读", systemImage: "book.pages")
                 }
                 .accessibilityLabel("分页阅读")
-                if chapters != nil {
-                    Button { isShowingSpeech = true } label: { Label("朗读", systemImage: "speaker.wave.2") }
-                }
                 if chapters != nil {
                     Button { isShowingContents = true } label: {
                         Label("章节目录", systemImage: "list.bullet")
@@ -197,11 +173,10 @@ struct DownloadedWebNovelTXTReader: View {
                 chapterText: { settings.projection.apply(chapters?[$0].body ?? "") },
                 onJump: { index, _ in chapterIndex = index }, onSearchHit: { hit in
                     if readingReturnPoint == nil { readingReturnPoint = .init(chapter: chapterIndex, anchor: visibleAnchor) }
-                    speech.pause(); chapterIndex = hit.chapterIndex; selectedSearchHit = hit
+                    chapterIndex = hit.chapterIndex; selectedSearchHit = hit
                 }, tab: .search)
         }
         .sheet(isPresented: $isShowingBookPreferences) { ReaderBookPreferencesView() }
-        .onValueChange(of: settings.projectionRevision) { _, _ in speech.stop() }
         .sheet(isPresented: $isShowingContents) {
             CompatNavigationStack {
                 ScrollViewReader { proxy in
@@ -255,7 +230,6 @@ struct DownloadedWebNovelTXTReader: View {
             }
             .compatPresentationDetents(.medium, .large)
         }
-        .onDisappear { speech.stop() }
         .task(id: url) {
             do {
                 // 每份文件内容只解码和划分章节一次（TXTBookCache）；
@@ -281,7 +255,6 @@ struct DownloadedWebNovelTXTReader: View {
             }
         }
         .onValueChange(of: chapterIndex) { _, newIndex in
-            if speechPosition?.chapterIndex != newIndex { speech.pause() }
             guard let contentHash else { return }
             let saved = settings.positions.txtPosition(hash: contentHash) ?? TXTReadingPosition(chapter: newIndex)
             guard saved.chapter != newIndex || settings.positions.all()["txt:\(contentHash)"] == nil else { return }
@@ -301,22 +274,10 @@ struct DownloadedWebNovelTXTReader: View {
 
     private func highlightedChunk(_ text: String, sourceRange: Range<Int>?) -> AttributedString {
         var value = AttributedString(text)
-        if speech.settings.highlightsSpokenText, speechPosition?.chapterIndex == chapterIndex, let sourceRange {
-            SpeechTextHighlight.apply(SpeechText.localRange(speechPosition?.sentenceRange, in: sourceRange), text: text, to: &value)
-        }
         if let hit = selectedSearchHit, hit.chapterIndex == chapterIndex, let sourceRange {
-            SpeechTextHighlight.apply(SpeechText.localRange(hit.utf16Offset..<(hit.utf16Offset + hit.match.utf16.count), in: sourceRange), text: text, to: &value)
+            ReaderTextHighlight.apply(ReaderTextRanges.localRange(hit.utf16Offset..<(hit.utf16Offset + hit.match.utf16.count), in: sourceRange), text: text, to: &value)
         }
         return value
-    }
-
-    private func scrollToSpeech(_ proxy: ScrollViewProxy) {
-        guard speech.settings.followsReadingPosition, let position = speechPosition,
-              position.chapterIndex == chapterIndex, bodyChunksChapterIndex == chapterIndex,
-              let chapters, chapters.indices.contains(chapterIndex) else { return }
-        let ranges = SpeechText.sourceRanges(of: bodyChunks, in: chapters[chapterIndex].body)
-        guard let index = ranges.firstIndex(where: { $0?.contains(position.currentOffset) == true }) else { return }
-        proxy.scrollTo("speech-chunk-\(index)", anchor: .center)
     }
 
     private func chapterControls(count: Int) -> some View {
@@ -447,18 +408,4 @@ private actor TXTPagedUnits {
     }
 }
 
-private struct SpeechTXTChunk: View {
-    let value: AttributedString
-    let text: String
-    let baseOffset: Int
-    let chapter: Int
-    @Environment(\.readerSpeechActions) private var actions
-    var body: some View {
-        Text(value)
-            .contextMenu { SpeechSentenceMenu(text: text, baseOffset: baseOffset, chapter: chapter) }
-            .environment(\.openURL, OpenURLAction { url in
-                if url.scheme == "novelia-speech" { actions.toggle(); return .handled }
-                return .systemAction
-            })
-    }
-}
+

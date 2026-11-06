@@ -159,17 +159,14 @@ final class EPUBPageBook {
         let images = await container.images(forChapterHTML: html, chapterHref: chapterHref)
         try Task.checkCancellation()
 
-        var document = HTMLLayoutDocument(
-            html: html,
+        // 原生引擎统一把 ruby 注音改写为「底文（读音）」文本：保留读音，
+        // 也避免复杂注音结构阻断整章排版；Readium 仍使用原书注音排版。
+        let document = HTMLLayoutDocument(
+            html: try Self.rubyParentheticalText(html),
             css: css,
             configuration: config,
             images: images
         )
-        // 当前引擎只接受一部分横排ruby；只在能力检查明确拒绝时降为底文，正常注音保持原样。
-        if document.capabilities().unsupportedFeatures.contains(.ruby) {
-            document = HTMLLayoutDocument(html: try Self.rubyBaseTextFallback(html), css: css, configuration: config, images: images)
-            EPUBLayoutLog.logger.notice("Unsupported ruby rendered as base text; source file preserved")
-        }
         let session = try document.makePageSession()
         // 先构建流水线（不排版页面），使 sourceText 就绪——DisplayList 文本切片依赖它。
         _ = try session.prepare()
@@ -191,12 +188,71 @@ final class EPUBPageBook {
         return layout
     }
 
-    static func rubyBaseTextFallback(_ html: String) throws -> String {
+    /// 把章节 HTML 中的 ruby 注音改写为「底文（读音）」纯文本。
+    /// 只影响本次排版结果，不修改原书；没有注音标签的章节原样返回。
+    static func rubyParentheticalText(_ html: String) throws -> String {
+        // 先做廉价的字符串检查，避免给普通章节增加一次完整解析。
+        let rubyTags = ["<ruby", "<rb", "<rp", "<rt"]
+        guard rubyTags.contains(where: { html.range(of: $0, options: .caseInsensitive) != nil }) else { return html }
         let document = try SwiftSoup.parse(html)
         document.outputSettings().prettyPrint(pretty: false)
+        // 先处理内层：外层重建时内层注音已经变成纯文本。
+        for ruby in try document.select("ruby").array().reversed() {
+            try ruby.html(Self.rubyParentheticalMarkup(of: ruby))
+            try ruby.unwrap()
+        }
+        // 结构不完整的注音标签（散落在 ruby 外的 rb/rt/rp）没有可靠的读音配对：
+        // 去掉标签、保留可见文字，避免引擎能力检查再次拒绝整章。
+        // （SwiftSoup 解析这类无效标记时本身就会丢弃 rt 外壳，只留下文字。）
+        try document.select("rb").unwrap()
         try document.select("rt, rp, rtc").remove()
-        try document.select("ruby, rb").unwrap()
+        EPUBLayoutLog.logger.notice("Ruby rendered as parenthetical text; source file preserved")
         return try document.outerHtml()
+    }
+
+    /// 把一个 ruby 元素的内容重建为「底文（读音）」；多个 rt 按出现顺序逐对生成。
+    /// `<rp>` 里的圆括号不再输出，统一改用全角括号，避免读入重复括号。
+    private static func rubyParentheticalMarkup(of ruby: Element) throws -> String {
+        var markup = ""
+        var base: [Node] = []
+        for child in ruby.getChildNodes() {
+            guard let element = child as? Element else {
+                base.append(child)
+                continue
+            }
+            switch element.tagName() {
+            case "rb":
+                // 去掉 rb 外壳，保留其中的内联标记（例如链接）。
+                base.append(contentsOf: element.getChildNodes())
+            case "rp":
+                continue
+            case "rt", "rtc":
+                let reading = try element.text()
+                guard !reading.isEmpty else { continue }
+                markup += try Self.rubyBaseMarkup(base)
+                base.removeAll()
+                markup += "（" + Self.escapedHTMLText(reading) + "）"
+            default:
+                base.append(element)
+            }
+        }
+        markup += try Self.rubyBaseMarkup(base)
+        return markup
+    }
+
+    /// 底文按源码格式换行书写时，标签之间会留下只用于排版的空白；
+    /// 去掉首尾空白，读音才能紧跟底文显示，而不是隔着一个空格。
+    private static func rubyBaseMarkup(_ nodes: [Node]) throws -> String {
+        var markup = ""
+        for node in nodes { markup += try node.outerHtml() }
+        return markup.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func escapedHTMLText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
     }
 
     func isChapterComplete(_ spineIndex: Int) -> Bool {

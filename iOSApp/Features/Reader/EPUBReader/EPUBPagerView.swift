@@ -55,11 +55,6 @@ struct EPUBPagerView: UIViewRepresentable {
     /// 取得选中文本，供系统复制菜单使用。
     var selectedText: (NSRange) -> String? = { _ in nil }
 
-    /// 当前句高亮独立于选字，不重画分页位图。
-    var speechRects: [CGRect] = []
-    var onSpeechTap: () -> Void = {}
-    var onSpeakSelection: (NSRange) -> Void = { _ in }
-
     /// 三页位图由宿主从同一份排版缓存派生；每次 SwiftUI 更新都会重放。
     var images: PageImages
 
@@ -78,9 +73,6 @@ struct EPUBPagerView: UIViewRepresentable {
         view.selectionRectsProvider = selectionRects
         view.selectedTextProvider = selectedText
         view.apply(images: images)
-        view.speechTapHandler = onSpeechTap
-        view.speakSelectionHandler = onSpeakSelection
-        view.applySpeechRects(speechRects)
         return view
     }
 
@@ -98,9 +90,6 @@ struct EPUBPagerView: UIViewRepresentable {
         view.selectionRectsProvider = selectionRects
         view.selectedTextProvider = selectedText
         view.apply(images: images)
-        view.speechTapHandler = onSpeechTap
-        view.speakSelectionHandler = onSpeakSelection
-        view.applySpeechRects(speechRects)
     }
 }
 
@@ -119,7 +108,6 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
     var selectedTextProvider: ((NSRange) -> String?)?
 
     private let strip = UIView()
-    private let speechLayer = CAShapeLayer()
     private let previousImageView = UIImageView()
     private let currentImageView = UIImageView()
     private let nextImageView = UIImageView()
@@ -128,9 +116,6 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
     private var adjustingStart = false
     private var selectionBounds: [CGRect] = []
     private var longPressGesture: UILongPressGestureRecognizer!
-    var speechTapHandler: (() -> Void)?
-    var speakSelectionHandler: ((NSRange) -> Void)?
-    private var spokenRects: [CGRect] = []
     private var editMenuInteraction: UIEditMenuInteraction!
 
     private var pageSize: CGSize = .zero
@@ -155,8 +140,6 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
             imageView.clipsToBounds = true
             strip.addSubview(imageView)
         }
-        speechLayer.fillColor = UIColor.systemYellow.withAlphaComponent(0.30).cgColor
-        currentImageView.layer.addSublayer(speechLayer)
         selectionLayer.fillColor = UIColor.systemBlue.withAlphaComponent(0.28).cgColor
         currentImageView.layer.addSublayer(selectionLayer)
         handlesLayer.fillColor = UIColor.systemBlue.cgColor
@@ -201,17 +184,6 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
         self.images = images
         pageSize = images.size
         layoutStripContent()
-    }
-
-    func applySpeechRects(_ rects: [CGRect]) {
-        spokenRects = rects
-        let path = UIBezierPath()
-        for rect in rects { path.append(UIBezierPath(rect: rect)) }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        speechLayer.frame = currentImageView.bounds
-        speechLayer.path = path.cgPath
-        CATransaction.commit()
     }
 
     private static func imagesEqual(_ a: EPUBPagerView.PageImages,
@@ -355,8 +327,6 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
             }
             return
         }
-
-        if spokenRects.contains(where: { $0.contains(location) }) { speechTapHandler?(); return }
 
         // 2) 中部三分之一：点到图片时打开查看器，否则显隐工具栏。
         if location.x > width / 3, location.x < width * 2 / 3 {
@@ -519,12 +489,6 @@ extension EPUBPagerUIView: UIEditMenuInteractionDelegate {
             controller.popoverPresentationController?.sourceRect = CGRect(origin: configuration.sourcePoint, size: CGSize(width: 1, height: 1))
             self.presentSelectionController(controller)
         }
-        let speak = UIAction(title: "从此句朗读", image: UIImage(systemName: "speaker.wave.2")) { [weak self] _ in
-            guard let self, let first = self.selectionInitialRange, let last = self.selectionMovingRange else { return }
-            let start = min(first.location, last.location)
-            let range = NSRange(location: start, length: max(NSMaxRange(first), NSMaxRange(last)) - start)
-            self.clearSelection(); self.speakSelectionHandler?(range)
-        }
-        return UIMenu(children: [copy, speak, lookup, search, share])
+        return UIMenu(children: [copy, lookup, search, share])
     }
 }

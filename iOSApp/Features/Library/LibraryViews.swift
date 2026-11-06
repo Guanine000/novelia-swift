@@ -429,6 +429,7 @@ struct LibrarySeriesDetailView: View {
     @EnvironmentObject private var cloudBooks: CloudBookStore
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var state: LibraryStateStore
+    @State private var isCheckingNewVolumes = false
     @State private var query = ""
     @State private var isSearching = false
     @State private var readerTarget: LibraryBook?
@@ -447,6 +448,11 @@ struct LibrarySeriesDetailView: View {
     private var members: [LibraryBook] {
         let keys = state.series.bookKeys(inSeries: seriesID)
         return allBooks.filter { keys.contains($0.key) && sourceFilter.includes(isWenku: $0.isWenku) }
+    }
+
+    private var unfilteredMembers: [LibraryBook] {
+        let keys = state.series.bookKeys(inSeries: seriesID)
+        return state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks).filter { keys.contains($0.key) }
     }
 
     private var options: LibrarySortOptions { state.sortOptions(scope: seriesID) }
@@ -513,6 +519,10 @@ struct LibrarySeriesDetailView: View {
         .onValueChange(of: series == nil) { _, removed in
             if removed { dismiss() }
         }
+        .sheet(isPresented: $isCheckingNewVolumes) {
+            WenkuSeriesNewVolumesView(books: unfilteredMembers,
+                libraryBooks: state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks))
+        }
         .sheet(isPresented: $isAddingBooks) {
             LibraryAddToSeriesSheet(seriesID: seriesID, books: allBooks)
         }
@@ -558,6 +568,7 @@ struct LibrarySeriesDetailView: View {
                 .accessibilityHint("进入多选，可批量移出系列、删除或压缩分享")
             }
             Menu {
+                Button { isCheckingNewVolumes = true } label: { Label("检查新卷", systemImage: "arrow.clockwise") }
                 Button { isAddingBooks = true } label: { Label("添加书籍", systemImage: "plus") }
                 LibrarySeriesMenuItems(seriesID: seriesID, name: series?.name ?? "", books: members, actions: bookActions)
             } label: {
@@ -708,6 +719,7 @@ final class LibraryBookActions: ObservableObject {
     @Published var chapterUpdateBook: DownloadedWebNovel?
     @Published var editingBook: LibraryBook?
     @Published var associatingBook: LibraryBook?
+    @Published var wenkuDetail: WenkuNovelOutline?
     /// 下载完成的书，页面据此打开阅读。
     @Published var downloadedBookKey: String?
     /// 多选：长按书籍进入，点击切换选择。
@@ -899,6 +911,7 @@ struct LibraryBookActionDialogs: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .compatNavigationDestination(item: $actions.wenkuDetail) { outline in WenkuDetailView(outline: outline) }
             .sheet(item: $actions.updateConfigurationBook) { book in
                 WebNovelEPUBUpdateOptionsSheet(book: book) { configuration in
                     actions.updateConfigurationBook = nil
@@ -1292,6 +1305,11 @@ struct LibraryBookRow: View {
     @ViewBuilder
     private func menuItems(for book: LibraryBook) -> some View {
         let currentSeries = state.series.seriesID(forBook: book.key)
+        if case .wenku(let record) = book.origin, let parent = record.parentWenkuID {
+            Button {
+                actions.wenkuDetail = WenkuNovelOutline(id: parent, title: record.parentWenkuTitle ?? book.title)
+            } label: { Label("查看文库详情", systemImage: "info.circle") }
+        }
         if book.isCloudOnly {
             Button { open(book) } label: {
                 Label(book.cloudDownloadSizeText.map { "下载（\($0)）" } ?? "下载", systemImage: "icloud.and.arrow.down")

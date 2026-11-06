@@ -52,10 +52,7 @@ enum ReadiumTextPublication {
             manifest: Manifest(metadata: Metadata(title: source.bookTitle, languages: ["zh"], layout: .reflowable),
                                readingOrder: links, tableOfContents: toc),
             container: TextContainer(source: source, links: links),
-            servicesBuilder: PublicationServicesBuilder(
-                content: DefaultContentService.makeFactory(
-                    resourceContentIteratorFactories: [HTMLResourceContentIterator.Factory()]),
-                positions: { _ in TextPositions(positions: positions) }))
+            servicesBuilder: PublicationServicesBuilder(positions: { _ in TextPositions(positions: positions) }))
     }
 }
 
