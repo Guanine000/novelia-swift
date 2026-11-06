@@ -1481,11 +1481,61 @@ private struct LibraryBookGridCell: View {
     var isSelected = false
 
     var body: some View {
+        Group {
+            if #available(iOS 16.0, *) {
+                cellContent
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: activate)
+                    // 网格共处一个 List 行，默认快照会捕获整行；显式预览只展示当前书籍。
+                    .contextMenu {
+                        LibraryBookMenuItems(book: book, actions: actions, open: open)
+                    } preview: {
+                        VStack(spacing: 10) {
+                            LibraryCoverView(book: book, width: 144, height: 201)
+                            Text(book.title)
+                                .font(.headline)
+                                .foregroundStyle(NoveliaStyle.ink)
+                                .lineLimit(3)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(16)
+                        .frame(width: 208)
+                        .background(NoveliaStyle.paper)
+                    }
+            } else {
+                // iOS 15 没有自定义菜单预览，使用带主操作的菜单避免预览整个网格。
+                Menu {
+                    LibraryBookMenuItems(book: book, actions: actions, open: open)
+                } label: {
+                    cellContent
+                } primaryAction: {
+                    activate()
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(book.title)，\(book.author)，\(state.status(for: book).detail)")
+        .accessibilityHint(isSelecting ? "切换选择" : "打开阅读")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("library-book-\(book.key)")
+    }
+
+    private func activate() {
+        if isSelecting { actions.toggleSelection(book) } else { open(book) }
+    }
+
+    @ViewBuilder
+    private var cellContent: some View {
         let status = state.status(for: book)
         VStack(alignment: .leading, spacing: 5) {
             ZStack(alignment: .topTrailing) {
-                LibraryCoverView(book: book, width: 96, height: 134)
-                    .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 2)
+                GeometryReader { geometry in
+                    LibraryCoverView(book: book, width: geometry.size.width,
+                                     height: geometry.size.height)
+                }
+                .aspectRatio(96.0 / 134.0, contentMode: .fit)
+                .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 2)
                 if isSelecting {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 20))
@@ -1515,19 +1565,12 @@ private struct LibraryBookGridCell: View {
                 .foregroundStyle(NoveliaStyle.ink)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
+                .frame(height: 34, alignment: .topLeading)
             Text(status.detail)
                 .font(.system(size: 10))
                 .foregroundStyle(status.isUnread ? NoveliaStyle.muted : NoveliaStyle.brandGreen)
                 .lineLimit(1)
         }
-        .contentShape(Rectangle())
-        .onTapGesture { if isSelecting { actions.toggleSelection(book) } else { open(book) } }
-        .contextMenu { LibraryBookMenuItems(book: book, actions: actions, open: open) }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(book.title)，\(book.author)，\(status.detail)")
-        .accessibilityHint(isSelecting ? "切换选择" : "打开阅读")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier("library-book-\(book.key)")
     }
 }
 
