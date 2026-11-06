@@ -13,8 +13,9 @@ struct ReaderBookPreferencesView: View {
         CompatNavigationStack {
             Form {
                 Section {
-                    Toggle("仅应用于这本书", isOn: Binding(get: { settings.usesBookPreferences }, set: { settings.setBookPreferencesEnabled($0) }))
+                    Toggle("仅应用于这本书", isOn: Binding(get: { settings.usesBookPreferences }, set: { settings.setBookPreferencesEnabled($0); draft = settings.projection }))
                 } footer: { Text("单书保存字号、主题、分页与排版。关闭后重新继承全局默认；不会改动其他书籍。文字转换与替换规则只属于本书。") }
+                Group {
                 Section("文字显示") {
                     Picker("简繁转换", selection: $draft.chinese) {
                         ForEach(ReadingTextProjection.Chinese.allCases) { Text($0.title).tag($0) }
@@ -42,6 +43,7 @@ struct ReaderBookPreferencesView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("效果预览") { Text(draft.apply(source.isEmpty ? "这是本书的文字预览，閱讀偏好只影响显示。" : source)) }
+                }.disabled(!settings.usesBookPreferences)
             }
             .navigationTitle("单书阅读偏好")
             .navigationBarTitleDisplayMode(.inline)
@@ -49,7 +51,7 @@ struct ReaderBookPreferencesView: View {
                 HStack {
                     Button("关闭") { dismiss() }
                     Spacer()
-                    Button("应用") { settings.setProjection(draft); dismiss() }
+                    Button("应用") { if settings.usesBookPreferences { settings.setProjection(draft) }; dismiss() }
                         .buttonStyle(.borderedProminent)
                 }
                 .padding().background(.regularMaterial)

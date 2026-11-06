@@ -591,6 +591,12 @@ final class TapTests: XCTestCase {
   let increase = app.buttons["放大字号"]; reveal(increase, app: app); increase.tap()
   XCTAssertTrue(app.buttons["应用"].firstMatch.waitForExistence(timeout: 10)); app.buttons["应用"].firstMatch.tap()
   XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 20))
+  readerAction(app, "单书阅读偏好").tap()
+  app.switches["仅应用于这本书"].firstMatch.tap()
+  app.buttons["应用"].firstMatch.tap()
+  readerAction(app, "单书阅读偏好").tap()
+  XCTAssertEqual(app.switches["仅应用于这本书"].firstMatch.value as? String, "0")
+  app.buttons["关闭"].firstMatch.tap()
  }
  func checkExactSearchAndReturn(readium: Bool) {
   let app = openDownloadedNetworkBook(readium: readium); defer { app.terminate() }
@@ -766,6 +772,12 @@ final class TapTests: XCTestCase {
   selectedCount(app, 0)
   XCTAssertTrue(app.buttons["完成"].waitForExistence(timeout: 20)); app.buttons["完成"].tap()
 
+  // 连续拖选应跨过两本，并在松手后保留选择。
+  let first = app.staticTexts["验收样本甲"].firstMatch
+  let second = app.staticTexts["验收样本乙"].firstMatch
+  first.press(forDuration: 0.8, thenDragTo: second)
+  selectedCount(app, 2)
+  app.buttons["完成"].tap()
   // 书库多选：全选两本后压缩分享。
   beginSelection(app, title: "验收样本甲")
   app.buttons["全选"].tap()

@@ -104,7 +104,7 @@ struct LibraryView: View {
                         .libraryListRow()
                         ForEach(sorted(ungrouped, options: sortOptions)) { book in
                             LibraryBookRow(book: book, actions: bookActions, open: open,
-                                           isSelecting: bookActions.isSelecting,
+                                           isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
                                            isSelected: bookActions.selectedKeys.contains(book.key))
                                 .libraryListRow()
                         }
@@ -127,7 +127,7 @@ struct LibraryView: View {
             } else if sourceBooks.isEmpty { emptyLibrary }
         }
         .safeAreaInset(edge: .bottom) {
-            if bookActions.isSelecting { LibrarySelectionBar(books: selectable, actions: bookActions) }
+            if bookActions.isSelecting || bookActions.isDraggingSelection { LibrarySelectionBar(books: selectable, actions: bookActions) }
         }
         .onValueChange(of: segment) { _, _ in bookActions.endSelection() }
         .compatScrollDismissesKeyboardInteractively()
@@ -337,7 +337,7 @@ struct LibraryView: View {
         } else {
             ForEach(sorted(matches, options: sortOptions)) { book in
                 LibraryBookRow(book: book, actions: bookActions, open: open,
-                               isSelecting: bookActions.isSelecting,
+                               isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
                                isSelected: bookActions.selectedKeys.contains(book.key))
                     .libraryListRow()
             }
@@ -474,7 +474,7 @@ struct LibrarySeriesDetailView: View {
                 } else {
                     ForEach(visible) { book in
                         LibraryBookRow(book: book, showsSeries: false, actions: bookActions, open: open,
-                                       isSelecting: bookActions.isSelecting,
+                                       isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
                                        isSelected: bookActions.selectedKeys.contains(book.key))
                             .libraryListRow()
                     }
@@ -486,7 +486,7 @@ struct LibrarySeriesDetailView: View {
         .compatScrollDismissesKeyboardInteractively()
         .safeAreaInset(edge: .top) { searchBar }
         .safeAreaInset(edge: .bottom) {
-            if bookActions.isSelecting {
+            if bookActions.isSelecting || bookActions.isDraggingSelection {
                 LibrarySelectionBar(books: visible, actions: bookActions, archiveTitle: series?.name ?? "系列")
             }
         }
@@ -705,6 +705,7 @@ final class LibraryBookActions: ObservableObject {
     @Published var downloadedBookKey: String?
     /// 多选：长按书籍进入，点击切换选择。
     @Published private(set) var isSelecting = false
+    @Published var isDraggingSelection = false
     @Published private(set) var selectedKeys: Set<String> = []
     /// 已生成的压缩包，非 nil 时弹出系统分享面板。
     @Published var shareArchive: LibraryArchiveShare?
@@ -1219,6 +1220,7 @@ struct LibraryBookActionDialogs: ViewModifier {
 /// 每个 ForEach 元素只返回一行，使 List 能按书籍标识复用行，避免遍历多行子视图。
 /// 点击整行打开阅读；“更多”菜单提供系列、导出、移动和删除。
 struct LibraryBookRow: View {
+    @EnvironmentObject private var dragFrames: LibrarySelectionFrames
     let book: LibraryBook
     /// 系列详情中不重复显示系列名。
     var showsSeries = true
@@ -1241,8 +1243,12 @@ struct LibraryBookRow: View {
                                   wordCount: wordCounts.total(hash: hash))
                 .contentShape(Rectangle())
                 // 点击负责打开或切换选择；页面的长按桥接负责连续拖选。
-                // 在 List 行中分别挂 onTapGesture/onLongPressGesture 时点击会抢先触发，故显式组合。
-                .background(GeometryReader { geometry in Color.clear.preference(key: LibraryRowFrames.self, value: [book.key: geometry.frame(in: .global)]) })
+                .background(GeometryReader { geometry in
+                    Color.clear
+                        .onAppear { dragFrames.frames[book.key] = geometry.frame(in: .global) }
+                        .onValueChange(of: geometry.frame(in: .global)) { _, frame in dragFrames.frames[book.key] = frame }
+                        .onDisappear { dragFrames.frames[book.key] = nil }
+                })
                 .onTapGesture { if isSelecting { actions.toggleSelection(book) } else { open(book) } }
                 .accessibilityAddTraits(.isButton)
                 .accessibilityHint(isSelecting ? "切换选择" : "打开阅读")
