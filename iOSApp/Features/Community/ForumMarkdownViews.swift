@@ -25,7 +25,8 @@ struct ForumMarkdownBody: View {
         .tint(NoveliaStyle.brandGreen)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .font(mode == .comment ? .system(size: 14) : .system(size: 15))
+        .font(mode == .comment ? .system(size: 15) : .system(size: 16))
+        .lineSpacing(4)
         .environment(\.openURL, OpenURLAction { url in
             if let route = ForumNovelRoute(url: url, configuration: services.configuration), let linkActions {
                 linkActions.openNovel(route)
@@ -40,10 +41,10 @@ struct ForumMarkdownBody: View {
     private func blockView(_ block: ForumMarkdownBlock) -> some View {
         switch block.kind {
         case .paragraph:
-            ForumInlineMarkdownText(markdown: block.text, baseSize: mode == .comment ? 14 : 15)
+            ForumInlineMarkdownText(markdown: block.text, baseSize: mode == .comment ? 15 : 16)
         case let .heading(level):
             ForumInlineMarkdownText(markdown: block.text, baseSize: CGFloat(headingSize(level)), bold: true)
-                .font(.system(size: headingSize(level), weight: .bold, design: .rounded))
+                .font(.system(size: headingSize(level), weight: .bold))
                 .padding(.top, level <= 2 ? 5 : 2)
         case .unorderedItem:
             listRow(marker: "•", text: block.text)
@@ -52,7 +53,7 @@ struct ForumMarkdownBody: View {
         case .quote:
             HStack(alignment: .top, spacing: 9) {
                 RoundedRectangle(cornerRadius: 2).fill(NoveliaStyle.muted.opacity(0.45)).frame(width: 3)
-                ForumInlineMarkdownText(markdown: block.text, baseSize: mode == .comment ? 14 : 15, textColor: NoveliaStyle.muted).foregroundStyle(NoveliaStyle.muted)
+                ForumInlineMarkdownText(markdown: block.text, baseSize: mode == .comment ? 15 : 16, textColor: NoveliaStyle.muted).foregroundStyle(NoveliaStyle.muted)
             }
             .fixedSize(horizontal: false, vertical: true)
             .padding(.leading, 4)
@@ -77,7 +78,7 @@ struct ForumMarkdownBody: View {
     private func listRow(marker: String, text: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(marker).font(.system(size: 15, weight: .semibold)).frame(minWidth: 18, alignment: .trailing)
-            ForumInlineMarkdownText(markdown: text, baseSize: mode == .comment ? 14 : 15)
+            ForumInlineMarkdownText(markdown: text, baseSize: mode == .comment ? 15 : 16)
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.leading, 5)
@@ -105,7 +106,7 @@ private struct ForumMarkdownTable: View {
                 ForEach(rows.indices, id: \.self) { row in
                     ForumTableRow {
                         ForEach(rows[row].indices, id: \.self) { column in
-                            ForumInlineMarkdownText(markdown: rows[row][column], baseSize: mode == .comment ? 14 : 15, bold: row == 0)
+                            ForumInlineMarkdownText(markdown: rows[row][column], baseSize: mode == .comment ? 15 : 16, bold: row == 0)
                                 .lineLimit(nil)
                                 .multilineTextAlignment(.leading)
                                 .frame(width: 220, alignment: .leading)

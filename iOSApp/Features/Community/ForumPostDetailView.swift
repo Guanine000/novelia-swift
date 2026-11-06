@@ -44,19 +44,34 @@ struct ForumPostDetailView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     if let post {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text(post.title).font(.system(size: 25, weight: .bold, design: .rounded)).foregroundStyle(NoveliaStyle.ink)
-                            HStack {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text(post.title)
+                                .font(.system(size: 24, weight: .bold))
+                                .foregroundStyle(NoveliaStyle.ink)
+                                .lineSpacing(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            HStack(spacing: 8) {
+                                Text(String(post.authorUsername.prefix(1)).uppercased())
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(NoveliaStyle.brandGreen)
+                                    .frame(width: 24, height: 24)
+                                    .background(NoveliaStyle.brandGreen.opacity(0.14), in: Circle())
                                 Text(post.authorUsername)
-                                Spacer()
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(NoveliaStyle.ink)
+                                Text("·").font(.system(size: 12)).foregroundStyle(NoveliaStyle.muted)
                                 Text(post.createdAt.forumDisplayDate)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(NoveliaStyle.muted)
+                                Spacer(minLength: 0)
                             }
-                            .font(.caption).foregroundStyle(NoveliaStyle.muted)
+                            Divider().overlay(NoveliaStyle.muted.opacity(0.15))
                             ForumMarkdownBody(markdown: post.content)
-                            HStack {
-                                Label("\(post.viewsCount) 次浏览", systemImage: "eye")
-                                Label("\(post.commentsCount) 条评论", systemImage: "bubble.right")
-                                Spacer()
+                            Divider().overlay(NoveliaStyle.muted.opacity(0.15))
+                            HStack(spacing: 16) {
+                                Label("\(post.viewsCount)", systemImage: "eye")
+                                Label("\(post.commentsCount)", systemImage: "bubble.right")
+                                Spacer(minLength: 8)
                                 if auth.username == post.authorUsername {
                                     Button { Task { await preparePostEditor() } } label: {
                                         Label("编辑", systemImage: "square.and.pencil")
@@ -71,10 +86,15 @@ struct ForumPostDetailView: View {
                                 }
                                 .disabled(favoriteInProgress)
                             }
-                            .font(.caption)
+                            .font(.system(size: 12, weight: .medium))
                             .tint(NoveliaStyle.brandGreen)
                         }
-                        .padding(16).background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 16))
+                        .padding(18)
+                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(NoveliaStyle.muted.opacity(0.10), lineWidth: 1)
+                        )
                     } else if isLoading {
                         HStack { Spacer(); ProgressView("正在加载帖子…"); Spacer() }
                     } else if let errorMessage {
@@ -82,26 +102,22 @@ struct ForumPostDetailView: View {
                         Button("重试") { Task { await load() } }.buttonStyle(.borderedProminent).tint(NoveliaStyle.brandGreen)
                     }
 
-                    if let post, !post.commentsLocked {
-                        Button {
-                            beginComment()
-                        } label: {
-                            Label(auth.username == nil ? "登录 Novelia后发表评论" : "发表评论", systemImage: "square.and.pencil")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(14)
-                                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
-                        }
-                        .buttonStyle(.plain)
-                        .tint(NoveliaStyle.brandGreen)
-                    } else if post?.commentsLocked == true {
-                        Label("该帖子已关闭评论。", systemImage: "lock.fill").font(.footnote).foregroundStyle(NoveliaStyle.muted)
+                    if post?.commentsLocked == true {
+                        Label("该帖子已关闭评论。", systemImage: "lock.fill")
+                            .font(.footnote)
+                            .foregroundStyle(NoveliaStyle.muted)
                     }
 
-                    HStack {
-                        Text("评论").font(.headline)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("评论")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(NoveliaStyle.ink)
+                        Text("\(totalComments)")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(NoveliaStyle.muted)
                         Spacer()
-                        Text("共 \(totalComments) 条").font(.caption).foregroundStyle(NoveliaStyle.muted)
                     }
+                    .padding(.top, 2)
                     ForEach(comments) { comment in
                         ForumCommentCard(
                             postID: postID,
@@ -121,15 +137,21 @@ struct ForumPostDetailView: View {
                         )
                     }
                     if totalComments > 20 {
-                        HStack {
-                            Button("上一页") { Task { await loadComments(page: commentPage - 1) } }
-                                .disabled(commentPage == 0 || isLoading)
-                            Spacer()
-                            Text("第 \(commentPage + 1) 页").font(.caption).foregroundStyle(NoveliaStyle.muted)
-                            Spacer()
-                            Button("下一页") { Task { await loadComments(page: commentPage + 1) } }
-                                .disabled(Int64((commentPage + 1) * 20) >= totalComments || isLoading)
+                        HStack(spacing: 12) {
+                            commentPageButton("chevron.left", label: "上一页",
+                                              enabled: commentPage > 0 && !isLoading) {
+                                Task { await loadComments(page: commentPage - 1) }
+                            }
+                            Text("第 \(commentPage + 1) 页")
+                                .font(.system(size: 11, weight: .medium).monospacedDigit())
+                                .foregroundStyle(NoveliaStyle.muted)
+                            commentPageButton("chevron.right", label: "下一页",
+                                              enabled: Int64((commentPage + 1) * 20) < totalComments && !isLoading) {
+                                Task { await loadComments(page: commentPage + 1) }
+                            }
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
                     }
                 }
                 .padding(16)
@@ -149,6 +171,11 @@ struct ForumPostDetailView: View {
                 }
             }
             .environment(\.openURL, OpenURLAction { url in handleForumLink(url) })
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let post, !post.commentsLocked {
+                commentComposerBar
+            }
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle("帖子详情")
@@ -201,6 +228,51 @@ struct ForumPostDetailView: View {
                 )
             }
         }
+    }
+
+    /// 固定在底部的评论入口，替代正文中的大按钮卡片。
+    private var commentComposerBar: some View {
+        HStack(spacing: 10) {
+            Button {
+                beginComment()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(auth.username == nil ? "登录后发表评论" : "写评论…")
+                        .font(.system(size: 14))
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(NoveliaStyle.muted)
+                .padding(.horizontal, 14)
+                .frame(height: 40)
+                .background(NoveliaStyle.card, in: Capsule())
+                .overlay(
+                    Capsule().stroke(NoveliaStyle.muted.opacity(0.20), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
+    }
+
+    private func commentPageButton(_ symbol: String, label: String, enabled: Bool,
+                                   action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(enabled ? NoveliaStyle.ink : NoveliaStyle.muted.opacity(0.5))
+                .frame(width: 36, height: 36)
+                .background(NoveliaStyle.card, in: Circle())
+                .overlay(
+                    Circle().stroke(NoveliaStyle.muted.opacity(enabled ? 0.22 : 0.12), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(label)
     }
 
     @MainActor
@@ -352,20 +424,29 @@ private struct ForumCommentCard: View {
     private var api: any ForumService { services.api.forum }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack {
-                Text(comment.authorUsername).font(.caption.weight(.bold))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(String(comment.authorUsername.prefix(1)).uppercased())
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(NoveliaStyle.brandGreen)
+                    .frame(width: 22, height: 22)
+                    .background(NoveliaStyle.brandGreen.opacity(0.14), in: Circle())
+                Text(comment.authorUsername)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(NoveliaStyle.ink)
                 Spacer()
-                Text(comment.createdAt.forumDisplayDate).font(.caption2).foregroundStyle(NoveliaStyle.muted)
+                Text(comment.createdAt.forumDisplayDate)
+                    .font(.system(size: 11))
+                    .foregroundStyle(NoveliaStyle.muted)
             }
             ForumMarkdownBody(markdown: content, mode: .comment)
-            HStack(spacing: 16) {
-                Button("回复") { onReply() }
+            HStack(spacing: 8) {
+                commentAction("回复") { onReply() }
                 if username == comment.authorUsername {
-                    Button("编辑") { onEdit(comment) }
+                    commentAction("编辑") { onEdit(comment) }
                 }
             }
-            .font(.caption.weight(.semibold)).tint(NoveliaStyle.brandGreen)
+            .tint(NoveliaStyle.brandGreen)
             ForEach(allReplies) { reply in
                 HStack(alignment: .top, spacing: 8) {
                     RoundedRectangle(cornerRadius: 2).fill(NoveliaStyle.brandGreen.opacity(0.4)).frame(width: 3)
@@ -393,8 +474,24 @@ private struct ForumCommentCard: View {
                 .font(.caption.weight(.semibold)).tint(NoveliaStyle.brandGreen).disabled(isLoadingReplies)
             }
         }
-        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
-        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(NoveliaStyle.muted.opacity(0.10), lineWidth: 1)
+        )
+    }
+
+    private func commentAction(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(NoveliaStyle.brandGreen.opacity(0.10), in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     @MainActor

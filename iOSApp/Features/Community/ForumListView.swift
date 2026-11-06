@@ -17,6 +17,7 @@ private struct ForumContentView: View {
     @EnvironmentObject private var auth: ForumAuthStore
     @StateObject private var store: ForumStore
     @State private var isConfirmingLogout = false
+    @State private var openedPostID: Int64?
 
     init(initialCategory: String, initialQuery: String, api: any ForumService) {
         let store = ForumStore(api: api)
@@ -32,23 +33,17 @@ private struct ForumContentView: View {
                                  isVisible: store.source == .all) { category in
                     Task { await store.selectCategory(category.slug) }
                 }
-                if !store.filterTags.isEmpty {
-                    HStack {
-                        Text("标签").foregroundStyle(NoveliaStyle.muted)
-                        Picker("标签筛选", selection: $store.selectedTagID) {
-                            Text("全部标签").tag(nil as Int64?)
-                            ForEach(store.filterTags) { tag in
-                                Text(tag.name).tag(Optional(tag.id))
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .accessibilityIdentifier("forum-tag-filter")
-                        Spacer()
+                if store.source != .all {
+                    ForumSourceChip(title: store.source.title) {
+                        Task { await store.selectSource(.all) }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(NoveliaStyle.paper)
-                    .onValueChange(of: store.selectedTagID) { _, _ in
+                }
+                if !store.filterTags.isEmpty {
+                    ForumTagFilter(
+                        tags: store.filterTags,
+                        selectedTagID: store.selectedTagID
+                    ) { tagID in
+                        store.selectedTagID = tagID
                         Task { await store.loadPosts(page: 0) }
                     }
                 }
@@ -63,6 +58,7 @@ private struct ForumContentView: View {
                     if store.isLoadingCategories && store.categories.isEmpty {
                         HStack { Spacer(); ProgressView("正在连接论坛…"); Spacer() }
                             .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
 
                     if store.categories.isEmpty, !store.isLoadingCategories, let error = store.errorMessage {
@@ -75,10 +71,12 @@ private struct ForumContentView: View {
                                 .buttonStyle(.borderedProminent).tint(NoveliaStyle.brandGreen)
                         }
                         .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                     } else if visiblePosts.isEmpty, !store.isLoadingPosts, store.errorMessage == nil {
                         CompatUnavailable(store.posts.isEmpty ? "这里还没有帖子" : "本页没有匹配的帖子", systemImage: "bubble.left.and.bubble.right",
                                                description: Text(filtersCurrentPageOnly ? "可翻页查看其他页的帖子。" : "切换分类或调整搜索词。"))
                             .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
 
                     if filtersCurrentPageOnly {
@@ -86,40 +84,47 @@ private struct ForumContentView: View {
                             .font(.footnote)
                             .foregroundStyle(NoveliaStyle.muted)
                             .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
 
                     ForEach(visiblePosts) { post in
-                        NavigationLink {
-                            ForumPostDetailView(postID: post.id)
+                        Button {
+                            openedPostID = post.id
                         } label: {
-                            ForumPostRow(post: post, category: store.categories.first { $0.id == post.categoryId })
+                            ForumPostCard(post: post, category: store.categories.first { $0.id == post.categoryId })
                         }
-                        .listRowBackground(NoveliaStyle.card)
-                    }
-
-                    if store.page > 0 || store.hasNextPage {
-                        HStack {
-                            Button("上一页") { loadPage(max(0, store.page - 1), using: proxy) }
-                                .disabled(store.page == 0 || store.isLoadingPosts)
-                            Spacer()
-                            Text("第 \(store.page + 1) 页 · 共 \(store.total) 帖")
-                                .font(.caption).foregroundStyle(NoveliaStyle.muted)
-                            Spacer()
-                            Button("下一页") { loadPage(store.page + 1, using: proxy) }
-                                .disabled(!store.hasNextPage || store.isLoadingPosts)
-                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                        .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                     }
-                    if store.isLoadingPosts {
-                        HStack { Spacer(); ProgressView(); Spacer() }.listRowBackground(Color.clear)
+
+                    if store.page > 0 || store.hasNextPage || store.isLoadingPosts {
+                        ForumPaginationBar(
+                            page: store.page,
+                            total: store.total,
+                            hasPrevious: store.page > 0,
+                            hasNext: store.hasNextPage,
+                            isLoading: store.isLoadingPosts,
+                            onPrevious: { loadPage(max(0, store.page - 1), using: proxy) },
+                            onNext: { loadPage(store.page + 1, using: proxy) }
+                        )
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
                     }
                     if let error = store.errorMessage, !store.categories.isEmpty {
-                        Text(error).font(.footnote).foregroundStyle(.red).listRowBackground(Color.clear)
+                        Text(error).font(.footnote).foregroundStyle(.red)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
                 }
                 .listStyle(.plain)
                 .compatScrollContentBackgroundHidden()
                 .background(NoveliaStyle.paper)
+                .compatNavigationDestination(item: $openedPostID) { postID in
+                    ForumPostDetailView(postID: postID)
+                }
                 .navigationTitle("论坛")
                 .toolbar {
                     ToolbarItem(placement: .compatTopBarLeading) {
@@ -145,15 +150,7 @@ private struct ForumContentView: View {
                                 .labelStyle(.iconOnly)
                         }
                     }
-                    ToolbarItem(placement: .compatTopBarTrailing) {
-                        NavigationLink {
-                            ForumComposeView(categories: store.categories, initialCategorySlug: store.selectedCategory)
-                        } label: {
-                            Image(systemName: "square.and.pencil")
-                        }
-                        .accessibilityLabel("发布新帖")
-                    }
-                    ToolbarItem(placement: .principal) {
+                    ToolbarItemGroup(placement: .compatTopBarTrailing) {
                         Menu {
                             ForEach(ForumSort.allCases) { option in
                                 Button {
@@ -164,7 +161,17 @@ private struct ForumContentView: View {
                                     else { Text(option.title) }
                                 }
                             }
-                        } label: { Text(store.sort.title).font(.subheadline.weight(.semibold)) }
+                        } label: {
+                            Image(systemName: "arrow.up.arrow.down")
+                        }
+                        .accessibilityLabel("排序：\(store.sort.title)")
+
+                        NavigationLink {
+                            ForumComposeView(categories: store.categories, initialCategorySlug: store.selectedCategory)
+                        } label: {
+                            Image(systemName: "square.and.pencil")
+                        }
+                        .accessibilityLabel("发布新帖")
                     }
                 }
                 .searchable(text: $store.query, prompt: "搜索论坛帖子")
@@ -218,46 +225,92 @@ private struct ForumContentView: View {
     }
 }
 
-private struct ForumPostRow: View {
+private extension ForumFeedSource {
+    var title: String {
+        switch self {
+        case .all: "全部帖子"
+        case .favorites: "云端收藏"
+        case .myPosts: "我的帖子"
+        }
+    }
+}
+
+/// 帖子列表行：白卡 + 分类胶囊 + 标题 + 标签 + 统计，行间留白由列表行距提供。
+private struct ForumPostCard: View {
     let post: ForumPost
     let category: ForumCategory?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                if post.pinOrder != nil { Image(systemName: "pin.fill").foregroundStyle(NoveliaStyle.brandGreen) }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                if post.pinOrder != nil {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(NoveliaStyle.brandGreen)
+                        .accessibilityLabel("置顶")
+                }
                 Text(category?.title ?? "论坛")
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(NoveliaStyle.brandGreen)
-                if post.commentsLocked { Image(systemName: "lock.fill").foregroundStyle(NoveliaStyle.muted) }
-                Spacer()
-                Text(post.createdAt.forumDisplayDate).foregroundStyle(NoveliaStyle.muted)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(NoveliaStyle.brandGreen.opacity(0.12), in: Capsule())
+                if post.commentsLocked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .accessibilityLabel("已锁定评论")
+                }
+                Spacer(minLength: 8)
+                Text(post.createdAt.forumDisplayDate)
+                    .font(.system(size: 11))
+                    .foregroundStyle(NoveliaStyle.muted)
             }
-            .font(.caption)
             Text(post.title)
-                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(NoveliaStyle.ink)
                 .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
             if !post.tags.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(post.tags) { tag in
-                            Text(tag.name).font(.caption2.weight(.medium))
-                                .padding(.horizontal, 8).padding(.vertical, 4)
-                                .background(NoveliaStyle.brandGreen.opacity(0.10), in: Capsule())
-                        }
+                HStack(spacing: 6) {
+                    ForEach(post.tags.prefix(4)) { tag in
+                        Text(tag.name)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(NoveliaStyle.muted.opacity(0.10), in: Capsule())
+                    }
+                    if post.tags.count > 4 {
+                        Text("+\(post.tags.count - 4)")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(NoveliaStyle.muted)
                     }
                 }
             }
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 Text(post.authorUsername)
+                    .lineLimit(1)
                 Label("\(post.commentsCount)", systemImage: "bubble.right")
                 Label("\(post.viewsCount)", systemImage: "eye")
-                Spacer()
-                if post.favorited { Image(systemName: "bookmark.fill").foregroundStyle(NoveliaStyle.brandGreen) }
+                Spacer(minLength: 6)
+                if post.favorited {
+                    Image(systemName: "bookmark.fill")
+                        .foregroundStyle(NoveliaStyle.brandGreen)
+                        .accessibilityLabel("已收藏")
+                }
             }
-            .font(.caption2).foregroundStyle(NoveliaStyle.muted)
+            .font(.system(size: 11))
+            .foregroundStyle(NoveliaStyle.muted)
         }
-        .padding(.vertical, 7)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(NoveliaStyle.muted.opacity(0.12), lineWidth: 1)
+        )
     }
 }
 
@@ -273,25 +326,168 @@ private struct ForumCategoryBar: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 9) {
+            HStack(spacing: 8) {
                 ForEach(categories) { category in
                     Button { onSelect(category) } label: {
                         Text(category.title)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(selectedCategory == category.slug ? .white : NoveliaStyle.ink)
-                            .padding(.horizontal, 14).padding(.vertical, 8)
-                            .background(selectedCategory == category.slug ? NoveliaStyle.brandGreen : NoveliaStyle.card, in: Capsule())
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(selectedCategory == category.slug ? NoveliaStyle.brandGreen : Color.clear, in: Capsule())
+                            .overlay {
+                                Capsule().stroke(
+                                    selectedCategory == category.slug ? Color.clear : NoveliaStyle.muted.opacity(0.28),
+                                    lineWidth: 1
+                                )
+                            }
                     }
                     .buttonStyle(.plain)
+                    .accessibilityAddTraits(selectedCategory == category.slug ? .isSelected : [])
                 }
             }
-            .padding(.horizontal, 16).padding(.vertical, 10)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
         }
-        .frame(height: isShown ? 56 : 0)
+        .frame(height: isShown ? 48 : 0)
         .clipped()
         .background(NoveliaStyle.paper)
         .allowsHitTesting(isShown)
         .accessibilityHidden(!isShown)
+    }
+}
+
+/// 「我的帖子／云端收藏」时显示当前来源，便于一键回到全部帖子。
+private struct ForumSourceChip: View {
+    let title: String
+    let onClear: () -> Void
+
+    var body: some View {
+        HStack {
+            HStack(spacing: 6) {
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                Button(action: onClear) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("回到全部帖子")
+            }
+            .foregroundStyle(NoveliaStyle.brandGreen)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(NoveliaStyle.brandGreen.opacity(0.10), in: Capsule())
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        .background(NoveliaStyle.paper)
+    }
+}
+
+/// 小说分类下的标签筛选，取代系统 Picker，保持与分类胶囊同一视觉语言。
+private struct ForumTagFilter: View {
+    let tags: [ForumTag]
+    let selectedTagID: Int64?
+    let onSelect: (Int64?) -> Void
+
+    private var selectedName: String {
+        tags.first { $0.id == selectedTagID }?.name ?? "全部标签"
+    }
+
+    private var isFiltering: Bool { selectedTagID != nil }
+
+    var body: some View {
+        HStack {
+            Menu {
+                Button("全部标签") { onSelect(nil) }
+                ForEach(tags) { tag in
+                    Button {
+                        onSelect(tag.id)
+                    } label: {
+                        if tag.id == selectedTagID { Label(tag.name, systemImage: "checkmark") }
+                        else { Text(tag.name) }
+                    }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "tag")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(selectedName)
+                        .font(.system(size: 12, weight: .semibold))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                }
+                .foregroundStyle(isFiltering ? NoveliaStyle.brandGreen : NoveliaStyle.ink)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(isFiltering ? NoveliaStyle.brandGreen.opacity(0.10) : NoveliaStyle.card, in: Capsule())
+                .overlay(
+                    Capsule().stroke(
+                        isFiltering ? NoveliaStyle.brandGreen.opacity(0.35) : NoveliaStyle.muted.opacity(0.22),
+                        lineWidth: 1
+                    )
+                )
+            }
+            .accessibilityIdentifier("forum-tag-filter")
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        .background(NoveliaStyle.paper)
+    }
+}
+
+/// 翻页栏：两端圆形箭头 + 中间页码胶囊，替代原来的文字按钮。
+private struct ForumPaginationBar: View {
+    let page: Int
+    let total: Int64
+    let hasPrevious: Bool
+    let hasNext: Bool
+    let isLoading: Bool
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            roundButton("chevron.left", label: "上一页", enabled: hasPrevious && !isLoading, action: onPrevious)
+
+            Group {
+                if isLoading {
+                    ProgressView()
+                        .frame(minWidth: 108)
+                } else {
+                    Text("第 \(page + 1) 页 · 共 \(total) 帖")
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .frame(minWidth: 108)
+                }
+            }
+
+            roundButton("chevron.right", label: "下一页", enabled: hasNext && !isLoading, action: onNext)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+    }
+
+    private func roundButton(_ symbol: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(enabled ? NoveliaStyle.ink : NoveliaStyle.muted.opacity(0.5))
+                .frame(width: 38, height: 38)
+                .background(NoveliaStyle.card, in: Circle())
+                .overlay(
+                    Circle().stroke(NoveliaStyle.muted.opacity(enabled ? 0.22 : 0.12), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(label)
     }
 }
 
