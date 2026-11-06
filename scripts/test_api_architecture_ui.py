@@ -578,8 +578,8 @@ final class TapTests: XCTestCase {
   readerAction(app, "单书阅读偏好").tap()
   let perBook = app.switches["仅应用于这本书"].firstMatch
   XCTAssertTrue(perBook.waitForExistence(timeout: 10)); perBook.tap()
-  let original = app.textFields["原词，例如人名"]; reveal(original, app: app); original.tap(); original.typeText("替代服务")
-  let replacement = app.textFields["替换为（可留空）"]; replacement.tap(); replacement.typeText("本书替换")
+  let original = app.textFields["原词，例如人名"]; reveal(original, app: app); original.tap(); original.typeText("替代服务\n")
+  let replacement = app.textFields["替换为（可留空）"]; replacement.typeText("本书替换\n")
   app.buttons["添加或更新"].tap()
   XCTAssertTrue(app.buttons["应用"].firstMatch.waitForExistence(timeout: 10)); app.buttons["应用"].firstMatch.tap()
   XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 20))

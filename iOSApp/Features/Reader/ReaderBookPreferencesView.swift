@@ -7,7 +7,8 @@ struct ReaderBookPreferencesView: View {
     @State private var draft = ReadingTextProjection()
     @State private var source = ""
     @State private var replacement = ""
-    @FocusState private var editingRule: Bool
+    private enum RuleField: Hashable { case source, replacement }
+    @FocusState private var editingRule: RuleField?
     var body: some View {
         CompatNavigationStack {
             Form {
@@ -21,10 +22,12 @@ struct ReaderBookPreferencesView: View {
                     Toggle("启用本书文字替换", isOn: $draft.enabled)
                 }
                 Section("添加替换规则") {
-                    TextField("原词，例如人名", text: $source).focused($editingRule)
-                    TextField("替换为（可留空）", text: $replacement).focused($editingRule)
+                    TextField("原词，例如人名", text: $source).focused($editingRule, equals: .source)
+                        .submitLabel(.next).onSubmit { editingRule = .replacement }
+                    TextField("替换为（可留空）", text: $replacement).focused($editingRule, equals: .replacement)
+                        .submitLabel(.done).onSubmit { editingRule = nil }
                     Button("添加或更新") {
-                        draft.replacements[source] = replacement; source = ""; replacement = ""; editingRule = false
+                        draft.replacements[source] = replacement; source = ""; replacement = ""; editingRule = nil
                     }
                     .disabled(source.isEmpty || source.utf16.count > 120 || replacement.utf16.count > 120 || draft.replacements.count >= 1000)
                 }
