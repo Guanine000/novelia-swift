@@ -1481,39 +1481,16 @@ private struct LibraryBookGridCell: View {
     var isSelected = false
 
     var body: some View {
-        Group {
-            if #available(iOS 16.0, *) {
-                cellContent
-                    .contentShape(Rectangle())
-                    .onTapGesture(perform: activate)
-                    // 网格共处一个 List 行，默认快照会捕获整行；显式预览只展示当前书籍。
-                    .contextMenu {
-                        LibraryBookMenuItems(book: book, actions: actions, open: open)
-                    } preview: {
-                        VStack(spacing: 10) {
-                            LibraryCoverView(book: book, width: 144, height: 201)
-                            Text(book.title)
-                                .font(.headline)
-                                .foregroundStyle(NoveliaStyle.ink)
-                                .lineLimit(3)
-                                .multilineTextAlignment(.center)
-                        }
-                        .padding(16)
-                        .frame(width: 208)
-                        .background(NoveliaStyle.paper)
-                    }
-            } else {
-                // iOS 15 没有自定义菜单预览，使用带主操作的菜单避免预览整个网格。
-                Menu {
-                    LibraryBookMenuItems(book: book, actions: actions, open: open)
-                } label: {
-                    cellContent
-                } primaryAction: {
-                    activate()
-                }
-                .buttonStyle(.plain)
-            }
+        // 使用无预览的菜单，长按只展开操作，不抬起封面或捕获网格快照。
+        Menu {
+            LibraryBookMenuItems(book: book, actions: actions, open: open)
+        } label: {
+            cellContent
+                .contentShape(Rectangle())
+        } primaryAction: {
+            activate()
         }
+        .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(book.title)，\(book.author)，\(state.status(for: book).detail)")
         .accessibilityHint(isSelecting ? "切换选择" : "打开阅读")
