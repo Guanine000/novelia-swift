@@ -242,14 +242,16 @@ struct ReaderStyleSheet: View {
             }
             .navigationTitle("阅读设置")
             .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .bottom) {
-                HStack {
+            .toolbar {
+                // 按钮放导航栏，避免 sheet 底部再铺一条与表单不同色的操作条。
+                ToolbarItem(placement: .compatTopBarLeading) {
                     Button("关闭") { onClose() }
-                    Spacer()
+                }
+                ToolbarItem(placement: .compatTopBarTrailing) {
                     Button("应用") { onApply() }
-                        .buttonStyle(.borderedProminent)
+                        .font(.body.weight(.semibold))
                         .disabled(!canApply)
-                }.padding().background(.regularMaterial)
+                }
             }
         }
         .compatPresentationDetents(.medium, .large)

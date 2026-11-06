@@ -42,14 +42,14 @@ struct ReaderBookPreferencesView: View {
             }
             .navigationTitle("本书文字处理")
             .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .bottom) {
-                HStack {
+            .toolbar {
+                ToolbarItem(placement: .compatTopBarLeading) {
                     Button("关闭") { dismiss() }
-                    Spacer()
-                    Button("应用") { settings.setProjection(draft); dismiss() }
-                        .buttonStyle(.borderedProminent)
                 }
-                .padding().background(.regularMaterial)
+                ToolbarItem(placement: .compatTopBarTrailing) {
+                    Button("应用") { settings.setProjection(draft); dismiss() }
+                        .font(.body.weight(.semibold))
+                }
             }
             .onAppear { draft = settings.projection }
         }

@@ -86,13 +86,15 @@ struct LibraryWenkuAssociationEditor: View {
                 }
             }
             .navigationTitle("关联文库作品／分卷").navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .bottom) {
-                HStack {
+            .toolbar {
+                ToolbarItem(placement: .compatTopBarLeading) {
                     Button("关闭") { task?.cancel(); dismiss() }.disabled(isSaving)
-                    Spacer()
+                }
+                ToolbarItem(placement: .compatTopBarTrailing) {
                     Button(isSaving ? "正在保存…" : "保存关联") { save() }
-                        .buttonStyle(.borderedProminent).disabled(detail == nil || selectedVolume == nil || isLoading || isSaving)
-                }.padding().background(.regularMaterial)
+                        .font(.body.weight(.semibold))
+                        .disabled(detail == nil || selectedVolume == nil || isLoading || isSaving)
+                }
             }
             .onAppear {
                 query = current.parentWenkuTitle ?? book.title
