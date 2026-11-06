@@ -53,6 +53,7 @@ struct ReaderBookPreferencesView: View {
             }
             .onAppear { draft = settings.projection }
         }
+        .compatPresentationBackground(NoveliaStyle.paper)
     }
 }
 

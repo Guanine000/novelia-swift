@@ -255,6 +255,8 @@ struct ReaderStyleSheet: View {
             }
         }
         .compatPresentationDetents(.medium, .large)
+        // 不透明纸色底：半透明 sheet 在滚动时要持续重算背后内容的模糊，容易掉帧。
+        .compatPresentationBackground(NoveliaStyle.paper)
     }
 
     private func styleSlider(_ label: String, value: Binding<CGFloat>,
