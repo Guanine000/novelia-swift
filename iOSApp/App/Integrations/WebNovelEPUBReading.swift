@@ -70,7 +70,8 @@ private final class WebNovelEPUBReadingModel: ObservableObject {
          settings: ReaderSettings, downloads: WebNovelDownloadStore) {
         self.book = book; self.catalog = catalog; self.content = content; self.settings = settings; self.downloads = downloads
         url = downloads.fileURL(for: book)
-        settings.positions.changes.sink { [weak self] in self?.objectWillChange.send() }.store(in: &subscriptions)
+        // 不再订阅位置变化：每次翻页都会写入阅读位置，订阅后会让整个读者界面（含阅读器视图）
+        // 每翻一页重算一次，造成明显卡顿；本模型没有任何界面直接读取 positions。
         settings.webEPUBMaps.$maps.dropFirst().sink { [weak self] _ in
             Task { @MainActor [weak self] in self?.refreshMap() }
         }.store(in: &subscriptions)
