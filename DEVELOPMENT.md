@@ -84,7 +84,7 @@ Core 功能逻辑 → Domain 与通用 Support
 
 已有某些界面入口和导航会跨功能引用；本约定不要求为导航全部建立协议。需要共享业务能力时，提供明确接口或 App 适配，避免读取另一个功能 Store 的内部字段、全局实例或私有文件格式。
 
-界面颜色、圆角与常用字号统一使用 `NoveliaStyle`（App 层定义）：颜色为 `ink`/`muted`/`paper`/`card`/`brandGreen` 加语义化的 `danger`/`warning`，圆角三档 `radiusSmall`/`Medium`/`Large`（8/12/16），字号档 `fontMicro`/`Caption`/`Footnote`/`Body`（10/11/12/13，名称只表示档位）。界面层不再新增硬编码错误色或这三档之外的圆角；既有孤值（7、13–15、17–24 圆角与带 `weight`/`design` 的字号组合）保持原样，逐处确认归属后再收敛，不做盲改。
+界面颜色、圆角与常用字号统一使用 `NoveliaStyle`（App 层定义）：颜色为 `ink`/`muted`/`paper`/`card`/`brandGreen` 加语义化的 `danger`/`warning`，圆角三档 `radiusSmall`/`Medium`/`Large`（8/12/16），字号档 `fontMicro`/`Caption`/`Footnote`/`Body`（10/11/12/13，名称只表示档位）。`paper`/`card` 的浅色值来自 `AppPaperStyle` 预设（“我的 → 界面 → 界面底色”，动态色提供器读取 `appPaperStyle`，根视图持有对应 `@AppStorage` 保证换档时全树重渲染）；深色模式纸面/卡片固定，不随预设变化。界面层不再新增硬编码错误色或这三档之外的圆角；既有孤值（7、13–15、17–24 圆角与带 `weight`/`design` 的字号组合）保持原样，逐处确认归属后再收敛，不做盲改。
 
 ## 启动、导航和状态生命周期
 

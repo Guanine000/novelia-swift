@@ -105,6 +105,39 @@ enum AppThemeColor: String, CaseIterable, Identifiable {
     }
 }
 
+/// 界面底色预设：只调整浅色模式的纸面底色，深色模式保持现有近黑配色。
+/// 卡片保持白色，与两档纸面都能保持层次；选择保存在本机，不参与同步。
+enum AppPaperStyle: String, CaseIterable, Identifiable {
+    case cream
+    case gray
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .cream: "米白（默认）"
+        case .gray: "浅灰"
+        }
+    }
+
+    /// 浅色模式的页面底色。
+    var lightPaper: UIColor {
+        switch self {
+        case .cream: UIColor(red: 0.98, green: 0.97, blue: 0.94, alpha: 1)
+        case .gray: UIColor(red: 0.949, green: 0.949, blue: 0.965, alpha: 1)
+        }
+    }
+
+    /// 选择器里的色卡颜色（浅色纸面）。
+    var swatchColor: Color {
+        Color(lightPaper)
+    }
+
+    static func from(storedValue: String?) -> AppPaperStyle {
+        storedValue.flatMap(AppPaperStyle.init(rawValue:)) ?? .cream
+    }
+}
+
 enum NoveliaStyle {
     static var brandGreen: Color { .accentColor }
 
@@ -126,21 +159,22 @@ enum NoveliaStyle {
         })
     }
 
-    /// 页面底色（浅色=米色纸面，深色=近黑）。
+    /// 页面底色（浅色=按「我的 → 界面」的界面底色预设，深色=近黑）。
     static var paper: Color {
         Color(uiColor: UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 0.10, green: 0.10, blue: 0.11, alpha: 1)
-                : UIColor(red: 0.98, green: 0.97, blue: 0.94, alpha: 1)
+            guard trait.userInterfaceStyle == .dark else {
+                return AppPaperStyle.from(storedValue: UserDefaults.standard.string(forKey: SettingsKey.appPaperStyle)).lightPaper
+            }
+            return UIColor(red: 0.10, green: 0.10, blue: 0.11, alpha: 1)
         })
     }
 
-    /// 卡片/列表行底色（浅色=白，深色=深灰）。
+    /// 卡片/列表行底色（浅色=白，深色=深灰）；与两档纸面都能保持层次。
     static var card: Color {
         Color(uiColor: UIColor { trait in
             trait.userInterfaceStyle == .dark
                 ? UIColor(red: 0.17, green: 0.17, blue: 0.18, alpha: 1)
-                : UIColor.white
+                : .white
         })
     }
 
@@ -206,6 +240,8 @@ struct RootView: View {
         lastSelected: UserDefaults.standard.string(forKey: SettingsKey.tabBarLastSelected),
         order: AppTabLayout.order(from: UserDefaults.standard.string(forKey: SettingsKey.tabBarOrder))
     )
+    /// 界面底色预设。持有它让根视图在换档时重渲染，纸面与卡片的动态色随之刷新。
+    @AppStorage(SettingsKey.appPaperStyle) private var paperStyleRaw = AppPaperStyle.cream.rawValue
 
     init(services: AppServices) {
         self.services = services
@@ -253,6 +289,9 @@ struct RootView: View {
         }
         .tint(AppThemeColor.color(for: appThemeColorRaw, customHex: appThemeCustomHex))
         .background(NoveliaStyle.paper)
+        // 纸面/卡片的动态色提供器只在视图重新求值时重新解析；换底色预设时用行身份
+        // 重建整棵 TabView 让全部界面立即跟随（tab 选择状态在本视图上，不受影响）。
+        .id(paperStyleRaw)
         .environmentObject(services)
         .environmentObject(services.local.readerSettings)
         .environmentObject(services.local.library)

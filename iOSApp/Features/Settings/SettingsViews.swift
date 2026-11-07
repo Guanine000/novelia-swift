@@ -12,6 +12,7 @@ struct SettingsView: View {
     @State private var isConfirmingLogout = false
     @AppStorage(SettingsKey.appThemeColor) private var themeColorRaw = AppThemeColor.novelia.rawValue
     @AppStorage(SettingsKey.appThemeCustomHex) private var themeCustomHex = "559775"
+    @AppStorage(SettingsKey.appPaperStyle) private var paperStyleRaw = AppPaperStyle.cream.rawValue
     #if !NOVELIA_READIUM_ONLY
     @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = false
     #endif
@@ -177,6 +178,17 @@ struct SettingsView: View {
                         ),
                         supportsOpacity: false
                     )
+                }
+                Picker(selection: $paperStyleRaw) {
+                    ForEach(AppPaperStyle.allCases) { option in
+                        HStack(spacing: 8) {
+                            PaperStyleSwatch(color: option.swatchColor)
+                            Text(option.title)
+                        }
+                        .tag(option.rawValue)
+                    }
+                } label: {
+                    Label("界面底色", systemImage: "square.on.square")
                 }
             }
             Section("同步") {
@@ -715,5 +727,17 @@ private struct LicenseTextView: UIViewRepresentable {
             view.text = text
             view.setContentOffset(.zero, animated: false)
         }
+    }
+}
+
+/// 界面底色选择器里的纸面色卡；独立视图避免 Form 主体表达式类型检查超时。
+private struct PaperStyleSwatch: View {
+    let color: Color
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .overlay(Circle().strokeBorder(NoveliaStyle.muted.opacity(0.35), lineWidth: 1))
+            .frame(width: 12, height: 12)
     }
 }

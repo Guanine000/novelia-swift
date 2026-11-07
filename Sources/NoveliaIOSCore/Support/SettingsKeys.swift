@@ -19,6 +19,8 @@ enum SettingsKey {
     static let readerBookBackgroundFollow = "readerBookBackgroundFollow"
     static let appThemeColor = "appThemeColor"
     static let appThemeCustomHex = "appThemeCustomHex"
+    /// 界面底色预设，值为 `AppPaperStyle` 原始值；只影响浅色模式，本机保存不参与同步。
+    static let appPaperStyle = "appPaperStyle"
     /// 底栏页面顺序，以逗号分隔的 `AppTab` 原始值保存。
     static let tabBarOrder = "tabBar.order"
     /// 启动时打开的页面：`AppTab` 原始值，或 `last` 表示上次使用的页面。
