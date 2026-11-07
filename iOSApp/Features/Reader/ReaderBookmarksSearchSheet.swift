@@ -83,7 +83,7 @@ struct ReaderBookmarksSearchSheet: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
                         if bookmark.chapterID != nil, resolveChapter?(bookmark) == nil {
-                            Text("本机章节未下载或未核对").font(.caption).foregroundStyle(.orange)
+                            Text("本机章节未下载或未核对").font(.caption).foregroundStyle(NoveliaStyle.warning)
                         }
                         if !bookmark.snippet.isEmpty {
                             Text(bookmark.snippet)

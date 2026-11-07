@@ -224,7 +224,7 @@ private struct ReadiumEPUBReaderViewContent: View {
                 }
                 if !model.currentChapterTitle.isEmpty {
                     Text(model.currentChapterTitle)
-                        .font(.system(size: 10))
+                        .font(NoveliaStyle.fontMicro)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }

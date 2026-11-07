@@ -264,13 +264,13 @@ struct LibraryImportProgressOverlay: View {
                     ProgressView(value: Double(model.importCompletedCount), total: Double(max(model.importTotalCount, 1)))
                         .tint(NoveliaStyle.brandGreen)
                     Text("已处理 \(model.importCompletedCount) / \(model.importTotalCount) 个文件")
-                        .font(.system(size: 13))
+                        .font(NoveliaStyle.fontBody)
                         .foregroundStyle(NoveliaStyle.muted)
                 }
                 .padding(20)
                 .frame(width: 280)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.45), lineWidth: 1))
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge))
+                .overlay(RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge).stroke(.white.opacity(0.45), lineWidth: 1))
                 .shadow(color: .black.opacity(0.16), radius: 22, y: 8)
             }
             .transition(.opacity)

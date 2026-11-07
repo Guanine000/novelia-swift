@@ -638,7 +638,7 @@ private struct LibraryAddToSeriesSheet: View {
                             Text(book.title).font(.system(size: 15, weight: .semibold)).lineLimit(2)
                             Text([book.author, state.seriesName(for: book).map { "当前系列：\($0)" }]
                                     .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
-                                .font(.system(size: 12))
+                                .font(NoveliaStyle.fontFootnote)
                                 .foregroundStyle(NoveliaStyle.muted)
                                 .lineLimit(1)
                         }
@@ -999,7 +999,7 @@ struct LibraryBookActionDialogs: ViewModifier {
                     }
                     .padding(20)
                     .frame(maxWidth: 240)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge))
                 }
             }
             .overlay {
@@ -1013,7 +1013,7 @@ struct LibraryBookActionDialogs: ViewModifier {
                     }
                     .padding(20)
                     .frame(maxWidth: 280)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge))
                 }
             }
             .confirmationDialog(
@@ -1523,7 +1523,7 @@ private struct LibraryBookGridCell: View {
                         .offset(x: 4, y: -4)
                 } else if book.cloudFileMissing {
                     Image(systemName: "exclamationmark.icloud")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(NoveliaStyle.warning)
                         .padding(4)
                         .background(Circle().fill(NoveliaStyle.paper))
                         .offset(x: 4, y: -4)
@@ -1546,7 +1546,7 @@ private struct LibraryBookGridCell: View {
                 .multilineTextAlignment(.leading)
                 .frame(height: 34, alignment: .topLeading)
             Text(status.detail)
-                .font(.system(size: 10))
+                .font(NoveliaStyle.fontMicro)
                 .foregroundStyle(status.isUnread ? NoveliaStyle.muted : NoveliaStyle.brandGreen)
                 .lineLimit(1)
         }
@@ -1569,13 +1569,13 @@ private struct LibraryBookRowContent: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                 Text(book.author.isEmpty ? "未知作者" : book.author)
-                    .font(.system(size: 12))
+                    .font(NoveliaStyle.fontFootnote)
                     .foregroundStyle(NoveliaStyle.muted)
                     .lineLimit(1)
                 HStack(spacing: 6) {
                     if book.cloudFileMissing {
                         Image(systemName: "exclamationmark.icloud")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(NoveliaStyle.warning)
                             .accessibilityLabel("云端文件缺失")
                     } else if book.isCloudOnly {
                         Image(systemName: "icloud")
@@ -1594,7 +1594,7 @@ private struct LibraryBookRowContent: View {
                     Text(status.detail)
                         .foregroundStyle(status.isUnread ? NoveliaStyle.muted : NoveliaStyle.brandGreen)
                 }
-                .font(.system(size: 11))
+                .font(NoveliaStyle.fontCaption)
                 .foregroundStyle(NoveliaStyle.muted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1659,7 +1659,7 @@ private struct LibraryContinueReadingCard: View {
                         .multilineTextAlignment(.leading)
                     if !book.author.isEmpty {
                         Text(book.author)
-                            .font(.system(size: 12))
+                            .font(NoveliaStyle.fontFootnote)
                             .foregroundStyle(NoveliaStyle.muted)
                             .lineLimit(1)
                     }
@@ -1726,7 +1726,7 @@ private struct LibrarySeriesRow: View {
                     .foregroundStyle(NoveliaStyle.ink)
                     .lineLimit(2)
                 Text("\(books.count) 本")
-                    .font(.system(size: 12))
+                    .font(NoveliaStyle.fontFootnote)
                     .foregroundStyle(NoveliaStyle.muted)
             }
             Spacer()

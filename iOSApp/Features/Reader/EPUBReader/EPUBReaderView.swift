@@ -271,7 +271,7 @@ private struct EPUBReaderViewContent: View {
                     .lineLimit(1)
                 if !currentChapterTitle.isEmpty {
                     Text(currentChapterTitle)
-                        .font(.system(size: 10))
+                        .font(NoveliaStyle.fontMicro)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }

@@ -114,7 +114,7 @@ private struct ForumContentView: View {
                         .listRowBackground(Color.clear)
                     }
                     if let error = store.errorMessage, !store.categories.isEmpty {
-                        Text(error).font(.footnote).foregroundStyle(.red)
+                        Text(error).font(.footnote).foregroundStyle(NoveliaStyle.danger)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
@@ -257,13 +257,13 @@ private struct ForumPostCard: View {
                     .background(NoveliaStyle.brandGreen.opacity(0.12), in: Capsule())
                 if post.commentsLocked {
                     Image(systemName: "lock.fill")
-                        .font(.system(size: 10))
+                        .font(NoveliaStyle.fontMicro)
                         .foregroundStyle(NoveliaStyle.muted)
                         .accessibilityLabel("已锁定评论")
                 }
                 Spacer(minLength: 8)
                 Text(post.createdAt.forumDisplayDate)
-                    .font(.system(size: 11))
+                    .font(NoveliaStyle.fontCaption)
                     .foregroundStyle(NoveliaStyle.muted)
             }
             Text(post.title)
@@ -301,14 +301,14 @@ private struct ForumPostCard: View {
                         .accessibilityLabel("已收藏")
                 }
             }
-            .font(.system(size: 11))
+            .font(NoveliaStyle.fontCaption)
             .foregroundStyle(NoveliaStyle.muted)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
                 .stroke(NoveliaStyle.muted.opacity(0.12), lineWidth: 1)
         )
     }
@@ -372,7 +372,7 @@ private struct ForumSourceChip: View {
                     .lineLimit(1)
                 Button(action: onClear) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 13))
+                        .font(NoveliaStyle.fontBody)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("回到全部帖子")
@@ -506,7 +506,7 @@ struct ForumErrorOverlay: View {
             VStack(alignment: .leading, spacing: 14) {
                 Label("论坛遇到问题", systemImage: "exclamationmark.triangle.fill")
                     .font(.headline)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(NoveliaStyle.danger)
 
                 ScrollView {
                     Text(message)

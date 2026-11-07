@@ -69,8 +69,8 @@ struct CloudReadingHistoryListView: View {
 
                 if let error = readingHistory.errorMessage, !readingHistory.items.isEmpty {
                     Label(error, systemImage: "exclamationmark.triangle")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.orange)
+                        .font(NoveliaStyle.fontFootnote)
+                        .foregroundStyle(NoveliaStyle.warning)
                     Button("重试加载") {
                         Task {
                             if readingHistory.canLoadMore {
@@ -95,7 +95,7 @@ struct CloudReadingHistoryListView: View {
                         }
                 } else if !readingHistory.isLoading && !readingHistory.items.isEmpty {
                     Text("已加载全部阅读历史")
-                        .font(.system(size: 12))
+                        .font(NoveliaStyle.fontFootnote)
                         .foregroundStyle(NoveliaStyle.muted)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
@@ -166,8 +166,8 @@ struct CloudFavoritesListView: View {
 
                 if let error = favorites.errorMessage {
                     Label(error, systemImage: "exclamationmark.triangle")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.red)
+                        .font(NoveliaStyle.fontFootnote)
+                        .foregroundStyle(NoveliaStyle.danger)
                 }
                 if auth.username != nil {
                     Button("刷新网页收藏") { Task { await favorites.refresh(account: auth.username) } }

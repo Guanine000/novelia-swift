@@ -125,8 +125,8 @@ struct PageNavigator: View {
                 .monospacedDigit()
                 .focused($inlineJumpFocused)
                 .frame(width: 64, height: 32)
-                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(NoveliaStyle.muted.opacity(0.2), lineWidth: 1))
+                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall))
+                .overlay(RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall).stroke(NoveliaStyle.muted.opacity(0.2), lineWidth: 1))
                 .onSubmit { submitInlineJump() }
                 .accessibilityLabel("页码")
             Text("/ \(pageCount) 页")
@@ -155,7 +155,7 @@ struct PageNavigator: View {
                             .padding(.horizontal, 2)
                             .foregroundStyle(number == page ? Color.white : NoveliaStyle.ink)
                             .background(number == page ? NoveliaStyle.brandGreen : NoveliaStyle.card,
-                                        in: RoundedRectangle(cornerRadius: 8))
+                                        in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall))
                     }
                     .accessibilityLabel("第 \(number) 页")
                     .accessibilityAddTraits(number == page ? .isSelected : [])
@@ -195,7 +195,7 @@ struct PageNavigator: View {
                 .font(.system(size: 13, weight: .bold))
                 .frame(width: 32, height: 32)
                 .foregroundStyle(enabled ? NoveliaStyle.ink : NoveliaStyle.muted.opacity(0.4))
-                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 8))
+                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall))
         }
         .disabled(!enabled)
         .accessibilityLabel(label)
@@ -336,7 +336,7 @@ private struct DiscoverContentView: View {
                                 .foregroundStyle(NoveliaStyle.muted)
                         }
                         Text("网络小说书源没有匹配结果，以下是在文库中找到的作品。进入文库详情页可以跳转到对应的网络小说。")
-                            .font(.system(size: 12))
+                            .font(NoveliaStyle.fontFootnote)
                             .foregroundStyle(NoveliaStyle.muted)
                         ForEach(store.wenkuNovels) { novel in
                             NavigationLink {

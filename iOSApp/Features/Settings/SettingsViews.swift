@@ -72,7 +72,7 @@ struct SettingsView: View {
                         }
                 } else {
                     Text("登录后可使用需要账号的服务。密码由 Novelia 认证网页处理，App 只保存会话令牌。")
-                        .font(.system(size: 13))
+                        .font(NoveliaStyle.fontBody)
                         .foregroundStyle(NoveliaStyle.muted)
                     Button {
                         auth.errorMessage = nil
@@ -219,7 +219,7 @@ struct SettingsView: View {
                 }
                 .disabled(isExportingLogs)
                 Text("导出本应用最近 7 天内当前运行可读取的诊断事件，仅保留错误码、耗时和数量等信息，省略标识符、文件路径和未经审查的文本。")
-                    .font(.system(size: 13))
+                    .font(NoveliaStyle.fontBody)
                     .foregroundStyle(NoveliaStyle.muted)
             }
         }
@@ -419,7 +419,7 @@ private struct TXTChapterRulesView: View {
                 .labelsHidden()
             }
             Text(rule.explanation)
-                .font(.system(size: 12))
+                .font(NoveliaStyle.fontFootnote)
                 .foregroundStyle(.secondary)
             Text(rule.pattern)
                 .font(.system(size: 11, design: .monospaced))
@@ -463,7 +463,7 @@ private struct TXTChapterRuleEditor: View {
                 }
                 if let errorMessage {
                     Section {
-                        Text(errorMessage).font(.footnote).foregroundStyle(.red)
+                        Text(errorMessage).font(.footnote).foregroundStyle(NoveliaStyle.danger)
                     }
                 }
             }

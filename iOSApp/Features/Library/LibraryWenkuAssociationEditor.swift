@@ -45,7 +45,7 @@ struct LibraryWenkuAssociationEditor: View {
                     TextField("作品名", text: $query).focused($queryFocused).submitLabel(.search).onSubmit { search(page: 0) }
                     Button("搜索作品") { search(page: 0) }.disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
                     if isLoading { ProgressView("正在查询…") }
-                    if let error { Text(error).foregroundStyle(.red) }
+                    if let error { Text(error).foregroundStyle(NoveliaStyle.danger) }
                     ForEach(results) { item in
                         Button { load(item) } label: {
                             VStack(alignment: .leading) {

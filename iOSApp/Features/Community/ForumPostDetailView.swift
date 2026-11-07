@@ -59,9 +59,9 @@ struct ForumPostDetailView: View {
                                 Text(post.authorUsername)
                                     .font(.system(size: 13, weight: .semibold))
                                     .foregroundStyle(NoveliaStyle.ink)
-                                Text("·").font(.system(size: 12)).foregroundStyle(NoveliaStyle.muted)
+                                Text("·").font(NoveliaStyle.fontFootnote).foregroundStyle(NoveliaStyle.muted)
                                 Text(post.createdAt.forumDisplayDate)
-                                    .font(.system(size: 12))
+                                    .font(NoveliaStyle.fontFootnote)
                                     .foregroundStyle(NoveliaStyle.muted)
                                 Spacer(minLength: 0)
                             }
@@ -436,7 +436,7 @@ private struct ForumCommentCard: View {
                     .foregroundStyle(NoveliaStyle.ink)
                 Spacer()
                 Text(comment.createdAt.forumDisplayDate)
-                    .font(.system(size: 11))
+                    .font(NoveliaStyle.fontCaption)
                     .foregroundStyle(NoveliaStyle.muted)
             }
             ForumMarkdownBody(markdown: content, mode: .comment)
@@ -476,9 +476,9 @@ private struct ForumCommentCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
                 .stroke(NoveliaStyle.muted.opacity(0.10), lineWidth: 1)
         )
     }

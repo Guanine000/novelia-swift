@@ -99,7 +99,7 @@ struct NovelDetailView: View {
                             Image(systemName: "chevron.right").font(.caption)
                         }
                         .padding(14)
-                        .background(NoveliaStyle.brandGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        .background(NoveliaStyle.brandGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
                     }
                     .buttonStyle(.plain)
                 }
@@ -135,7 +135,7 @@ struct NovelDetailView: View {
                             }
                         }
                         Text("阅读时可在右上角设置中切换译源。")
-                            .font(.system(size: 12))
+                            .font(NoveliaStyle.fontFootnote)
                             .foregroundStyle(NoveliaStyle.muted)
                     }
                 }
@@ -145,7 +145,7 @@ struct NovelDetailView: View {
                         HStack(spacing: 8) {
                             Text("标签").font(.system(size: 19, weight: .bold, design: .rounded))
                             Text("点击搜索，长按屏蔽")
-                                .font(.system(size: 12))
+                                .font(NoveliaStyle.fontFootnote)
                                 .foregroundStyle(NoveliaStyle.muted)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
@@ -242,7 +242,7 @@ struct NovelDetailView: View {
                         .disabled(progress != nil)
                         if let error = webNovelDownloads.errors[displayNovel.id] {
                             Text("下载失败：\(error)")
-                                .font(.footnote).foregroundStyle(.red)
+                                .font(.footnote).foregroundStyle(NoveliaStyle.danger)
                         }
                     }
                 }
@@ -514,7 +514,7 @@ private struct WebNovelDownloadSheet: View {
                     }
                 }
                 if let error = downloads.errors[novel.id] {
-                    Section { Text("下载失败：\(error)").font(.footnote).foregroundStyle(.red) }
+                    Section { Text("下载失败：\(error)").font(.footnote).foregroundStyle(NoveliaStyle.danger) }
                 }
                 if didFinish {
                     Section { Label("\(selectedMode.title) EPUB 下载完成，可在“书库”中阅读或导出", systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
@@ -675,7 +675,7 @@ struct NovelCommentsView: View {
                 .frame(minHeight: 86)
                 .padding(7)
                 .compatScrollContentBackgroundHidden()
-                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 12))
+                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
                 .overlay(alignment: .topLeading) {
                     if draft.isEmpty {
                         Text(replyRoot == nil ? "写下你的评论…" : "写下你的回复…")
@@ -709,7 +709,7 @@ struct NovelCommentsView: View {
             }
         }
         .padding(14)
-        .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 16))
+        .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge))
     }
 
     private func commentThread(_ comment: NoveliaComment) -> some View {
@@ -760,7 +760,7 @@ struct NovelCommentsView: View {
                                         .foregroundStyle(NoveliaStyle.muted)
                                 }
                                 ForumMarkdownBody(markdown: reply.content, mode: .comment)
-                                    .font(.system(size: 12))
+                                    .font(NoveliaStyle.fontFootnote)
                                     .lineSpacing(3)
                             }
                         }

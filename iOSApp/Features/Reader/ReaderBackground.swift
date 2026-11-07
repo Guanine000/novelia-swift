@@ -131,14 +131,14 @@ struct ReaderBackgroundSettingsView: View {
                     catch { self.error = error.localizedDescription }
                 }.disabled(busy)
                 if busy { ProgressView("正在导入…") }
-                if let error { Text(error).foregroundStyle(.red) }
+                if let error { Text(error).foregroundStyle(NoveliaStyle.danger) }
             } footer: {
                 Text("默认：使用阅读器内置底色，不显示自定义颜色或图片，已导入图片仍保留。恢复默认颜色只重置颜色；恢复当前模式默认背景会清除该模式的颜色和两张图片。浅色和深色分别保存，随阅读器外观切换。竖屏与横屏图片分别保存；未设置当前方向图片时使用背景颜色。图片居中裁剪填满阅读区域；请选择与文字有足够对比的背景。设置应用于在线小说、TXT和EPUB，保存在本机。")
             }
             Section("预览") {
                 ReaderBackgroundView(dark: dark, fallback: dark ? .black : NoveliaStyle.paper)
                     .overlay { Text("阅读背景预览\n正文示例").foregroundStyle(dark ? .white : .black) }
-                    .frame(width: landscape ? 280 : 160, height: landscape ? 160 : 280).clipShape(RoundedRectangle(cornerRadius: 12))
+                    .frame(width: landscape ? 280 : 160, height: landscape ? 160 : 280).clipShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
             }
         }
         .navigationTitle("阅读背景")

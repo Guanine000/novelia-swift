@@ -151,6 +151,26 @@ enum NoveliaStyle {
         case .moss: Color(red: 0.36, green: 0.52, blue: 0.40)
         }
     }
+
+    // MARK: 设计 token
+
+    /// 圆角三档：小用于行内胶囊与缩略图，中用于卡片与输入框，大用于大面板。
+    /// 新代码一律取这三档；既有孤值（7、13–15、17–24）待逐处确认后再收敛，不盲改。
+    static let radiusSmall: CGFloat = 8
+    static let radiusMedium: CGFloat = 12
+    static let radiusLarge: CGFloat = 16
+
+    /// 错误/破坏性操作的语义色，当前与系统 `.red` 一致；调整主题时只改这里。
+    static let danger = Color.red
+    /// 需要注意但尚未失败的状态（如云端文件缺失、自动同步不可靠提示）。
+    static let warning = Color.orange
+
+    /// 常用四档系统字号。名称只表示档位不强制语义；带 `weight`/`design` 的
+    /// 组合（如等宽进度文字）继续手写，等出现稳定模式再考虑收进 token。
+    static let fontMicro = Font.system(size: 10)
+    static let fontCaption = Font.system(size: 11)
+    static let fontFootnote = Font.system(size: 12)
+    static let fontBody = Font.system(size: 13)
 }
 
 struct RootView: View {

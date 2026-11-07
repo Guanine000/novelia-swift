@@ -63,7 +63,7 @@ struct ForumMarkdownBody: View {
                 .textSelection(.enabled)
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(NoveliaStyle.paper, in: RoundedRectangle(cornerRadius: 8))
+                .background(NoveliaStyle.paper, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall))
         case let .table(rows):
             ForumMarkdownTable(rows: rows, mode: mode)
         case .divider:
@@ -339,8 +339,8 @@ private struct ForumDetailsBlock: View {
         }
         .tint(NoveliaStyle.brandGreen)
         .padding(11)
-        .background(NoveliaStyle.paper.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(NoveliaStyle.muted.opacity(0.2), lineWidth: 1))
+        .background(NoveliaStyle.paper.opacity(0.65), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall))
+        .overlay(RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall).stroke(NoveliaStyle.muted.opacity(0.2), lineWidth: 1))
     }
 }
 

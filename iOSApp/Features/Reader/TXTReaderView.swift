@@ -133,7 +133,7 @@ struct DownloadedWebNovelTXTReader: View {
                         .lineLimit(1)
                     if let chapterTitle = chapters?[chapterIndex].title, !chapterTitle.isEmpty {
                         Text(chapterTitle)
-                            .font(.system(size: 10))
+                            .font(NoveliaStyle.fontMicro)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }

@@ -377,7 +377,7 @@ private struct ReaderThemeSwatch: View {
         Button(action: action) {
             VStack(spacing: 5) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall)
                         .fill(previewBackground)
                     Text("A")
                         .font(.system(size: 17, weight: .semibold))
@@ -385,14 +385,14 @@ private struct ReaderThemeSwatch: View {
                 }
                 .frame(height: 44)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall)
                         .strokeBorder(isSelected ? NoveliaStyle.brandGreen : Color.secondary.opacity(0.25),
                                       lineWidth: isSelected ? 2 : 1)
                 }
                 .overlay(alignment: .topTrailing) {
                     if isSelected {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 13))
+                            .font(NoveliaStyle.fontBody)
                             .foregroundStyle(.white, NoveliaStyle.brandGreen)
                             .padding(4)
                     }

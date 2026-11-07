@@ -28,7 +28,7 @@ private struct ForumComposeNotice: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(12)
-        .background(NoveliaStyle.brandGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .background(NoveliaStyle.brandGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
         .environment(\.openURL, OpenURLAction { url in
             guard let route = ForumNoticeDestination(url: url, configuration: services.configuration), let linkActions else {
                 parentOpenURL(url)
@@ -94,7 +94,7 @@ private struct ForumRulesView: View {
                 errorMessage = $0
             })
             .id(reloadID)
-            if isLoading { ProgressView("正在加载社区守则…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) }
+            if isLoading { ProgressView("正在加载社区守则…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium)) }
             if let errorMessage {
                 CompatUnavailable {
                     Label("社区守则加载失败", systemImage: "wifi.exclamationmark")
@@ -290,7 +290,7 @@ private struct ForumMarkdownEditor: View {
                         }
                         .frame(height: minimumHeight)
                         .padding(12)
-                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 12))
+                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
                     } else {
                         ZStack(alignment: .topLeading) {
                             ForumMarkdownTextEditor(text: $draft, selection: $selection)
@@ -306,7 +306,7 @@ private struct ForumMarkdownEditor: View {
                             }
                         }
                         .padding(8)
-                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 12))
+                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
                     }
                 }
 

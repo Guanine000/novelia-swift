@@ -400,7 +400,7 @@ struct NoveliaLoginSheet: View {
                 if let errorMessage = auth.errorMessage {
                     Text(errorMessage)
                         .font(.footnote)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(NoveliaStyle.danger)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
@@ -562,7 +562,7 @@ struct ForumLoginSheet: View {
             }
             .safeAreaInset(edge: .bottom) {
                 if let errorMessage = auth.errorMessage {
-                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
+                    Text(errorMessage).font(.footnote).foregroundStyle(NoveliaStyle.danger)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 16).padding(.vertical, 10).background(.regularMaterial)
                 }

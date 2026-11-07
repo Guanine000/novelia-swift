@@ -392,7 +392,7 @@ private struct WebNovelEPUBReaderContent: View {
             Form {
                 if model.context == nil {
                     ProgressView("正在准备本机目录…")
-                    if let error = model.error { Text(error).foregroundStyle(.red) }
+                    if let error = model.error { Text(error).foregroundStyle(NoveliaStyle.danger) }
                 } else {
                 if atEnd { Section { Text("已读完本机已下载章节").font(.title3.bold()); Text(model.book.novel.title) } }
                 if model.missing { Section { Text("本机版本未包含同步位置的章节，或该章节尚未核对。请核对章节对应或更新 EPUB。") } }
@@ -464,7 +464,7 @@ private struct WebNovelEPUBReaderContent: View {
                     } else { Text("本机章节已全部确认。需要修改时可开启更正。") }
                 }
                 if let message = model.message { Section { Text(message) } }
-                if let error = model.error { Section { Text(error).foregroundStyle(.red) } }
+                if let error = model.error { Section { Text(error).foregroundStyle(NoveliaStyle.danger) } }
                 if operation != nil { Button("取消当前操作", role: .cancel) { operation?.cancel() } }
                 }
             }

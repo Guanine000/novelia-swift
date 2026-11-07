@@ -151,7 +151,7 @@ private struct WenkuNovelList: View {
                         .buttonStyle(.plain)
                     }
                     if let error, !novels.isEmpty {
-                        Text(error).font(.footnote).foregroundStyle(.red).padding()
+                        Text(error).font(.footnote).foregroundStyle(NoveliaStyle.danger).padding()
                     }
                     if let pager, pager.pageCount > 1 || pager.page > 1 {
                         PageNavigator(page: pager.page, pageCount: pager.pageCount, isLoading: loading,
@@ -177,20 +177,20 @@ struct WenkuNovelRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             CoverImage(url: novel.cover.flatMap(URL.init(string:))) {
-                RoundedRectangle(cornerRadius: 8).fill(NoveliaStyle.brandGreen.opacity(0.12))
+                RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall).fill(NoveliaStyle.brandGreen.opacity(0.12))
                     .overlay(Image(systemName: "book.closed").foregroundStyle(NoveliaStyle.brandGreen))
             }
-            .frame(width: 72, height: 96).clipShape(RoundedRectangle(cornerRadius: 8))
+            .frame(width: 72, height: 96).clipShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall))
             VStack(alignment: .leading, spacing: 6) {
                 Text(novel.displayTitle).font(.system(size: 16, weight: .bold)).foregroundStyle(NoveliaStyle.ink).lineLimit(2)
                 if !novel.title.isEmpty && novel.title != novel.displayTitle {
-                    Text(novel.title).font(.system(size: 12)).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
+                    Text(novel.title).font(NoveliaStyle.fontFootnote).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
                 }
                 if novel.favored != nil {
                     Label("已收藏", systemImage: "heart.fill").font(.system(size: 11, weight: .medium)).foregroundStyle(NoveliaStyle.brandGreen)
                 }
                 Spacer(minLength: 0)
-                Text("文库小说").font(.system(size: 11)).foregroundStyle(NoveliaStyle.muted)
+                Text("文库小说").font(NoveliaStyle.fontCaption).foregroundStyle(NoveliaStyle.muted)
             }
             Spacer(minLength: 0)
             Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary).padding(.top, 8)
@@ -285,7 +285,7 @@ struct WenkuDetailView: View {
                                 Image(systemName: "chevron.right").font(.caption)
                             }
                             .padding(14)
-                            .background(NoveliaStyle.brandGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                            .background(NoveliaStyle.brandGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
                         }
                         .buttonStyle(.plain)
                         volumesSection(detail)
@@ -416,7 +416,7 @@ struct WenkuDetailView: View {
                 ForEach(Array(volumes.enumerated()), id: \.offset) { item in
                     let volume = item.element
                     CoverImage(url: URL(string: volume.coverHires ?? volume.cover)) {
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall)
                             .fill(NoveliaStyle.brandGreen.opacity(0.1))
                             .overlay {
                                 Image(systemName: "book.closed")
@@ -425,7 +425,7 @@ struct WenkuDetailView: View {
                             }
                     }
                     .frame(width: 112, height: 154)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .clipShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall))
                     .accessibilityLabel(volume.titleZh ?? volume.title)
                 }
             }
@@ -453,7 +453,7 @@ struct WenkuDetailView: View {
                         Image(systemName: "chevron.right").font(.caption)
                     }
                     .padding(14)
-                    .background(NoveliaStyle.brandGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                    .background(NoveliaStyle.brandGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
                 }
                 .buttonStyle(.plain)
             }
@@ -504,7 +504,7 @@ struct WenkuDetailView: View {
                         }
                     }
                 }
-                .padding(12).background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 12))
+                .padding(12).background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
             }
         }
     }
@@ -589,7 +589,7 @@ private struct WenkuDownloadSheet: View {
                         }
                     }
                     Text("原文单独 EPUB 目前受 Novelia 上游接口限制，暂时不可下载；译文和双语文件可用。")
-                        .font(.footnote).foregroundStyle(.orange)
+                        .font(.footnote).foregroundStyle(NoveliaStyle.warning)
                 }
                 Section("翻译源") {
                     if availableTranslators.isEmpty {
@@ -609,7 +609,7 @@ private struct WenkuDownloadSheet: View {
                         }
                     }
                 }
-                if let errorMessage { Section { Text(errorMessage).font(.footnote).foregroundStyle(.red) } }
+                if let errorMessage { Section { Text(errorMessage).font(.footnote).foregroundStyle(NoveliaStyle.danger) } }
                 if finished { Section { Label("下载完成，可在“书库”中阅读或导出", systemImage: "checkmark.circle.fill").foregroundStyle(.green) } }
                 Section {
                     Button {

@@ -129,7 +129,7 @@ struct ReaderView: View {
                             .lineSpacing(4)
                             .foregroundStyle(readerPrimaryText)
                         Text("著 · \(novel.author)")
-                            .font(.system(size: 13))
+                            .font(NoveliaStyle.fontBody)
                             .foregroundStyle(readerSecondaryText)
                     }
                     .padding(.top, 14)
@@ -158,7 +158,7 @@ struct ReaderView: View {
 
                     if let chapterError, !chapter.originalText.isEmpty {
                         Text("章节内容已缓存；刷新失败：\(chapterError)")
-                            .font(.system(size: 12))
+                            .font(NoveliaStyle.fontFootnote)
                             .foregroundStyle(NoveliaStyle.muted)
                     }
 
@@ -313,7 +313,7 @@ struct ReaderView: View {
                         .lineLimit(1)
                     if !chapter.title.isEmpty {
                         Text(chapter.title)
-                            .font(.system(size: 10))
+                            .font(NoveliaStyle.fontMicro)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
@@ -371,7 +371,7 @@ struct ReaderView: View {
 
     private var unavailableTranslationMessage: some View {
         Text("当前章节暂无\(translationSource.title)译文。可在阅读设置中切换译源。")
-            .font(.system(size: 13))
+            .font(NoveliaStyle.fontBody)
             .foregroundStyle(readerSecondaryText)
     }
 

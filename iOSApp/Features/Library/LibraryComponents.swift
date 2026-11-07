@@ -17,7 +17,7 @@ struct FeaturedNovelCard: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(NoveliaStyle.muted)
                 Text(novel.summary)
-                    .font(.system(size: 12))
+                    .font(NoveliaStyle.fontFootnote)
                     .lineLimit(2)
                     .lineSpacing(3)
                     .foregroundStyle(NoveliaStyle.muted)
@@ -43,7 +43,7 @@ struct NovelRow: View {
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .foregroundStyle(NoveliaStyle.ink)
                 Text(novel.author)
-                    .font(.system(size: 12))
+                    .font(NoveliaStyle.fontFootnote)
                     .foregroundStyle(NoveliaStyle.muted)
                 Text(metadata(for: novel))
                     .font(.system(size: 11, weight: .medium))
@@ -81,7 +81,7 @@ struct BookCover: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium)
                 .fill(LinearGradient(
                     colors: [NoveliaStyle.accent(for: novel.accent), NoveliaStyle.ink.opacity(0.95)],
                     startPoint: .topLeading,
@@ -104,7 +104,7 @@ struct BookCover: View {
             .padding(width * 0.12)
         }
         .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
         .accessibilityLabel("\(novel.title) 封面")
     }
 }

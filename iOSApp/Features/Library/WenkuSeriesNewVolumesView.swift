@@ -53,7 +53,7 @@ struct WenkuSeriesNewVolumesView: View {
                     Section(work.displayTitle) {
                         switch outcomes[work.id] {
                         case .checked(let report): result(report, work: work)
-                        case .failed(let error): Text(error).foregroundStyle(.red)
+                        case .failed(let error): Text(error).foregroundStyle(NoveliaStyle.danger)
                         case nil: Text(isChecking ? "等待检查…" : "尚未检查").foregroundStyle(.secondary)
                         }
                         NavigationLink("查看文库详情") { WenkuDetailView(outline: work) }
