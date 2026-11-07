@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import Translation
 import UIKit
 import UniformTypeIdentifiers
 
@@ -128,6 +129,16 @@ extension View {
             self.scrollIndicators(.hidden)
         } else {
             self.background(ScrollViewAdjuster(hideIndicators: true))
+        }
+    }
+
+    /// 系统翻译面板（iOS 17.4+）；更早系统为无操作，菜单项由调用方按可用性隐藏。
+    @ViewBuilder
+    func compatTranslationPresentation(isPresented: Binding<Bool>, text: String?) -> some View {
+        if #available(iOS 17.4, *), let text {
+            self.translationPresentation(isPresented: isPresented, text: text)
+        } else {
+            self
         }
     }
 

@@ -54,7 +54,8 @@ struct EPUBPagerView: UIViewRepresentable {
     var selectionRects: (NSRange) -> [CGRect] = { _ in [] }
     /// 取得选中文本，供系统复制菜单使用。
     var selectedText: (NSRange) -> String? = { _ in nil }
-
+    /// 选中菜单里的「翻译」；宿主呈现系统翻译面板（iOS 17.4+）。
+    var selectionTranslate: ((String) -> Void)? = { _ in }
     /// 三页位图由宿主从同一份排版缓存派生；每次 SwiftUI 更新都会重放。
     var images: PageImages
 
@@ -72,6 +73,7 @@ struct EPUBPagerView: UIViewRepresentable {
         view.selectionRangeProvider = selectionRangeAt
         view.selectionRectsProvider = selectionRects
         view.selectedTextProvider = selectedText
+        view.selectionTranslateHandler = selectionTranslate
         view.apply(images: images)
         return view
     }
@@ -89,6 +91,7 @@ struct EPUBPagerView: UIViewRepresentable {
         view.selectionRangeProvider = selectionRangeAt
         view.selectionRectsProvider = selectionRects
         view.selectedTextProvider = selectedText
+        view.selectionTranslateHandler = selectionTranslate
         view.apply(images: images)
     }
 }
@@ -106,7 +109,8 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
     var selectionRangeProvider: ((CGPoint) -> NSRange?)?
     var selectionRectsProvider: ((NSRange) -> [CGRect])?
     var selectedTextProvider: ((NSRange) -> String?)?
-
+    /// 选中菜单里的「翻译」；宿主呈现系统翻译面板（iOS 17.4+）。
+    var selectionTranslateHandler: ((String) -> Void)?
     private let strip = UIView()
     private let previousImageView = UIImageView()
     private let currentImageView = UIImageView()
@@ -489,6 +493,13 @@ extension EPUBPagerUIView: UIEditMenuInteractionDelegate {
             controller.popoverPresentationController?.sourceRect = CGRect(origin: configuration.sourcePoint, size: CGSize(width: 1, height: 1))
             self.presentSelectionController(controller)
         }
-        return UIMenu(children: [copy, lookup, search, share])
+        var items: [UIMenuElement] = [copy, lookup]
+        if #available(iOS 17.4, *), let translateHandler = selectionTranslateHandler {
+            items.append(UIAction(title: "翻译", image: UIImage(systemName: "translate")) { _ in
+                translateHandler(selectedText)
+            })
+        }
+        items.append(contentsOf: [search, share])
+        return UIMenu(children: items)
     }
 }

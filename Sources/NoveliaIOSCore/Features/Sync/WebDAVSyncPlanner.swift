@@ -116,6 +116,7 @@ enum WebDAVSyncPlanner {
         return bookmarks.filter { keys.contains($0.value.bookKey) }
     }
 
+
     /// 浅色、深色背景各自比较：远端严格较新才采用远端。
     static func planBackground(local: SyncedReaderBackground, remote: SyncedReaderBackground?) -> BackgroundSyncDecision {
         guard let remote, remote.updatedAt > local.updatedAt else { return .useLocal }

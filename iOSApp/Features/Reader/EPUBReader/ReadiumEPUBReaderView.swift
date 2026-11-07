@@ -180,6 +180,8 @@ private struct ReadiumEPUBReaderViewContent: View {
         .onValueChange(of: settings.appearanceRaw) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         .onValueChange(of: backgrounds.revision) { _, _ in model.refreshBackground() }
         .onValueChange(of: bookBackgroundFollow) { _, _ in model.refreshPageBackgroundRule() }
+        .onAppear { ReaderKeepScreenOn.activate() }
+        .onDisappear { ReaderKeepScreenOn.deactivate() }
         .task(id: model.status) {
             if model.status == .ready { await model.scanBookDiagnostics() }
         }
@@ -237,6 +239,7 @@ private struct ReadiumEPUBReaderViewContent: View {
                 if model.readingReturnPoint != nil {
                     Button("回到刚才阅读处") { model.returnToReading() }
                 }
+                ReaderKeepScreenOnMenuItem()
                 Button { isShowingBookPreferences = true } label: { Label("本书文字处理", systemImage: "slider.horizontal.3") }
                 Button {
                     draftStyle = model.style

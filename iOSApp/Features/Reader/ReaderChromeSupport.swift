@@ -254,6 +254,43 @@ enum ReaderDebugOptions {
     static let showsTOCDiagnosticsKey = "reader.showTOCDiagnostics"
 }
 
+/// 「屏幕常亮」：阅读期间阻止自动锁屏。开关记忆在本机（默认关闭），
+/// 只在阅读器前台持有；退出阅读器由各阅读面在 onDisappear 统一恢复。
+enum ReaderKeepScreenOn {
+    static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: SettingsKey.readerKeepScreenOn)
+    }
+
+    static func apply(_ enabled: Bool) {
+        UIApplication.shared.isIdleTimerDisabled = enabled
+    }
+
+    /// 进入阅读面时按存储值生效。
+    static func activate() {
+        apply(isEnabled)
+    }
+
+    /// 离开阅读面时一律恢复系统默认。
+    static func deactivate() {
+        apply(false)
+    }
+}
+
+/// 阅读菜单里的「屏幕常亮」开关项；各阅读面菜单共用。
+struct ReaderKeepScreenOnMenuItem: View {
+    @AppStorage(SettingsKey.readerKeepScreenOn) private var isEnabled = false
+
+    var body: some View {
+        Button {
+            isEnabled.toggle()
+            ReaderKeepScreenOn.apply(isEnabled)
+        } label: {
+            Label("屏幕常亮", systemImage: isEnabled ? "checkmark" : "sun.max")
+        }
+        .accessibilityLabel(isEnabled ? "屏幕常亮已开启" : "屏幕常亮已关闭")
+    }
+}
+
 /// 目录中的一行：EPUB、TXT、在线小说共用。按层级缩进；当前章左侧显示竖条与「当前」标签；
 /// 有子项的分组左侧显示展开/折叠按钮，点标题仍跳到该章。
 struct ReaderTOCRow: View {

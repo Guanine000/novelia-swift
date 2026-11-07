@@ -71,6 +71,7 @@ private struct EPUBReaderViewContent: View {
     @State private var wasBatteryMonitoringEnabled = false
     let bookURL: URL?
     var textBook: PagedTextBook? = nil
+
     /// TXT / 在线小说包装视图提供的额外顶部栏控件。
     var accessory: AnyView? = nil
     var statisticsBook: ReadingBook? = nil
@@ -112,7 +113,8 @@ private struct EPUBReaderViewContent: View {
                         Button("关闭阅读器") { dismiss() }
                     }
                 case .ready:
-                    EPUBReaderPageSurface(model: model, showChrome: $showChrome, size: geometry.size, searchRects: model.searchHighlightRects)
+                    EPUBReaderPageSurface(model: model, showChrome: $showChrome, size: geometry.size,
+                                          searchRects: model.searchHighlightRects)
                         .equatable()
                         // 底栏不再放上一页／下一页按钮，保留 VoiceOver 的翻页动作。
                         .accessibilityAdjustableAction { direction in
@@ -182,6 +184,7 @@ private struct EPUBReaderViewContent: View {
                 if model.viewportSize != geometry.size {
                     model.viewportSize = geometry.size
                 }
+                ReaderKeepScreenOn.activate()
                 if let textBook {
                     model.start(textBook: textBook)
                 } else if let bookURL {
@@ -194,6 +197,7 @@ private struct EPUBReaderViewContent: View {
                 if !wasBatteryMonitoringEnabled {
                     UIDevice.current.isBatteryMonitoringEnabled = false
                 }
+                ReaderKeepScreenOn.deactivate()
             }
             .onReceive(NotificationCenter.default.publisher(for: UIDevice.batteryLevelDidChangeNotification)) { _ in
                 updateBatteryLevel()
@@ -281,6 +285,7 @@ private struct EPUBReaderViewContent: View {
                 if model.readingReturnPoint != nil {
                     Button("回到刚才阅读处") { model.returnToReading() }
                 }
+                ReaderKeepScreenOnMenuItem()
                 Button { isShowingBookPreferences = true } label: { Label("本书文字处理", systemImage: "slider.horizontal.3") }
                 Button {
                     draftStyle = model.style
@@ -823,9 +828,12 @@ struct EPUBReaderHost: View {
 private struct EPUBReaderPageSurface: View, Equatable {
     @ObservedObject var model: EPUBReaderModel
     @Environment(\.openURL) private var openURL
+    @EnvironmentObject private var settings: ReaderSettings
     @Binding var showChrome: Bool
     let size: CGSize
     let searchRects: [CGRect]
+    @State private var translateText: String?
+    @State private var showsTranslate = false
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.model === rhs.model && lhs.size == rhs.size && lhs.searchRects == rhs.searchRects
@@ -856,14 +864,20 @@ private struct EPUBReaderPageSurface: View, Equatable {
             selectionRangeAt: { point in model.selectionRange(at: point) },
             selectionRects: { range in model.selectionRects(for: range) },
             selectedText: { range in model.selectedText(for: range) },
+            selectionTranslate: { text in
+                translateText = text
+                showsTranslate = true
+            },
             images: model.pagerImages()
         )
         .overlay {
             Path { path in for rect in searchRects { path.addRect(rect) } }
                 .fill(Color.yellow.opacity(0.35)).allowsHitTesting(false).accessibilityHidden(true)
         }
+        .compatTranslationPresentation(isPresented: $showsTranslate, text: translateText)
         .frame(width: size.width, height: size.height)
     }
+
 }
 
 #endif

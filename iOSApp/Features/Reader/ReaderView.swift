@@ -111,8 +111,14 @@ struct ReaderView: View {
                                   ready: !chapter.originalText.isEmpty)
         }
         }
-        .onAppear { settings.activateBook("online:" + novel.id) }
-        .onDisappear { settings.deactivateBook("online:" + novel.id) }
+        .onAppear {
+            settings.activateBook("online:" + novel.id)
+            ReaderKeepScreenOn.activate()
+        }
+        .onDisappear {
+            settings.deactivateBook("online:" + novel.id)
+            ReaderKeepScreenOn.deactivate()
+        }
     }
 
     private var scrollReader: some View {
@@ -212,6 +218,7 @@ struct ReaderView: View {
                             selectedSearchHit = nil; chapterIndex = point.chapter; returnAnchor = point.anchor; readingReturnPoint = nil
                         }
                     }
+                    ReaderKeepScreenOnMenuItem()
                     Button("本书文字处理") { isShowingBookPreferences = true }
                     NavigationLink("离线章节") { OfflineChapterManagementView(novel: novel) }
                     Button {

@@ -50,8 +50,12 @@ struct DownloadedWebNovelTXTReader: View {
             guard !Task.isCancelled else { return }
             let id = "txt:" + (hash ?? url.lastPathComponent)
             settings.activateBook(id); preferenceID = id
+            ReaderKeepScreenOn.activate()
         }
-        .onDisappear { if let preferenceID { settings.deactivateBook(preferenceID) } }
+        .onDisappear {
+            if let preferenceID { settings.deactivateBook(preferenceID) }
+            ReaderKeepScreenOn.deactivate()
+        }
     }
 
     private var scrollReader: some View {
@@ -145,6 +149,7 @@ struct DownloadedWebNovelTXTReader: View {
                 if let point = readingReturnPoint {
                     Button("回到刚才阅读处") { selectedSearchHit = nil; chapterIndex = point.chapter; returnAnchor = point.anchor; readingReturnPoint = nil }
                 }
+                ReaderKeepScreenOnMenuItem()
                 Button("本书文字处理") { isShowingBookPreferences = true }
                 Button { settings.pagedTextReading = true } label: {
                     Label("分页阅读", systemImage: "book.pages")

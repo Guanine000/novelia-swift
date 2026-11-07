@@ -75,6 +75,7 @@ final class EPUBReaderModel: ObservableObject {
     @Published private(set) var isLayingOut = false
     /// 当前展示的注脚弹窗；nil = 无弹窗。关闭弹层不改变阅读位置。
     @Published var activeNote: EPUBNote?
+
     /// 书内图片（点图查看与目录页“图片”）；仅 EPUB 挂上容器。
     let imageLibrary = ReaderImageLibrary()
     /// 普通链接点击提示（本轮不导航）。
