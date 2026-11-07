@@ -56,6 +56,7 @@ final class EPUBReaderModel: ObservableObject {
         }
     }
     private var openedBookHash: String?
+    var onManualNavigation: (() -> Void)?
     private var isRestoringPosition = false
     private var restoredNativePosition: (offset: Int, hash: String)?
     /// 正在进行的重排数量。重排期间位置会临时归零，此时的变化不写入阅读位置；
@@ -1012,6 +1013,7 @@ final class EPUBReaderModel: ObservableObject {
     /// 写入位置并标明来源，供 `logLocationChange` 区分用户操作与无人操作的移动。
     private func moveLocation(to target: EPUBReadingLocation, cause: String) {
         locationCause = cause
+        if cause != "speech" { onManualNavigation?() }
         location = target
         locationCause = nil
     }
@@ -1157,6 +1159,58 @@ final class EPUBReaderModel: ObservableObject {
     var chapterCount: Int { source?.chapterCount ?? 0 }
 
     /// 一章的纯文本（书内搜索与书签摘要使用），换算口径与阅读位置一致。
+    // MARK: 朗读
+
+    @Published private(set) var speechHighlightRects: [CGRect] = []
+    private var speechPosition: SpeechReadingPosition?
+    private var speechSettings = SpeechSettings.default
+
+    var speechAnchor: SpeechAnchor {
+        let index = location.spineIndex
+        let offset = pageBook?.sourceOffset(spineIndex: index, pageIndex: location.pageIndex)
+        return SpeechAnchor(chapterIndex: index, progression: currentPageRange?.range.lowerBound ?? 0,
+                            chapterUTF16Length: pageBook?.sourceLength(spineIndex: index) ?? 0,
+                            startIndexHint: nil, sourceUTF16Offset: offset, startsAtVisibleOffset: true)
+    }
+
+    func speechChapterText(_ index: Int) async throws -> String {
+        guard let source, let book = pageBook, (0..<source.chapterCount).contains(index) else { throw CancellationError() }
+        if !book.isChapterComplete(index) {
+            try await book.layoutChapter(index, container: source, config: makeConfig(),
+                                         aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                         context: layoutContext(.navigate))
+        }
+        try Task.checkCancellation()
+        guard pageBook === book, let text = book.sourceText(spineIndex: index) else { throw CancellationError() }
+        return text
+    }
+
+    func updateSpeechPosition(_ position: SpeechReadingPosition?, settings: SpeechSettings) {
+        speechPosition = position
+        speechSettings = settings
+        if let position, settings.followsReadingPosition, !isAnimating, !isLayingOut,
+           let book = pageBook, book.isChapterComplete(position.chapterIndex),
+           let rawPage = book.pageIndex(spineIndex: position.chapterIndex, containingSourceOffset: position.currentOffset) {
+            let page = usesDoublePage ? (rawPage / 2) * 2 : rawPage
+            let target = EPUBReadingLocation(spineIndex: position.chapterIndex, pageIndex: page)
+            if target != location {
+                moveLocation(to: target, cause: "speech")
+                prefetchNeighbors(of: position.chapterIndex)
+            }
+        }
+        refreshSpeechHighlight()
+    }
+
+    private func refreshSpeechHighlight() {
+        let rects: [CGRect]
+        if let position = speechPosition, speechSettings.highlightsSpokenText,
+           location.spineIndex == position.chapterIndex {
+            rects = selectionRects(for: NSRange(location: position.sentenceRange.lowerBound,
+                                                length: position.sentenceRange.count))
+        } else { rects = [] }
+        if rects != speechHighlightRects { speechHighlightRects = rects }
+    }
+
     func chapterPlainText(_ index: Int) async throws -> String {
         guard let source, (0..<source.chapterCount).contains(index) else { throw CancellationError() }
         return BookTextSearch.plainText(html: try await source.chapterHTML(at: index))

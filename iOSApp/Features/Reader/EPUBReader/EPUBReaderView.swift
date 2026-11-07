@@ -871,6 +871,10 @@ private struct EPUBReaderPageSurface: View, Equatable {
             images: model.pagerImages()
         )
         .overlay {
+            Path { path in for rect in model.speechHighlightRects { path.addRect(rect) } }
+                .fill(Color.yellow.opacity(0.30)).allowsHitTesting(false).accessibilityHidden(true)
+        }
+        .overlay {
             Path { path in for rect in searchRects { path.addRect(rect) } }
                 .fill(Color.yellow.opacity(0.35)).allowsHitTesting(false).accessibilityHidden(true)
         }

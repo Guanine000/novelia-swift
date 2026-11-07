@@ -117,6 +117,11 @@ struct SettingsView: View {
                 } label: {
                     Label("阅读背景", systemImage: "paintbrush")
                 }
+                NavigationLink {
+                    SpeechSettingsView()
+                } label: {
+                    Label("朗读", systemImage: "speaker.wave.2")
+                }
                 VStack(alignment: .leading, spacing: 9) {
                     HStack {
                         Text("正文字号")

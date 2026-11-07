@@ -21,6 +21,24 @@ enum SettingsKey {
     static let appThemeCustomHex = "appThemeCustomHex"
     /// 界面底色预设，值为 `AppPaperStyle` 原始值；只影响浅色模式，本机保存不参与同步。
     static let appPaperStyle = "appPaperStyle"
+    /// 朗读偏好，只存本机，不参与 WebDAV 同步；`SpeechSettingsStore` 负责读写与旧值兼容。
+    enum Speech {
+        static let edgeVoiceCatalog = "speech.edgeVoiceCatalog.v1"
+        static let volume = "speech.volume.v1"
+        static let pitch = "speech.pitch.v1"
+        static let edgePrefetchEnabled = "speech.edgePrefetchEnabled.v1"
+        static let edgeVoiceIdentifier = "speech.edgeVoice.v1"
+        static let edgeConsent = "speech.edgeConsent.v1"
+        static let voiceIdentifier = "speech.voice.v1"
+        static let rate = "speech.rate.v1"
+        static let followsReadingPosition = "speech.follow.v1"
+        static let highlightsSpokenText = "speech.highlight.v1"
+        /// 本地自动路由或已获同意的云端引擎；保留旧 rawValue。
+        static let preferredEngine = "speech.engine.v1"
+        /// 定时停止分钟数，0 表示关闭。
+        static let sleepTimerMinutes = "speech.sleepTimer.v1"
+    }
+
     /// 阅读期间阻止自动锁屏（屏幕常亮）；默认关闭，仅阅读器前台生效。
     static let readerKeepScreenOn = "readerKeepScreenOn"
     /// 底栏页面顺序，以逗号分隔的 `AppTab` 原始值保存。
