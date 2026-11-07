@@ -120,6 +120,135 @@ struct ReaderScrubber: View {
     }
 }
 
+/// 两个分页引擎共用的阅读页顶栏骨架：返回、双行标题与「阅读菜单」容器。
+/// 菜单内容与显隐策略因引擎而异，由调用方传入；这里只统一布局、材质与无障碍。
+struct ReaderTopBarShell<MenuContent: View, TitleTrailer: View>: View {
+    @Environment(\.dismiss) private var dismiss
+    let bookTitle: String
+    let chapterTitle: String
+    @ViewBuilder var titleTrailer: TitleTrailer
+    @ViewBuilder var menu: MenuContent
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.title3)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("返回")
+            VStack(spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(bookTitle)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    titleTrailer
+                }
+                if !chapterTitle.isEmpty {
+                    Text(chapterTitle)
+                        .font(NoveliaStyle.fontMicro)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .combine)
+            Menu { menu } label: {
+                Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("阅读菜单")
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 10)
+        .frame(height: 48)
+        .background(.thinMaterial)
+    }
+}
+
+/// 两个分页引擎共用的阅读页底栏容器：进度区、电量/百分比/时间状态行与显隐背景。
+/// 工具栏隐藏时仍保留百分比；原生引擎隐藏时垫页面纸色，Readium 保持透明。
+struct ReaderBottomBarShell<Content: View>: View {
+    let showChrome: Bool
+    let batteryLevel: Double
+    /// 工具栏隐藏时仍显示的全书百分比；nil 表示不显示。
+    let hiddenPercentText: String?
+    /// 工具栏隐藏时的底色；nil 保持透明。
+    var hiddenBackground: Color? = nil
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(spacing: 8) {
+            if showChrome {
+                content
+                    .transition(.opacity)
+            }
+            HStack {
+                Text(batteryLevel >= 0 ? "电量 \(Int((batteryLevel * 100).rounded()))%" : "电量 —")
+                Spacer()
+                // 工具栏隐藏时也保留进度百分比，兼顾沉浸阅读与位置感知。
+                if !showChrome, let hiddenPercentText {
+                    Text(hiddenPercentText)
+                }
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Text(context.date, format: .dateTime.hour().minute())
+                }
+            }
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .allowsHitTesting(false)
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, showChrome ? 8 : 4)
+        .padding(.bottom, 10)
+        .background {
+            if showChrome {
+                Rectangle().fill(.thinMaterial)
+            } else if let hiddenBackground {
+                hiddenBackground.opacity(0.92)
+            }
+        }
+        .animation(.easeInOut(duration: 0.18), value: showChrome)
+    }
+}
+
+/// 两个分页引擎共用的「位置、进度拖动条与百分比」一行；文字口径与可用状态由引擎给出。
+struct ReaderPositionRow: View {
+    let positionTexts: [ReaderPositionStyle: String]
+    /// 拖动预览文字；nil 表示不在拖动中。
+    let previewText: String?
+    @Binding var value: Double
+    let onEditingChanged: (Bool) -> Void
+    let percentText: String
+    let scrubDisabled: Bool
+
+    var body: some View {
+        VStack(spacing: 4) {
+            if let previewText {
+                Text(previewText)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(.thinMaterial, in: Capsule())
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+            // 位置、进度与翻页都收在一行；上一页／下一页交给手势与 VoiceOver 动作。
+            HStack(spacing: 10) {
+                ReaderPositionLabel(texts: positionTexts)
+                ReaderScrubber(value: $value, onEditingChanged: onEditingChanged)
+                    .disabled(scrubDisabled)
+                Text(percentText)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 36, alignment: .trailing)
+            }
+        }
+    }
+}
+
 /// 阅读页调试信息开关。默认关闭；打开后目录显示解析诊断说明与 spine 编号。
 enum ReaderDebugOptions {
     static let showsTOCDiagnosticsKey = "reader.showTOCDiagnostics"

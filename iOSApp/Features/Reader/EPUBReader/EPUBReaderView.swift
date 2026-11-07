@@ -255,30 +255,12 @@ private struct EPUBReaderViewContent: View {
     // MARK: 顶部工具栏（覆盖层，显隐不改视口）
 
     private var topBar: some View {
-        HStack(spacing: 12) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.title3)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("返回")
-            VStack(spacing: 1) {
-                Text(model.source?.bookTitle ?? "阅读器")
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                if !currentChapterTitle.isEmpty {
-                    Text(currentChapterTitle)
-                        .font(NoveliaStyle.fontMicro)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .accessibilityElement(children: .combine)
-            Menu {
+        // 布局与材质由共用骨架提供；菜单内容与显隐（不淡出，直接禁用）保持本引擎行为。
+        ReaderTopBarShell(
+            bookTitle: model.source?.bookTitle ?? "阅读器",
+            chapterTitle: currentChapterTitle,
+            titleTrailer: { EmptyView() },
+            menu: {
                 if let accessory { accessory }
                 if let key = model.bookmarkKey {
                     ReaderBookmarkButton(store: settings.bookmarks, bookKey: model.currentBookmarkKey ?? key, pageRange: model.currentPageRange,
@@ -307,15 +289,8 @@ private struct EPUBReaderViewContent: View {
                     Label("阅读设置", systemImage: "textformat.size")
                 }
                 .accessibilityLabel("阅读设置")
-            } label: {
-                Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
             }
-            .accessibilityLabel("阅读菜单")
-        }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 10)
-        .frame(height: 48)
-        .background(.thinMaterial)
+        )
         .opacity(showChrome ? 1 : 0)
         .disabled(!showChrome)
     }
@@ -331,66 +306,30 @@ private struct EPUBReaderViewContent: View {
     // MARK: 底部状态栏（页码 + 进度条）
 
     private var bottomBar: some View {
-        VStack(spacing: 8) {
-            if showChrome {
-                positionAndScrub
-                    .transition(.opacity)
-            }
-            HStack {
-                Text(batteryLevel >= 0 ? "电量 \(Int((batteryLevel * 100).rounded()))%" : "电量 —")
-                Spacer()
-                // 工具栏隐藏时也保留进度百分比，兼顾沉浸阅读与位置感知。
-                if !showChrome {
-                    Text(FractionText.percent(model.overallProgress))
-                }
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Text(context.date, format: .dateTime.hour().minute())
-                }
-            }
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(.secondary)
-            .allowsHitTesting(false)
+        ReaderBottomBarShell(
+            showChrome: showChrome,
+            batteryLevel: Double(batteryLevel),
+            hiddenPercentText: showChrome ? nil : FractionText.percent(model.overallProgress),
+            hiddenBackground: model.pageBackgroundColor
+        ) {
+            positionAndScrub
         }
-        .padding(.horizontal, 18)
-        .padding(.top, showChrome ? 8 : 4)
-        .padding(.bottom, 10)
-        .background {
-            if showChrome {
-                Rectangle().fill(.thinMaterial)
-            } else {
-                model.pageBackgroundColor.opacity(0.92)
-            }
-        }
-        .animation(.easeInOut(duration: 0.18), value: showChrome)
     }
 
     /// 位置、进度条与百分比。拆成独立视图，避免 `body` 的类型推导过重。
     private var positionAndScrub: some View {
-        VStack(spacing: 4) {
-            if isScrubbing {
-                Text(scrubPreviewText)
-                    .font(.system(size: 11, weight: .medium))
-                    .lineLimit(1)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(.thinMaterial, in: Capsule())
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-            }
-            // 位置、进度与翻页都收在一行；上一页／下一页交给手势与 VoiceOver 动作。
-            HStack(spacing: 10) {
-                ReaderPositionLabel(texts: [
-                    .chapterPage: showsTOCDiagnostics ? model.locationDescription : model.pageDescription,
-                    .chapterProgress: model.chapterProgressDescription,
-                    .bookProgress: model.bookProgressDescription
-                ])
-                ReaderScrubber(value: scrubBinding, onEditingChanged: handleScrub)
-                    .disabled(model.status != .ready || model.isAnimating || model.isLayingOut)
-                Text(FractionText.percent(isScrubbing ? scrubProgress : model.overallProgress))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 36, alignment: .trailing)
-            }
-        }
+        ReaderPositionRow(
+            positionTexts: [
+                .chapterPage: showsTOCDiagnostics ? model.locationDescription : model.pageDescription,
+                .chapterProgress: model.chapterProgressDescription,
+                .bookProgress: model.bookProgressDescription
+            ],
+            previewText: isScrubbing ? scrubPreviewText : nil,
+            value: scrubBinding,
+            onEditingChanged: handleScrub,
+            percentText: FractionText.percent(isScrubbing ? scrubProgress : model.overallProgress),
+            scrubDisabled: model.status != .ready || model.isAnimating || model.isLayingOut
+        )
     }
 
     private var scrubBinding: Binding<Double> {

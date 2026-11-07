@@ -204,34 +204,16 @@ private struct ReadiumEPUBReaderViewContent: View {
     // MARK: 顶栏
 
     private var topBar: some View {
-        HStack(spacing: 12) {
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.title3)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("返回")
-            VStack(spacing: 1) {
-                HStack(spacing: 6) {
-                    Text(model.bookTitle.isEmpty ? "阅读器" : model.bookTitle)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                    // 在线分页仍需区分实验引擎，标识随章节名一起放进顶栏。
-                    if textBook != nil { engineBadge }
-                }
-                if !model.currentChapterTitle.isEmpty {
-                    Text(model.currentChapterTitle)
-                        .font(NoveliaStyle.fontMicro)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .accessibilityElement(children: .combine)
-            Menu {
+        // 布局与材质由共用骨架提供；菜单内容保持本引擎行为（引擎说明、就绪才可用的书签/目录）。
+        // 显隐沿用条件包含：隐藏时顶栏整体不参与布局。
+        ReaderTopBarShell(
+            bookTitle: model.bookTitle.isEmpty ? "阅读器" : model.bookTitle,
+            chapterTitle: model.currentChapterTitle,
+            titleTrailer: {
+                // 在线分页仍需区分实验引擎，标识随章节名一起放进顶栏。
+                if textBook != nil { engineBadge }
+            },
+            menu: {
                 if textBook == nil { Text("Readium 阅读引擎") }
                 if let accessory { accessory }
                 if let key = model.bookmarkKey, model.status == .ready {
@@ -264,15 +246,8 @@ private struct ReadiumEPUBReaderViewContent: View {
                 }
                 .accessibilityLabel("阅读设置")
                 .disabled(model.status != .ready)
-            } label: {
-                Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
             }
-            .accessibilityLabel("阅读菜单")
-        }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 10)
-        .frame(height: 48)
-        .background(.thinMaterial)
+        )
     }
 
     private var engineBadge: some View {
@@ -287,63 +262,31 @@ private struct ReadiumEPUBReaderViewContent: View {
     // MARK: 底栏
 
     private var bottomBar: some View {
-        VStack(spacing: 8) {
-            if showChrome {
-                positionAndScrub
-                    .transition(.opacity)
-            }
-            HStack {
-                Text(batteryLevel >= 0 ? "电量 \(Int((batteryLevel * 100).rounded()))%" : "电量 —")
-                Spacer()
-                // 工具栏隐藏时也保留进度百分比，兼顾沉浸阅读与位置感知。
-                if !showChrome {
-                    Text(FractionText.percent(model.overallProgress))
-                }
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Text(context.date, format: .dateTime.hour().minute())
-                }
-            }
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(.secondary)
-            .allowsHitTesting(false)
+        ReaderBottomBarShell(
+            showChrome: showChrome,
+            batteryLevel: Double(batteryLevel),
+            hiddenPercentText: showChrome ? nil : FractionText.percent(model.overallProgress)
+        ) {
+            positionAndScrub
         }
-        .padding(.horizontal, 18)
-        .padding(.top, showChrome ? 8 : 4)
-        .padding(.bottom, 10)
-        .background {
-            if showChrome { Rectangle().fill(.thinMaterial) }
-        }
-        .animation(.easeInOut(duration: 0.18), value: showChrome)
     }
 
     /// 位置、进度条与百分比。拆成独立视图，避免 `body` 的类型推导过重。
+    /// 引擎未就绪时整行不可用，与合并前的行为一致。
     private var positionAndScrub: some View {
-        VStack(spacing: 4) {
-            if isScrubbing {
-                Text(scrubPreviewText)
-                    .font(.system(size: 11, weight: .medium))
-                    .lineLimit(1)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(.thinMaterial, in: Capsule())
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
-            }
-            // 位置、进度与翻页都收在一行；上一页／下一页交给手势与 VoiceOver 动作。
-            HStack(spacing: 10) {
-                ReaderPositionLabel(texts: [
-                    .chapterPage: model.locationDescription,
-                    .chapterProgress: model.chapterProgressDescription,
-                    .bookProgress: model.bookProgressDescription
-                ])
-                ReaderScrubber(value: scrubBinding, onEditingChanged: handleScrub)
-                    .disabled(model.status != .ready)
-                Text(FractionText.percent(isScrubbing ? scrubProgress : model.overallProgress))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: 36, alignment: .trailing)
-            }
-            .disabled(model.status != .ready)
-        }
+        ReaderPositionRow(
+            positionTexts: [
+                .chapterPage: model.locationDescription,
+                .chapterProgress: model.chapterProgressDescription,
+                .bookProgress: model.bookProgressDescription
+            ],
+            previewText: isScrubbing ? scrubPreviewText : nil,
+            value: scrubBinding,
+            onEditingChanged: handleScrub,
+            percentText: FractionText.percent(isScrubbing ? scrubProgress : model.overallProgress),
+            scrubDisabled: model.status != .ready
+        )
+        .disabled(model.status != .ready)
     }
 
     private var scrubBinding: Binding<Double> {

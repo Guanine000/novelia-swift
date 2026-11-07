@@ -120,6 +120,13 @@ private struct WenkuNovelList: View {
     /// 搜索结果按页浏览；收藏一次加载全部，不分页。
     let pager: Pager?
     let reload: () async -> Void
+    /// 封面网格是文库浏览的默认形态；列表保留给偏好文字信息的场景，选择记在本机。
+    @AppStorage("discover.wenkuLayout") private var layout: LibraryBooksLayout = .grid
+
+    /// 搜索结果按标签屏蔽过滤后的可见作品；收藏不过滤。
+    private var visibleNovels: [WenkuNovelOutline] {
+        novels.filter { !filtersBlocked || !blocked.hides(blocked.wenkuTags[$0.id] ?? []) }
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -141,14 +148,34 @@ private struct WenkuNovelList: View {
                     } else if novels.isEmpty {
                         CompatUnavailable("没有找到作品", systemImage: "books.vertical", description: Text("换个关键词试试。"))
                     }
-                    ForEach(novels.filter { !filtersBlocked || !blocked.hides(blocked.wenkuTags[$0.id] ?? []) }) { novel in
-                        NavigationLink {
-                            WenkuDetailView(outline: novel)
-                                .environmentObject(localLibrary)
-                        } label: {
-                            WenkuNovelRow(novel: novel)
+                    if !visibleNovels.isEmpty {
+                        HStack {
+                            Spacer()
+                            Button {
+                                layout = layout == .list ? .grid : .list
+                            } label: {
+                                Image(systemName: layout == .list ? "square.grid.2x2" : "list.bullet")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(NoveliaStyle.muted)
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Rectangle())
+                            }
+                            .accessibilityLabel(layout == .list ? "文库列表切换为网格" : "文库网格切换为列表")
                         }
-                        .buttonStyle(.plain)
+                    }
+                    if layout == .grid {
+                        WenkuNovelGrid(novels: visibleNovels)
+                            .environmentObject(localLibrary)
+                    } else {
+                        ForEach(visibleNovels) { novel in
+                            NavigationLink {
+                                WenkuDetailView(outline: novel)
+                                    .environmentObject(localLibrary)
+                            } label: {
+                                WenkuNovelRow(novel: novel)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     if let error, !novels.isEmpty {
                         Text(error).font(.footnote).foregroundStyle(NoveliaStyle.danger).padding()
@@ -169,6 +196,67 @@ private struct WenkuNovelList: View {
     }
 
     private static let topAnchor = "wenku-list-top"
+}
+
+/// 文库作品的封面网格：三列自适应，封面比例与书库网格一致；收藏角标沿用列表的心形标识。
+/// 网格展示中文标题，原名与收藏状态进详情页查看，保持封面驱动的浏览密度。
+struct WenkuNovelGrid: View {
+    @EnvironmentObject private var localLibrary: WenkuLocalLibraryStore
+    let novels: [WenkuNovelOutline]
+
+    private let columns = [GridItem(.adaptive(minimum: 96, maximum: 140), spacing: 14)]
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
+            ForEach(novels) { novel in
+                NavigationLink {
+                    WenkuDetailView(outline: novel)
+                        .environmentObject(localLibrary)
+                } label: {
+                    WenkuNovelGridCell(novel: novel)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+private struct WenkuNovelGridCell: View {
+    let novel: WenkuNovelOutline
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ZStack(alignment: .topTrailing) {
+                CoverImage(url: novel.cover.flatMap(URL.init(string:))) {
+                    RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall).fill(NoveliaStyle.brandGreen.opacity(0.12))
+                        .overlay(Image(systemName: "book.closed").foregroundStyle(NoveliaStyle.brandGreen))
+                }
+                .aspectRatio(96.0 / 134.0, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall))
+                .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 2)
+                if novel.favored != nil {
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(NoveliaStyle.brandGreen)
+                        .padding(4)
+                        .background(Circle().fill(NoveliaStyle.paper))
+                        .offset(x: 4, y: -4)
+                        .accessibilityLabel("已收藏")
+                }
+            }
+            .frame(maxWidth: .infinity)
+            Text(novel.displayTitle)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(NoveliaStyle.ink)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(novel.displayTitle + (novel.favored != nil ? "，已收藏" : ""))
+        .accessibilityHint("打开文库详情")
+        .accessibilityAddTraits(.isButton)
+    }
 }
 
 struct WenkuNovelRow: View {
