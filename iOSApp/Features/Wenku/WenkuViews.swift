@@ -246,11 +246,13 @@ private struct WenkuNovelGridCell: View {
                 }
             }
             .frame(maxWidth: .infinity)
+            // 与书库网格一致：书名预留两行高度，标题行数不同也不会让封面错位。
             Text(novel.displayTitle)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(NoveliaStyle.ink)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
+                .frame(height: 34, alignment: .topLeading)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(novel.displayTitle + (novel.favored != nil ? "，已收藏" : ""))
