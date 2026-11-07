@@ -275,6 +275,7 @@ private final class SystemSynthesizerDelegate: NSObject, AVSpeechSynthesizerDele
 /// 面板挂在阅读器宿主上，菜单关闭或顶栏隐藏都不会销毁正在展示的面板。
 struct ReaderSpeechPresentation: ViewModifier {
     @EnvironmentObject private var services: AppServices
+    @Environment(\.speechHandoff) private var speechHandoff
     @ObservedObject var controller: SpeechPlaybackController
     @Binding var isPresented: Bool
     let anchor: () -> SpeechAnchor
@@ -292,6 +293,9 @@ struct ReaderSpeechPresentation: ViewModifier {
         .overlay(alignment: .bottom) {
             ReaderSpeechBar(controller: controller, openPanel: { isPresented = true })
         }
+        // 进入阅读器即回收遗留的跨页会话；这里的控制器随之成为唯一会话。
+        .onAppear { speechHandoff?.release() }
+        .onDisappear { handOffOnExit() }
         .onValueChange(of: isPresented) { _, shown in
             if shown {
                 controller.bookTitle = title
@@ -303,6 +307,16 @@ struct ReaderSpeechPresentation: ViewModifier {
                               anchor: anchor(), title: title, onEngineChange: rebuild, onStart: { controller.start(from: anchor()) })
         }
     }
+
+    /// 退出阅读器：系统/云端引擎只依赖正文闭包，交给 App 迷你条继续；Readium 引擎绑定导航器，只能停止。
+    private func handOffOnExit() {
+        guard controller.isActive else { return }
+        if controller.engineKind == .readium {
+            controller.stop()
+        } else {
+            speechHandoff?.adopt(controller)
+        }
+    }
     private func rebuild() {
         controller.reloadSettings()
         let local = makeEngine()
@@ -311,6 +325,37 @@ struct ReaderSpeechPresentation: ViewModifier {
                                                      onReadingPosition: system.onReadingPosition,
                                                      chapterText: system.chapterText))
         } else { controller.attach(local) }
+    }
+}
+
+/// 跨页面朗读会话：阅读器退出时把仍在播放的系统／云端引擎控制器移交到这里，
+/// 由根视图的迷你条接管；重新进入阅读器时回收（停止旧会话，由阅读器自己的控制器接手）。
+/// Readium 官方引擎持有导航器，离开阅读器即失效，不进入移交。每台 App 只有一个活动会话。
+@MainActor
+final class SpeechHandoffStore: ObservableObject {
+    @Published private(set) var session: SpeechPlaybackController?
+
+    func adopt(_ controller: SpeechPlaybackController) { session = controller }
+    /// 阅读器接管前停止遗留会话；同一控制器回到阅读器时无需重复停止。
+    func release() {
+        guard let session else { return }
+        session.stop()
+        self.session = nil
+    }
+    func clearIfSame(_ controller: SpeechPlaybackController) {
+        guard session === controller else { return }
+        self.session = nil
+    }
+}
+
+/// 移交存储经环境传给各阅读器宿主；替代验证组装不注入，阅读器退出即按原逻辑留在原地。
+private struct SpeechHandoffKey: EnvironmentKey {
+    static let defaultValue: SpeechHandoffStore? = nil
+}
+extension EnvironmentValues {
+    var speechHandoff: SpeechHandoffStore? {
+        get { self[SpeechHandoffKey.self] }
+        set { self[SpeechHandoffKey.self] = newValue }
     }
 }
 

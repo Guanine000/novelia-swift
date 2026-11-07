@@ -32,12 +32,17 @@ def main():
         binary = folder / 'SpeechTests'
         subprocess.run(['swiftc', '-parse-as-library', '-module-cache-path', str(folder / 'modules'), str(swift), '-o', str(binary)], check=True)
         subprocess.run([str(binary)], check=True, timeout=30)
-    # UI 停止由阅读器宿主持有，不能重新放回可隐藏的工具栏按钮。
+    # UI 停止由阅读器宿主持有：退出时按引擎能力移交或停止（handOffOnExit），
+    # 不把停止重新绑回会随顶栏隐藏的按钮；三个滚动/分页宿主仍保留文本规则变化的停止。
     accessory = (speech / 'SystemSpeechEngine.swift').read_text().split('// MARK: - 各阅读器共用的朗读入口')[1]
-    assert '.onDisappear' not in accessory
+    assert '.onDisappear { handOffOnExit() }' in accessory and 'func handOffOnExit' in accessory
     for path in ['ReaderView.swift', 'TXTReaderView.swift', 'EPUBReader/EPUBReaderView.swift']:
         text = (ROOT / 'iOSApp/Features/Reader' / path).read_text()
         assert 'speech.stop()' in text, path
+    # 跨页移交：存储随共用朗读入口放在宿主层，阅读器出现时回收遗留会话，Readium 视图同样接入。
+    assert 'final class SpeechHandoffStore' in accessory and 'func adopt(' in accessory and 'func release()' in accessory
+    assert 'speechHandoff?.release()' in accessory and 'speechHandoff?.adopt(' in accessory
+    assert '.speechHandoff' in (ROOT / 'iOSApp/Features/Reader/EPUBReader/ReadiumEPUBReaderView.swift').read_text()
     assert 'controller.capabilities.contains(.readingFollow)' in (speech / 'ReadiumSpeechPlayback.swift').read_text()
     print('PASS: reader teardown and follow-control wiring guards')
 

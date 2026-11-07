@@ -50,13 +50,32 @@ final class SpeechPlaybackController: ObservableObject {
     }
 
     func reloadSettings() { settings = store.load() }
-    var selectedVoiceIdentifier: String? { engine?.kind == .edge ? settings.edgeVoiceIdentifier : settings.voiceIdentifier }
-    func selectVoice(_ identifier: String) {
-        if engine?.kind == .edge { settings.edgeVoiceIdentifier = identifier }
-        else { settings.voiceIdentifier = identifier.isEmpty ? nil : identifier }
+    var selectedVoiceIdentifier: String? {
+        switch engine?.kind {
+        case .edge: settings.edgeVoiceIdentifier
+        case .openai: settings.openAIVoice
+        default: settings.voiceIdentifier
+        }
     }
-    var isCloud: Bool { engineKind == .edge }
-    var engineTitle: String { isCloud ? "Edge 在线朗读" : (engineKind == .readium ? "本地 · Readium" : "本地 · 系统朗读") }
+    func selectVoice(_ identifier: String) {
+        switch engine?.kind {
+        case .edge: settings.edgeVoiceIdentifier = identifier
+        case .openai: settings.openAIVoice = identifier
+        default: settings.voiceIdentifier = identifier.isEmpty ? nil : identifier
+        }
+    }
+    var isCloud: Bool { engineKind == .edge || engineKind == .openai }
+    /// 已填写服务地址即视为配置过第三方 API；密钥有效性在请求失败时提示。
+    var openAIConfigured: Bool { !settings.openAIBaseURL.isEmpty }
+    var engineTitle: String {
+        switch engineKind {
+        case .edge: "Edge 在线朗读"
+        case .openai: "第三方 API 朗读"
+        case .readium: "本地 · Readium"
+        case .system: "本地 · 系统朗读"
+        case nil: "Novelia 朗读"
+        }
+    }
     var edgeConsentGranted: Bool { store.edgeConsentGranted }
     func changeEngine(to kind: SpeechEngineKind, grantConsent: Bool = false) {
         stop()
@@ -378,6 +397,7 @@ struct SpeechControlView: View {
     var onEngineChange: (() -> Void)? = nil
     var onStart: (() -> Void)? = nil
     @State private var showsEdgeConsent = false
+    @State private var showsOpenAIHint = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -424,13 +444,15 @@ struct SpeechControlView: View {
                 if let onEngineChange {
                     Section("朗读引擎") {
                         Picker("切换引擎", selection: Binding(
-                            get: { controller.isCloud ? SpeechEngineKind.edge : .system },
+                            get: { controller.isCloud ? (controller.engineKind == .openai ? SpeechEngineKind.openai : .edge) : .system },
                             set: { kind in
                                 if kind == .edge && !controller.edgeConsentGranted { showsEdgeConsent = true }
+                                else if kind == .openai && !controller.openAIConfigured { showsOpenAIHint = true }
                                 else { controller.changeEngine(to: kind); onEngineChange() }
                             })) {
                             Text("本地朗读").tag(SpeechEngineKind.system)
                             Text("Edge 在线朗读").tag(SpeechEngineKind.edge)
+                            Text("第三方 API").tag(SpeechEngineKind.openai)
                         }
                         Text("当前引擎：\(controller.engineTitle)").font(.caption).foregroundStyle(.secondary)
                         Text("切换会停止当前播放；点按播放，从当前阅读位置继续。")
@@ -439,9 +461,11 @@ struct SpeechControlView: View {
                 }
 
                 if controller.isCloud {
-                    Section("Edge 在线朗读") {
+                    Section(controller.engineKind == .openai ? "第三方 API 在线朗读" : "Edge 在线朗读") {
                         Toggle("提前准备下一段", isOn: $controller.settings.edgePrefetchEnabled)
-                        Text("开启后会提前发送同章下一分段正文给微软，减少段间等待。上一句／下一句按时间轴跳转；无时间轴时按段切换。音频只在本次会话内缓存，停止后清除。")
+                        Text(controller.engineKind == .openai
+                             ? "开启后会提前请求同章下一段音频，减少段间等待。上一句／下一句按分段切换。音频只在本次会话内缓存，停止后清除。"
+                             : "开启后会提前发送同章下一段正文给微软，减少段间等待。上一句／下一句按时间轴跳转；无时间轴时按段切换。音频只在本次会话内缓存，停止后清除。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -454,11 +478,11 @@ struct SpeechControlView: View {
                 }
 
                 if controller.capabilities.contains(.voiceSelection), !controller.availableVoices.isEmpty {
-                    Section(controller.isCloud ? "Edge 音色" : "设备语音") {
+                    Section(controller.isCloud ? (controller.engineKind == .openai ? "第三方音色" : "Edge 音色") : "设备语音") {
                         SpeechVoicePicker(voices: controller.availableVoices,
                                           selection: Binding(get: { controller.selectedVoiceIdentifier ?? "" },
                                                              set: { controller.selectVoice($0) }),
-                                          isCloud: controller.isCloud, rate: controller.settings.rate, volume: controller.settings.volume, pitch: controller.settings.pitch,
+                                          isCloud: controller.isCloud, engineKind: controller.engineKind, rate: controller.settings.rate, volume: controller.settings.volume, pitch: controller.settings.pitch,
                                           beforePreview: { controller.stop() })
                             .id(controller.engineKind)
                     }
@@ -467,15 +491,20 @@ struct SpeechControlView: View {
                 if controller.capabilities.contains(.rateControl) {
                     Section("语速") {
                         Slider(value: $controller.settings.rate, in: 0...1, step: 0.05)
-                        Text(controller.isCloud ? "0.5 为 Edge 默认语速，从下一段起生效。" : "0.5 为系统默认语速，从下一句起生效。")
+                        Text(controller.engineKind == .openai
+                             ? "0.5 为默认语速（对应 1.0 倍速，范围约 0.25–2.0 倍），从下一段起生效。"
+                             : controller.isCloud ? "0.5 为 Edge 默认语速，从下一段起生效。" : "0.5 为系统默认语速，从下一句起生效。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
 
                 if controller.capabilities.contains(.volumeControl) || controller.capabilities.contains(.pitchControl) {
-                    Section("声音") { SpeechSoundControls(settings: $controller.settings, cloud: controller.isCloud) }
+                    Section("声音") {
+                        SpeechSoundControls(settings: $controller.settings, cloud: controller.isCloud,
+                                            showsPitch: controller.engineKind != .openai)
+                    }
                 } else if controller.engineKind == .readium {
-                    Text("Readium 本地朗读接口暂不支持独立音量和音高；系统朗读与 Edge 支持。")
+                    Text("Readium 本地朗读接口暂不支持独立音量和音高；系统朗读、Edge 与第三方 API 支持。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("定时停止") {
@@ -531,6 +560,11 @@ struct SpeechControlView: View {
             }
         } message: {
             Text("朗读时会把当前分段正文发送给微软服务。需要联网，音频只在本次会话内缓存，停止后清除。是否同意并启用？")
+        }
+        .alert("先配置第三方 API", isPresented: $showsOpenAIHint) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("请在「我的 → 阅读体验 → 朗读 → 第三方 API」填写服务地址与 API 密钥后，再切换到第三方 API 朗读。")
         }
     }
 
@@ -626,11 +660,36 @@ struct ReaderSpeechBar: View {
     }
 }
 
+/// 根视图的跨页听书条：阅读器退出后接管的会话在这里显示；点中间文字区打开完整面板。
+/// 会话停止（含定时到期）后自动消失；进入阅读器会回收遗留会话，因此阅读中不会出现。
+struct SpeechMiniBarHost: View {
+    @ObservedObject var store: SpeechHandoffStore
+    @State private var showsPanel = false
+    var body: some View {
+        if let controller = store.session {
+            ReaderSpeechBar(controller: controller, openPanel: { showsPanel = true })
+                .onReceive(controller.$state) { state in
+                    if state == .idle { store.clearIfSame(controller) }
+                }
+                .sheet(isPresented: $showsPanel) {
+                    SpeechControlView(controller: controller, session: controller.session,
+                                      anchor: SpeechAnchor(chapterIndex: 0, progression: 0,
+                                                           chapterUTF16Length: 0, startIndexHint: nil),
+                                      title: controller.bookTitle, onEngineChange: nil,
+                                      onStart: { controller.play() })
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+}
+
 /// 音色按语言组织；试听固定短句，不上传书籍正文，离开音色页面即停止。
 struct SpeechVoicePicker: View {
     let voices: [SpeechVoiceOption]
     @Binding var selection: String
     let isCloud: Bool
+    /// 云端音色目录只对 Edge 生效；第三方 API 用预设加自定义名称，不走在线目录。
+    var engineKind: SpeechEngineKind? = nil
     let rate: Double
     var volume: Double = 1
     var pitch: Double = 0
@@ -639,8 +698,9 @@ struct SpeechVoicePicker: View {
     @StateObject private var preview = SpeechVoicePreview()
     @State private var dynamicVoices: [SpeechVoiceOption] = SpeechSettingsStore().edgeVoices
     @State private var showsCatalog = false
+    private var usesEdgeCatalog: Bool { isCloud && engineKind != .openai }
     private var displayedVoices: [SpeechVoiceOption] {
-        var values = isCloud ? dynamicVoices : voices
+        var values = usesEdgeCatalog ? dynamicVoices : voices
         if isCloud, !selection.isEmpty, !values.contains(where: { $0.identifier == selection }) {
             values.append(.init(identifier: selection, name: selection, language: String(selection.prefix(5))))
         }
@@ -648,7 +708,7 @@ struct SpeechVoicePicker: View {
     }
     private var languages: [String] { Set(displayedVoices.map(\.language)).sorted() }
     var body: some View {
-        Picker(isCloud ? "Edge 音色" : "设备语音", selection: $selection) {
+        Picker(isCloud ? (usesEdgeCatalog ? "Edge 音色" : "第三方音色") : "设备语音", selection: $selection) {
             if !isCloud { Text("系统默认").tag("") }
             ForEach(languages, id: \.self) { language in
                 Section(language) {
@@ -658,7 +718,7 @@ struct SpeechVoicePicker: View {
                 }
             }
         }
-        if isCloud {
+        if usesEdgeCatalog {
             Button("更多 Edge 音色") { preview.stop(); showsCatalog = true }
                 .sheet(isPresented: $showsCatalog, onDismiss: { dynamicVoices = SpeechSettingsStore().edgeVoices }) {
                     SpeechVoiceCatalog(selection: $selection, voices: $dynamicVoices)
@@ -783,15 +843,20 @@ extension EnvironmentValues {
 struct SpeechSoundControls: View {
     @Binding var settings: SpeechSettings
     let cloud: Bool
+    /// 第三方 API 不支持音高参数，隐藏对应控件而不是展示无效设置。
+    var showsPitch: Bool = true
     var body: some View {
         VStack(alignment: .leading) {
             Text("朗读音量 \(Int(settings.volume * 100))%")
             Slider(value: $settings.volume, in: 0...1, step: 0.05).accessibilityLabel("朗读音量")
-            Text("音高：" + (abs(settings.pitch) < 0.01 ? "默认" : (settings.pitch < 0 ? "偏低" : "偏高")))
-            Slider(value: $settings.pitch, in: -1...1, step: 0.05).accessibilityLabel("朗读音高")
+            if showsPitch {
+                Text("音高：" + (abs(settings.pitch) < 0.01 ? "默认" : (settings.pitch < 0 ? "偏低" : "偏高")))
+                Slider(value: $settings.pitch, in: -1...1, step: 0.05).accessibilityLabel("朗读音高")
+            }
             Button("恢复声音默认值") { settings.volume = 1; settings.pitch = 0 }
         }
-        Text(cloud ? "音量立即生效；音高从下一段起生效，不改变语速。" : "系统朗读从下一句起生效；Readium 官方接口暂不提供这两项配置。")
+        Text(cloud ? (showsPitch ? "音量立即生效；音高从下一段起生效，不改变语速。" : "音量立即生效。")
+                   : "系统朗读从下一句起生效；Readium 官方接口暂不提供这两项配置。")
             .font(.caption).foregroundStyle(.secondary)
     }
 }

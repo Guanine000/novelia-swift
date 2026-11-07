@@ -345,7 +345,6 @@ struct ReaderView: View {
         }
         .environment(\.readerSearchRange, selectedSearchHit.flatMap { $0.chapterIndex == chapterIndex ? $0.utf16Offset..<($0.utf16Offset + $0.match.utf16.count) : nil })
         .environment(\.speechChapterIndex, chapterIndex)
-        .onDisappear { speech.stop() }
         .onValueChange(of: modeRaw) { _, _ in speech.stop() }
         .onValueChange(of: translationSourceRaw) { _, _ in speech.stop() }
         .toolbar {

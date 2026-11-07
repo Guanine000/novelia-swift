@@ -195,7 +195,6 @@ private struct EPUBReaderViewContent: View {
                 }
             }
             .onDisappear {
-                speech.stop()
                 model.onManualNavigation = nil
                 // 停止已关闭书籍的排版；重新打开时复用缓存中已完成的章节。
                 model.close()

@@ -23,6 +23,7 @@ struct ReadiumEPUBReaderView: View {
 
 private struct ReadiumEPUBReaderViewContent: View {
     @EnvironmentObject private var services: AppServices
+    @Environment(\.speechHandoff) private var speechHandoff
     @ObservedObject private var settings: ReaderSettings
     @ObservedObject private var backgrounds: ReaderBackgroundStore
     @StateObject private var model: ReadiumEPUBReaderModel
@@ -160,8 +161,13 @@ private struct ReadiumEPUBReaderViewContent: View {
             if let textBook { await model.open(textBook: textBook, systemIsDark: colorScheme == .dark) }
             else if let bookURL { await model.open(url: bookURL, systemIsDark: colorScheme == .dark) }
         }
+        .onAppear { speechHandoff?.release() }
         .onDisappear {
-            model.speech.stop()
+            // Readium 官方引擎绑定导航器，离开即失效停止；Edge/第三方引擎交给跨页迷你条继续。
+            if model.speech.isActive {
+                if model.speech.engineKind == .readium { model.speech.stop() }
+                else { speechHandoff?.adopt(model.speech) }
+            }
             if !wasBatteryMonitoringEnabled {
                 UIDevice.current.isBatteryMonitoringEnabled = false
             }

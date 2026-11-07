@@ -310,6 +310,11 @@ struct RootView: View {
         .environmentObject(webDAVSync)
         .environmentObject(libraryWordCounts)
         .environmentObject(updates)
+        .environment(\.speechHandoff, services.speechHandoff)
+        // 跨页听书条：只有阅读器退出且仍在播放时才有会话，阅读中由移交回收保持隐藏。
+        .overlay(alignment: .bottom) {
+            SpeechMiniBarHost(store: services.speechHandoff)
+        }
         .modifier(WebDAVAutoSyncTriggers(sync: webDAVSync, web: webNovelDownloads, wenku: wenkuDownloads,
                                          library: services.local.library, blockedTags: services.local.blockedTags,
                                          identityMaps: services.local.readerSettings.webEPUBMaps, bookmarks: services.local.bookmarks))

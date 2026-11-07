@@ -56,7 +56,6 @@ struct DownloadedWebNovelTXTReader: View {
             ReaderKeepScreenOn.activate()
         }
         .onDisappear {
-            speech.stop()
             if let preferenceID { settings.deactivateBook(preferenceID) }
             ReaderKeepScreenOn.deactivate()
         }

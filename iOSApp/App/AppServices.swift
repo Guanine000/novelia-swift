@@ -14,12 +14,15 @@ final class AppServices: ObservableObject {
     let account: AccountAuthStore
     let forumAccount: ForumAuthStore
     let speech: any SpeechEngineSelecting
+    /// 阅读器退出后仍在播放的朗读会话；根视图的迷你条观察这里，阅读器出现时回收。
+    let speechHandoff = SpeechHandoffStore()
 
     init(configuration: APIConfiguration, api: APIServiceCollection,
          account: AccountAuthStore, forumAccount: ForumAuthStore, local: LocalAppServices? = nil,
-         performsUpdateChecks: Bool = true, speechService: (any CloudSpeechSynthesizing)? = nil) {
+         performsUpdateChecks: Bool = true, speechService: (any CloudSpeechSynthesizing)? = nil,
+         openAIService: (any CloudSpeechSynthesizing)? = nil) {
         self.performsUpdateChecks = performsUpdateChecks
-        speech = AppSpeechEngineFactory(service: speechService)
+        speech = AppSpeechEngineFactory(service: speechService, openAIService: openAIService)
         self.local = local ?? LocalAppServices()
         self.configuration = configuration
         self.api = api
@@ -41,7 +44,19 @@ final class AppServices: ObservableObject {
             novelToken: { [store = account.tokenStore] in store.read() },
             forumToken: { [store = forum.tokenStore] in store.read() })
         return AppServices(configuration: configuration, api: api, account: account, forumAccount: forum,
-                           speechService: EdgeSpeechClient())
+                           speechService: EdgeSpeechClient(), openAIService: openAICompatibleClient())
+    }
+
+    /// 第三方 API 的端点在每次请求时读取设置与 Keychain 密钥；未配置时客户端报告 notConfigured，不发请求。
+    private static func openAICompatibleClient() -> any CloudSpeechSynthesizing {
+        let settings = SpeechSettingsStore()
+        let keyStore = KeychainSpeechAPIKeyStore()
+        return OpenAICompatibleSpeechClient(endpointProvider: ClosureOpenAIEndpointProvider {
+            let value = settings.load()
+            guard let url = URL(string: value.openAIBaseURL), !value.openAIBaseURL.isEmpty,
+                  let key = keyStore.readKey(), !key.isEmpty else { return nil }
+            return OpenAISpeechEndpoint(baseURL: url, apiKey: key, model: value.openAIModel)
+        })
     }
 }
 
