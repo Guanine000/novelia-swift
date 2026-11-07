@@ -440,7 +440,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             if let self, Date().timeIntervalSince(self.lastSpeechDecorationTap) < 0.3 { return true }
             self?.noteGesture("tap")
             if let self, let view = self.navigator?.view,
-               event.location.x < view.bounds.width / 3 || event.location.x > view.bounds.width * 2 / 3 { self.speech.pause(); self.pendingWebPositionWrite = true }
+               event.location.x < view.bounds.width / 3 || event.location.x > view.bounds.width * 2 / 3 { self.speech.suspendFollow(true); self.pendingWebPositionWrite = true }
             if let self, self.isAtWebNovelEnd, let view = self.navigator?.view,
                event.location.x > view.bounds.width * 2 / 3 { self.pendingWebPositionWrite = false; self.onReachedEnd?(); return true }
             return false
@@ -574,6 +574,16 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         }
     }
 
+    /// 当前朗读句定位（Readium 官方引擎上报），供「回到正在朗读的段落」。
+    private var spokenLocator: Locator?
+
+    /// 用户翻页或滚动后回到正在朗读的段落。
+    func jumpToSpoken() {
+        guard let spokenLocator else { return }
+        markNavigation("speech")
+        Task { _ = await navigator?.go(to: spokenLocator) }
+    }
+
     private func attachSpeechEngine(publication: Publication, navigator: EPUBNavigatorViewController) {
         let local = ReadiumSpeechEngine(publication: publication, navigator: navigator, onFollow: { [weak self] in
             self?.markNavigation("speech")
@@ -585,6 +595,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
                   let base = await publication.locate(publication.readingOrder[index]) else { return nil }
             return base.copy(locations: { $0.progression = 0 })
         })
+        local?.onSpokenLocator = { [weak self] locator in self?.spokenLocator = locator }
         speech.reloadSettings()
         if let speechSelection {
             speech.attach(speechSelection.select(local: local, chapterCount: chapterCount,
@@ -809,7 +820,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     private var redirectedOperation: Int?
 
     private func markNavigation(_ cause: String) {
-        if ["turnForward", "turnBackward", "navigate", "seek", "swipe", "outerSwipe"].contains(cause) { speech.pause() }
+        if ["turnForward", "turnBackward", "navigate", "seek", "swipe", "outerSwipe"].contains(cause) { speech.suspendFollow(true) }
         diagnosticOperation += 1
         if ["turnForward", "turnBackward", "navigate", "seek", "swipe", "outerSwipe", "speech"].contains(cause) { pendingWebPositionWrite = true }
         pendingLocationCause = (cause, .now)

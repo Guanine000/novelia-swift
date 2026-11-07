@@ -287,6 +287,10 @@ struct RootView: View {
         .onValueChange(of: selectedTab) { _, tab in
             UserDefaults.standard.set(tab.rawValue, forKey: SettingsKey.tabBarLastSelected)
         }
+        // 从迷你条发起「回到书内朗读处」：书库标签负责按书籍身份打开对应书籍。
+        .onValueChange(of: services.speechHandoff.openRequest) { _, request in
+            if request != nil { selectedTab = .library }
+        }
         .tint(AppThemeColor.color(for: appThemeColorRaw, customHex: appThemeCustomHex))
         .background(NoveliaStyle.paper)
         // 纸面/卡片的动态色提供器只在视图重新求值时重新解析；换底色预设时用行身份

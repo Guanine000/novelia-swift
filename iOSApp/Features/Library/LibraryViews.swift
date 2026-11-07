@@ -21,6 +21,7 @@ struct LibraryView: View {
     @EnvironmentObject private var webDAVSync: WebDAVSyncStore
     @EnvironmentObject private var cloudBooks: CloudBookStore
     @EnvironmentObject private var state: LibraryStateStore
+    @EnvironmentObject private var services: AppServices
     @StateObject private var importer = LibraryImportModel()
     @StateObject private var bookActions = LibraryBookActions()
     @State private var segment = Segment.all
@@ -168,6 +169,15 @@ struct LibraryView: View {
         }
         .onValueChange(of: readerTarget) { _, target in
             if target == nil { state.reloadPositions() }
+        }
+        // 迷你条请求回到朗读处：按书籍身份找到书并打开，阅读器起来后从该位置继续朗读。
+        .onValueChange(of: services.speechHandoff.openRequest) { _, request in
+            guard let request else { return }
+            if let book = allBooks.first(where: { $0.key == request.bookKey }) {
+                readerTarget = book
+            } else {
+                services.speechHandoff.consumeOpenRequest()
+            }
         }
         .onValueChange(of: webDAVSync.isSyncing) { _, syncing in
             if !syncing { state.reloadPositions() }

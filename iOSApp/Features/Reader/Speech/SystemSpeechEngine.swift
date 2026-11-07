@@ -280,6 +280,11 @@ struct ReaderSpeechPresentation: ViewModifier {
     @Binding var isPresented: Bool
     let anchor: () -> SpeechAnchor
     let title: String
+    /// 书籍身份与「回到朗读处」由宿主提供；不提供时功能按钮自动隐藏。
+    var bookKey: String? = nil
+    var jumpToSpoken: (() -> Void)? = nil
+    var onResumeSaved: ((SpeechResumePoint) -> Void)? = nil
+    /// 必须排在带默认值的参数之后、并以尾闭包传入。
     let makeEngine: @MainActor () -> (any SpeechEngine)?
 
     func body(content: Content) -> some View {
@@ -294,17 +299,26 @@ struct ReaderSpeechPresentation: ViewModifier {
             ReaderSpeechBar(controller: controller, openPanel: { isPresented = true })
         }
         // 进入阅读器即回收遗留的跨页会话；这里的控制器随之成为唯一会话。
-        .onAppear { speechHandoff?.release() }
+        .onAppear {
+            speechHandoff?.release()
+            controller.bookKey = bookKey
+            controller.onJumpToSpoken = jumpToSpoken
+            controller.refreshSavedResume()
+        }
         .onDisappear { handOffOnExit() }
         .onValueChange(of: isPresented) { _, shown in
             if shown {
                 controller.bookTitle = title
+                controller.bookKey = bookKey
+                controller.refreshSavedResume()
                 if !controller.isAvailable || !controller.isActive { rebuild() }
             }
         }
         .sheet(isPresented: $isPresented) {
             SpeechControlView(controller: controller, session: controller.session,
-                              anchor: anchor(), title: title, onEngineChange: rebuild, onStart: { controller.start(from: anchor()) })
+                              anchor: anchor(), title: title, onEngineChange: rebuild,
+                              onStart: { controller.start(from: anchor()) },
+                              onResumeSaved: onResumeSaved)
         }
     }
 
@@ -335,16 +349,48 @@ struct ReaderSpeechPresentation: ViewModifier {
 final class SpeechHandoffStore: ObservableObject {
     @Published private(set) var session: SpeechPlaybackController?
 
-    func adopt(_ controller: SpeechPlaybackController) { session = controller }
+    /// 阅读器退出时接管的会话。`retained` 用来保住引擎依赖的对象——
+    /// Readium 官方引擎绑定导航器，模型被释放就会失效，必须一并保留。
+    private var retained: AnyObject?
+
+    /// 迷你条上「回到书内朗读处」的请求：由根视图切回书库、由书库打开对应书籍，
+    /// 书籍打开后取走 `pendingResume` 并从该位置继续朗读（高亮随朗读就位）。
+    struct OpenRequest: Equatable { let bookKey: String; let id = UUID() }
+    @Published private(set) var openRequest: OpenRequest?
+    private(set) var pendingResume: SpeechResumePoint?
+
+    /// 发起打开请求；没有书籍身份时不处理。
+    func requestOpen() {
+        guard let bookKey = session?.bookKey, !bookKey.isEmpty else { return }
+        // 优先用实时位置；没有实时位置再退回已落盘的续听记录。
+        pendingResume = session?.currentResumePoint ?? session?.savedResume
+        openRequest = OpenRequest(bookKey: bookKey)
+    }
+    /// 书籍打开后取走续听位置：同时停掉跨页会话，避免两处同时出声。
+    func takePendingResume(bookKey: String) -> SpeechResumePoint? {
+        guard let pending = pendingResume, pending.bookKey == bookKey else { return nil }
+        pendingResume = nil
+        openRequest = nil
+        release()
+        return pending
+    }
+    func consumeOpenRequest() { openRequest = nil; pendingResume = nil }
+
+    func adopt(_ controller: SpeechPlaybackController, retained owner: AnyObject? = nil) {
+        session = controller
+        self.retained = owner
+    }
     /// 阅读器接管前停止遗留会话；同一控制器回到阅读器时无需重复停止。
     func release() {
         guard let session else { return }
         session.stop()
         self.session = nil
+        retained = nil
     }
     func clearIfSame(_ controller: SpeechPlaybackController) {
         guard session === controller else { return }
-        self.session = nil
+        session = nil
+        retained = nil
     }
 }
 

@@ -198,7 +198,7 @@ struct ReaderView: View {
                 .frame(maxWidth: .infinity)
             }
             .background(ReaderBackgroundView(dark: appearance.isDark(system: systemColorScheme), fallback: readerBackground).ignoresSafeArea())
-            .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in speech.pause() })
+            .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in speech.suspendFollow(true) })
             .onPreferenceChange(ReaderScrollFrames.self) { visibleAnchor = ReaderScrollFrames.visible($0) }
             .task(id: "\(selectedSearchHit?.id ?? "")|\(chapter.id)|\(isLoadingChapter)|\(returnAnchor ?? "")") {
                 guard !isLoadingChapter else { return }
@@ -207,12 +207,12 @@ struct ReaderView: View {
                 else if let hit = selectedSearchHit, hit.chapterIndex == chapterIndex { scrollToFind(proxy, offset: hit.utf16Offset) }
             }
             .onValueChange(of: speechPosition) { _, position in
-                guard let position, speech.settings.followsReadingPosition else { return }
+                guard let position else { return }
                 if chapterIndex != position.chapterIndex { chapterIndex = position.chapterIndex }
                 scrollToSpeech(proxy)
             }
             .onValueChange(of: chapterIndex) { _, newIndex in
-                if speechPosition?.chapterIndex != newIndex { speech.pause() }
+                if speechPosition?.chapterIndex != newIndex { speech.suspendFollow(true) }
                 guard novel.chapters.indices.contains(newIndex) else { return }
                 savedChapterIndex = newIndex
                 settings.recordWebPosition(id: novel.id, chapterIndex: newIndex)
@@ -223,7 +223,16 @@ struct ReaderView: View {
             .modifier(ReaderSpeechPresentation(controller: speech, isPresented: $isShowingSpeech,
                                           anchor: { SpeechAnchor(chapterIndex: chapterIndex, progression: 0,
                                                                chapterUTF16Length: 0, startIndexHint: nil) },
-                                          title: novel.title) {
+                                          title: novel.title,
+                                          bookKey: "online:" + novel.id,
+                                          jumpToSpoken: { speech.suspendFollow(false); scrollToSpeech(proxy, force: true) },
+                                          onResumeSaved: { point in
+                                              guard novel.chapters.indices.contains(point.chapterIndex) else { return }
+                                              chapterIndex = point.chapterIndex
+                                              speech.start(from: SpeechAnchor(chapterIndex: point.chapterIndex,
+                                                                              progression: point.progression,
+                                                                              chapterUTF16Length: 0, startIndexHint: nil))
+                                          }) {
                         SystemSpeechEngine(chapterCount: novel.chapters.count, onReadingPosition: { position, _ in
                             speechPosition = position
                         }) { index in
@@ -451,7 +460,9 @@ struct ReaderView: View {
         speech.settings.highlightsSpokenText && speechPosition?.chapterIndex == chapterIndex ? speechPosition?.sentenceRange : nil
     }
 
-    private func scrollToSpeech(_ proxy: ScrollViewProxy) {
+    private func scrollToSpeech(_ proxy: ScrollViewProxy, force: Bool = false) {
+        // 自动跟读只在开关打开时滚动；「回到朗读处」按钮无视开关。
+        if !force, !speech.settings.followsReadingPosition { return }
         guard let position = speechPosition, position.chapterIndex == chapterIndex else { return }
         let text = displayedText(chapter)
         let pieces: [String]

@@ -7,6 +7,7 @@ struct DownloadedWebNovelTXTReader: View {
     @EnvironmentObject private var settings: ReaderSettings
     private var fontSize: Double { settings.fontSize }
     @Environment(\.colorScheme) private var systemColorScheme
+    @Environment(\.speechHandoff) private var speechHandoff
     let url: URL
     let title: String
     let rules: TXTChapterRuleConfiguration
@@ -108,7 +109,7 @@ struct DownloadedWebNovelTXTReader: View {
                             proxy.scrollTo("txt-reader-top", anchor: .top)
                         }
                     }
-                    .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in speech.pause() })
+                    .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in speech.suspendFollow(true) })
                     .onPreferenceChange(ReaderScrollFrames.self) { visibleAnchor = ReaderScrollFrames.visible($0) }
                     .task(id: "\(selectedSearchHit?.id ?? "")|\(bodyChunksChapterIndex ?? -1)|\(returnAnchor ?? "")") {
                         guard bodyChunksChapterIndex == chapterIndex else { return }
@@ -139,7 +140,16 @@ struct DownloadedWebNovelTXTReader: View {
         .modifier(ReaderSpeechPresentation(controller: speech, isPresented: $isShowingSpeech,
                                           anchor: { SpeechAnchor(chapterIndex: chapterIndex, progression: 0,
                                                                chapterUTF16Length: 0, startIndexHint: nil) },
-                                          title: title) {
+                                          title: title,
+                                          bookKey: preferenceID,
+                                          jumpToSpoken: { speech.suspendFollow(false); scrollToSpeechForce() },
+                                          onResumeSaved: { point in
+                                              guard let chapters, chapters.indices.contains(point.chapterIndex) else { return }
+                                              chapterIndex = point.chapterIndex
+                                              speech.start(from: SpeechAnchor(chapterIndex: point.chapterIndex,
+                                                                              progression: point.progression,
+                                                                              chapterUTF16Length: 0, startIndexHint: nil))
+                                          }) {
                         let current = chapters ?? []
                         return SystemSpeechEngine(chapterCount: current.count, onReadingPosition: { position, preferences in
                             speechPosition = position
@@ -271,6 +281,12 @@ struct DownloadedWebNovelTXTReader: View {
                 }
                 let id = "txt:" + book.contentHash
                 settings.activateBook(id); preferenceID = id
+                // 从迷你条进入：取走续听位置并就地起播。
+                if let point = speechHandoff?.takePendingResume(bookKey: id) {
+                    chapterIndex = min(max(point.chapterIndex, 0), max(book.chapters.count - 1, 0))
+                    speech.start(from: SpeechAnchor(chapterIndex: chapterIndex, progression: point.progression,
+                                                    chapterUTF16Length: 0, startIndexHint: nil))
+                }
                 contentHash = book.contentHash
                 parsedBook = book
                 tocWordCounts = nil
@@ -283,7 +299,7 @@ struct DownloadedWebNovelTXTReader: View {
             }
         }
         .onValueChange(of: chapterIndex) { _, newIndex in
-            if speechPosition?.chapterIndex != newIndex { speech.pause() }
+            if speechPosition?.chapterIndex != newIndex { speech.suspendFollow(true) }
             guard let contentHash else { return }
             let saved = settings.positions.txtPosition(hash: contentHash) ?? TXTReadingPosition(chapter: newIndex)
             guard saved.chapter != newIndex || settings.positions.all()["txt:\(contentHash)"] == nil else { return }
@@ -310,6 +326,17 @@ struct DownloadedWebNovelTXTReader: View {
             ReaderTextHighlight.apply(ReaderTextRanges.localRange(hit.utf16Offset..<(hit.utf16Offset + hit.match.utf16.count), in: sourceRange), text: text, to: &value)
         }
         return value
+    }
+
+    /// 「回到朗读处」按钮：外层拿不到 ScrollViewProxy，通过锚点定位（与搜索命中同一套滚动键）。
+    private func scrollToSpeechForce() {
+        guard let position = speechPosition, position.chapterIndex == chapterIndex,
+              bodyChunksChapterIndex == chapterIndex, let chapters,
+              chapters.indices.contains(chapterIndex) else { return }
+        let ranges = ReaderTextRanges.sourceRanges(of: bodyChunks, in: settings.projection.apply(chapters[chapterIndex].body))
+        guard let index = ranges.firstIndex(where: { $0?.contains(position.currentOffset) == true }) else { return }
+        // 复用「回到刚才阅读处」的锚点机制触发滚动，拿不到 proxy 也能定位。
+        returnAnchor = "text-chunk-\(index)"
     }
 
     private func scrollToSpeech(_ proxy: ScrollViewProxy) {

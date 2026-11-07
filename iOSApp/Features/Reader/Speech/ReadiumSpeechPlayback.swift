@@ -13,12 +13,15 @@ import UIKit
 @MainActor
 final class SpeechPlaybackController: ObservableObject {
     @Published private(set) var state: SpeechPlaybackState = .idle {
-        didSet { session.playbackStateDidChange(state) }
+        didSet {
+            session.playbackStateDidChange(state)
+            recordResumePoint()
+        }
     }
     @Published var settings = SpeechSettingsStore().load() {
         didSet {
             let value = settings.clamped()
-            engine?.update(settings: value)
+            applyEngineSettings()
             store.save(value)
             session.update(sleepTimerMinutes: value.sleepTimerMinutes)
         }
@@ -28,8 +31,17 @@ final class SpeechPlaybackController: ObservableObject {
     let session = SpeechRemoteSession()
     /// 锁屏显示的书名，由阅读器入口设置。
     var bookTitle = "Novelia 朗读"
+    /// 书籍身份（进度键），由阅读器入口设置；用于按书记住收听位置。
+    var bookKey: String?
+    /// 「回到正在朗读的段落」：由宿主阅读器注入，滚动/分页各自实现定位。
+    var onJumpToSpoken: (() -> Void)?
+    /// 上次收听位置（打开面板时读取，供「继续上次」）。
+    private(set) var savedResume: SpeechResumePoint?
 
     private let store = SpeechSettingsStore()
+    private let resumeStore = SpeechResumeStore()
+    private var lastResumeSave = Date.distantPast
+    private var lastResumeChapter = -1
     @Published private(set) var showsQuickControls = false
     @Published private(set) var engineKind: SpeechEngineKind?
     private var engine: (any SpeechEngine)?
@@ -50,6 +62,73 @@ final class SpeechPlaybackController: ObservableObject {
     }
 
     func reloadSettings() { settings = store.load() }
+
+    /// 打开面板或进入书籍时读取该书上次的收听位置。
+    func refreshSavedResume() {
+        savedResume = bookKey.flatMap { resumeStore.load(bookKey: $0) }
+    }
+
+    /// 当前会话的实时收听位置（不落盘）：迷你条「回到书内」用它定位，
+    /// 避免刚起播还没到 10 秒落盘时取不到位置。
+    var currentResumePoint: SpeechResumePoint? {
+        guard let bookKey, !bookKey.isEmpty else { return nil }
+        let chapter: Int
+        switch state {
+        case .playing(let utterance), .paused(let utterance):
+            chapter = utterance.chapterIndex
+        default:
+            chapter = lastAnchor.chapterIndex
+        }
+        return SpeechResumePoint(bookKey: bookKey, chapterIndex: chapter,
+                                 progression: lastAnchor.progression,
+                                 engine: (engineKind ?? .system).rawValue)
+    }
+
+    /// 章级位置变化时写入。state 每句都会变，这里做两道闸：章没变且未满 60 秒不重复编码写盘，
+    /// 章变化时也至少间隔 5 秒，避免朗读时反复触发 UserDefaults 写入造成卡顿。
+    private func recordResumePoint() {
+        guard let bookKey, !bookKey.isEmpty else { return }
+        let chapter: Int
+        switch state {
+        case .playing(let utterance), .paused(let utterance):
+            chapter = utterance.chapterIndex
+        default:
+            chapter = lastAnchor.chapterIndex
+        }
+        let now = Date()
+        let elapsed = now.timeIntervalSince(lastResumeSave)
+        let chapterChanged = chapter != lastResumeChapter
+        guard chapterChanged ? elapsed >= 5 : elapsed >= 60 else { return }
+        lastResumeSave = now
+        lastResumeChapter = chapter
+        let point = SpeechResumePoint(bookKey: bookKey, chapterIndex: chapter,
+                                      progression: lastAnchor.progression,
+                                      engine: (engineKind ?? .system).rawValue)
+        resumeStore.save(point)
+        // 直接复用刚写入的对象，省掉一次 JSON 解码。
+        savedResume = point
+    }
+
+    /// 手动翻页时只挂起跟读，不打断播放：用户翻到别处继续看，朗读仍在进行。
+    private(set) var followSuspended = false
+    func suspendFollow(_ suspended: Bool) {
+        guard followSuspended != suspended else { return }
+        followSuspended = suspended
+        applyEngineSettings()
+    }
+
+    /// 引擎拿到的设置：挂起跟读期间临时关闭自动翻页，不改动已保存的偏好。
+    private func applyEngineSettings() {
+        var value = settings.clamped()
+        if followSuspended { value.followsReadingPosition = false }
+        engine?.update(settings: value)
+    }
+
+    /// 宿主在起播或跳章后同步当前位置，供断点记录使用。
+    func noteAnchor(_ anchor: SpeechAnchor) {
+        lastAnchor = anchor
+        recordResumePoint()
+    }
     var selectedVoiceIdentifier: String? {
         switch engine?.kind {
         case .edge: settings.edgeVoiceIdentifier
@@ -103,11 +182,13 @@ final class SpeechPlaybackController: ObservableObject {
         engine = newEngine
         engineKind = newEngine?.kind
         state = newEngine?.state ?? .idle
-        newEngine?.update(settings: settings.clamped())
+        applyEngineSettings()
     }
 
     func start(from anchor: SpeechAnchor, readiumLocator: Locator? = nil) {
         guard let engine else { return }
+        // 新一次起播恢复正常跟读：手动翻页挂起的只是当次会话。
+        if followSuspended { followSuspended = false; applyEngineSettings() }
         // 主线程回调直接落状态，不再额外排队；代次阻止已替换引擎的迟到事件。
         stop()
         let generation = self.generation
@@ -118,6 +199,7 @@ final class SpeechPlaybackController: ObservableObject {
         (engine as? ReadiumSpeechEngine)?.startingLocator = readiumLocator
         showsQuickControls = true
         lastAnchor = anchor
+        recordResumePoint()
         session.activate(title: bookTitle)
         state = .preparing
         startTask = Task { [weak self] in
@@ -231,6 +313,8 @@ final class ReadiumSpeechEngine: SpeechEngine, PublicationSpeechSynthesizerDeleg
     private let onFollow: (() -> Void)?
     private weak var navigator: EPUBNavigatorViewController?
     var startingLocator: Locator?
+    /// 当前朗读句的定位，供宿主「回到正在朗读的段落」使用。
+    var onSpokenLocator: ((Locator) -> Void)?
     private let decorationGroup = "tts"
     private var settings = SpeechSettings.default
     private var lastFollowDate = Date.distantPast
@@ -345,6 +429,7 @@ final class ReadiumSpeechEngine: SpeechEngine, PublicationSpeechSynthesizerDeleg
         case let .paused(utterance):
             state = .paused(Self.map(utterance))
         case let .playing(utterance, range: range):
+            onSpokenLocator?(utterance.locator)
             state = .playing(Self.map(utterance))
             applyDecoration(for: utterance)
             if settings.followsReadingPosition, let range { follow(range) }
@@ -396,6 +481,8 @@ struct SpeechControlView: View {
     var title = "Novelia 朗读"
     var onEngineChange: (() -> Void)? = nil
     var onStart: (() -> Void)? = nil
+    /// 从上次收听位置继续：由宿主阅读器负责跳章并起播。
+    var onResumeSaved: ((SpeechResumePoint) -> Void)? = nil
     @State private var showsEdgeConsent = false
     @State private var showsOpenAIHint = false
     @Environment(\.dismiss) private var dismiss
@@ -437,6 +524,15 @@ struct SpeechControlView: View {
                             Spacer()
                             Button("下一章") { controller.skipChapter(1) }
                         }.buttonStyle(.borderless).disabled(!controller.isActive)
+                    }
+                    if controller.isActive, let jump = controller.onJumpToSpoken {
+                        Button("回到正在朗读的段落") { jump() }
+                            .buttonStyle(.borderless)
+                    }
+                    if let saved = controller.savedResume, let resume = onResumeSaved {
+                        Button("继续上次收听（第 \(saved.chapterIndex + 1) 章）") { resume(saved) }
+                            .buttonStyle(.borderless)
+                            .disabled(controller.isActive)
                     }
                     Text(statusText).font(.footnote).foregroundStyle(.secondary)
                 }
@@ -600,9 +696,11 @@ struct SpeechControlView: View {
 struct ReaderSpeechBar: View {
     @ObservedObject var controller: SpeechPlaybackController
     let openPanel: () -> Void
+    /// 迷你条（阅读器之外）用「回到书内」替代「回到朗读处」：定位需要回到书里才有效。
+    var onReturnToBook: (() -> Void)? = nil
     var body: some View {
         if controller.showsQuickControls {
-            HStack(spacing: 16) {
+            HStack(spacing: 12) {
                 Button {
                     if controller.state.isPlaying { controller.pause() } else { controller.play() }
                 } label: {
@@ -612,12 +710,20 @@ struct ReaderSpeechBar: View {
                 }
                 .accessibilityLabel(controller.state.isPlaying ? "快捷暂停朗读" : "快捷继续朗读")
                 .disabled(controller.state == .preparing)
+                if controller.capabilities.contains(.chapterNavigation) {
+                    Button { controller.skipChapter(-1) } label: { Image(systemName: "backward.end.fill") }
+                        .accessibilityLabel("上一章")
+                }
                 Button { controller.skipBackward() } label: { Image(systemName: "backward.fill") }
                     .accessibilityLabel(controller.skipBackwardLabel)
                     .disabled(controller.state.utterance == nil)
                 Button { controller.skipForward() } label: { Image(systemName: "forward.fill") }
                     .accessibilityLabel(controller.skipForwardLabel)
                     .disabled(controller.state.utterance == nil)
+                if controller.capabilities.contains(.chapterNavigation) {
+                    Button { controller.skipChapter(1) } label: { Image(systemName: "forward.end.fill") }
+                        .accessibilityLabel("下一章")
+                }
                 Button(action: openPanel) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(controller.bookTitle.isEmpty ? "Novelia 朗读" : controller.bookTitle)
@@ -632,6 +738,13 @@ struct ReaderSpeechBar: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                if onReturnToBook != nil {
+                    Button { onReturnToBook?() } label: { Image(systemName: "book") }
+                        .accessibilityLabel("回到书内朗读处")
+                } else if controller.onJumpToSpoken != nil, controller.isActive {
+                    Button { controller.onJumpToSpoken?() } label: { Image(systemName: "text.magnifyingglass") }
+                        .accessibilityLabel("回到正在朗读的段落")
+                }
                 Button(action: openPanel) { Image(systemName: "slider.horizontal.3") }
                     .accessibilityLabel("朗读设置")
                 Button { controller.stop() } label: { Image(systemName: "xmark") }
@@ -667,7 +780,9 @@ struct SpeechMiniBarHost: View {
     @State private var showsPanel = false
     var body: some View {
         if let controller = store.session {
-            ReaderSpeechBar(controller: controller, openPanel: { showsPanel = true })
+            ReaderSpeechBar(controller: controller,
+                            openPanel: { showsPanel = true },
+                            onReturnToBook: { store.requestOpen() })
                 .onReceive(controller.$state) { state in
                     if state == .idle { store.clearIfSame(controller) }
                 }

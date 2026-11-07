@@ -1201,6 +1201,21 @@ final class EPUBReaderModel: ObservableObject {
         refreshSpeechHighlight()
     }
 
+    /// 用户手动翻页后回到当前朗读句所在页；与自动跟读不同，这里无视「自动翻到朗读位置」开关。
+    func jumpToSpeechPosition() {
+        guard let position = speechPosition, let book = pageBook,
+              book.isChapterComplete(position.chapterIndex),
+              let rawPage = book.pageIndex(spineIndex: position.chapterIndex,
+                                           containingSourceOffset: position.currentOffset) else { return }
+        let page = usesDoublePage ? (rawPage / 2) * 2 : rawPage
+        let target = EPUBReadingLocation(spineIndex: position.chapterIndex, pageIndex: page)
+        if target != location {
+            moveLocation(to: target, cause: "speech")
+            prefetchNeighbors(of: position.chapterIndex)
+        }
+        refreshSpeechHighlight()
+    }
+
     private func refreshSpeechHighlight() {
         let rects: [CGRect]
         if let position = speechPosition, speechSettings.highlightsSpokenText,

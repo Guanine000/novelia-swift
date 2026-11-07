@@ -41,6 +41,8 @@ enum SettingsKey {
         static let openAIBaseURL = "speech.openaiBaseURL.v1"
         static let openAIModel = "speech.openaiModel.v1"
         static let openAIVoice = "speech.openaiVoice.v1"
+        /// 上次收听位置（按书），供重启后继续听；键值为前缀加书籍身份。
+        static let resumePointPrefix = "speech.resume.v1."
     }
 
     /// 阅读期间阻止自动锁屏（屏幕常亮）；默认关闭，仅阅读器前台生效。

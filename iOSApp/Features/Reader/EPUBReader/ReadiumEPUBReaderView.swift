@@ -161,12 +161,17 @@ private struct ReadiumEPUBReaderViewContent: View {
             if let textBook { await model.open(textBook: textBook, systemIsDark: colorScheme == .dark) }
             else if let bookURL { await model.open(url: bookURL, systemIsDark: colorScheme == .dark) }
         }
-        .onAppear { speechHandoff?.release() }
+        .onAppear {
+            speechHandoff?.release()
+            model.speech.bookKey = model.bookmarkKey ?? settings.activeBookID
+            model.speech.onJumpToSpoken = { model.jumpToSpoken() }
+            model.speech.refreshSavedResume()
+        }
         .onDisappear {
-            // Readium 官方引擎绑定导航器，离开即失效停止；Edge/第三方引擎交给跨页迷你条继续。
+            // 离开阅读器时把会话交给跨页迷你条继续。Readium 官方引擎绑定导航器，
+            // 因此连同模型一起保留（retained），否则导航器随视图释放、朗读立即失效。
             if model.speech.isActive {
-                if model.speech.engineKind == .readium { model.speech.stop() }
-                else { speechHandoff?.adopt(model.speech) }
+                speechHandoff?.adopt(model.speech, retained: model)
             }
             if !wasBatteryMonitoringEnabled {
                 UIDevice.current.isBatteryMonitoringEnabled = false
@@ -192,7 +197,16 @@ private struct ReadiumEPUBReaderViewContent: View {
         .onAppear { ReaderKeepScreenOn.activate() }
         .onDisappear { ReaderKeepScreenOn.deactivate() }
         .task(id: model.status) {
-            if model.status == .ready { await model.scanBookDiagnostics() }
+            guard model.status == .ready else { return }
+            await model.scanBookDiagnostics()
+            // 从迷你条进入：取走续听位置并就地起播。
+            if let point = speechHandoff?.takePendingResume(bookKey: model.bookmarkKey ?? settings.activeBookID ?? "") {
+                model.prepareSpeech()
+                model.speech.start(from: SpeechAnchor(chapterIndex: point.chapterIndex,
+                                                      progression: point.progression,
+                                                      chapterUTF16Length: 0, startIndexHint: nil),
+                                   readiumLocator: nil)
+            }
         }
         .sheet(isPresented: $isShowingTOC) { tocSheet }
         .modifier(ReaderImagePresenter(library: model.imageLibrary, chapterTitle: { model.imageChapterTitle($0) },
@@ -214,7 +228,16 @@ private struct ReadiumEPUBReaderViewContent: View {
         }
         .sheet(isPresented: $isShowingSpeech) {
             SpeechControlView(controller: model.speech, session: model.speech.session,
-                              anchor: model.speechAnchor, title: model.bookTitle, onEngineChange: { model.prepareSpeech() }, onStart: { model.startSpeechFromVisiblePage() })
+                              anchor: model.speechAnchor, title: model.bookTitle,
+                              onEngineChange: { model.prepareSpeech() },
+                              onStart: { model.startSpeechFromVisiblePage() },
+                              onResumeSaved: { point in
+                                  model.jump(toChapter: point.chapterIndex, progression: point.progression)
+                                  model.speech.start(from: SpeechAnchor(chapterIndex: point.chapterIndex,
+                                                                        progression: point.progression,
+                                                                        chapterUTF16Length: 0, startIndexHint: nil),
+                                                     readiumLocator: nil)
+                              })
         }
         .sheet(item: $model.activeNote) { note in noteSheet(note) }
     }

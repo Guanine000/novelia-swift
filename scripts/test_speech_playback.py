@@ -19,6 +19,7 @@ def main():
         'Sources/NoveliaIOSCore/Features/Reader/CloudSpeechText.swift',
         'Sources/NoveliaIOSCore/Features/Reader/SpeechText.swift',
         'Sources/NoveliaIOSCore/Support/SpeechSettingsStore.swift',
+        'Sources/NoveliaIOSCore/Support/SpeechResumeStore.swift',
         'Sources/NoveliaIOSCore/Support/SettingsKeys.swift',
     ]]
     fragments = [p.read_text() for p in core] + [system, readium, remote, (speech / 'EdgeSpeechEngine.swift').read_text(), (ROOT / 'iOSApp/App/Integrations/SpeechEngineFactory.swift').read_text()]

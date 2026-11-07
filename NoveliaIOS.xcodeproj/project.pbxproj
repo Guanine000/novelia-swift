@@ -86,6 +86,7 @@
 		FDC000000000000000000030 /* OpenAICompatibleSpeechClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000032 /* OpenAICompatibleSpeechClient.swift */; };
 		FDC000000000000000000016 /* EdgeSpeechToken.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000006 /* EdgeSpeechToken.swift */; };
 		FDC000000000000000000017 /* SpeechSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000007 /* SpeechSettingsStore.swift */; };
+		FDC000000000000000000033 /* SpeechResumeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000035 /* SpeechResumeStore.swift */; };
 		FDC000000000000000000018 /* SpeechEngineFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000008 /* SpeechEngineFactory.swift */; };
 		FDC000000000000000000019 /* EdgeSpeechEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000009 /* EdgeSpeechEngine.swift */; };
 		FDC00000000000000000001A /* ReadiumSpeechPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC00000000000000000000A /* ReadiumSpeechPlayback.swift */; };
@@ -232,6 +233,7 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		FDC000000000000000000031 /* OpenAICompatibleSpeechClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000032 /* OpenAICompatibleSpeechClient.swift */; };
 		FDC000000000000000000026 /* EdgeSpeechToken.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000006 /* EdgeSpeechToken.swift */; };
 		FDC000000000000000000027 /* SpeechSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000007 /* SpeechSettingsStore.swift */; };
+		FDC000000000000000000034 /* SpeechResumeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000035 /* SpeechResumeStore.swift */; };
 		FDC000000000000000000028 /* SpeechEngineFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000008 /* SpeechEngineFactory.swift */; };
 		FDC000000000000000000029 /* EdgeSpeechEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000009 /* EdgeSpeechEngine.swift */; };
 		FDC00000000000000000002A /* ReadiumSpeechPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC00000000000000000000A /* ReadiumSpeechPlayback.swift */; };
@@ -360,6 +362,7 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		FDC000000000000000000032 /* OpenAICompatibleSpeechClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Infrastructure/API/OpenAICompatibleSpeechClient.swift; sourceTree = "<group>"; };
 		FDC000000000000000000006 /* EdgeSpeechToken.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Infrastructure/API/EdgeSpeechToken.swift; sourceTree = "<group>"; };
 		FDC000000000000000000007 /* SpeechSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/SpeechSettingsStore.swift; sourceTree = "<group>"; };
+		FDC000000000000000000035 /* SpeechResumeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/SpeechResumeStore.swift; sourceTree = "<group>"; };
 		D30000000000000000000002 /* ReaderSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderSettings.swift; sourceTree = "<group>"; };
 		D30000000000000000000004 /* ReaderSettingsAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderSettingsAdapters.swift; sourceTree = "<group>"; };
 		E51000000000000000000001 /* LibraryOrganizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/LibraryOrganizer.swift; sourceTree = "<group>"; };
@@ -584,6 +587,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				FDC000000000000000000032 /* OpenAICompatibleSpeechClient.swift */,
 				FDC000000000000000000006 /* EdgeSpeechToken.swift */,
 				FDC000000000000000000007 /* SpeechSettingsStore.swift */,
+				FDC000000000000000000035 /* SpeechResumeStore.swift */,
 				D30000000000000000000002 /* ReaderSettings.swift */,
 				C20000000000000000000002 /* ShareableLogPolicy.swift */,
 				C2A00000000000000000000B /* SerialAsyncGate.swift */,
@@ -956,6 +960,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				FDC000000000000000000030 /* OpenAICompatibleSpeechClient.swift in Sources */,
 				FDC000000000000000000016 /* EdgeSpeechToken.swift in Sources */,
 				FDC000000000000000000017 /* SpeechSettingsStore.swift in Sources */,
+				FDC000000000000000000033 /* SpeechResumeStore.swift in Sources */,
 				FDC000000000000000000018 /* SpeechEngineFactory.swift in Sources */,
 				FDC000000000000000000019 /* EdgeSpeechEngine.swift in Sources */,
 				FDC00000000000000000001A /* ReadiumSpeechPlayback.swift in Sources */,
@@ -1089,6 +1094,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				FDC000000000000000000031 /* OpenAICompatibleSpeechClient.swift in Sources */,
 				FDC000000000000000000026 /* EdgeSpeechToken.swift in Sources */,
 				FDC000000000000000000027 /* SpeechSettingsStore.swift in Sources */,
+				FDC000000000000000000034 /* SpeechResumeStore.swift in Sources */,
 				FDC000000000000000000028 /* SpeechEngineFactory.swift in Sources */,
 				FDC000000000000000000029 /* EdgeSpeechEngine.swift in Sources */,
 				FDC00000000000000000002A /* ReadiumSpeechPlayback.swift in Sources */,

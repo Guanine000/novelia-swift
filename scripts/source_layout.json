@@ -120,6 +120,7 @@
   "OpenAICompatibleSpeechClient.swift": "Sources/NoveliaIOSCore/Infrastructure/API/OpenAICompatibleSpeechClient.swift",
   "EdgeSpeechToken.swift": "Sources/NoveliaIOSCore/Infrastructure/API/EdgeSpeechToken.swift",
   "SpeechSettingsStore.swift": "Sources/NoveliaIOSCore/Support/SpeechSettingsStore.swift",
+  "SpeechResumeStore.swift": "Sources/NoveliaIOSCore/Support/SpeechResumeStore.swift",
   "SpeechEngineFactory.swift": "iOSApp/App/Integrations/SpeechEngineFactory.swift",
   "EdgeSpeechEngine.swift": "iOSApp/Features/Reader/Speech/EdgeSpeechEngine.swift",
   "ReadiumSpeechPlayback.swift": "iOSApp/Features/Reader/Speech/ReadiumSpeechPlayback.swift",
