@@ -30,6 +30,13 @@ struct SettingsView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
     }
 
+    /// iOS 26 的 Form 行由 UIKit 支撑：主题在页面打开时变化，行内取值文字不会随
+    /// 新 tint 重新着色。用主题身份作行身份强制重建带取值的 Picker 行，行高不变，
+    /// 不影响滚动位置；自定义颜色变化同样触发。
+    private var themeRowIdentity: String {
+        themeColorRaw + "-" + themeCustomHex
+    }
+
     private var selectedMode: ReaderMode {
         ReaderMode(rawValue: modeRaw) ?? .bilingual
     }
@@ -56,6 +63,7 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+        .id(themeRowIdentity)
     }
 
     var body: some View {
@@ -123,6 +131,7 @@ struct SettingsView: View {
                         Text(mode.title).tag(mode.rawValue)
                     }
                 }
+                .id(themeRowIdentity)
                 VStack(alignment: .leading, spacing: 9) {
                     HStack {
                         Text("正文字号")
@@ -158,6 +167,7 @@ struct SettingsView: View {
                 } label: {
                     Label("主题色", systemImage: "paintpalette")
                 }
+                .id(themeRowIdentity)
                 if AppThemeColor(rawValue: themeColorRaw) == .custom {
                     ColorPicker(
                         "自定义颜色",
