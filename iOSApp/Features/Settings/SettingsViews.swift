@@ -69,7 +69,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("账号") {
+            Section {
                 if let username = auth.username {
                     CompatLabeledContent("已登录", value: username)
                     Button("退出登录", role: .destructive) { isConfirmingLogout = true }
@@ -80,9 +80,6 @@ struct SettingsView: View {
                             Text("小说与论坛使用同一账号，会一起退出。")
                         }
                 } else {
-                    Text("登录后可使用需要账号的服务。密码由 Novelia 认证网页处理，App 只保存会话令牌。")
-                        .font(NoveliaStyle.fontBody)
-                        .foregroundStyle(NoveliaStyle.muted)
                     Button {
                         auth.errorMessage = nil
                         auth.isLoginPresented = true
@@ -90,6 +87,13 @@ struct SettingsView: View {
                         Label("登录 / 注册", systemImage: "person.crop.circle.badge.checkmark")
                     }
                     .tint(NoveliaStyle.brandGreen)
+                }
+            } header: {
+                Text("账号")
+            } footer: {
+                // 说明只在未登录时出现，避免占据已登录用户的首屏。
+                if auth.username == nil {
+                    Text("登录后可使用需要账号的服务。密码由 Novelia 认证网页处理，App 只保存会话令牌。")
                 }
             }
             Section("阅读数据") {
@@ -113,6 +117,30 @@ struct SettingsView: View {
                 } label: {
                     Label("阅读背景", systemImage: "paintbrush")
                 }
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack {
+                        Text("正文字号")
+                        Spacer()
+                        Text("\(Int(readerSettings.fontSize)) pt")
+                            .foregroundStyle(NoveliaStyle.muted)
+                    }
+                    Slider(value: $readerSettings.fontSize, in: ReaderSettings.fontRange, step: 1)
+                        .tint(NoveliaStyle.brandGreen)
+                        .accessibilityLabel("正文字号")
+                        .accessibilityValue("\(Int(readerSettings.fontSize)) 点")
+                }
+                Picker("显示语言", selection: $modeRaw) {
+                    ForEach(ReaderMode.allCases) { mode in
+                        Text(mode.title).tag(mode.rawValue)
+                    }
+                }
+                .id(themeRowIdentity)
+                NavigationLink {
+                    TXTChapterRulesView()
+                } label: {
+                    Label("TXT 分章规则", systemImage: "text.alignleft")
+                }
+                // 实验引擎开关与随附选项沉底：设一次就忘的项不占常用位。
                 #if NOVELIA_READIUM_ONLY
                 readiumExperienceControls
                 #else
@@ -127,29 +155,6 @@ struct SettingsView: View {
                     readiumExperienceControls
                 }
                 #endif
-                Picker("显示语言", selection: $modeRaw) {
-                    ForEach(ReaderMode.allCases) { mode in
-                        Text(mode.title).tag(mode.rawValue)
-                    }
-                }
-                .id(themeRowIdentity)
-                VStack(alignment: .leading, spacing: 9) {
-                    HStack {
-                        Text("正文字号")
-                        Spacer()
-                        Text("\(Int(readerSettings.fontSize)) pt")
-                            .foregroundStyle(NoveliaStyle.muted)
-                    }
-                    Slider(value: $readerSettings.fontSize, in: ReaderSettings.fontRange, step: 1)
-                        .tint(NoveliaStyle.brandGreen)
-                        .accessibilityLabel("正文字号")
-                        .accessibilityValue("\(Int(readerSettings.fontSize)) 点")
-                }
-                NavigationLink {
-                    TXTChapterRulesView()
-                } label: {
-                    Label("TXT 分章规则", systemImage: "text.alignleft")
-                }
             }
             Section("界面") {
                 NavigationLink { TabBarSettingsView() } label: {
@@ -198,7 +203,7 @@ struct SettingsView: View {
                     Label("WebDAV 同步", systemImage: "arrow.triangle.2.circlepath")
                 }
             }
-            Section("关于与高级") {
+            Section("关于") {
                 Toggle("启动时检查更新", isOn: $checksUpdates)
                 if services.performsUpdateChecks {
                     Button {
@@ -223,6 +228,8 @@ struct SettingsView: View {
                 } label: {
                     Label("开源许可", systemImage: "doc.plaintext")
                 }
+            }
+            Section {
                 Toggle(isOn: $showsTOCDiagnostics) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("显示目录诊断信息")
@@ -240,9 +247,10 @@ struct SettingsView: View {
                     }
                 }
                 .disabled(isExportingLogs)
+            } header: {
+                Text("高级")
+            } footer: {
                 Text("导出本应用最近 7 天内当前运行可读取的诊断事件，仅保留错误码、耗时和数量等信息，省略标识符、文件路径和未经审查的文本。")
-                    .font(NoveliaStyle.fontBody)
-                    .foregroundStyle(NoveliaStyle.muted)
             }
         }
         .compatScrollContentBackgroundHidden()
