@@ -16,6 +16,7 @@ import zlib
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--device', required=True)
 parser.add_argument('--app', required=True, help='Built dedicated architecture-validation Novelia.app')
+parser.add_argument('--speech-regressions', action='store_true', help='Run targeted speech UI scenarios')
 parser.add_argument('--only-testing', action='append', help='Run one UI regression after a targeted change')
 parser.add_argument('--performance', action='store_true', help='Record simulator Debug baseline metrics instead of functional UI regressions')
 parser.add_argument('--library-count', type=int, choices=[0, 300, 3000], default=300)
@@ -226,6 +227,231 @@ final class TapTests: XCTestCase {
   app.coordinate(withNormalizedOffset: CGVector(dx: 0.70, dy: 0.5)).tap()
   XCTAssertFalse(app.staticTexts["已读完本机已下载章节"].exists)
   zeroExternalRequests(app)
+ }
+ // 只核对朗读状态与顶栏生命周期，不据此声称模拟器真实发声或后台验收通过。
+ func testSpeechDynamicCatalogFallbackAndSearch() {
+  let app = start(txt: true); defer { app.terminate() }
+  let book = app.staticTexts["架构验证TXT"].firstMatch; XCTAssertTrue(book.waitForExistence(timeout: 15)); book.tap()
+  readerAction(app, "朗读").tap()
+  let engine = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "切换引擎")).firstMatch
+  reveal(engine, app: app); engine.tap(); app.buttons["Edge 在线朗读"].tap(); app.alerts.buttons["同意并启用"].tap()
+  let more = app.buttons["更多 Edge 音色"]; reveal(more, app: app); more.tap()
+  let update = app.buttons["从 Edge 更新音色"]; XCTAssertTrue(update.waitForExistence(timeout: 5)); update.tap()
+  XCTAssertTrue(app.staticTexts["音色更新失败，仍可使用已有列表。"].waitForExistence(timeout: 5))
+  let search = app.searchFields.firstMatch; reveal(search, app: app, up: false); search.tap(); search.typeText("Yunxi")
+  let voice = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "zh-CN-YunxiNeural")).firstMatch
+  XCTAssertTrue(voice.waitForExistence(timeout: 5)); voice.tap()
+  zeroExternalRequests(app)
+ }
+ func testSpeechIndependentVolumeAndPitch() {
+  let app = openDownloadedNetworkBook(readium: false); defer { app.terminate() }
+  readerAction(app, "朗读").tap()
+  let volume = app.sliders["朗读音量"], pitch = app.sliders["朗读音高"]
+  reveal(volume, app: app); volume.adjust(toNormalizedSliderPosition: 0.25)
+  reveal(pitch, app: app); pitch.adjust(toNormalizedSliderPosition: 0.75)
+  let reset = app.buttons["恢复声音默认值"]; reveal(reset, app: app); reset.tap()
+  XCTAssertTrue(app.staticTexts["朗读音量 100%"].waitForExistence(timeout: 5))
+  XCTAssertTrue(app.staticTexts["音高：默认"].exists)
+  zeroExternalRequests(app)
+ }
+ func testSpeechNativeSelectionAndHighlightTap() {
+  let app = openDownloadedNetworkBook(readium: false); defer { app.terminate() }
+  let point = app.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.27))
+  point.press(forDuration: 1)
+  let from = app.descendants(matching: .any).matching(identifier: "从此句朗读").firstMatch
+  XCTAssertTrue(from.waitForExistence(timeout: 5)); from.tap()
+  XCTAssertTrue(app.buttons["快捷暂停朗读"].waitForExistence(timeout: 10)); app.buttons["快捷暂停朗读"].tap()
+  point.tap()
+  XCTAssertTrue(app.buttons["快捷暂停朗读"].waitForExistence(timeout: 5), "Tapping the highlighted sentence must resume")
+  zeroExternalRequests(app)
+ }
+ func testSpeechReadiumSelectionStart() {
+  let app = start(readium: true, txt: true); defer { app.terminate() }
+  let book = app.staticTexts["架构验证TXT"].firstMatch; XCTAssertTrue(book.waitForExistence(timeout: 15)); book.tap()
+  XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30))
+  let body = app.webViews.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "本地TXT验证正文")).firstMatch
+  XCTAssertTrue(body.waitForExistence(timeout: 15)); body.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.2)).press(forDuration: 1.5)
+  let from = app.descendants(matching: .any).matching(identifier: "从此句朗读").firstMatch
+  XCTAssertTrue(from.waitForExistence(timeout: 5)); from.tap()
+  XCTAssertTrue(app.buttons["快捷暂停朗读"].waitForExistence(timeout: 10))
+  let highlight = app.webViews.buttons["当前朗读句"].firstMatch
+  XCTAssertTrue(highlight.waitForExistence(timeout: 5)); highlight.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+  XCTAssertTrue(app.buttons["快捷继续朗读"].waitForExistence(timeout: 5))
+  highlight.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+  XCTAssertTrue(app.buttons["快捷暂停朗读"].waitForExistence(timeout: 5))
+  zeroExternalRequests(app)
+ }
+ func testSpeechSentenceStartFromTXTScrollText() {
+  let app = start(txt: true); defer { app.terminate() }
+  let book = app.staticTexts["架构验证TXT"].firstMatch; XCTAssertTrue(book.waitForExistence(timeout: 15)); book.tap()
+  let body = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "本地TXT验证正文")).firstMatch
+  XCTAssertTrue(body.waitForExistence(timeout: 15)); body.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.2)).press(forDuration: 1)
+  let from = app.descendants(matching: .any).matching(identifier: "从此句朗读").firstMatch
+  XCTAssertTrue(from.waitForExistence(timeout: 5)); from.tap()
+  let sentence = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "本地TXT验证正文")).firstMatch
+  XCTAssertTrue(sentence.waitForExistence(timeout: 5)); sentence.tap()
+  XCTAssertTrue(app.buttons["快捷暂停朗读"].waitForExistence(timeout: 10))
+  zeroExternalRequests(app)
+ }
+ func testSpeechSentenceStartFromScrollText() {
+  let app = start(); defer { app.terminate() }; openNovel(app)
+  let read = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "继续阅读")).firstMatch
+  reveal(read, app: app); read.tap()
+  let body = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "这是替代服务提供的阅读正文")).firstMatch
+  XCTAssertTrue(body.waitForExistence(timeout: 15)); body.press(forDuration: 1)
+  let from = app.descendants(matching: .any).matching(identifier: "从此句朗读").firstMatch
+  XCTAssertTrue(from.waitForExistence(timeout: 5)); from.tap()
+  let sentence = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "这是替代服务提供的阅读正文")).firstMatch
+  XCTAssertTrue(sentence.waitForExistence(timeout: 5)); sentence.tap()
+  XCTAssertTrue(app.buttons["快捷暂停朗读"].waitForExistence(timeout: 10))
+  zeroExternalRequests(app)
+ }
+ func testNativeSpeechPanelSurvivesChromeAndShowsCapabilities() {
+  let app = openDownloadedNetworkBook(readium: false); defer { app.terminate() }
+  readerAction(app, "朗读").tap()
+  reveal(app.switches["高亮当前朗读句"], app: app)
+  reveal(app.buttons["播放朗读"], app: app, up: false); app.buttons["播放朗读"].tap()
+  XCTAssertTrue(app.buttons["暂停朗读"].waitForExistence(timeout: 10)); app.buttons["暂停朗读"].tap()
+  app.buttons["关闭"].firstMatch.tap()
+  let quickPlay = app.buttons["快捷继续朗读"]
+  XCTAssertTrue(quickPlay.waitForExistence(timeout: 5)); quickPlay.tap()
+  XCTAssertTrue(app.buttons["快捷暂停朗读"].waitForExistence(timeout: 5)); app.buttons["快捷暂停朗读"].tap()
+  let highlight = XCTAttachment(screenshot: app.screenshot()); highlight.name = "原生分页系统TTS句子高亮"; highlight.lifetime = .keepAlways; add(highlight)
+  let menu = app.buttons["阅读菜单"]; XCTAssertTrue(menu.waitForExistence(timeout: 5))
+  XCTAssertFalse(app.buttons["朗读"].exists)
+  app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65)).tap()
+  expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: menu); waitForExpectations(timeout: 5)
+  app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65)).tap()
+  readerAction(app, "朗读").tap()
+  XCTAssertTrue(app.staticTexts["已暂停"].waitForExistence(timeout: 5))
+  app.buttons["停止朗读"].tap()
+  readerAction(app, "朗读").tap()
+  XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "点按播放，从当前页开始朗读")).firstMatch.waitForExistence(timeout: 5))
+  app.buttons["关闭"].firstMatch.tap(); zeroExternalRequests(app)
+ }
+ func testSpeechNativeFollowTurnsPagesAndManualTurnPauses() {
+  let app = openDownloadedNetworkBook(readium: false); defer { app.terminate() }
+  readerAction(app, "朗读").tap(); app.buttons["播放朗读"].tap()
+  XCTAssertTrue(app.buttons["暂停朗读"].waitForExistence(timeout: 10)); app.buttons["暂停朗读"].tap()
+  // 每次跳句都经过真实系统引擎与跟读回调，避免依赖模拟器语音播放速度。
+  for _ in 0..<20 { app.buttons["下一句"].tap() }
+  app.buttons["关闭"].firstMatch.tap()
+  let laterPage = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", ".*第 [2-9]/.*页.*")).firstMatch
+  XCTAssertTrue(laterPage.waitForExistence(timeout: 10), "Speech callbacks must move the native pager")
+  let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "系统跟读自动翻页"; shot.lifetime = .keepAlways; add(shot)
+  // 底栏已无翻页按钮：点按右缘翻页区执行一次手动翻页。
+  app.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+  readerAction(app, "朗读").tap()
+  XCTAssertTrue(app.staticTexts["已暂停"].waitForExistence(timeout: 10), "Manual turning must pause speech")
+  app.buttons["关闭"].firstMatch.tap()
+  let before = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "第 [0-9]+/[0-9]+ 页.*")).firstMatch.label
+  app.buttons["返回"].firstMatch.tap()
+  let more = app.buttons["更多操作：架构验证小说"]; XCTAssertTrue(more.waitForExistence(timeout: 10)); more.tap()
+  app.buttons["阅读"].firstMatch.tap()
+  let restored = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", "第 [0-9]+/[0-9]+ 页.*")).firstMatch
+  XCTAssertTrue(restored.waitForExistence(timeout: 20))
+  // 进度比较只取「第 X/Y 页」描述；TXT 包装的章描述按 · 分段后同口径。
+  XCTAssertEqual(restored.label.components(separatedBy: "·").prefix(2).joined(), before.components(separatedBy: "·").prefix(2).joined())
+  zeroExternalRequests(app)
+ }
+ func assertSpeechAvailable(_ app: XCUIApplication) {
+  readerAction(app, "朗读").tap()
+  XCTAssertTrue(app.buttons["播放朗读"].waitForExistence(timeout: 5))
+  XCTAssertTrue(app.buttons["播放朗读"].isEnabled)
+  reveal(app.switches["高亮当前朗读句"], app: app)
+  XCTAssertTrue(app.switches["自动翻到朗读位置"].exists)
+  app.buttons["关闭"].firstMatch.tap()
+  zeroExternalRequests(app)
+ }
+ func testEdgeSpeechConsentAndCapabilityFallback() {
+  let app = start(txt: true); defer { app.terminate() }
+  let book = app.staticTexts["架构验证TXT"].firstMatch; XCTAssertTrue(book.waitForExistence(timeout: 10)); book.tap()
+  readerAction(app, "朗读").tap()
+  let engine = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "切换引擎")).firstMatch
+  reveal(engine, app: app); engine.tap(); app.buttons["Edge 在线朗读"].tap()
+  XCTAssertTrue(app.alerts["启用 Edge 在线朗读？"].waitForExistence(timeout: 5))
+  app.alerts.buttons["取消"].tap()
+  XCTAssertTrue(app.staticTexts["当前引擎：本地 · 系统朗读"].waitForExistence(timeout: 5))
+  engine.tap(); app.buttons["Edge 在线朗读"].tap(); app.alerts.buttons["同意并启用"].tap()
+  XCTAssertTrue(app.staticTexts["当前引擎：Edge 在线朗读"].waitForExistence(timeout: 5))
+  XCTAssertTrue(app.buttons["上一段"].exists)
+  app.buttons["播放朗读"].tap()
+  // 独立替代组装没有云端服务，不上传夹具正文。
+  XCTAssertTrue(app.staticTexts["当前环境不提供 Edge 在线朗读。"].waitForExistence(timeout: 5))
+  reveal(app.switches["自动翻到朗读位置"], app: app)
+  reveal(engine, app: app, up: false); engine.tap(); app.buttons["本地朗读"].tap()
+  XCTAssertTrue(app.staticTexts["当前引擎：本地 · 系统朗读"].waitForExistence(timeout: 5))
+  engine.tap(); app.buttons["Edge 在线朗读"].tap()
+  XCTAssertFalse(app.alerts["启用 Edge 在线朗读？"].exists)
+  XCTAssertTrue(app.staticTexts["当前引擎：Edge 在线朗读"].waitForExistence(timeout: 5))
+  let edgeVoice = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Edge 音色")).firstMatch
+  reveal(edgeVoice, app: app); edgeVoice.tap()
+  XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "云希")).firstMatch.waitForExistence(timeout: 5))
+  XCTAssertFalse(app.buttons["系统默认"].exists)
+  app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "云希")).firstMatch.tap()
+  let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "书内切换Edge与独立音色"; shot.lifetime = .keepAlways; add(shot)
+  let preview = app.buttons["试听当前音色"]; reveal(preview, app: app); preview.tap()
+  XCTAssertTrue(app.staticTexts["当前环境不提供在线音色试听。"].waitForExistence(timeout: 5))
+  let prefetch = app.switches["提前准备下一段"]; reveal(prefetch, app: app, up: false); prefetch.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+  expectation(for: NSPredicate(format: "value == %@", "1"), evaluatedWith: prefetch); waitForExpectations(timeout: 5)
+  app.buttons["关闭"].firstMatch.tap()
+  let back = app.buttons["返回"].firstMatch
+  if app.buttons["BackButton"].exists { app.buttons["BackButton"].tap() }
+  else if back.exists { back.tap() } else { app.navigationBars.buttons.firstMatch.tap() }
+  app.buttons["我的"].firstMatch.tap()
+  let globalSpeech = app.buttons["朗读"].firstMatch; reveal(globalSpeech, app: app); globalSpeech.tap()
+  reveal(app.switches["高亮当前朗读句"], app: app)
+  reveal(app.switches["自动翻到朗读位置"], app: app)
+  let globalPrefetch = app.switches["提前准备下一段"]; reveal(globalPrefetch, app: app)
+  XCTAssertEqual(globalPrefetch.value as? String, "1")
+  zeroExternalRequests(app)
+ }
+ func testSpeechReadiumOnlineAvailable() {
+  let app = start(readium: true); defer { app.terminate() }; openNovel(app)
+  let read = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "继续阅读")).firstMatch
+  reveal(read, app: app); read.tap()
+  XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30))
+  assertSpeechAvailable(app)
+ }
+ func testSpeechReadiumTXTAvailable() {
+  let app = start(readium: true, txt: true); defer { app.terminate() }
+  let book = app.staticTexts["架构验证TXT"].firstMatch; XCTAssertTrue(book.waitForExistence(timeout: 15)); book.tap()
+  XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30))
+  assertSpeechAvailable(app)
+ }
+ func testSpeechReadiumNormalStartShowsQuickControls() {
+  let app = start(readium: true, txt: true); defer { app.terminate() }
+  let book = app.staticTexts["架构验证TXT"].firstMatch; XCTAssertTrue(book.waitForExistence(timeout: 15)); book.tap()
+  XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 30))
+  readerAction(app, "朗读").tap(); app.buttons["播放朗读"].tap()
+  XCTAssertTrue(app.buttons["暂停朗读"].waitForExistence(timeout: 15))
+  app.buttons["关闭"].firstMatch.tap()
+  XCTAssertTrue(app.buttons["快捷暂停朗读"].waitForExistence(timeout: 5))
+  app.buttons["快捷暂停朗读"].tap()
+  XCTAssertTrue(app.buttons["快捷继续朗读"].waitForExistence(timeout: 5))
+  app.buttons["快捷继续朗读"].tap()
+  XCTAssertTrue(app.buttons["快捷暂停朗读"].waitForExistence(timeout: 5))
+ }
+ func checkScrollSpeechPausesOnDrag(_ app: XCUIApplication) {
+  assertSpeechAvailable(app)
+  readerAction(app, "朗读").tap(); app.buttons["播放朗读"].tap()
+  XCTAssertTrue(app.buttons["暂停朗读"].waitForExistence(timeout: 10))
+  app.buttons["关闭"].firstMatch.tap()
+  app.swipeUp()
+  readerAction(app, "朗读").tap()
+  XCTAssertTrue(app.staticTexts["已暂停"].waitForExistence(timeout: 10))
+  app.buttons["停止朗读"].tap()
+ }
+ func testSpeechScrollTXTFollowAndManualDrag() {
+  let app = start(txt: true); defer { app.terminate() }
+  let book = app.staticTexts["架构验证TXT"].firstMatch; XCTAssertTrue(book.waitForExistence(timeout: 15)); book.tap()
+  checkScrollSpeechPausesOnDrag(app)
+ }
+ func testSpeechScrollOnlineFollowAndManualDrag() {
+  let app = start(); defer { app.terminate() }; openNovel(app)
+  let read = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "继续阅读")).firstMatch
+  reveal(read, app: app); read.tap()
+  checkScrollSpeechPausesOnDrag(app)
  }
  func testNativeNetworkEPUBEndAndUpdate() { checkNetworkEnd(readium: false) }
  func testReadiumNetworkEPUBEndAndUpdate() { checkNetworkEnd(readium: true) }
@@ -992,7 +1218,7 @@ if args.epub_pagination:
 print(f'UI test artifacts: {r}', flush=True)
 with (r / 'test.log').open('w') as log:
  try:
-  subprocess.run(['xcodebuild','-project',str(p),'-scheme','TapTests','-destination',f'platform=iOS Simulator,id={args.device}','-derivedDataPath',str(r/'DerivedData'),'-parallel-testing-enabled','NO','test'] + ([f'-only-testing:{method}' for method in args.only_testing] if args.only_testing else []),stdout=log,stderr=subprocess.STDOUT,check=True)
+  subprocess.run(['xcodebuild','-project',str(p),'-scheme','TapTests','-destination',f'platform=iOS Simulator,id={args.device}','-derivedDataPath',str(r/'DerivedData'),'-parallel-testing-enabled','NO','test'] + ([f'-only-testing:TapTests/TapTests/{method}' for method in ['testEdgeSpeechConsentAndCapabilityFallback', 'testNativeSpeechPanelSurvivesChromeAndShowsCapabilities', 'testSpeechNativeFollowTurnsPagesAndManualTurnPauses', 'testSpeechReadiumOnlineAvailable', 'testSpeechReadiumTXTAvailable', 'testSpeechScrollTXTFollowAndManualDrag', 'testSpeechScrollOnlineFollowAndManualDrag']] if args.speech_regressions else ([f'-only-testing:{method}' for method in args.only_testing] if args.only_testing else [])),stdout=log,stderr=subprocess.STDOUT,check=True)
  finally:
   if sample is not None:
    subprocess.run(['xcrun','simctl','terminate',args.device,'cc.novelia.ios.architecture-validation'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

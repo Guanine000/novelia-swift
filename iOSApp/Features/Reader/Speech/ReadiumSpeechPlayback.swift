@@ -561,34 +561,67 @@ struct SpeechControlView: View {
     }
 }
 
-/// 正文上的小型控件不占顶栏；展开设置仍使用宿主面板，不持有第二套播放器。
-struct ReaderSpeechQuickControls: View {
+/// 底部听书条：朗读期间覆盖在阅读区底部，替代悬浮控件；中间文字区点按打开朗读面板。
+/// 与引擎无关，经 `ReaderSpeechPresentation` 挂在各阅读器上，不持有第二套播放器。
+struct ReaderSpeechBar: View {
     @ObservedObject var controller: SpeechPlaybackController
     let openPanel: () -> Void
-    @State private var expanded = false
     var body: some View {
         if controller.showsQuickControls {
-            VStack(alignment: .trailing, spacing: 8) {
-                if expanded {
-                    HStack(spacing: 16) {
-                        Button { controller.skipBackward() } label: { Image(systemName: "backward.fill") }
-                            .accessibilityLabel(controller.skipBackwardLabel)
-                        Button { controller.skipForward() } label: { Image(systemName: "forward.fill") }
-                            .accessibilityLabel(controller.skipForwardLabel)
-                        Button(action: openPanel) { Image(systemName: "slider.horizontal.3") }.accessibilityLabel("朗读设置")
-                        Button { controller.stop() } label: { Image(systemName: "stop.fill") }.accessibilityLabel("停止朗读")
-                    }.padding(14).background(.regularMaterial, in: Capsule())
+            HStack(spacing: 16) {
+                Button {
+                    if controller.state.isPlaying { controller.pause() } else { controller.play() }
+                } label: {
+                    Image(systemName: controller.state.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.title3)
+                        .frame(width: 32, height: 40)
                 }
-                HStack(spacing: 12) {
-                    Button {
-                        if controller.state.isPlaying { controller.pause() } else { controller.play() }
-                    } label: { Image(systemName: controller.state.isPlaying ? "pause.fill" : "play.fill").frame(width: 36, height: 36) }
-                    .accessibilityLabel(controller.state.isPlaying ? "快捷暂停朗读" : "快捷继续朗读")
-                    .disabled(controller.state == .preparing)
-                    Button { expanded.toggle() } label: { Image(systemName: expanded ? "chevron.down" : "ellipsis").frame(width: 32, height: 36) }
-                        .accessibilityLabel("朗读快捷操作")
-                }.padding(6).background(.regularMaterial, in: Capsule())
-            }.buttonStyle(.borderless)
+                .accessibilityLabel(controller.state.isPlaying ? "快捷暂停朗读" : "快捷继续朗读")
+                .disabled(controller.state == .preparing)
+                Button { controller.skipBackward() } label: { Image(systemName: "backward.fill") }
+                    .accessibilityLabel(controller.skipBackwardLabel)
+                    .disabled(controller.state.utterance == nil)
+                Button { controller.skipForward() } label: { Image(systemName: "forward.fill") }
+                    .accessibilityLabel(controller.skipForwardLabel)
+                    .disabled(controller.state.utterance == nil)
+                Button(action: openPanel) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(controller.bookTitle.isEmpty ? "Novelia 朗读" : controller.bookTitle)
+                            .font(NoveliaStyle.fontFootnote)
+                            .lineLimit(1)
+                        Text(statusLine)
+                            .font(NoveliaStyle.fontMicro)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Button(action: openPanel) { Image(systemName: "slider.horizontal.3") }
+                    .accessibilityLabel("朗读设置")
+                Button { controller.stop() } label: { Image(systemName: "xmark") }
+                    .accessibilityLabel("停止朗读")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.regularMaterial)
+            .overlay(alignment: .top) {
+                Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 0.5)
+            }
+        }
+    }
+
+    private var statusLine: String {
+        switch controller.state {
+        case .idle: return "朗读已停止"
+        case .preparing: return "正在准备…"
+        case .playing(let utterance): return "正在朗读：\(utterance.text.prefix(28))"
+        case .paused: return "已暂停"
+        case .finished: return "朗读结束"
+        case .failed(let message): return message
         }
     }
 }

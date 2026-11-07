@@ -58,6 +58,8 @@ private struct EPUBReaderViewContent: View {
     @State private var tocWordCounts: ReaderTOCWordCounts?
     @State private var isShowingBookPreferences = false
     @State private var isShowingStyle = false
+    @StateObject private var speech = SpeechPlaybackController()
+    @State private var isShowingSpeech = false
     @State private var isShowingBookmarks = false
     @State private var bookmarksTab = ReaderBookmarksSearchSheet.Tab.bookmarks
     @State private var didCopyDiagnostics = false
@@ -113,8 +115,8 @@ private struct EPUBReaderViewContent: View {
                         Button("关闭阅读器") { dismiss() }
                     }
                 case .ready:
-                    EPUBReaderPageSurface(model: model, showChrome: $showChrome, size: geometry.size,
-                                          searchRects: model.searchHighlightRects)
+                    EPUBReaderPageSurface(model: model, speech: speech, showChrome: $showChrome, size: geometry.size,
+                                          speechRects: model.speechHighlightRects, searchRects: model.searchHighlightRects)
                         .equatable()
                         // 底栏不再放上一页／下一页按钮，保留 VoiceOver 的翻页动作。
                         .accessibilityAdjustableAction { direction in
@@ -177,6 +179,7 @@ private struct EPUBReaderViewContent: View {
                 }
             }
             .onAppear {
+                model.onManualNavigation = { speech.pause() }
                 wasBatteryMonitoringEnabled = UIDevice.current.isBatteryMonitoringEnabled
                 UIDevice.current.isBatteryMonitoringEnabled = true
                 updateBatteryLevel()
@@ -192,6 +195,8 @@ private struct EPUBReaderViewContent: View {
                 }
             }
             .onDisappear {
+                speech.stop()
+                model.onManualNavigation = nil
                 // 停止已关闭书籍的排版；重新打开时复用缓存中已完成的章节。
                 model.close()
                 if !wasBatteryMonitoringEnabled {
@@ -218,6 +223,14 @@ private struct EPUBReaderViewContent: View {
         .trackReadingTime(statisticsBook ?? ReadingBook(id: "epub:\(bookURL?.lastPathComponent ?? "sample")",
                                                        title: bookURL?.deletingPathExtension().lastPathComponent ?? "样例书", kind: .epub),
                           ready: model.status == .ready)
+        .modifier(ReaderSpeechPresentation(controller: speech, isPresented: $isShowingSpeech,
+                                  anchor: { model.speechAnchor },
+                                  title: model.source?.bookTitle ?? "阅读器") {
+                SystemSpeechEngine(chapterCount: model.chapterCount,
+                                   onReadingPosition: { position, settings in model.updateSpeechPosition(position, settings: settings) }) { index in
+                    try await model.speechChapterText(index)
+                }
+            })
         .sheet(isPresented: $isShowingTOC) { tocSheet }
         .modifier(ReaderImagePresenter(library: model.imageLibrary, chapterTitle: { model.chapterTitle($0) },
                                        onJump: { model.jump(toImage: $0) }))
@@ -235,7 +248,7 @@ private struct EPUBReaderViewContent: View {
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NoveliaImportedFontsChanged"))) { _ in model.refreshBackground() }
         .onValueChange(of: settings.fontSize) { _, _ in synchronizeSettings(systemIsDark: colorScheme == .dark) }
         .sheet(isPresented: $isShowingBookPreferences) { ReaderBookPreferencesView() }
-        .onValueChange(of: settings.projectionRevision) { _, _ in model.reloadBookPreferences() }
+        .onValueChange(of: settings.projectionRevision) { _, _ in speech.stop(); model.reloadBookPreferences() }
         .onValueChange(of: settings.appearanceRaw) { _, _ in synchronizeSettings(systemIsDark: colorScheme == .dark) }
         .onValueChange(of: model.isAnimating) { _, active in
             if !active { synchronizeSettings(systemIsDark: colorScheme == .dark) }
@@ -294,6 +307,7 @@ private struct EPUBReaderViewContent: View {
                     Label("阅读设置", systemImage: "textformat.size")
                 }
                 .accessibilityLabel("阅读设置")
+                Button { isShowingSpeech = true } label: { Label("朗读", systemImage: "speaker.wave.2") }
             }
         )
         .opacity(showChrome ? 1 : 0)
@@ -827,16 +841,19 @@ struct EPUBReaderHost: View {
 /// 变化时，模型仍会使此观察视图更新。
 private struct EPUBReaderPageSurface: View, Equatable {
     @ObservedObject var model: EPUBReaderModel
+    let speech: SpeechPlaybackController
     @Environment(\.openURL) private var openURL
     @EnvironmentObject private var settings: ReaderSettings
     @Binding var showChrome: Bool
     let size: CGSize
+    let speechRects: [CGRect]
     let searchRects: [CGRect]
+    @Environment(\.readerSpeechActions) private var speechActions
     @State private var translateText: String?
     @State private var showsTranslate = false
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.model === rhs.model && lhs.size == rhs.size && lhs.searchRects == rhs.searchRects
+        lhs.model === rhs.model && lhs.size == rhs.size && lhs.speechRects == rhs.speechRects && lhs.searchRects == rhs.searchRects
     }
 
     var body: some View {
@@ -864,16 +881,18 @@ private struct EPUBReaderPageSurface: View, Equatable {
             selectionRangeAt: { point in model.selectionRange(at: point) },
             selectionRects: { range in model.selectionRects(for: range) },
             selectedText: { range in model.selectedText(for: range) },
+            speechRects: speechRects,
+            onSpeechTap: { speech.toggleHighlightedSpeech() },
+            onSpeakSelection: { range in
+                speechActions.start(SpeechAnchor(chapterIndex: model.location.spineIndex, progression: 0,
+                                                chapterUTF16Length: 0, startIndexHint: nil, sourceUTF16Offset: range.location))
+            },
             selectionTranslate: { text in
                 translateText = text
                 showsTranslate = true
             },
             images: model.pagerImages()
         )
-        .overlay {
-            Path { path in for rect in model.speechHighlightRects { path.addRect(rect) } }
-                .fill(Color.yellow.opacity(0.30)).allowsHitTesting(false).accessibilityHidden(true)
-        }
         .overlay {
             Path { path in for rect in searchRects { path.addRect(rect) } }
                 .fill(Color.yellow.opacity(0.35)).allowsHitTesting(false).accessibilityHidden(true)

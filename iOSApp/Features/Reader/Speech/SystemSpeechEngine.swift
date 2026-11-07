@@ -289,9 +289,8 @@ struct ReaderSpeechPresentation: ViewModifier {
                 rebuild()
                 controller.start(from: selected)
             }))
-        .overlay(alignment: .bottomTrailing) {
-            ReaderSpeechQuickControls(controller: controller, openPanel: { isPresented = true })
-                .padding(.trailing, 16).padding(.bottom, 110)
+        .overlay(alignment: .bottom) {
+            ReaderSpeechBar(controller: controller, openPanel: { isPresented = true })
         }
         .onValueChange(of: isPresented) { _, shown in
             if shown {

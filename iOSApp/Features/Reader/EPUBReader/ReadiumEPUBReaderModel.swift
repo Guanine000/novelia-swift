@@ -52,6 +52,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published private(set) var isDarkMode = false
     /// 每次重建导航器递增，让宿主视图换上新的控制器。
     @Published private(set) var navigatorRevision = 0
+    /// 朗读控制器：每本书独立实例，不恢复全局 shared。
+    let speech = SpeechPlaybackController()
+    var speechSelection: (any SpeechEngineSelecting)?
+    private var lastSpeechDecorationTap = Date.distantPast
     /// 各章节 WebView 读到的书籍 html/body 底色（WebView 释放后自动移除）。
     /// 书籍底色只画在 WebView 内；把它涂在包住 WebView 的整屏章节视图上，四周边距就随书页一起滑动，
     /// 翻页时不必等位置回报后再换色。
@@ -149,6 +153,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
                 url: url, disablesScripts: UserDefaults.standard.bool(forKey: SettingsKey.readerEPUBDisablesScripts), projection: settings.projection)
             self.publication = publication
             bookTitle = publication.metadata.title ?? url.deletingPathExtension().lastPathComponent
+            speech.bookTitle = bookTitle
             if case .success(let positions) = await publication.positions() {
                 positionCount = positions.count
                 let index = ReadiumNavigationIndex(readingOrder: publication.readingOrder, tableOfContents: [])
@@ -196,6 +201,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             let publication = ReadiumTextPublication.make(source: source)
             self.publication = publication
             bookTitle = source.bookTitle
+            speech.bookTitle = bookTitle
             toc = Self.flatten(publication.manifest.tableOfContents)
             embeddedTOCCount = toc.count
             positionCount = source.chapterCount
@@ -409,6 +415,11 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         config.decorationTemplates["novelia-search"] = HTMLDecorationTemplate(
             layout: .boxes, element: "<span class='novelia-search-current'></span>",
             stylesheet: ".novelia-search-current { background: rgba(255,210,0,0.30); border-radius: 3px; }")
+        // 朗读高亮提供可访问名称，点按只覆盖当前实际句子矩形。
+        config.decorationTemplates["novelia-speech"] = HTMLDecorationTemplate(
+            layout: .boxes, element: "<span role='button' aria-label='当前朗读句' class='novelia-speech-current'></span>",
+            stylesheet: ".novelia-speech-current { background: rgba(255,210,0,0.30); border-radius: 3px; }")
+        config.editingActions = [EditingAction(title: "从此句朗读", action: #selector(ReadiumNavigatorContainer.speakSelection))] + EditingAction.defaultActions
         config.readiumCSSRSProperties.pageGutter = CSSPxLength(Double(style.leftMargin + style.rightMargin) / 2)
         // 根背景透明：书籍未设背景时露出宿主绘制的阅读背景；书籍给 body 设的背景
         // （如 `<body bgcolor>`）按 CSS 规则延伸到整个页面。
@@ -416,11 +427,20 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         let navigator = try EPUBNavigatorViewController(
             publication: publication, initialLocation: initialLocation, config: config)
         navigator.delegate = self
+        for group in ["tts", "edge-tts"] {
+            navigator.observeDecorationInteractions(inGroup: group) { [weak self] _ in
+                self?.lastSpeechDecorationTap = Date()
+                self?.speech.toggleHighlightedSpeech()
+            }
+        }
+
         // 先于翻页适配器注册且不消费事件：只记下点按，供位置日志区分用户翻页与 Readium 自行移动。
         gestureToken = navigator.addObserver(.tap { [weak self] event in
+            // 同次 WebKit 点击先激活高亮，再上报普通点按；后者不能把刚恢复的朗读再次暂停。
+            if let self, Date().timeIntervalSince(self.lastSpeechDecorationTap) < 0.3 { return true }
             self?.noteGesture("tap")
             if let self, let view = self.navigator?.view,
-               event.location.x < view.bounds.width / 3 || event.location.x > view.bounds.width * 2 / 3 { self.pendingWebPositionWrite = true }
+               event.location.x < view.bounds.width / 3 || event.location.x > view.bounds.width * 2 / 3 { self.speech.pause(); self.pendingWebPositionWrite = true }
             if let self, self.isAtWebNovelEnd, let view = self.navigator?.view,
                event.location.x > view.bounds.width * 2 / 3 { self.pendingWebPositionWrite = false; self.onReachedEnd?(); return true }
             return false
@@ -441,6 +461,155 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         redirectedOperation = nil
         pendingLocationCause = nil
         navigatorRevision += 1
+        attachSpeechEngine(publication: publication, navigator: navigator)
+    }
+
+    func startSpeechFromVisiblePage() {
+        speech.stop(); prepareSpeech()
+        let cloud = speech.isCloud
+        speech.startSelection { [weak self] in
+            guard let self, let navigator = self.navigator,
+                  let visible = await navigator.firstVisibleElementLocator() else { return nil }
+            let index = self.navigationIndex?.resourceIndex(for: visible.href) ?? self.currentPageRange?.chapter ?? 0
+            if !cloud { return (self.speechAnchor, visible) }
+            guard let source = try? await self.chapterPlainText(index),
+                  let root = navigator.view,
+                  let (web, _) = Self.visibleWebView(containing: CGPoint(x: root.bounds.midX, y: root.bounds.midY), in: root) else { return nil }
+            let script = """
+            (() => {
+              const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+              let node, prefix = 0;
+              const visible = r => r.width > 0 && r.height > 0 && r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight;
+              while ((node = walker.nextNode())) {
+                if (node.parentElement.closest('script,style')) continue;
+                const text = node.data;
+                const range = document.createRange(); range.selectNodeContents(node);
+                if (text.trim() && Array.from(range.getClientRects()).some(visible)) {
+                  let lo = 0, hi = text.length - 1;
+                  while (lo < hi) {
+                    const mid = Math.floor((lo + hi) / 2);
+                    range.setStart(node, 0); range.setEnd(node, mid + 1);
+                    if (Array.from(range.getClientRects()).some(visible)) hi = mid; else lo = mid + 1;
+                  }
+                  if (lo > 0 && text.charCodeAt(lo) >= 0xDC00 && text.charCodeAt(lo) <= 0xDFFF) lo--;
+                  let end = Math.min(text.length, lo + 80);
+                  if (end < text.length && text.charCodeAt(end) >= 0xDC00 && text.charCodeAt(end) <= 0xDFFF) end--;
+                  return { offset: prefix + text.slice(0, lo).replace(/\\s/g, '').length, quote: text.slice(lo, end) };
+                }
+                prefix += text.replace(/\\s/g, '').length;
+              }
+              return null;
+            })()
+            """
+            let result: [String: Any]? = await withCheckedContinuation { continuation in
+                web.evaluateJavaScript(script) { value, _ in continuation.resume(returning: value as? [String: Any]) }
+            }
+            guard let result, let offset = result["offset"] as? Int, let quote = result["quote"] as? String,
+                  let sourceOffset = SpeechText.sourceOffset(visibleNonWhitespaceOffset: offset, quote: quote, in: source) else { return nil }
+            return (SpeechAnchor(chapterIndex: index, progression: 0, chapterUTF16Length: source.utf16.count,
+                                 startIndexHint: nil, sourceUTF16Offset: sourceOffset, startsAtVisibleOffset: true), nil)
+        }
+    }
+
+    func startSpeech(selection: Selection) {
+        let selectedLocator = selection.locator
+        let index = navigationIndex?.resourceIndex(for: selectedLocator.href) ?? currentPageRange?.chapter ?? 0
+        speech.stop(); prepareSpeech()
+        let cloud = speech.isCloud
+        speech.startSelection { [weak self] in
+            guard let self else { return nil }
+            let progression = selectedLocator.locations.progression ?? 0
+            if !cloud {
+                return (SpeechAnchor(chapterIndex: index, progression: progression,
+                                     chapterUTF16Length: 0, startIndexHint: nil), selectedLocator)
+            }
+            guard let source = try? await self.chapterPlainText(index),
+                  let selected = selectedLocator.text.highlight,
+                  let offset = SpeechText.selectedOffset(selected, in: source, near: progression) else { return nil }
+            return (SpeechAnchor(chapterIndex: index, progression: progression, chapterUTF16Length: source.utf16.count,
+                                 startIndexHint: nil, sourceUTF16Offset: offset), nil)
+        }
+        navigator?.clearSelection()
+    }
+
+    /// 每次重建导航器都要换朗读引擎：旧引擎持有的导航器已失效。
+    private var externalSpeechTask: Task<Void, Never>?
+    private var externalSpeechGeneration = UUID()
+
+    /// 用同一份上传正文的前后文定位句子，Readium 在 HTML 中解析精确文本范围。
+    private func updateExternalSpeechPosition(_ position: SpeechReadingPosition?, settings: SpeechSettings) {
+        externalSpeechTask?.cancel()
+        externalSpeechGeneration = UUID()
+        let generation = externalSpeechGeneration
+        guard let position, let publication, let navigator,
+              publication.readingOrder.indices.contains(position.chapterIndex) else {
+            navigator?.apply(decorations: [], in: "edge-tts")
+            return
+        }
+        externalSpeechTask = Task { [weak self, weak navigator] in
+            guard let self, let navigator,
+                  let text = try? await self.chapterPlainText(position.chapterIndex),
+                  let base = await publication.locate(publication.readingOrder[position.chapterIndex]),
+                  !Task.isCancelled, self.externalSpeechGeneration == generation else { return }
+            let source = text as NSString
+            let range = position.sentenceRange
+            guard range.lowerBound >= 0, range.upperBound <= source.length, !range.isEmpty else { return }
+            let beforeStart = max(0, range.lowerBound - 80)
+            let afterEnd = min(source.length, range.upperBound + 80)
+            let locator = base.copy(locations: {
+                $0.progression = Double(range.lowerBound) / Double(max(1, source.length))
+            }, text: {
+                $0.before = source.substring(with: NSRange(location: beforeStart, length: range.lowerBound - beforeStart))
+                $0.highlight = source.substring(with: NSRange(location: range.lowerBound, length: range.count))
+                $0.after = source.substring(with: NSRange(location: range.upperBound, length: afterEnd - range.upperBound))
+            })
+            let decorations = settings.highlightsSpokenText
+                ? [Decoration(id: "edge-current", locator: locator,
+                              style: .init(id: "novelia-speech"))] : []
+            navigator.apply(decorations: decorations, in: "edge-tts")
+            if settings.followsReadingPosition, self.speech.state.isPlaying {
+                self.markNavigation("speech")
+                _ = await navigator.go(to: locator)
+            }
+        }
+    }
+
+    private func attachSpeechEngine(publication: Publication, navigator: EPUBNavigatorViewController) {
+        let local = ReadiumSpeechEngine(publication: publication, navigator: navigator, onFollow: { [weak self] in
+            self?.markNavigation("speech")
+        }, chapterLocator: { [weak self] delta in
+            guard let self else { return nil }
+            let current = self.currentPageRange?.chapter ?? 0
+            let index = min(publication.readingOrder.count - 1, max(0, current + delta))
+            guard publication.readingOrder.indices.contains(index),
+                  let base = await publication.locate(publication.readingOrder[index]) else { return nil }
+            return base.copy(locations: { $0.progression = 0 })
+        })
+        speech.reloadSettings()
+        if let speechSelection {
+            speech.attach(speechSelection.select(local: local, chapterCount: chapterCount,
+                onReadingPosition: { [weak self] position, settings in
+                    self?.updateExternalSpeechPosition(position, settings: settings)
+                }, chapterText: { [weak self] index in
+                guard let self else { throw CancellationError() }
+                return try await self.chapterPlainText(index)
+            }))
+        } else { speech.attach(local) }
+    }
+
+    /// 未在播放时重开面板，重新读取已确认的引擎偏好，不打断活动会话。
+    func prepareSpeech() {
+        guard !speech.isActive, let publication, let navigator else { return }
+        attachSpeechEngine(publication: publication, navigator: navigator)
+    }
+
+    /// 朗读起播位置。Readium 引擎优先使用当前可见页的 Locator；
+    /// 这里保留章内比例，供以后按片段队列起播的系统／云端引擎使用。
+    var speechAnchor: SpeechAnchor {
+        let range = currentPageRange
+        return SpeechAnchor(chapterIndex: range?.chapter ?? 0,
+                            progression: range?.range.lowerBound ?? 0,
+                            chapterUTF16Length: 0, startIndexHint: nil)
     }
 
     /// 在导航器视图坐标处查找正文图片（`<img>` 或 SVG `<image>`，边长不足 32pt 的小图不算），
@@ -569,6 +738,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     func reloadBookPreferences(url: URL?) {
         readingReturnPoint = nil
         navigator?.apply(decorations: [], in: "book-search")
+        speech.stop()
         reloadStoredStyle()
         if let textBook, let source = textBook.source as? TextChapterSource {
             source.displayProjection = settings.projection
@@ -639,8 +809,9 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     private var redirectedOperation: Int?
 
     private func markNavigation(_ cause: String) {
+        if ["turnForward", "turnBackward", "navigate", "seek", "swipe", "outerSwipe"].contains(cause) { speech.pause() }
         diagnosticOperation += 1
-        if ["turnForward", "turnBackward", "navigate", "seek", "swipe", "outerSwipe"].contains(cause) { pendingWebPositionWrite = true }
+        if ["turnForward", "turnBackward", "navigate", "seek", "swipe", "outerSwipe", "speech"].contains(cause) { pendingWebPositionWrite = true }
         pendingLocationCause = (cause, .now)
     }
 

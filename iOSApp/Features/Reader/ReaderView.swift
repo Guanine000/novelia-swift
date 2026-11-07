@@ -65,6 +65,8 @@ struct ReaderView: View {
     @State private var isLoadingChapter = false
     @State private var chapterError: String?
     @State private var loadAttempt = 0
+    @StateObject private var speech = SpeechPlaybackController()
+    @State private var isShowingSpeech = false
     @State private var isShowingBookPreferences = false
     /// 章节目录改为半屏卡片，便于边看正文边跳章。
     @State private var isShowingChapterDirectory = false
@@ -73,6 +75,7 @@ struct ReaderView: View {
     @State private var readingReturnPoint: ScrollReadingReturnPoint?
     @State private var visibleAnchor: String?
     @State private var returnAnchor: String?
+    @State private var speechPosition: SpeechReadingPosition?
 
     init(novel: Novel, startingAt: Int) {
         self.novel = novel
@@ -119,6 +122,7 @@ struct ReaderView: View {
             settings.deactivateBook("online:" + novel.id)
             ReaderKeepScreenOn.deactivate()
         }
+        .onValueChange(of: settings.projectionRevision) { _, _ in speech.stop() }
     }
 
     private var scrollReader: some View {
@@ -194,6 +198,7 @@ struct ReaderView: View {
                 .frame(maxWidth: .infinity)
             }
             .background(ReaderBackgroundView(dark: appearance.isDark(system: systemColorScheme), fallback: readerBackground).ignoresSafeArea())
+            .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in speech.pause() })
             .onPreferenceChange(ReaderScrollFrames.self) { visibleAnchor = ReaderScrollFrames.visible($0) }
             .task(id: "\(selectedSearchHit?.id ?? "")|\(chapter.id)|\(isLoadingChapter)|\(returnAnchor ?? "")") {
                 guard !isLoadingChapter else { return }
@@ -201,7 +206,13 @@ struct ReaderView: View {
                 if let anchor = returnAnchor { proxy.scrollTo(anchor, anchor: .top); returnAnchor = nil }
                 else if let hit = selectedSearchHit, hit.chapterIndex == chapterIndex { scrollToFind(proxy, offset: hit.utf16Offset) }
             }
+            .onValueChange(of: speechPosition) { _, position in
+                guard let position, speech.settings.followsReadingPosition else { return }
+                if chapterIndex != position.chapterIndex { chapterIndex = position.chapterIndex }
+                scrollToSpeech(proxy)
+            }
             .onValueChange(of: chapterIndex) { _, newIndex in
+                if speechPosition?.chapterIndex != newIndex { speech.pause() }
                 guard novel.chapters.indices.contains(newIndex) else { return }
                 savedChapterIndex = newIndex
                 settings.recordWebPosition(id: novel.id, chapterIndex: newIndex)
@@ -209,6 +220,26 @@ struct ReaderView: View {
                     proxy.scrollTo(novel.chapters[newIndex].id, anchor: .top)
                 }
             }
+            .modifier(ReaderSpeechPresentation(controller: speech, isPresented: $isShowingSpeech,
+                                          anchor: { SpeechAnchor(chapterIndex: chapterIndex, progression: 0,
+                                                               chapterUTF16Length: 0, startIndexHint: nil) },
+                                          title: novel.title) {
+                        SystemSpeechEngine(chapterCount: novel.chapters.count, onReadingPosition: { position, _ in
+                            speechPosition = position
+                        }) { index in
+                            guard novel.chapters.indices.contains(index) else { return "" }
+                            let listed = novel.chapters[index]
+                            let cached = loadedChapters[listed.id] ?? listed
+                            if !cached.originalText.isEmpty || !cached.translatedText.isEmpty {
+                                return displayedText(cached)
+                            }
+                            guard novel.isRemote, let providerId = novel.providerId,
+                                  let novelId = novel.novelId else { return "" }
+                            let fetched = try await settings.offlineChapters.chapter(listed, book: novel, account: auth.offlineAccountScope, service: services.api.content)
+                            loadedChapters[listed.id] = fetched
+                            return displayedText(fetched)
+                        }
+                    })
         .toolbar {
                 ToolbarItem(placement: .compatTopBarTrailing) {
                     Menu {
@@ -234,6 +265,8 @@ struct ReaderView: View {
                             .foregroundStyle(readerPrimaryText)
                     }
                     .accessibilityLabel("分页阅读")
+
+                    Button { isShowingSpeech = true } label: { Label("朗读", systemImage: "speaker.wave.2") }
 
                     Button(action: toggleBookmark) {
                         Label(isBookmarked ? "移除书签" : "添加书签", systemImage: isBookmarked ? "bookmark.fill" : "bookmark")
@@ -300,7 +333,7 @@ struct ReaderView: View {
                 }, onJump: { index, _ in chapterIndex = index }, scopeDescription: "仅搜索已加载和本机缓存章节，不会下载未缓存正文。",
                 onSearchHit: { hit in
                     if readingReturnPoint == nil { readingReturnPoint = .init(chapter: chapterIndex, anchor: visibleAnchor) }
-                    chapterIndex = hit.chapterIndex; selectedSearchHit = hit
+                    speech.pause(); chapterIndex = hit.chapterIndex; selectedSearchHit = hit
                 }, tab: .search)
         }
         .sheet(isPresented: $isShowingBookPreferences) { ReaderBookPreferencesView() }
@@ -311,6 +344,10 @@ struct ReaderView: View {
             }), appearance: appearance)
         }
         .environment(\.readerSearchRange, selectedSearchHit.flatMap { $0.chapterIndex == chapterIndex ? $0.utf16Offset..<($0.utf16Offset + $0.match.utf16.count) : nil })
+        .environment(\.speechChapterIndex, chapterIndex)
+        .onDisappear { speech.stop() }
+        .onValueChange(of: modeRaw) { _, _ in speech.stop() }
+        .onValueChange(of: translationSourceRaw) { _, _ in speech.stop() }
         .toolbar {
             // 与分页阅读器一致：顶栏同时显示书名与当前章节。
             ToolbarItem(placement: .principal) {
@@ -337,12 +374,12 @@ struct ReaderView: View {
     private var readerText: some View {
         switch mode {
         case .original:
-            Paragraphs(text: settings.projection.apply(chapter.originalText), fontSize: fontSize, color: readerPrimaryText)
+            Paragraphs(text: settings.projection.apply(chapter.originalText), fontSize: fontSize, color: readerPrimaryText, speechRange: speechHighlightRange)
         case .translated:
             if displayedTranslation.allSatisfy(\.isEmpty) {
                 unavailableTranslationMessage
             } else {
-                Paragraphs(paragraphs: displayedTranslation, fontSize: fontSize, color: readerPrimaryText)
+                Paragraphs(paragraphs: displayedTranslation, fontSize: fontSize, color: readerPrimaryText, speechRange: speechHighlightRange)
             }
         case .bilingual:
             bilingualReaderText
@@ -358,12 +395,14 @@ struct ReaderView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     if !paragraph.original.isEmpty {
                         ReaderTextBlock(text: paragraph.original, fontSize: fontSize, color: readerPrimaryText,
+                                        speechRange: ranges[index * 2].flatMap { ReaderTextRanges.localRange(speechHighlightRange, in: $0) },
                                         baseOffset: ranges[index * 2]?.lowerBound)
                             .id("text-block-\(ranges[index * 2]?.lowerBound ?? -1)")
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if !paragraph.translation.isEmpty {
                         ReaderTextBlock(text: paragraph.translation, fontSize: fontSize, color: readerSecondaryText,
+                                        speechRange: ranges[index * 2 + 1].flatMap { ReaderTextRanges.localRange(speechHighlightRange, in: $0) },
                                         baseOffset: ranges[index * 2 + 1]?.lowerBound)
                             .id("text-block-\(ranges[index * 2 + 1]?.lowerBound ?? -1)")
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -407,6 +446,28 @@ struct ReaderView: View {
             return chapter.bilingualParagraphs(source: translationSource)
                 .flatMap { [$0.original, $0.translation] }.joined(separator: "\n\n")
         }
+    }
+
+    private var speechHighlightRange: Range<Int>? {
+        speech.settings.highlightsSpokenText && speechPosition?.chapterIndex == chapterIndex ? speechPosition?.sentenceRange : nil
+    }
+
+    private func scrollToSpeech(_ proxy: ScrollViewProxy) {
+        guard let position = speechPosition, position.chapterIndex == chapterIndex else { return }
+        let text = displayedText(chapter)
+        let pieces: [String]
+        switch mode {
+        case .original: pieces = settings.projection.apply(chapter.originalText).components(separatedBy: "\n\n")
+        case .translated: pieces = displayedTranslation
+        case .bilingual: pieces = bilingualParagraphs.flatMap { [$0.original, $0.translation] }
+        }
+        let ranges = ReaderTextRanges.sourceRanges(of: pieces, in: text)
+        guard let index = ranges.firstIndex(where: { $0?.contains(position.currentOffset) == true }),
+              let range = ranges[index] else { return }
+        let chunks = ReaderTextChunker.chunks(pieces[index], maximumCharacters: 200)
+        let localRanges = ReaderTextRanges.sourceRanges(of: chunks, in: pieces[index])
+        guard let chunk = localRanges.compactMap({ $0 }).first(where: { $0.contains(position.currentOffset - range.lowerBound) }) else { return }
+        proxy.scrollTo("text-offset-\(range.lowerBound + chunk.lowerBound)", anchor: .center)
     }
 
     private func scrollToFind(_ proxy: ScrollViewProxy, offset: Int) {
@@ -576,14 +637,16 @@ private struct ChapterDirectoryView: View {
 
 private struct Paragraphs: View {
     let paragraphs: [String]
+    let speechRange: Range<Int>?
     let fontSize: Double
     let color: Color
 
-    init(text: String, fontSize: Double, color: Color) {
-        self.init(paragraphs: text.components(separatedBy: "\n\n"), fontSize: fontSize, color: color)
+    init(text: String, fontSize: Double, color: Color, speechRange: Range<Int>? = nil) {
+        self.init(paragraphs: text.components(separatedBy: "\n\n"), fontSize: fontSize, color: color, speechRange: speechRange)
     }
 
-    init(paragraphs: [String], fontSize: Double, color: Color) {
+    init(paragraphs: [String], fontSize: Double, color: Color, speechRange: Range<Int>? = nil) {
+        self.speechRange = speechRange
         self.paragraphs = paragraphs
         self.fontSize = fontSize
         self.color = color
@@ -594,6 +657,7 @@ private struct Paragraphs: View {
         LazyVStack(alignment: .leading, spacing: 15) {
             ForEach(paragraphs.indices, id: \.self) { index in
                 ReaderTextBlock(text: paragraphs[index], fontSize: fontSize, color: color,
+                                speechRange: ranges[index].flatMap { ReaderTextRanges.localRange(speechRange, in: $0) },
                                 baseOffset: ranges[index]?.lowerBound)
                     .id("text-block-\(ranges[index]?.lowerBound ?? -1)")
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -606,7 +670,9 @@ private struct ReaderTextBlock: View {
     let text: String
     let fontSize: Double
     let color: Color
-    /// 本块首字符在整章正文中的 UTF-16 偏移，用于把搜索命中换算到块内。
+    /// 当前章的朗读句范围（已收窄到本块）；nil 表示不显示朗读高亮。
+    var speechRange: Range<Int>? = nil
+    /// 本块首字符在整章正文中的 UTF-16 偏移，用于把搜索命中与朗读偏移换算到块内。
     var baseOffset: Int? = nil
 
     private var chunks: [String] { ReaderTextChunker.chunks(text, maximumCharacters: 200) }
@@ -616,7 +682,9 @@ private struct ReaderTextBlock: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(chunks.indices, id: \.self) { index in
                 let offset = (baseOffset ?? 0) + (ranges[index]?.lowerBound ?? 0)
-                LinkedReaderText(text: chunks[index], color: color, baseOffset: offset)
+                LinkedReaderText(text: chunks[index], color: color,
+                                 speechRange: ranges[index].flatMap { ReaderTextRanges.localRange(speechRange, in: $0) },
+                                 baseOffset: offset)
                     .id("text-offset-\(offset)")
                     .background(GeometryReader { geometry in Color.clear.preference(key: ReaderScrollFrames.self, value: ["text-offset-\(offset)": geometry.frame(in: .global)]) })
                     .font(.system(size: CGFloat(fontSize), weight: .regular, design: .serif))
@@ -627,16 +695,20 @@ private struct ReaderTextBlock: View {
     }
 }
 
-/// 让章节正文中的 URL 显示为可交互链接，同时保留阅读器字体与搜索命中底色。
+/// 让章节正文中的 URL 显示为可交互链接，同时保留阅读器字体与搜索命中、朗读句底色。
 private struct LinkedReaderText: View {
     let text: String
     let color: Color
+    var speechRange: Range<Int>? = nil
     var baseOffset: Int = 0
+    @Environment(\.readerSpeechActions) private var speechActions
+    @Environment(\.speechChapterIndex) private var speechChapterIndex
     @Environment(\.readerSearchRange) private var searchRange
 
     private var attributedText: AttributedString {
         var value = AttributedString(text)
         value.foregroundColor = color
+        SpeechTextHighlight.apply(speechRange, text: text, to: &value)
         ReaderTextHighlight.apply(ReaderTextRanges.localRange(searchRange, in: baseOffset..<(baseOffset + text.utf16.count)), text: text, to: &value)
         guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
             return value
@@ -656,6 +728,11 @@ private struct LinkedReaderText: View {
     var body: some View {
         Text(attributedText)
             .tint(.accentColor)
+            .contextMenu { SpeechSentenceMenu(text: text, baseOffset: baseOffset, chapter: speechChapterIndex) }
+            .environment(\.openURL, OpenURLAction { url in
+                if url.scheme == "novelia-speech" { speechActions.toggle(); return .handled }
+                return .systemAction
+            })
     }
 }
 
