@@ -142,13 +142,16 @@ struct DownloadedWebNovelTXTReader: View {
                                                                chapterUTF16Length: 0, startIndexHint: nil) },
                                           title: title,
                                           bookKey: preferenceID,
-                                          jumpToSpoken: { speech.suspendFollow(false); scrollToSpeechForce() },
+                                          isReady: chapters != nil,
+                                          chapterTitle: { index in
+                                              guard let chapters, chapters.indices.contains(index) else { return nil }
+                                              return chapters[index].title
+                                          },
+                                          jumpToSpoken: { scrollToSpeechForce() },
                                           onResumeSaved: { point in
                                               guard let chapters, chapters.indices.contains(point.chapterIndex) else { return }
                                               chapterIndex = point.chapterIndex
-                                              speech.start(from: SpeechAnchor(chapterIndex: point.chapterIndex,
-                                                                              progression: point.progression,
-                                                                              chapterUTF16Length: 0, startIndexHint: nil))
+                                              speech.start(from: point.anchor)
                                           }) {
                         let current = chapters ?? []
                         return SystemSpeechEngine(chapterCount: current.count, onReadingPosition: { position, preferences in
@@ -281,12 +284,6 @@ struct DownloadedWebNovelTXTReader: View {
                 }
                 let id = "txt:" + book.contentHash
                 settings.activateBook(id); preferenceID = id
-                // 从迷你条进入：取走续听位置并就地起播。
-                if let point = speechHandoff?.takePendingResume(bookKey: id) {
-                    chapterIndex = min(max(point.chapterIndex, 0), max(book.chapters.count - 1, 0))
-                    speech.start(from: SpeechAnchor(chapterIndex: chapterIndex, progression: point.progression,
-                                                    chapterUTF16Length: 0, startIndexHint: nil))
-                }
                 contentHash = book.contentHash
                 parsedBook = book
                 tocWordCounts = nil

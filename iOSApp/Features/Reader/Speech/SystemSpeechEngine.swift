@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import SwiftUI
+import struct ReadiumShared.Locator
 
 // MARK: - 系统语音合成引擎
 
@@ -10,6 +11,7 @@ import SwiftUI
 @MainActor
 final class SystemSpeechEngine: SpeechEngine {
     let kind: SpeechEngineKind = .system
+    let preparationMessage = "正在加载朗读章节…"
     /// 系统合成器支持语音、语速与逐词回调；backgroundAudio 由两份 Info.plist 的 audio 模式
     /// 与 `SpeechRemoteSession` 提供，两个引擎都声明该能力。
     var capabilities: SpeechCapabilities {
@@ -36,19 +38,20 @@ final class SystemSpeechEngine: SpeechEngine {
     private let synthesizer = AVSpeechSynthesizer()
     private let bridge = SystemSynthesizerDelegate()
     let chapterCount: Int
-    let chapterText: (Int) async throws -> String
+    private(set) var chapterText: (Int) async throws -> String
     private var segments: [SpeechText.Segment] = []
     private var chapterIndex = 0
     private var segmentIndex = 0
     private var settings = SpeechSettings.default
     private var isPaused = false
+    private var ownsAudioSession = false
     // 停止/重新起播使旧加载和旧 utterance 失效；取消请求不保证提供方立即返回。
     private var generation = UUID()
     private var loadTask: Task<Void, Never>?
     private var activeUtterance: AVSpeechUtterance?
     private var chapterUTF16Length = 0
     private var readingPosition: SpeechReadingPosition?
-    let onReadingPosition: ((SpeechReadingPosition?, SpeechSettings) -> Void)?
+    private(set) var onReadingPosition: ((SpeechReadingPosition?, SpeechSettings) -> Void)?
 
     init(chapterCount: Int,
          onReadingPosition: ((SpeechReadingPosition?, SpeechSettings) -> Void)? = nil,
@@ -65,13 +68,19 @@ final class SystemSpeechEngine: SpeechEngine {
         }
     }
 
+    /// 保留合成器的句内进度，只替换新阅读页的数据和定位回调。
+    func rebindReadingContext(to replacement: SystemSpeechEngine) {
+        chapterText = replacement.chapterText
+        onReadingPosition = replacement.onReadingPosition
+    }
+
     func start(from anchor: SpeechAnchor) async {
         guard !Task.isCancelled else { return }
         stop()
         let generation = self.generation
         state = .preparing
         activateSession()
-        await load(chapter: anchor.chapterIndex, progression: anchor.progression, generation: generation, sourceOffset: anchor.sourceUTF16Offset, exactVisibleStart: anchor.startsAtVisibleOffset)
+        await load(chapter: anchor.chapterIndex, progression: anchor.progression, generation: generation, sourceOffset: anchor.sourceUTF16Offset, exactVisibleStart: anchor.startsAtVisibleOffset, resumeText: anchor.resumeText)
     }
 
     func pause() {
@@ -84,6 +93,7 @@ final class SystemSpeechEngine: SpeechEngine {
     func resume() {
         guard case .paused = state else { return }
         isPaused = false
+        activateSession()
         synthesizer.continueSpeaking()
         if let current = state.utterance { state = .playing(current) }
     }
@@ -140,7 +150,7 @@ final class SystemSpeechEngine: SpeechEngine {
 
     // MARK: 队列
 
-    private func load(chapter index: Int, progression: Double, generation: UUID, sourceOffset: Int? = nil, exactVisibleStart: Bool = false) async {
+    private func load(chapter index: Int, progression: Double, generation: UUID, sourceOffset: Int? = nil, exactVisibleStart: Bool = false, resumeText: String? = nil) async {
         guard self.generation == generation, !Task.isCancelled else { return }
         state = .preparing
         guard index >= 0, index < chapterCount else {
@@ -153,6 +163,7 @@ final class SystemSpeechEngine: SpeechEngine {
         do {
             let text = try await chapterText(index)
             guard self.generation == generation, !Task.isCancelled else { return }
+            let sourceOffset = sourceOffset ?? resumeText.flatMap { SpeechText.selectedOffset($0, in: text, near: progression) }
             // 长章节切句放到后台，避免阻塞主线程。
             let parts = await Task.detached(priority: .userInitiated) {
                 SpeechText.splitAtVisibleOffset(SpeechText.segments(in: text), offset: exactVisibleStart ? sourceOffset : nil)
@@ -198,7 +209,8 @@ final class SystemSpeechEngine: SpeechEngine {
             utterance.voice = voice
         }
         state = .playing(SpeechUtterance(text: segment.text, chapterIndex: chapterIndex,
-                                         utf16Offset: segment.utf16Offset, wordRange: nil))
+                                         utf16Offset: segment.utf16Offset, wordRange: nil,
+                                         chapterUTF16Length: chapterUTF16Length))
         activeUtterance = utterance
         reportReadingPosition(spokenOffset: 0)
         synthesizer.speak(utterance)
@@ -219,7 +231,8 @@ final class SystemSpeechEngine: SpeechEngine {
         let end = min(length, start + max(1, range.length))
         state = .playing(SpeechUtterance(text: current.text, chapterIndex: chapterIndex,
                                          utf16Offset: current.utf16Offset,
-                                         wordRange: start..<max(start + 1, end)))
+                                         wordRange: start..<max(start + 1, end),
+                                         chapterUTF16Length: chapterUTF16Length))
     }
 
     private func reportReadingPosition(spokenOffset: Int) {
@@ -233,7 +246,7 @@ final class SystemSpeechEngine: SpeechEngine {
     }
 
     /// 归一化 0–1：0.5 对应系统默认语速，两端分别对应最小／最大语速。
-    private static func avRate(for normalized: Double) -> Float {
+    static func avRate(for normalized: Double) -> Float {
         let value = min(max(normalized, 0), 1)
         let lower = Double(AVSpeechUtteranceMinimumSpeechRate)
         let upper = Double(AVSpeechUtteranceMaximumSpeechRate)
@@ -246,10 +259,12 @@ final class SystemSpeechEngine: SpeechEngine {
     private func activateSession() {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .spokenAudio, policy: .longFormAudio)
-        try? session.setActive(true)
+        do { try session.setActive(true); ownsAudioSession = true } catch {}
     }
 
     private func deactivateSession() {
+        guard ownsAudioSession else { return }
+        ownsAudioSession = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 }
@@ -276,12 +291,16 @@ private final class SystemSynthesizerDelegate: NSObject, AVSpeechSynthesizerDele
 struct ReaderSpeechPresentation: ViewModifier {
     @EnvironmentObject private var services: AppServices
     @Environment(\.speechHandoff) private var speechHandoff
+    @Environment(\.speechBookRoute) private var bookRoute
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var controller: SpeechPlaybackController
     @Binding var isPresented: Bool
     let anchor: () -> SpeechAnchor
     let title: String
     /// 书籍身份与「回到朗读处」由宿主提供；不提供时功能按钮自动隐藏。
     var bookKey: String? = nil
+    var isReady: Bool = true
+    var chapterTitle: ((Int) -> String?)? = nil
     var jumpToSpoken: (() -> Void)? = nil
     var onResumeSaved: ((SpeechResumePoint) -> Void)? = nil
     /// 必须排在带默认值的参数之后、并以尾闭包传入。
@@ -300,12 +319,31 @@ struct ReaderSpeechPresentation: ViewModifier {
         }
         // 进入阅读器即回收遗留的跨页会话；这里的控制器随之成为唯一会话。
         .onAppear {
-            speechHandoff?.release()
+            if speechHandoff?.openRequest == nil { speechHandoff?.release() }
+            controller.bookRoute = bookRoute
             controller.bookKey = bookKey
             controller.onJumpToSpoken = jumpToSpoken
+            controller.chapterTitleProvider = chapterTitle
             controller.refreshSavedResume()
         }
-        .onDisappear { handOffOnExit() }
+        .task(id: isReady ? bookKey : nil) {
+            guard isReady, let bookKey else { return }
+            controller.bookKey = bookKey
+            controller.bookRoute = bookRoute
+            controller.refreshSavedResume()
+            controller.chapterTitleProvider = chapterTitle
+            if speechHandoff?.pendingResume?.bookKey == bookKey {
+                controller.bookTitle = title
+                rebuild()
+                if let playback = speechHandoff?.takePendingResume(bookKey: bookKey, into: controller), !playback.retainedPlayback {
+                    controller.start(from: playback.anchor, readiumLocator: playback.locator)
+                }
+            }
+        }
+        .onValueChange(of: scenePhase) { _, phase in
+            if phase != .active { controller.flushResumePoint() }
+        }
+        .onDisappear { controller.cancelVoicePreviewRecovery(); controller.flushResumePoint(); handOffOnExit() }
         .onValueChange(of: isPresented) { _, shown in
             if shown {
                 controller.bookTitle = title
@@ -343,8 +381,8 @@ struct ReaderSpeechPresentation: ViewModifier {
 }
 
 /// 跨页面朗读会话：阅读器退出时把仍在播放的系统／云端引擎控制器移交到这里，
-/// 由根视图的迷你条接管；重新进入阅读器时回收（停止旧会话，由阅读器自己的控制器接手）。
-/// Readium 官方引擎持有导航器，离开阅读器即失效，不进入移交。每台 App 只有一个活动会话。
+/// 由根视图的迷你条接管；同书返回时移交运行中的系统/云端音频对象，不重新起播。
+/// Readium 官方引擎随阅读模型一并保留导航器。每台 App 只有一个活动会话。
 @MainActor
 final class SpeechHandoffStore: ObservableObject {
     @Published private(set) var session: SpeechPlaybackController?
@@ -355,7 +393,19 @@ final class SpeechHandoffStore: ObservableObject {
 
     /// 迷你条上「回到书内朗读处」的请求：由根视图切回书库、由书库打开对应书籍，
     /// 书籍打开后取走 `pendingResume` 并从该位置继续朗读（高亮随朗读就位）。
-    struct OpenRequest: Equatable { let bookKey: String; let id = UUID() }
+    struct OpenRequest: Hashable, Identifiable {
+        let bookKey: String
+        let route: SpeechBookRoute?
+        let id = UUID()
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+        func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    }
+    struct PendingPlayback {
+        let anchor: SpeechAnchor
+        let locator: Locator?
+        var retainedPlayback = false
+    }
+    private var pendingPlayback: PendingPlayback?
     @Published private(set) var openRequest: OpenRequest?
     private(set) var pendingResume: SpeechResumePoint?
 
@@ -364,17 +414,24 @@ final class SpeechHandoffStore: ObservableObject {
         guard let bookKey = session?.bookKey, !bookKey.isEmpty else { return }
         // 优先用实时位置；没有实时位置再退回已落盘的续听记录。
         pendingResume = session?.currentResumePoint ?? session?.savedResume
-        openRequest = OpenRequest(bookKey: bookKey)
+        pendingPlayback = session.map { PendingPlayback(anchor: $0.currentPlaybackAnchor, locator: $0.currentSpokenLocator) }
+        openRequest = OpenRequest(bookKey: bookKey, route: session?.bookRoute)
     }
-    /// 书籍打开后取走续听位置：同时停掉跨页会话，避免两处同时出声。
-    func takePendingResume(bookKey: String) -> SpeechResumePoint? {
-        guard let pending = pendingResume, pending.bookKey == bookKey else { return nil }
+    /// 新宿主优先接管同书的运行中音频；不能接管时才停止旧会话并按锚点重建。
+    func takePendingResume(bookKey: String, into receiver: SpeechPlaybackController? = nil) -> PendingPlayback? {
+        guard let pending = pendingResume, pending.bookKey == bookKey,
+              let playback = pendingPlayback else { return nil }
         pendingResume = nil
+        pendingPlayback = nil
         openRequest = nil
-        release()
-        return pending
+        var result = playback
+        if let session, let receiver, receiver.adoptLivePlayback(from: session) {
+            result.retainedPlayback = true
+            clearIfSame(session)
+        } else { release() }
+        return result
     }
-    func consumeOpenRequest() { openRequest = nil; pendingResume = nil }
+    func consumeOpenRequest() { openRequest = nil; pendingResume = nil; pendingPlayback = nil }
 
     func adopt(_ controller: SpeechPlaybackController, retained owner: AnyObject? = nil) {
         session = controller
@@ -394,7 +451,21 @@ final class SpeechHandoffStore: ObservableObject {
     }
 }
 
-/// 移交存储经环境传给各阅读器宿主；替代验证组装不注入，阅读器退出即按原逻辑留在原地。
+/// 导航身份独立于正文位置键；书库使用记录 ID，在线阅读保留打开时的小说描述。
+enum SpeechBookRoute {
+    case library(String)
+    case online(Novel)
+}
+private struct SpeechBookRouteKey: EnvironmentKey {
+    static let defaultValue: SpeechBookRoute? = nil
+}
+extension EnvironmentValues {
+    var speechBookRoute: SpeechBookRoute? {
+        get { self[SpeechBookRouteKey.self] }
+        set { self[SpeechBookRouteKey.self] = newValue }
+    }
+}
+/// 移交存储经环境传给各阅读器宿主，实例由 App 持有。
 private struct SpeechHandoffKey: EnvironmentKey {
     static let defaultValue: SpeechHandoffStore? = nil
 }

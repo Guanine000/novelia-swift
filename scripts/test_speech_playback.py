@@ -22,7 +22,9 @@ def main():
         'Sources/NoveliaIOSCore/Support/SpeechResumeStore.swift',
         'Sources/NoveliaIOSCore/Support/SettingsKeys.swift',
     ]]
-    fragments = [p.read_text() for p in core] + [system, readium, remote, (speech / 'EdgeSpeechEngine.swift').read_text(), (ROOT / 'iOSApp/App/Integrations/SpeechEngineFactory.swift').read_text()]
+    handoff = (speech / 'SystemSpeechEngine.swift').read_text().split('@MainActor\nfinal class SpeechHandoffStore')[1].split('private struct SpeechBookRouteKey')[0]
+    handoff = '@MainActor\nfinal class SpeechHandoffStore' + handoff
+    fragments = [handoff] + [p.read_text() for p in core] + [system, readium, remote, (speech / 'EdgeSpeechEngine.swift').read_text(), (ROOT / 'iOSApp/App/Integrations/SpeechEngineFactory.swift').read_text()]
     actual = '\n'.join('\n'.join(line for line in s.splitlines() if not line.startswith('import ')) for s in fragments)
     fixture = (ROOT / 'scripts/fixtures/speech_playback_harness.swift').read_text()
     source = fixture.replace('// ACTUAL_PLAYBACK_SOURCES', actual)
@@ -36,7 +38,7 @@ def main():
     # UI 停止由阅读器宿主持有：退出时按引擎能力移交或停止（handOffOnExit），
     # 不把停止重新绑回会随顶栏隐藏的按钮；三个滚动/分页宿主仍保留文本规则变化的停止。
     accessory = (speech / 'SystemSpeechEngine.swift').read_text().split('// MARK: - 各阅读器共用的朗读入口')[1]
-    assert '.onDisappear { handOffOnExit() }' in accessory and 'func handOffOnExit' in accessory
+    assert '.onDisappear { controller.cancelVoicePreviewRecovery(); controller.flushResumePoint(); handOffOnExit() }' in accessory and 'func handOffOnExit' in accessory
     for path in ['ReaderView.swift', 'TXTReaderView.swift', 'EPUBReader/EPUBReaderView.swift']:
         text = (ROOT / 'iOSApp/Features/Reader' / path).read_text()
         assert 'speech.stop()' in text, path
@@ -45,6 +47,13 @@ def main():
     assert 'speechHandoff?.release()' in accessory and 'speechHandoff?.adopt(' in accessory
     assert '.speechHandoff' in (ROOT / 'iOSApp/Features/Reader/EPUBReader/ReadiumEPUBReaderView.swift').read_text()
     assert 'controller.capabilities.contains(.readingFollow)' in (speech / 'ReadiumSpeechPlayback.swift').read_text()
+    root = (ROOT / 'iOSApp/App/NoveliaApp.swift').read_text()
+    library = (ROOT / 'iOSApp/Features/Library/LibraryViews.swift').read_text()
+    assert '.onReceive(services.speechHandoff.$openRequest)' in root
+    assert '.onReceive(services.speechHandoff.$openRequest) { request in openSpeechBook(request) }' in library
+    assert '.onValueChange(of: sourceBooks)' in library
+    assert 'consumeOpenRequest()' not in library
+    assert '.task(id: isReady ? bookKey : nil)' in accessory
     print('PASS: reader teardown and follow-control wiring guards')
 
 

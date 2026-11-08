@@ -2,6 +2,7 @@ import Foundation
 
 // 平台桩只保存调用与投递事件；下方插入的状态机、任务取消与命令路由均为实际 App 源码。
 protocol ObservableObject: AnyObject {}
+struct Novel {}
 @propertyWrapper struct Published<Value> {
     var wrappedValue: Value
     init(wrappedValue: Value) { self.wrappedValue = wrappedValue }
@@ -35,7 +36,8 @@ final class AVSpeechSynthesizer {
     init() { Self.instances.append(self) }
     func pauseSpeaking(at: SpeechBoundary) {}
     func continueSpeaking() {}
-    func stopSpeaking(at: SpeechBoundary) {}
+    var stopCount = 0
+    func stopSpeaking(at: SpeechBoundary) { stopCount += 1 }
     func speak(_ utterance: AVSpeechUtterance) { spoken.append(utterance) }
     func finish(_ utterance: AVSpeechUtterance) { delegate?.speechSynthesizer(self, didFinish: utterance) }
     func range(_ utterance: AVSpeechUtterance, location: Int = 0) {
@@ -54,8 +56,10 @@ final class AVAudioPlayer {
     var currentTime: TimeInterval = 0
     func prepareToPlay() -> Bool { true }
     func play() -> Bool { playCount += 1; return true }
-    func pause() {}
-    func stop() {}
+    var pauseCount = 0
+    var stopCount = 0
+    func pause() { pauseCount += 1 }
+    func stop() { stopCount += 1 }
     func finish() { delegate?.audioPlayerDidFinishPlaying(self, successfully: true) }
 }
 
@@ -73,7 +77,8 @@ final class AVAudioSession: NSObject {
     static let instance = AVAudioSession()
     static func sharedInstance() -> AVAudioSession { instance }
     func setCategory(_ category: Category, mode: Mode, policy: Policy) throws {}
-    func setActive(_ active: Bool, options: Options = []) throws {}
+    var deactivations = 0
+    func setActive(_ active: Bool, options: Options = []) throws { if !active { deactivations += 1 } }
 }
 enum MPRemoteCommandHandlerStatus { case success }
 class MPRemoteCommand {
@@ -99,7 +104,10 @@ final class MPNowPlayingInfoCenter {
 let MPMediaItemPropertyTitle = "title", MPMediaItemPropertyArtist = "artist", MPMediaItemPropertyAlbumTitle = "album"
 let MPNowPlayingInfoPropertyMediaType = "type", MPNowPlayingInfoPropertyPlaybackRate = "rate"
 enum MPNowPlayingInfoMediaType: Int { case audio }
-struct Locator { var marker: Int = 0 }
+struct Locator: Codable {
+    var marker: Int = 0
+    func jsonString() throws -> String { String(data: try JSONEncoder().encode(self), encoding: .utf8)! }
+}
 struct Publication {}
 final class UIColor {
     static let systemYellow = UIColor()
@@ -113,13 +121,14 @@ struct Decoration {
     var locatorWaiter: CheckedContinuation<Locator?, Never>?
     var delaysLocator = false
     var follows = 0
+    var lastGoLocator: Locator?
     var decorations: [Decoration] = []
     func firstVisibleElementLocator() async -> Locator? {
         if delaysLocator { return await withCheckedContinuation { locatorWaiter = $0 } }
         return Locator()
     }
     func apply(decorations: [Decoration], in group: String) { self.decorations = decorations }
-    func go(to locator: Locator) async -> Bool { follows += 1; return true }
+    func go(to locator: Locator) async -> Bool { follows += 1; lastGoLocator = locator; return true }
 }
 @MainActor protocol PublicationSpeechSynthesizerDelegate: AnyObject {
     func publicationSpeechSynthesizer(_ synthesizer: PublicationSpeechSynthesizer, stateDidChange state: PublicationSpeechSynthesizer.State)
@@ -140,7 +149,8 @@ struct Decoration {
     init?(publication: Publication) { Self.instances.append(self) }
     var lastLocator: Locator?
     func start(from locator: Locator?) { starts += 1; lastLocator = locator }
-    func stop() { delegate?.publicationSpeechSynthesizer(self, stateDidChange: .stopped) }
+    var stops = 0
+    func stop() { stops += 1; delegate?.publicationSpeechSynthesizer(self, stateDidChange: .stopped) }
     func pause() {}
     func resume() {}
     func previous() {}
@@ -226,6 +236,277 @@ actor PendingCloudSpeech: CloudSpeechSynthesizing {
         print("PASS: \(label)")
     }
     @MainActor static func main() async {
+        let ux = SpeechPlaybackController()
+        let uxSystem = SystemSpeechEngine(chapterCount: 1) { _ in "第一句。第二句。第三句。" }
+        ux.bookKey = "txt:ux-\(UUID())"
+        ux.attach(uxSystem)
+        ux.start(from: SpeechAnchor(chapterIndex: 0, progression: 0, chapterUTF16Length: 0, startIndexHint: nil))
+        await wait { ux.state.isPlaying }
+        ux.skipForward(); await drain()
+        let previewToken = ux.beginVoicePreview()!
+        check(!ux.state.isPlaying && ux.currentPlaybackAnchor.sourceUTF16Offset == 4, "试听暂停原书并保留当前句")
+        ux.finishVoicePreview(previewToken, restore: true)
+        check(ux.state.isPlaying && ux.state.utterance?.text == "第二句。", "试听结束继续原来正在播放的句子")
+        ux.pause()
+        let pausedPreview = ux.beginVoicePreview()!
+        ux.finishVoicePreview(pausedPreview, restore: true)
+        check(!ux.state.isPlaying && ux.state.utterance != nil, "原来暂停的书在试听后仍保持暂停")
+        ux.resume()
+        var previewCancellations = 0
+        let cancelledPreview = ux.beginVoicePreview(cancel: { previewCancellations += 1 })!
+        ux.stop(); ux.finishVoicePreview(cancelledPreview, restore: true)
+        check(ux.state == .idle, "明确停止后旧试听回调不能恢复书籍")
+        check(previewCancellations == 1 && !ux.ownsVoicePreview(cancelledPreview), "明确操作同时取消试听音频与恢复令牌")
+        ux.start(from: SpeechAnchor(chapterIndex: 0, progression: 0, chapterUTF16Length: 12, startIndexHint: nil, sourceUTF16Offset: 4))
+        await wait { ux.state.isPlaying }
+        let leavingPreview = ux.beginVoicePreview()!
+        ux.finishVoicePreview(leavingPreview, restore: false)
+        check(!ux.state.isPlaying, "离开试听设置取消自动恢复")
+        ux.resume()
+        ux.suspendFollow(true)
+        var jumpCount = 0
+        ux.onJumpToSpoken = { jumpCount += 1 }
+        ux.returnToSpoken()
+        check(ux.followSuspended && jumpCount == 1, "返回朗读处只定位不擅自恢复跟读")
+        ux.resumeFollowing()
+        check(!ux.followSuspended && jumpCount == 2, "显式恢复跟读解除临时挂起并定位")
+        ux.settings.followsReadingPosition = false; ux.suspendFollow(true); ux.resumeFollowing()
+        check(ux.followSuspended && !ux.settings.followsReadingPosition && jumpCount == 2,
+              "全局关闭跟读时不会被恢复按钮擅自打开")
+        ux.settings.followsReadingPosition = true
+        ux.pause()
+        ux.changeEngine(to: .edge)
+        let switchedCloudService = RecordingCloudSpeech()
+        let switchedCloud = EdgeSpeechEngine(service: switchedCloudService, chapterCount: 1) { _ in "第一句。第二句。第三句。" }
+        ux.attach(switchedCloud)
+        check(!ux.state.isPlaying && ux.state.utterance?.utf16Offset == 4 && switchedCloud.state == .idle,
+              "暂停时换引擎保留句子且不启动合成或发声")
+        let initialRequests = await switchedCloudService.calls
+        check(initialRequests == 0, "暂停换到云端不会提前发送正文")
+        check(MPRemoteCommandCenter.shared().playCommand.isEnabled, "暂停换引擎后锁屏播放命令仍注册")
+        MPRemoteCommandCenter.shared().playCommand.fire(); await wait { ux.state.isPlaying }
+        check(ux.state.utterance?.text.hasPrefix("第二句。") == true, "暂停切换后锁屏播放从原句开始")
+        check(ux.followSuspended, "换引擎和继续播放不擅自解除用户挂起的跟读")
+        ux.changeEngine(to: .system)
+        let switchedSystem = SystemSpeechEngine(chapterCount: 1) { _ in "第一句。第二句。第三句。" }
+        ux.attach(switchedSystem); await wait { ux.state.isPlaying }
+        check(ux.state.utterance?.text == "第二句。", "播放中换回本地自动继续当前句")
+        let transferNavigator = EPUBNavigatorViewController(); transferNavigator.delaysLocator = true
+        let transferReadium = ReadiumSpeechEngine(publication: Publication(), navigator: transferNavigator,
+            anchorForLocator: { _ in SpeechAnchor(chapterIndex: 0, progression: 0.1, chapterUTF16Length: 0, startIndexHint: nil) },
+            locatorForAnchor: { _ in Locator(marker: 73) })!
+        ux.changeEngine(to: .readium); ux.attach(transferReadium)
+        await wait { PublicationSpeechSynthesizer.instances.last?.lastLocator?.marker == 73 }
+        check(transferNavigator.locatorWaiter == nil, "换到Readium使用收听锚点而不是当前可见页")
+        transferReadium.publicationSpeechSynthesizer(PublicationSpeechSynthesizer.instances.last!,
+            stateDidChange: .playing(.init(text: "第二句。", locator: Locator(marker: 73)), range: nil))
+        ux.changeEngine(to: .edge)
+        ux.attach(EdgeSpeechEngine(service: RecordingCloudSpeech(), chapterCount: 1) { _ in "第一句。第二句。第三句。" })
+        await wait { ux.state.isPlaying }
+        check(ux.state.utterance?.text.hasPrefix("第二句。") == true,
+              "Readium换到云端用当前句核对源偏移而非近似比例")
+        let stalePreview = ux.beginVoicePreview()!
+        ux.changeEngine(to: .system)
+        ux.attach(SystemSpeechEngine(chapterCount: 1) { _ in "第一句。第二句。第三句。" })
+        ux.finishVoicePreview(stalePreview, restore: true)
+        check(!ux.state.isPlaying, "切换引擎后旧试听不能恢复已替换会话")
+        ux.skipForward(); await wait { ux.state.utterance?.text == "第三句。" }
+        check(ux.state.utterance?.text == "第三句。", "暂停换引擎后跳句先准备锚点再执行目标操作")
+        ux.stop()
+        var stages: [String] = []
+        let staged = EdgeSpeechEngine(service: RecordingCloudSpeech(), chapterCount: 1) { _ in "阶段验证。" }
+        staged.onStateChange = { state in if state == .preparing { stages.append(staged.preparationMessage) } }
+        await staged.start(from: SpeechAnchor(chapterIndex: 0, progression: 0, chapterUTF16Length: 0, startIndexHint: nil))
+        check(stages.contains(where: { $0.contains("加载朗读章节") }) && stages.contains(where: { $0.contains("请求Edge语音") }),
+              "准备反馈区分章节加载与在线音频请求")
+        staged.stop(); staged.onStateChange = nil
+        SpeechSettingsStore().save(.default)
+        let preparing = SpeechPlaybackController()
+        preparing.bookKey = "txt:preparing-\(UUID())"
+        preparing.attach(SystemSpeechEngine(chapterCount: 1) { _ in "准备中的正文。" })
+        preparing.start(from: SpeechAnchor(chapterIndex: 0, progression: 0.4, chapterUTF16Length: 0, startIndexHint: nil))
+        let preparingHandoff = SpeechHandoffStore()
+        preparingHandoff.adopt(preparing)
+        preparingHandoff.requestOpen()
+        check(preparingHandoff.takePendingResume(bookKey: preparing.bookKey!)?.anchor.progression == 0.4,
+              "首次准备阶段无存档也能从迷你条返回起播位置")
+        check(SpeechResumeStore().load(bookKey: preparing.bookKey!) == nil,
+              "准备阶段返回不会把未播放的位置覆盖进续听存档")
+        let resumeSuite = "ResumeHarness-\(UUID())"
+        let resumeDefaults = UserDefaults(suiteName: resumeSuite)!
+        defer { resumeDefaults.removePersistentDomain(forName: resumeSuite) }
+        let resumeStore = SpeechResumeStore(defaults: resumeDefaults)
+        let resuming = SpeechPlaybackController(resumeStore: resumeStore)
+        resuming.bookKey = "txt:restart"
+        let resumeEngine = SystemSpeechEngine(chapterCount: 2) { _ in "第一句。第二句。" }
+        resuming.attach(resumeEngine)
+        resuming.start(from: SpeechAnchor(chapterIndex: 0, progression: 0, chapterUTF16Length: 0, startIndexHint: nil))
+        await wait { resuming.state.isPlaying }
+        resuming.skipForward(); await drain()
+        check(resuming.currentPlaybackAnchor.sourceUTF16Offset == 4 && resuming.currentPlaybackAnchor.progression > 0.4,
+              "实时续听比例随句首前进")
+        check(resumeStore.load(bookKey: "txt:restart")?.sourceUTF16Offset == 0, "同章逐句变化保持写盘节流")
+        resuming.pause()
+        check(resumeStore.load(bookKey: "txt:restart")?.sourceUTF16Offset == 4, "暂停立即补存最新句首")
+        let pausedAt = resumeStore.load(bookKey: "txt:restart")?.updatedAt
+        resuming.flushResumePoint()
+        check(resumeStore.load(bookKey: "txt:restart")?.updatedAt == pausedAt, "重复暂停或后台补存不重复写盘")
+        resuming.resume(); resuming.skipForward()
+        await wait { resuming.state.utterance?.chapterIndex == 1 }
+        resuming.skipForward(); await drain()
+        resuming.stop()
+        let stoppedPoint = resumeStore.load(bookKey: "txt:restart")!
+        check(stoppedPoint.chapterIndex == 1 && stoppedPoint.sourceUTF16Offset == 4, "跨章停止保存新章当前句而非旧起播锚点")
+        let restored = SpeechPlaybackController(resumeStore: resumeStore)
+        restored.bookKey = "txt:restart"; restored.refreshSavedResume()
+        let restoredEngine = SystemSpeechEngine(chapterCount: 2) { _ in "第一句。第二句。" }
+        restored.attach(restoredEngine)
+        check(resumeStore.load(bookKey: "txt:restart") == stoppedPoint, "重建引擎不覆盖上次续听位置")
+        restored.start(from: restored.savedResume!.anchor)
+        await wait { restored.state.isPlaying }
+        check(restored.state.utterance?.chapterIndex == 1 && restored.state.utterance?.text == "第二句。",
+              "重新创建控制器后从跨章保存的句子恢复")
+        restored.skipBackward(); await drain(); restored.flushResumePoint()
+        check(resumeStore.load(bookKey: "txt:restart")?.sourceUTF16Offset == 0, "后台补存当前位置并支持向前跳句")
+        restored.stop()
+        let handoffController = SpeechPlaybackController()
+        handoffController.bookKey = "epub:hash"
+        handoffController.bookRoute = .library("wenku:record")
+        let handoffEngine = SystemSpeechEngine(chapterCount: 1) { _ in "第一句。第二句。" }
+        handoffController.attach(handoffEngine)
+        handoffController.start(from: SpeechAnchor(chapterIndex: 0, progression: 0, chapterUTF16Length: 0, startIndexHint: nil))
+        await wait { handoffController.state.isPlaying }
+        handoffController.skipForward()
+        await drain()
+        let handoff = SpeechHandoffStore()
+        handoff.adopt(handoffController)
+        handoff.requestOpen()
+        if case .library(let key) = handoff.openRequest?.route {
+            check(key == "wenku:record", "返回请求区分书库身份与正文哈希")
+        } else { check(false, "返回请求保留书库身份") }
+        let firstRequest = handoff.openRequest
+        handoff.requestOpen()
+        check(handoff.openRequest != firstRequest, "连续点击产生独立返回请求")
+        check(handoff.takePendingResume(bookKey: "epub:other") == nil && handoff.session != nil,
+              "错误书籍不消费返回请求或停止播放")
+        let expectedOffset = handoffController.state.utterance?.utf16Offset
+        let playback = handoff.takePendingResume(bookKey: "epub:hash")
+        check(playback?.anchor.sourceUTF16Offset == expectedOffset && expectedOffset != nil,
+              "返回书内保存实时朗读句偏移")
+        check(handoff.session == nil && handoff.openRequest == nil && !handoffController.isActive,
+              "新阅读器接管时停止旧会话并清除请求")
+        check(handoff.takePendingResume(bookKey: "epub:hash") == nil, "续播请求只能消费一次")
+        // 返回仍在运行的书籍时保留底层对象，句内进度和音频时间均不能重置。
+        let liveSystem = SpeechPlaybackController()
+        liveSystem.bookKey = "epub:live-system"
+        let originalSystem = SystemSpeechEngine(chapterCount: 1) { _ in "这是一句还没有读完的长句。下一句。" }
+        liveSystem.attach(originalSystem)
+        liveSystem.start(from: SpeechAnchor(chapterIndex: 0, progression: 0, chapterUTF16Length: 0, startIndexHint: nil))
+        await wait { liveSystem.state.isPlaying }
+        let synthesizer = AVSpeechSynthesizer.instances.last!
+        synthesizer.range(synthesizer.spoken.last!, location: 4); await drain()
+        let spokenCount = synthesizer.spoken.count, systemStops = synthesizer.stopCount
+        let retainedSession = liveSystem.session
+        let systemStore = SpeechHandoffStore(); systemStore.adopt(liveSystem); systemStore.requestOpen()
+        let resumedSystem = SpeechPlaybackController(); resumedSystem.bookKey = liveSystem.bookKey
+        var newPositions = 0
+        resumedSystem.attach(SystemSpeechEngine(chapterCount: 1, onReadingPosition: { _, _ in newPositions += 1 }) { _ in "这是一句还没有读完的长句。下一句。" })
+        let systemResult = systemStore.takePendingResume(bookKey: resumedSystem.bookKey!, into: resumedSystem)
+        check(systemResult?.retainedPlayback == true && resumedSystem.state.isPlaying && !liveSystem.isActive,
+              "系统返回书内直接接管运行中的合成器")
+        check(synthesizer.spoken.count == spokenCount && synthesizer.stopCount == systemStops,
+              "系统返回不stop或speak，保留句内位置不重读句首")
+        check(resumedSystem.session === retainedSession, "返回保留锁屏会话与定时截止时间")
+        synthesizer.range(synthesizer.spoken.last!, location: 6); await drain()
+        check(newPositions > 0, "接管后逐词高亮回调连接新阅读器")
+        liveSystem.stop()
+        check(resumedSystem.state.isPlaying, "旧阅读页销毁不停止已移交的合成器")
+        resumedSystem.stop()
+
+        let liveCloud = SpeechPlaybackController(); liveCloud.bookKey = "epub:live-edge"
+        let liveService = RecordingCloudSpeech()
+        liveCloud.attach(EdgeSpeechEngine(service: liveService, chapterCount: 1) { _ in "云端正在播放这一句。下一句。" })
+        liveCloud.start(from: SpeechAnchor(chapterIndex: 0, progression: 0, chapterUTF16Length: 0, startIndexHint: nil))
+        await wait { liveCloud.state.isPlaying }
+        let retainedPlayer = AVAudioPlayer.instances.last!
+        retainedPlayer.currentTime = 2.75
+        let cloudStops = retainedPlayer.stopCount, cloudPauses = retainedPlayer.pauseCount
+        let cloudCalls = await liveService.calls
+        let audioDeactivations = AVAudioSession.instance.deactivations
+        let cloudStore = SpeechHandoffStore(); cloudStore.adopt(liveCloud); cloudStore.requestOpen()
+        let resumedCloud = SpeechPlaybackController(); resumedCloud.bookKey = liveCloud.bookKey
+        resumedCloud.attach(EdgeSpeechEngine(service: liveService, chapterCount: 1) { _ in "旧临时正文" })
+        resumedCloud.attach(EdgeSpeechEngine(service: liveService, chapterCount: 1) { _ in "云端正在播放这一句。下一句。" })
+        check(AVAudioSession.instance.deactivations == audioDeactivations,
+              "新阅读器空闲引擎重建不关闭正在播放的音频会话")
+        let cloudResult = cloudStore.takePendingResume(bookKey: resumedCloud.bookKey!, into: resumedCloud)
+        await drain()
+        check(cloudResult?.retainedPlayback == true && resumedCloud.state.isPlaying,
+              "Edge返回书内仍在播放，不隐式暂停")
+        let remainingCalls = await liveService.calls
+        check(retainedPlayer.currentTime == 2.75 && retainedPlayer.stopCount == cloudStops
+              && retainedPlayer.pauseCount == cloudPauses && remainingCalls == cloudCalls,
+              "Edge接管保留currentTime，不暂停不重取音频")
+        resumedCloud.pause()
+        cloudStore.adopt(resumedCloud); cloudStore.requestOpen()
+        let pausedReceiver = SpeechPlaybackController(); pausedReceiver.bookKey = resumedCloud.bookKey
+        pausedReceiver.attach(EdgeSpeechEngine(service: liveService, chapterCount: 1) { _ in "云端正在播放这一句。下一句。" })
+        _ = cloudStore.takePendingResume(bookKey: pausedReceiver.bookKey!, into: pausedReceiver)
+        check(!pausedReceiver.state.isPlaying && pausedReceiver.state.utterance != nil,
+              "返回时原本暂停仍保持暂停")
+        pausedReceiver.play()
+        check(pausedReceiver.state.isPlaying && retainedPlayer.currentTime == 2.75,
+              "接管后继续使用原音频播放器恢复")
+        pausedReceiver.stop()
+
+        let localReadium = SpeechPlaybackController(); localReadium.bookKey = "epub:live-readium"
+        let oldNavigator = EPUBNavigatorViewController()
+        let localReadiumEngine = ReadiumSpeechEngine(publication: Publication(), navigator: oldNavigator)!
+        localReadium.attach(localReadiumEngine)
+        localReadium.start(from: SpeechAnchor(chapterIndex: 0, progression: 0, chapterUTF16Length: 0, startIndexHint: nil))
+        await wait { PublicationSpeechSynthesizer.instances.last!.starts == 1 }
+        let localSynth = PublicationSpeechSynthesizer.instances.last!
+        localReadiumEngine.publicationSpeechSynthesizer(localSynth,
+            stateDidChange: .playing(.init(text: "Readium当前句正在中间朗读。", locator: Locator(marker: 105)), range: Locator(marker: 106)))
+        await drain()
+        let startsBeforeReturn = localSynth.starts, stopsBeforeReturn = localSynth.stops
+        let readiumStore = SpeechHandoffStore(); readiumStore.adopt(localReadium); readiumStore.requestOpen()
+        let newReadiumController = SpeechPlaybackController(); newReadiumController.bookKey = localReadium.bookKey
+        let newNavigator = EPUBNavigatorViewController()
+        let newReadiumEngine = ReadiumSpeechEngine(publication: Publication(), navigator: newNavigator)!
+        var reboundLocator: Locator?
+        newReadiumEngine.onSpokenLocator = { reboundLocator = $0 }
+        newReadiumController.attach(newReadiumEngine)
+        let localResult = readiumStore.takePendingResume(bookKey: newReadiumController.bookKey!, into: newReadiumController)
+        await drain()
+        check(localResult?.retainedPlayback == true && newReadiumController.state.isPlaying,
+              "本地Readium返回接管原官方合成器而非Locator重起播")
+        check(localSynth.starts == startsBeforeReturn && localSynth.stops == stopsBeforeReturn,
+              "Readium句中返回不stop/start，不重读句首")
+        check(newNavigator.lastGoLocator?.marker == 106 && reboundLocator?.marker == 105,
+              "Readium新阅读页定位到当前词范围并接收当前句Locator")
+        check(!newNavigator.decorations.isEmpty && oldNavigator.decorations.isEmpty,
+              "Readium高亮从旧导航器移交新导航器")
+        localReadium.stop()
+        check(localSynth.stops == stopsBeforeReturn && newReadiumController.state.isPlaying,
+              "旧Readium阅读模型退出不停止已接管的官方合成器")
+        localReadiumEngine.publicationSpeechSynthesizer(localSynth,
+            stateDidChange: .playing(.init(text: "下一句继续。", locator: Locator(marker: 205)), range: Locator(marker: 206)))
+        check(newReadiumController.currentSentence == "下一句继续。" && reboundLocator?.marker == 205,
+              "原Readium合成器后续事件驱动新控制器与新页面")
+        newReadiumController.pause()
+        readiumStore.adopt(newReadiumController); readiumStore.requestOpen()
+        let pausedReadium = SpeechPlaybackController(); pausedReadium.bookKey = newReadiumController.bookKey
+        let pausedNavigator = EPUBNavigatorViewController()
+        pausedReadium.attach(ReadiumSpeechEngine(publication: Publication(), navigator: pausedNavigator)!)
+        let pausedReadiumResult = readiumStore.takePendingResume(bookKey: pausedReadium.bookKey!, into: pausedReadium)
+        await drain()
+        check(pausedReadiumResult?.retainedPlayback == true && !pausedReadium.state.isPlaying
+              && pausedReadium.state.utterance != nil && localSynth.starts == startsBeforeReturn,
+              "暂停的Readium返回保持暂停且不重新合成")
+        check(pausedNavigator.lastGoLocator?.marker == 206, "暂停Readium返回同样只定位页面")
+        pausedReadium.stop()
+
         let visibleAnchor = SpeechAnchor(chapterIndex: 0, progression: 0, chapterUTF16Length: 8,
                                         startIndexHint: nil, sourceUTF16Offset: 4, startsAtVisibleOffset: true)
         let visibleSystem = SystemSpeechEngine(chapterCount: 1) { _ in "页面前半后半句。" }
@@ -277,12 +558,34 @@ actor PendingCloudSpeech: CloudSpeechSynthesizing {
         selectedCloud.stop()
         let selectedController = SpeechPlaybackController()
         let selectedNavigator = EPUBNavigatorViewController(); selectedNavigator.delaysLocator = true
-        let selectedReadium = ReadiumSpeechEngine(publication: Publication(), navigator: selectedNavigator)!
+        let selectedReadium = ReadiumSpeechEngine(publication: Publication(), navigator: selectedNavigator,
+            anchorForLocator: { locator in
+                SpeechAnchor(chapterIndex: locator.marker == 84 ? 3 : 0, progression: 0.65,
+                             chapterUTF16Length: 0, startIndexHint: nil)
+            })!
         selectedController.attach(selectedReadium)
         selectedController.start(from: selectedAnchor, readiumLocator: Locator(marker: 42))
         await wait { PublicationSpeechSynthesizer.instances.last?.starts == 1 }
         check(PublicationSpeechSynthesizer.instances.last?.lastLocator?.marker == 42 && selectedNavigator.locatorWaiter == nil,
               "Readium 选句直接使用选区 Locator 而非可见页")
+        selectedController.bookKey = "online:sample"
+        selectedController.bookRoute = .online(Novel())
+        selectedReadium.publicationSpeechSynthesizer(PublicationSpeechSynthesizer.instances.last!,
+            stateDidChange: .playing(.init(text: "当前句", locator: Locator(marker: 84)), range: nil))
+        handoff.adopt(selectedController)
+        handoff.requestOpen()
+        if case .online = handoff.openRequest?.route {
+            check(true, "在线返回请求保留小说导航描述")
+        } else { check(false, "在线返回请求保留小说导航描述") }
+        selectedController.pause()
+        // 平台桩不自动发暂停回调，直接调用停止前补存验证实际保存逻辑。
+        selectedController.flushResumePoint()
+        let readiumSaved = SpeechResumeStore().load(bookKey: "online:sample")
+        check(readiumSaved?.chapterIndex == 3 && readiumSaved?.progression == 0.65,
+              "Readium 根据当前Locator保存真实章号和比例")
+        check(readiumSaved?.locatorJSON?.contains("84") == true, "Readium 当前句Locator写入持久化续听记录")
+        let readiumPlayback = handoff.takePendingResume(bookKey: "online:sample")
+        check(readiumPlayback?.locator?.marker == 84, "Readium 返回使用当前句 Locator 而非旧可见页")
         selectedController.stop()
         var selectionWaiter: CheckedContinuation<(SpeechAnchor, Locator?)?, Never>?
         selectedController.startSelection { await withCheckedContinuation { selectionWaiter = $0 } }

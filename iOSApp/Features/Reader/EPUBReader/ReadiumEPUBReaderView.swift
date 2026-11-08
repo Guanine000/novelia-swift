@@ -23,6 +23,7 @@ struct ReadiumEPUBReaderView: View {
 
 private struct ReadiumEPUBReaderViewContent: View {
     @EnvironmentObject private var services: AppServices
+    @Environment(\.speechBookRoute) private var bookRoute
     @Environment(\.speechHandoff) private var speechHandoff
     @ObservedObject private var settings: ReaderSettings
     @ObservedObject private var backgrounds: ReaderBackgroundStore
@@ -162,12 +163,17 @@ private struct ReadiumEPUBReaderViewContent: View {
             else if let bookURL { await model.open(url: bookURL, systemIsDark: colorScheme == .dark) }
         }
         .onAppear {
-            speechHandoff?.release()
+            if speechHandoff?.openRequest == nil { speechHandoff?.release() }
+            model.speech.bookRoute = bookRoute
+            model.speech.bookTitle = model.bookTitle
             model.speech.bookKey = model.bookmarkKey ?? settings.activeBookID
-            model.speech.onJumpToSpoken = { model.jumpToSpoken() }
+            model.speech.onJumpToSpoken = { [weak model = model] in model?.jumpToSpoken() }
+            model.speech.chapterTitleProvider = { [weak model = model] in model?.chapterTitle($0) }
             model.speech.refreshSavedResume()
         }
         .onDisappear {
+            model.speech.cancelVoicePreviewRecovery()
+            model.speech.flushResumePoint()
             // 离开阅读器时把会话交给跨页迷你条继续。Readium 官方引擎绑定导航器，
             // 因此连同模型一起保留（retained），否则导航器随视图释放、朗读立即失效。
             if model.speech.isActive {
@@ -186,6 +192,7 @@ private struct ReadiumEPUBReaderViewContent: View {
             model.synchronizeSharedSettings(systemIsDark: scheme == .dark)
         }
         .onValueChange(of: scenePhase) { _, phase in
+            if phase != .active { model.speech.flushResumePoint() }
             if phase != .background { model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         }
         .onValueChange(of: settings.fontSize) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
@@ -198,15 +205,17 @@ private struct ReadiumEPUBReaderViewContent: View {
         .onDisappear { ReaderKeepScreenOn.deactivate() }
         .task(id: model.status) {
             guard model.status == .ready else { return }
-            await model.scanBookDiagnostics()
-            // 从迷你条进入：取走续听位置并就地起播。
-            if let point = speechHandoff?.takePendingResume(bookKey: model.bookmarkKey ?? settings.activeBookID ?? "") {
+            model.speech.bookTitle = model.bookTitle
+            model.speech.bookKey = model.bookmarkKey ?? settings.activeBookID
+            model.speech.bookRoute = bookRoute
+            model.speech.refreshSavedResume()
+            if speechHandoff?.pendingResume?.bookKey == model.speech.bookKey {
                 model.prepareSpeech()
-                model.speech.start(from: SpeechAnchor(chapterIndex: point.chapterIndex,
-                                                      progression: point.progression,
-                                                      chapterUTF16Length: 0, startIndexHint: nil),
-                                   readiumLocator: nil)
+                if let playback = speechHandoff?.takePendingResume(bookKey: model.speech.bookKey ?? "", into: model.speech), !playback.retainedPlayback {
+                    model.speech.start(from: playback.anchor, readiumLocator: playback.locator)
+                }
             }
+            await model.scanBookDiagnostics()
         }
         .sheet(isPresented: $isShowingTOC) { tocSheet }
         .modifier(ReaderImagePresenter(library: model.imageLibrary, chapterTitle: { model.imageChapterTitle($0) },
@@ -232,11 +241,7 @@ private struct ReadiumEPUBReaderViewContent: View {
                               onEngineChange: { model.prepareSpeech() },
                               onStart: { model.startSpeechFromVisiblePage() },
                               onResumeSaved: { point in
-                                  model.jump(toChapter: point.chapterIndex, progression: point.progression)
-                                  model.speech.start(from: SpeechAnchor(chapterIndex: point.chapterIndex,
-                                                                        progression: point.progression,
-                                                                        chapterUTF16Length: 0, startIndexHint: nil),
-                                                     readiumLocator: nil)
+                                  model.resumeSpeech(at: point)
                               })
         }
         .sheet(item: $model.activeNote) { note in noteSheet(note) }

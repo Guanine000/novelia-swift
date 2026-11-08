@@ -1,7 +1,7 @@
 import Foundation
 
 /// 上次收听位置：按书保存，供 App 重启或重新进入书籍后「继续听」。
-/// 只记到章级加章内比例，不依赖具体引擎的 Locator；各阅读器用自己的跳转接口落位。
+/// 保存章号、句首源偏移与章内比例；Readium 的可选 Locator JSON 由 App 层解释。旧记录继续按比例恢复。
 /// 与朗读偏好一样只存本机，不参与 WebDAV 同步。
 struct SpeechResumePoint: Codable, Equatable, Sendable {
     var bookKey: String
@@ -10,13 +10,23 @@ struct SpeechResumePoint: Codable, Equatable, Sendable {
     var progression: Double
     var engine: String
     var updatedAt: Date
+    var sourceUTF16Offset: Int?
+    var locatorJSON: String?
 
-    init(bookKey: String, chapterIndex: Int, progression: Double, engine: String, updatedAt: Date = Date()) {
+    var anchor: SpeechAnchor {
+        SpeechAnchor(chapterIndex: chapterIndex, progression: progression,
+                     chapterUTF16Length: 0, startIndexHint: nil, sourceUTF16Offset: sourceUTF16Offset)
+    }
+
+    init(bookKey: String, chapterIndex: Int, progression: Double, engine: String, updatedAt: Date = Date(),
+         sourceUTF16Offset: Int? = nil, locatorJSON: String? = nil) {
         self.bookKey = bookKey
         self.chapterIndex = chapterIndex
         self.progression = min(max(progression.isFinite ? progression : 0, 0), 1)
         self.engine = engine
         self.updatedAt = updatedAt
+        self.sourceUTF16Offset = sourceUTF16Offset.map { max(0, $0) }
+        self.locatorJSON = locatorJSON
     }
 }
 
@@ -42,7 +52,7 @@ struct SpeechResumeStore {
     func save(_ point: SpeechResumePoint) {
         guard !point.bookKey.isEmpty,
               let data = try? JSONEncoder().encode(point),
-              data.count <= 4 * 1_024 else { return }
+              data.count <= 16 * 1_024 else { return }
         defaults.set(data, forKey: key(point.bookKey))
     }
 

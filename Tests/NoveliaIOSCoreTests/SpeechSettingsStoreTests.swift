@@ -2,6 +2,14 @@ import Foundation
 import XCTest
 @testable import NoveliaIOSCore
 
+private final class SpeechMigrationTrackingDefaults: UserDefaults {
+    var removalCount = 0
+    override func removeObject(forKey defaultName: String) {
+        removalCount += 1
+        super.removeObject(forKey: defaultName)
+    }
+}
+
 final class SpeechSettingsStoreTests: XCTestCase {
     private func makeDefaults() -> (UserDefaults, String) {
         let suite = "SpeechSettingsTest-\(UUID())"
@@ -33,6 +41,51 @@ final class SpeechSettingsStoreTests: XCTestCase {
         XCTAssertEqual(store.load(), settings)
         XCTAssertEqual(defaults.string(forKey: SettingsKey.Speech.preferredEngine), "readium")
         XCTAssertEqual(defaults.integer(forKey: SettingsKey.Speech.sleepTimerMinutes), 45)
+    }
+
+    func testRetiredAPIConfigurationMigratesToLocalWithoutChangingOtherPreferences() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("openai", forKey: SettingsKey.Speech.preferredEngine)
+        let retiredKeys = ["speech.openaiBaseURL.v1", "speech.openaiModel.v1", "speech.openaiVoice.v1"]
+        for key in retiredKeys { defaults.set("retired-value", forKey: key) }
+        defaults.set(0.75, forKey: SettingsKey.Speech.rate)
+        defaults.set(0.35, forKey: SettingsKey.Speech.volume)
+        defaults.set(true, forKey: SettingsKey.Speech.edgeConsent)
+        let store = SpeechSettingsStore(defaults: defaults)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.preferredEngine, .system)
+        XCTAssertEqual(defaults.string(forKey: SettingsKey.Speech.preferredEngine), "system")
+        XCTAssertEqual(loaded.rate, 0.75)
+        XCTAssertEqual(loaded.volume, 0.35)
+        XCTAssertTrue(store.edgeConsentGranted)
+        store.save(loaded)
+        _ = SpeechSettingsStore(defaults: defaults).load()
+        for key in retiredKeys { XCTAssertNil(defaults.object(forKey: key)) }
+    }
+
+    func testRetiredSettingsMigrationDoesNotWriteWhenAlreadyClean() {
+        let suite = "speech-clean-migration-\(UUID())"
+        let defaults = SpeechMigrationTrackingDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        for _ in 0..<3 { _ = SpeechSettingsStore(defaults: defaults).load() }
+        XCTAssertEqual(defaults.removalCount, 0, "音色读取会多次构造存储，干净偏好不能反复触发删除通知")
+        defaults.set("retired", forKey: "speech.openaiModel.v1")
+        _ = SpeechSettingsStore(defaults: defaults).load()
+        XCTAssertEqual(defaults.removalCount, 1)
+        _ = SpeechSettingsStore(defaults: defaults).load()
+        XCTAssertEqual(defaults.removalCount, 1, "清理完成后必须成为无写入的读取")
+    }
+
+    func testRetiredAPISettingsCleanupKeepsSelectedEdgeEngine() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("edge", forKey: SettingsKey.Speech.preferredEngine)
+        defaults.set(true, forKey: SettingsKey.Speech.edgeConsent)
+        defaults.set("retired", forKey: "speech.openaiBaseURL.v1")
+        let store = SpeechSettingsStore(defaults: defaults)
+        XCTAssertEqual(store.load().preferredEngine, .edge)
+        XCTAssertNil(defaults.object(forKey: "speech.openaiBaseURL.v1"))
     }
 
     func testInvalidStoredValuesFallBackSafely() {

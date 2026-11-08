@@ -157,7 +157,7 @@ final class ReaderSettings: ObservableObject {
 }
 
 /// Readium：书籍给页面指定了不透明底色时，阅读器四周（边距、安全区）何时跟随它。
-/// 忽略近白时也透明化正文 html/body；其他底色及图片保持书内样式。
+/// 忽略近白时也透明化正文页面、段落及行内底色；彩色底、边框及图片保持书内样式。
 enum ReaderBookBackgroundFollow: String, CaseIterable, Identifiable {
     /// 忽略纯白或接近白色的书籍底色（默认）：白底书保留阅读背景，彩色页面仍铺满。
     case ignoreNearWhite

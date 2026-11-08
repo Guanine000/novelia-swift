@@ -52,6 +52,7 @@ private struct EPUBReaderViewContent: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.speechHandoff) private var speechHandoff
+    @AppStorage(SettingsKey.readerBookBackgroundFollow) private var bookBackgroundFollow = ReaderBookBackgroundFollow.default.rawValue
     @State private var isShowingTOC = false
     /// 目录中已展开的分组（条目序号）；每次打开目录时重置为只展开当前章节所在分组。
     @State private var tocExpanded = Set<Int>()
@@ -179,14 +180,8 @@ private struct EPUBReaderViewContent: View {
                     model.viewportSize = geometry.size
                 }
             }
-            .onValueChange(of: model.status) { _, status in
-                guard status == .ready else { return }
-                // 从迷你条进入：取走续听位置并就地起播，高亮随朗读就位。
-                if let point = speechHandoff?.takePendingResume(bookKey: model.bookmarkKey ?? settings.activeBookID ?? "") {
-                    resumeSpeech(at: point)
-                }
-            }
             .onAppear {
+                model.bookBackgroundFollow = ReaderBookBackgroundFollow(storedValue: bookBackgroundFollow)
                 model.onManualNavigation = { speech.suspendFollow(true) }
                 wasBatteryMonitoringEnabled = UIDevice.current.isBatteryMonitoringEnabled
                 UIDevice.current.isBatteryMonitoringEnabled = true
@@ -234,7 +229,9 @@ private struct EPUBReaderViewContent: View {
                                   anchor: { model.speechAnchor },
                                   title: model.source?.bookTitle ?? "阅读器",
                                   bookKey: model.bookmarkKey ?? settings.activeBookID,
-                                  jumpToSpoken: { speech.suspendFollow(false); model.jumpToSpeechPosition() },
+                                  isReady: model.status == .ready,
+                                  chapterTitle: { model.chapterTitle($0) },
+                                  jumpToSpoken: { model.jumpToSpeechPosition() },
                                   onResumeSaved: { point in resumeSpeech(at: point) }) {
                 SystemSpeechEngine(chapterCount: model.chapterCount,
                                    onReadingPosition: { position, settings in model.updateSpeechPosition(position, settings: settings) }) { index in
@@ -266,6 +263,10 @@ private struct EPUBReaderViewContent: View {
         .onValueChange(of: model.isLayingOut) { _, active in
             if !active { synchronizeSettings(systemIsDark: colorScheme == .dark) }
         }
+        .onValueChange(of: bookBackgroundFollow) { _, value in
+            model.bookBackgroundFollow = ReaderBookBackgroundFollow(storedValue: value)
+            model.refreshBackground()
+        }
         .onValueChange(of: backgrounds.revision) { _, _ in model.refreshBackground() }
         .sheet(isPresented: $isShowingStyle) { styleSheet }
         .sheet(item: $model.activeNote) { note in noteSheet(note) }
@@ -282,9 +283,7 @@ private struct EPUBReaderViewContent: View {
     /// 从上次收听位置继续：先跳到该章，再按当前阅读位置起播。
     private func resumeSpeech(at point: SpeechResumePoint) {
         model.jump(toChapter: point.chapterIndex, progression: point.progression)
-        speech.start(from: SpeechAnchor(chapterIndex: point.chapterIndex,
-                                        progression: point.progression,
-                                        chapterUTF16Length: 0, startIndexHint: nil))
+        speech.start(from: point.anchor)
     }
 
     // MARK: 顶部工具栏（覆盖层，显隐不改视口）

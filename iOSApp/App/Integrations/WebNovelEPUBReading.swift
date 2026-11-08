@@ -12,6 +12,7 @@ struct WebNovelEPUBReader: View {
     var body: some View {
         WebNovelEPUBReaderContent(book: book, catalog: services.api.catalog, content: services.api.content,
                                   settings: services.local.readerSettings, downloads: downloads, managementOnly: managementOnly)
+            .environment(\.speechBookRoute, .library("web:" + book.id))
     }
 }
 

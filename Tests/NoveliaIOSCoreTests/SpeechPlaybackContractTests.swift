@@ -33,6 +33,28 @@ private final class StubSpeechEngine: SpeechEngine {
 }
 
 final class SpeechPlaybackContractTests: XCTestCase {
+    func testResumePointDecodesLegacyRecordsAndPreservesPreciseOffsets() throws {
+        let oldJSON = #"{"bookKey":"epub:old","chapterIndex":2,"progression":0.4,"engine":"system","updatedAt":0}"#
+        let old = try JSONDecoder().decode(SpeechResumePoint.self, from: Data(oldJSON.utf8))
+        XCTAssertNil(old.sourceUTF16Offset)
+        XCTAssertNil(old.locatorJSON)
+        XCTAssertEqual(old.anchor.chapterIndex, 2)
+        XCTAssertEqual(old.anchor.progression, 0.4)
+        let suite = "ResumeTests-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SpeechResumeStore(defaults: defaults)
+        let point = SpeechResumePoint(bookKey: "epub:new", chapterIndex: 3, progression: 0.6,
+                                      engine: "readium", sourceUTF16Offset: 123,
+                                      locatorJSON: #"{"href":"chapter4.xhtml"}"#)
+        store.save(point)
+        XCTAssertEqual(store.load(bookKey: "epub:new"), point)
+        XCTAssertEqual(store.load(bookKey: "epub:new")?.anchor.sourceUTF16Offset, 123)
+        XCTAssertNil(store.load(bookKey: "epub:other"))
+        defaults.set(Data("broken".utf8), forKey: SettingsKey.Speech.resumePointPrefix + "epub:broken")
+        XCTAssertNil(store.load(bookKey: "epub:broken"))
+    }
+
     func testCapabilitiesDriveHighlightFallbackForCloudEngines() {
         let utterance = SpeechUtterance(text: "甲", chapterIndex: 0, utf16Offset: 0, wordRange: 3..<5)
         XCTAssertEqual(utterance.highlightRange(for: [.wordLevelProgress, .offline]), 3..<5)

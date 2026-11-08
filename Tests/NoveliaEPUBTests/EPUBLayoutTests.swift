@@ -135,6 +135,29 @@ final class EPUBLayoutTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testNearWhiteFillsPreserveBordersColoredSurfacesAndMarkers() {
+        var border = BorderEdge.zero
+        border.width = 2; border.color = .red
+        func fill(_ color: UIColor, marker: Bool = false) -> DisplayItem {
+            .fill(DisplayFillItem(rect: PageLocalRect(rawValue: CGRect(x: 1, y: 2, width: 100, height: 30)),
+                color: color, cornerRadius: 3, borderTop: border, borderBottom: .zero,
+                borderLeft: .zero, borderRight: .zero, nodeID: 4, writingMode: .horizontal,
+                followsTextColor: marker))
+        }
+        let original = DisplayList(items: [fill(.white), fill(UIColor(white: 252.0 / 255, alpha: 1)),
+            fill(.yellow), fill(.white, marker: true)])
+        let filtered = EPUBPageBook.removingNearWhiteFills(from: original, enabled: true)
+        for (index, item) in filtered.items.enumerated() {
+            guard case .fill(let value) = item else { return XCTFail("Missing fill") }
+            XCTAssertEqual(value.color, index < 2 ? .clear : (index == 2 ? .yellow : .white))
+            XCTAssertEqual(value.borderTop, border)
+            XCTAssertEqual(value.cornerRadius, 3)
+            XCTAssertEqual(value.nodeID, 4)
+        }
+        XCTAssertTrue(EPUBPageBook.removingNearWhiteFills(from: original, enabled: false).hasSameContents(as: original))
+    }
+
     /// `scripts/scan_epub_layout.sh <book.epub>` 可对任意本地 EPUB 运行此检查。
     func testScanExternalBook() async throws {
         guard let path = ProcessInfo.processInfo.environment["SCAN_EPUB"], !path.isEmpty else {

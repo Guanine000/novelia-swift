@@ -9,6 +9,13 @@ struct SpeechSettingsStore {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        // 已移除的自备服务配置只做删除迁移，其他朗读偏好保持原值。
+        for key in ["speech.openaiBaseURL.v1", "speech.openaiModel.v1", "speech.openaiVoice.v1"] {
+            if defaults.object(forKey: key) != nil { defaults.removeObject(forKey: key) }
+        }
+        if defaults.string(forKey: SettingsKey.Speech.preferredEngine) == "openai" {
+            defaults.set(SpeechEngineKind.system.rawValue, forKey: SettingsKey.Speech.preferredEngine)
+        }
     }
 
     func load() -> SpeechSettings {
@@ -33,9 +40,6 @@ struct SpeechSettingsStore {
         settings.edgePrefetchEnabled = storedBool(SettingsKey.Speech.edgePrefetchEnabled, fallback: false)
         settings.volume = storedNumber(SettingsKey.Speech.volume)?.doubleValue ?? 1
         settings.pitch = storedNumber(SettingsKey.Speech.pitch)?.doubleValue ?? 0
-        settings.openAIBaseURL = defaults.string(forKey: SettingsKey.Speech.openAIBaseURL) ?? ""
-        settings.openAIModel = defaults.string(forKey: SettingsKey.Speech.openAIModel) ?? "tts-1"
-        settings.openAIVoice = defaults.string(forKey: SettingsKey.Speech.openAIVoice) ?? OpenAISpeechVoices.presets[0].identifier
         return settings.clamped()
     }
 
@@ -56,13 +60,7 @@ struct SpeechSettingsStore {
         defaults.set(value.highlightsSpokenText, forKey: SettingsKey.Speech.highlightsSpokenText)
         defaults.set(value.preferredEngine.rawValue, forKey: SettingsKey.Speech.preferredEngine)
         defaults.set(value.sleepTimerMinutes, forKey: SettingsKey.Speech.sleepTimerMinutes)
-        if value.openAIBaseURL.isEmpty {
-            defaults.removeObject(forKey: SettingsKey.Speech.openAIBaseURL)
-        } else {
-            defaults.set(value.openAIBaseURL, forKey: SettingsKey.Speech.openAIBaseURL)
-        }
-        defaults.set(value.openAIModel, forKey: SettingsKey.Speech.openAIModel)
-        defaults.set(value.openAIVoice, forKey: SettingsKey.Speech.openAIVoice)
+
     }
 
     /// 目录仅包含公开音色元数据；坏缓存回到内置列表，不联网，不参与同步。

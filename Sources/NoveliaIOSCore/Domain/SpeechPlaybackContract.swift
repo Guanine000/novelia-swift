@@ -11,37 +11,6 @@ enum SpeechEngineKind: String, CaseIterable, Sendable {
     case readium
     case system
     case edge
-    /// 用户自备 OpenAI 兼容服务（地址／密钥／模型／音色）；旧客户端无法识别该 rawValue，会安全回落本地。
-    case openai
-}
-
-/// 第三方 API 的密钥不进偏好文件，与本项目的会话凭据同样走 Keychain。
-/// 测试与验证组装注入内存实现。
-protocol SpeechAPIKeyStoring: Sendable {
-    func readKey() -> String?
-    func writeKey(_ value: String?)
-}
-
-/// OpenAI 兼容语音接口的公开预设音色；兼容服务的音色集各不相同，允许用户直接填写自定义名称。
-enum OpenAISpeechVoices {
-    static let presets: [SpeechVoiceOption] = [
-        .init(identifier: "alloy", name: "Alloy", language: "多语言"),
-        .init(identifier: "echo", name: "Echo", language: "多语言"),
-        .init(identifier: "fable", name: "Fable", language: "多语言"),
-        .init(identifier: "onyx", name: "Onyx", language: "多语言"),
-        .init(identifier: "nova", name: "Nova", language: "多语言"),
-        .init(identifier: "shimmer", name: "Shimmer", language: "多语言"),
-    ]
-
-    /// 预设加当前自定义音色；超出预设的选择必须始终出现在列表里，否则 Picker 无法回显。
-    static func options(selected: String) -> [SpeechVoiceOption] {
-        guard !selected.isEmpty, !presets.contains(where: { $0.identifier == selected }) else { return presets }
-        return presets + [.init(identifier: selected, name: selected, language: "自定义")]
-    }
-
-    static func isValidVoice(_ value: String) -> Bool {
-        !value.isEmpty && value.utf8.count <= 128
-    }
 }
 
 struct SpeechCapabilities: OptionSet, Sendable {
@@ -85,10 +54,6 @@ struct SpeechSettings: Equatable, Sendable {
     var volume: Double = 1
     /// -1…1 表示低到高，系统转换为0.5…2倍，Edge转换为-50…50Hz；不是跨引擎的物理等价值。
     var pitch: Double = 0
-    /// 第三方 API（OpenAI 兼容）服务地址，如 `https://api.openai.com/v1`；密钥存 Keychain，不在这里。
-    var openAIBaseURL: String = ""
-    var openAIModel: String = "tts-1"
-    var openAIVoice: String = OpenAISpeechVoices.presets[0].identifier
 
     static let `default` = SpeechSettings(voiceIdentifier: nil, rate: 0.5,
                                           followsReadingPosition: true, highlightsSpokenText: true,
@@ -114,25 +79,10 @@ struct SpeechSettings: Equatable, Sendable {
         value.volume = min(1, max(0, volume.isFinite ? volume : 1))
         value.pitch = min(1, max(-1, pitch.isFinite ? pitch : 0))
         value.sleepTimerMinutes = Self.normalizedSleepTimer(sleepTimerMinutes)
-        value.openAIBaseURL = Self.normalizedEndpoint(value.openAIBaseURL)
-        value.openAIModel = Self.normalizedField(value.openAIModel, fallback: "tts-1")
-        value.openAIVoice = Self.normalizedField(value.openAIVoice, fallback: OpenAISpeechVoices.presets[0].identifier)
         return value
     }
 
-    /// 服务地址只保留协议与主机语义；非法或非 HTTPS 的输入清空，请求端据此判断是否已配置。
-    static func normalizedEndpoint(_ raw: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.utf8.count <= 2_048, let url = URL(string: trimmed),
-              let scheme = url.scheme?.lowercased(), let host = url.host, !host.isEmpty else { return "" }
-        return scheme == "https" ? trimmed : ""
-    }
 
-    static func normalizedField(_ raw: String, fallback: String) -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed.utf8.count <= 128 else { return fallback }
-        return trimmed
-    }
 }
 
 /// 起播位置。章内比例与 UTF-16 长度沿用进度、书签、书内搜索的口径；
@@ -145,6 +95,8 @@ struct SpeechAnchor: Equatable, Sendable {
     /// 选句起播使用源文本坐标，章节加载后再换算，避免把页内比例当作选区位置。
     var sourceUTF16Offset: Int? = nil
     var startsAtVisibleOffset: Bool = false
+    /// 跨引擎换声时用当前句文本核对位置；源坐标可用时仍优先使用源偏移。
+    var resumeText: String? = nil
     func resolvedProgression(length: Int) -> Double {
         guard let offset = sourceUTF16Offset, length > 0 else { return progression }
         return (Double(min(max(0, offset), length - 1)) + 0.1) / Double(length)
@@ -171,6 +123,10 @@ struct SpeechUtterance: Equatable, Sendable {
     let utf16Offset: Int?
     /// 当前朗读到的词范围，云端引擎为 nil。
     let wordRange: Range<Int>?
+
+    /// 续听使用源字符坐标；Readium 则提供 Locator 的章内比例。
+    var chapterUTF16Length: Int? = nil
+    var chapterProgression: Double? = nil
 
     /// 只有声明了词级进度的引擎才提供可高亮范围；界面据此隐藏跟读高亮。
     func highlightRange(for capabilities: SpeechCapabilities) -> Range<Int>? {
@@ -206,6 +162,7 @@ enum SpeechPlaybackState: Equatable, Sendable {
 @MainActor
 protocol SpeechEngine: AnyObject {
     var kind: SpeechEngineKind { get }
+    var preparationMessage: String { get }
     var capabilities: SpeechCapabilities { get }
     var availableVoices: [SpeechVoiceOption] { get }
     var state: SpeechPlaybackState { get }
@@ -222,6 +179,7 @@ protocol SpeechEngine: AnyObject {
     func skipChapter(_ delta: Int)
 }
 extension SpeechEngine {
+    var preparationMessage: String { "正在准备朗读…" }
     func retry() -> Bool { false }
     func skipChapter(_ delta: Int) {}
 }

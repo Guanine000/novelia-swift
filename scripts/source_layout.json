@@ -117,7 +117,7 @@
   "CloudSpeechText.swift": "Sources/NoveliaIOSCore/Features/Reader/CloudSpeechText.swift",
   "SpeechText.swift": "Sources/NoveliaIOSCore/Features/Reader/SpeechText.swift",
   "EdgeSpeechClient.swift": "Sources/NoveliaIOSCore/Infrastructure/API/EdgeSpeechClient.swift",
-  "OpenAICompatibleSpeechClient.swift": "Sources/NoveliaIOSCore/Infrastructure/API/OpenAICompatibleSpeechClient.swift",
+  "RetiredSpeechServiceCleanup.swift": "Sources/NoveliaIOSCore/Infrastructure/API/RetiredSpeechServiceCleanup.swift",
   "EdgeSpeechToken.swift": "Sources/NoveliaIOSCore/Infrastructure/API/EdgeSpeechToken.swift",
   "SpeechSettingsStore.swift": "Sources/NoveliaIOSCore/Support/SpeechSettingsStore.swift",
   "SpeechResumeStore.swift": "Sources/NoveliaIOSCore/Support/SpeechResumeStore.swift",
