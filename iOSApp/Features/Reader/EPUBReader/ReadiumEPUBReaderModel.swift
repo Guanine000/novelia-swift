@@ -594,6 +594,14 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             guard publication.readingOrder.indices.contains(index),
                   let base = await publication.locate(publication.readingOrder[index]) else { return nil }
             return base.copy(locations: { $0.progression = 0 })
+        }, anchorForLocator: { [weak self] locator in
+            guard let self, let index = self.navigationIndex?.resourceIndex(for: locator.href) else { return nil }
+            return SpeechAnchor(chapterIndex: index, progression: locator.locations.progression ?? 0,
+                                chapterUTF16Length: 0, startIndexHint: nil)
+        }, locatorForAnchor: { [weak self] anchor in
+            guard let self, publication.readingOrder.indices.contains(anchor.chapterIndex),
+                  let base = await publication.locate(publication.readingOrder[anchor.chapterIndex]) else { return nil }
+            return base.copy(locations: { $0.progression = anchor.progression }, text: { $0.highlight = anchor.resumeText })
         })
         local?.onSpokenLocator = { [weak self] locator in self?.spokenLocator = locator }
         speech.reloadSettings()
@@ -606,6 +614,30 @@ final class ReadiumEPUBReaderModel: ObservableObject {
                 return try await self.chapterPlainText(index)
             }))
         } else { speech.attach(local) }
+    }
+
+    /// 续听先解析持久化 Locator（旧记录按章与比例恢复），等待导航完成再起播。
+    func resumeSpeech(at point: SpeechResumePoint) {
+        prepareSpeech()
+        let usesLocator = speech.engineKind == .readium
+        speech.startSelection { [weak self] in
+            guard let self, let publication = self.publication, let navigator = self.navigator,
+                  publication.readingOrder.indices.contains(point.chapterIndex) else { return nil }
+            var locator: Locator?
+            if usesLocator, let json = point.locatorJSON,
+               let value = try? JSONValue(jsonString: json),
+               let saved = try? Locator(json: value, warnings: nil),
+               self.navigationIndex?.resourceIndex(for: saved.href) == point.chapterIndex {
+                locator = saved
+            }
+            if locator == nil, let base = await publication.locate(publication.readingOrder[point.chapterIndex]) {
+                locator = base.copy(locations: { $0.progression = point.progression })
+            }
+            guard !Task.isCancelled, let locator else { return nil }
+            self.markNavigation("speech")
+            guard await navigator.go(to: locator), !Task.isCancelled else { return nil }
+            return (point.anchor, usesLocator ? locator : nil)
+        }
     }
 
     /// 未在播放时重开面板，重新读取已确认的引擎偏好，不打断活动会话。

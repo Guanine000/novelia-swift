@@ -35,6 +35,8 @@ extension AppServices {
             let directory = support.appendingPathComponent("WenkuEPUB", isDirectory: true)
             try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let text = "第一章 起点\n" + String(repeating: "本地TXT验证正文，通过原有分章和Readium管线阅读。\n\n", count: 80)
+                + "第二章 续听\n" + String(repeating: "第二章验证正文，用于跨章续听和重启恢复。\n\n", count: 80)
+                + "第三章 终点\n" + String(repeating: "第三章验证正文，用于完整分章识别。\n\n", count: 80)
             try! Data(text.utf8).write(to: directory.appendingPathComponent("architecture.txt"))
             let record = LocalWenkuEPUB(id: UUID(), title: "架构验证TXT", filename: "architecture.txt", addedAt: Date(),
                                        metadataLoaded: true, fileFormat: .txt)
@@ -77,7 +79,8 @@ extension AppServices {
         let forum = ForumAuthStore(configuration: configuration,
             tokenStore: FixtureTokenStore(username: ArchitectureFixtureBackend.username), refreshQueue: refreshQueue)
         return AppServices(configuration: configuration, api: backend.services(), account: account,
-            forumAccount: forum, local: local, performsUpdateChecks: false)
+            forumAccount: forum, local: local, performsUpdateChecks: false,
+            speechService: ProcessInfo.processInfo.arguments.contains("-architectureSpeechAudio") ? ArchitectureSpeechAudio() : nil)
     }
     /// 只为独立 Debug App 生成固定合成样本，基准脚本在计时前单独执行此步骤。
     private static func seedPerformanceLibrary() {
@@ -156,11 +159,25 @@ final class ArchitectureNetworkTrap: URLProtocol {
     override func stopLoading() {}
 }
 
+/// 独立验证App专用的静音WAV，运行真实云端播放器而不发送网络正文。
+private struct ArchitectureSpeechAudio: CloudSpeechSynthesizing {
+    func audio(text: String, voice: String, rate: Double) async throws -> Data {
+        let byteCount: UInt32 = 8_000 * 2 * 60
+        var data = Data("RIFF".utf8)
+        func word(_ value: UInt32) { var v = value.littleEndian; withUnsafeBytes(of: &v) { data.append(contentsOf: $0) } }
+        func short(_ value: UInt16) { var v = value.littleEndian; withUnsafeBytes(of: &v) { data.append(contentsOf: $0) } }
+        word(36 + byteCount); data.append(Data("WAVEfmt ".utf8)); word(16)
+        short(1); short(1); word(8_000); word(16_000); short(2); short(16)
+        data.append(Data("data".utf8)); word(byteCount); data.append(Data(count: Int(byteCount)))
+        return data
+    }
+}
+
 /// 显示验证进程的外部请求计数，供自动化读取；不参与业务交互且不进入 Release。
 struct ArchitectureValidationIndicator: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
-            Text("验证环境 · 外部请求 \(ArchitectureNetworkTrap.count) · 正文请求 \(ArchitectureNetworkTrap.chapterCount) · 本机正文 \(ArchitectureNetworkTrap.localDocumentCount) · 批次 \(ArchitectureNetworkTrap.batchCount) · EPUB请求 \(ArchitectureNetworkTrap.downloadCount)")
+            Text("验证环境 · 外部请求 \(ArchitectureNetworkTrap.count) · 正文请求 \(ArchitectureNetworkTrap.chapterCount) · 本机正文 \(ArchitectureNetworkTrap.localDocumentCount) · 批次 \(ArchitectureNetworkTrap.batchCount) · EPUB请求 \(ArchitectureNetworkTrap.downloadCount) · Readium起播 \(ReadiumSpeechEngine.validationStartCount)")
                 .font(.caption2).padding(4).background(.regularMaterial).allowsHitTesting(false)
                 .accessibilityIdentifier("architecture-validation-status")
         }

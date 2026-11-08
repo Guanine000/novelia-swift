@@ -1274,7 +1274,7 @@ enum EPUBReadiumImageLayout {
 
 // MARK: - Readium 页面底色
 
-/// 只处理 html/body 的页面底色；局部元素和背景图片保留书内样式。
+/// 忽略近白的页面、段落与行内底色；彩色底、边框和背景图片保留书内样式。
 /// 相同配置不重复写 DOM；主题观察只响应实际主题标记变化，忽略自身背景与其他样式修改。
 enum EPUBReadiumPageBackground {
     static func script(ignoresNearWhite: Bool, threshold: Double) -> String {
@@ -1283,7 +1283,7 @@ enum EPUBReadiumPageBackground {
           function apply() {
             var configuration = '\(ignoresNearWhite)|\(threshold)';
             var changed = document.__noveliaPageAppearance !== configuration;
-            var elements = [document.documentElement, document.body];
+            var elements = [document.documentElement].concat(Array.from(document.querySelectorAll('body, body *')));
             elements.forEach(function (el) {
               if (!el || !el.__noveliaPageBackground) return;
               var saved = el.__noveliaPageBackground;

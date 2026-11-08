@@ -165,7 +165,9 @@ final class EPUBImageTests: XCTestCase {
         html { background-color:#faf7f0; }
         body { background:white url('data:image/png;base64,\(png(width: 2, height: 2).base64EncodedString())'); }
         #local { background-color:white; color:black; }
-        </style></head><body style="background-color:white!important"><p id="local">局部底色</p></body></html>
+        #near { background-color:#fcfcfc!important; }
+        #colored { background-color:#88c1ec; border:2px solid red; }
+        </style></head><body style="background-color:white!important"><p id="local">局部底色<span id="near">近白</span><span id="colored">彩色</span></p></body></html>
         """
         let navigation = ImageNavigationObserver()
         webView.navigationDelegate = navigation
@@ -183,6 +185,9 @@ final class EPUBImageTests: XCTestCase {
                      body:getComputedStyle(document.body).backgroundColor,
                      image:getComputedStyle(document.body).backgroundImage,
                      local:getComputedStyle(document.getElementById('local')).backgroundColor,
+                     near:getComputedStyle(document.getElementById('near')).backgroundColor,
+                     colored:getComputedStyle(document.getElementById('colored')).backgroundColor,
+                     border:getComputedStyle(document.getElementById('colored')).borderTop,
                      priority:document.body.style.getPropertyPriority('background-color')}))()
             """)
             return try XCTUnwrap(result as? [String: String])
@@ -194,7 +199,10 @@ final class EPUBImageTests: XCTestCase {
             XCTAssertEqual(clear["root"], "rgba(0, 0, 0, 0)")
             XCTAssertEqual(clear["body"], "rgba(0, 0, 0, 0)")
             XCTAssertEqual(clear["image"], original["image"])
-            XCTAssertEqual(clear["local"], "rgb(255, 255, 255)")
+            XCTAssertEqual(clear["local"], "rgba(0, 0, 0, 0)")
+            XCTAssertEqual(clear["near"], "rgba(0, 0, 0, 0)")
+            XCTAssertEqual(clear["colored"], original["colored"])
+            XCTAssertEqual(clear["border"], original["border"])
         }
         try await apply(false)
         let restored = try await probe()

@@ -19,10 +19,9 @@ final class AppServices: ObservableObject {
 
     init(configuration: APIConfiguration, api: APIServiceCollection,
          account: AccountAuthStore, forumAccount: ForumAuthStore, local: LocalAppServices? = nil,
-         performsUpdateChecks: Bool = true, speechService: (any CloudSpeechSynthesizing)? = nil,
-         openAIService: (any CloudSpeechSynthesizing)? = nil) {
+         performsUpdateChecks: Bool = true, speechService: (any CloudSpeechSynthesizing)? = nil) {
         self.performsUpdateChecks = performsUpdateChecks
-        speech = AppSpeechEngineFactory(service: speechService, openAIService: openAIService)
+        speech = AppSpeechEngineFactory(service: speechService)
         self.local = local ?? LocalAppServices()
         self.configuration = configuration
         self.api = api
@@ -35,6 +34,7 @@ final class AppServices: ObservableObject {
     /// 生产组装保留小说/论坛独立会话；API 每次读取账号使用的同一凭据存储，避免令牌快照过期。
     static func novelia(configuration: APIConfiguration = .production,
                         session: URLSession = .shared) -> AppServices {
+        RetiredSpeechServiceCleanup.removeStoredKey()
         // 小说与论坛续期使用同一刷新 Cookie，共用一个队列逐个执行。
         let refreshQueue = SerialAsyncGate()
         let account = AccountAuthStore(configuration: configuration, session: session, refreshQueue: refreshQueue)
@@ -44,20 +44,10 @@ final class AppServices: ObservableObject {
             novelToken: { [store = account.tokenStore] in store.read() },
             forumToken: { [store = forum.tokenStore] in store.read() })
         return AppServices(configuration: configuration, api: api, account: account, forumAccount: forum,
-                           speechService: EdgeSpeechClient(), openAIService: openAICompatibleClient())
+                           speechService: EdgeSpeechClient())
     }
 
-    /// 第三方 API 的端点在每次请求时读取设置与 Keychain 密钥；未配置时客户端报告 notConfigured，不发请求。
-    private static func openAICompatibleClient() -> any CloudSpeechSynthesizing {
-        let settings = SpeechSettingsStore()
-        let keyStore = KeychainSpeechAPIKeyStore()
-        return OpenAICompatibleSpeechClient(endpointProvider: ClosureOpenAIEndpointProvider {
-            let value = settings.load()
-            guard let url = URL(string: value.openAIBaseURL), !value.openAIBaseURL.isEmpty,
-                  let key = keyStore.readKey(), !key.isEmpty else { return nil }
-            return OpenAISpeechEndpoint(baseURL: url, apiKey: key, model: value.openAIModel)
-        })
-    }
+
 }
 
 /// 由 AppServices 持有的本地状态所有者；阅读器、书库、统计与同步使用同一套实例。

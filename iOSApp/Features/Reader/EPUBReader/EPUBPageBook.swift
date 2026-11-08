@@ -56,6 +56,7 @@ struct EPUBLayoutContext {
 @MainActor
 final class EPUBPageBook {
     let generation: Int
+    let ignoresNearWhite: Bool
     private let coordinator: EPUBLayoutCoordinator
     /// 将没有书籍身份、不能缓存的排版限制在此分页书籍对象内。
     private let privateBookID = "private-" + UUID().uuidString
@@ -66,7 +67,8 @@ final class EPUBPageBook {
     /// 每排出一页回调一次（主线程）；宿主借此刷新"下一页已就绪"的可用性。
     var onPagesChanged: (() -> Void)?
 
-    init(generation: Int, coordinator: EPUBLayoutCoordinator? = nil) {
+    init(generation: Int, coordinator: EPUBLayoutCoordinator? = nil, ignoresNearWhite: Bool = true) {
+        self.ignoresNearWhite = ignoresNearWhite
         self.generation = generation
         self.coordinator = coordinator ?? .shared
     }
@@ -436,10 +438,28 @@ final class EPUBPageBook {
                 backgroundImage.draw(in: CGRect(x: (canvasRect.width - size.width) / 2, y: (canvasRect.height - size.height) / 2, width: size.width, height: size.height))
             }
             // UIKit 渲染上下文已是左上原点、y 向下，DisplayList.draw 直接可用。
-            list.draw(in: context.cgContext)
+            Self.removingNearWhiteFills(from: list, enabled: ignoresNearWhite).draw(in: context.cgContext)
         }
         renderedImages[id] = image.cgImage
         return image.cgImage
+    }
+
+    /// 只替换已解析的近白填充色，保留边框、变换、文字、彩色底和图片；原显示列表不变。
+    static func removingNearWhiteFills(from list: DisplayList, enabled: Bool, threshold: CGFloat = 240.0 / 255) -> DisplayList {
+        guard enabled else { return list }
+        return DisplayList(items: list.items.map { item in
+            guard case .fill(let fill) = item, !fill.followsTextColor else { return item }
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            guard fill.color.getRed(&red, green: &green, blue: &blue, alpha: &alpha), alpha > 0,
+                  min(red, green, blue) >= threshold else { return item }
+            var clear = DisplayFillItem(rect: fill.rect, color: .clear, cornerRadius: fill.cornerRadius,
+                borderTop: fill.borderTop, borderBottom: fill.borderBottom,
+                borderLeft: fill.borderLeft, borderRight: fill.borderRight,
+                nodeID: fill.nodeID, writingMode: fill.writingMode, fragmentPosition: fill.fragmentPosition,
+                isBackgroundPaint: fill.isBackgroundPaint, followsTextColor: fill.followsTextColor)
+            clear.paintTransform = fill.paintTransform
+            return .fill(clear)
+        })
     }
 
     /// 章节中目前已排版的每个页面的显示列表（用于排版回归测试）。

@@ -29,6 +29,7 @@ struct LibraryView: View {
     @State private var query = ""
     @State private var isSearching = false
     @State private var readerTarget: LibraryBook?
+    @State private var onlineSpeechTarget: SpeechHandoffStore.OpenRequest?
     @State private var isCreatingSeries = false
     @State private var newSeriesName = ""
     @State private var syncTask: Task<Void, Never>?
@@ -41,6 +42,23 @@ struct LibraryView: View {
         // 只给哈希／孤立状态清理完整书库，不能把尚未读取的另一库误判为已删除。
         guard webDownloads.isReady, wenkuDownloads.isReady else { return [] }
         return state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks)
+    }
+    /// 请求在书库加载完成前保留；导航键不再与文件哈希或在线位置键混用。
+    private func openSpeechBook(_ request: SpeechHandoffStore.OpenRequest?) {
+        guard let request else { return }
+        switch request.route {
+        case .online:
+            onlineSpeechTarget = request
+        case .library(let key):
+            guard let book = allBooks.first(where: { $0.key == key }) else { return }
+            readerTarget = book
+        case nil:
+            guard let book = allBooks.first(where: {
+                guard let hash = state.hashByBook[$0.key] ?? $0.cloudFileHash else { return false }
+                return $0.positionPrefix + hash == request.bookKey
+            }) else { return }
+            readerTarget = book
+        }
     }
     private var sortOptions: LibrarySortOptions { state.sortOptions(scope: nil) }
 
@@ -171,12 +189,12 @@ struct LibraryView: View {
             if target == nil { state.reloadPositions() }
         }
         // 迷你条请求回到朗读处：按书籍身份找到书并打开，阅读器起来后从该位置继续朗读。
-        .onValueChange(of: services.speechHandoff.openRequest) { _, request in
-            guard let request else { return }
-            if let book = allBooks.first(where: { $0.key == request.bookKey }) {
-                readerTarget = book
-            } else {
-                services.speechHandoff.consumeOpenRequest()
+        .onReceive(services.speechHandoff.$openRequest) { request in openSpeechBook(request) }
+        .onValueChange(of: sourceBooks) { _, _ in openSpeechBook(services.speechHandoff.openRequest) }
+        .onValueChange(of: state.hashByBook) { _, _ in openSpeechBook(services.speechHandoff.openRequest) }
+        .compatNavigationDestination(item: $onlineSpeechTarget) { request in
+            if case .online(let novel) = request.route {
+                ReaderView(novel: novel, startingAt: services.speechHandoff.pendingResume?.chapterIndex ?? 0)
             }
         }
         .onValueChange(of: webDAVSync.isSyncing) { _, syncing in
@@ -1874,6 +1892,7 @@ struct LibraryReaderDestination: View {
     @StateObject private var rules = TXTChapterRuleStore.shared
 
     var body: some View {
+        Group {
         if book.format == .txt {
             DownloadedWebNovelTXTReader(url: book.fileURL, title: book.title, rules: rules.configuration, statisticsID: book.key)
         } else if case .webNovel(let record) = book.origin, record.novel.isRemote {
@@ -1881,6 +1900,8 @@ struct LibraryReaderDestination: View {
         } else {
             EPUBReaderHost(initialURL: book.fileURL, statisticsID: book.key, statisticsTitle: book.title)
         }
+        }
+        .environment(\.speechBookRoute, .library(book.key))
     }
 }
 

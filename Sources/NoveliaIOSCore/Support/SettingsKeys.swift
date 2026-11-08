@@ -37,10 +37,6 @@ enum SettingsKey {
         static let preferredEngine = "speech.engine.v1"
         /// 定时停止分钟数，0 表示关闭。
         static let sleepTimerMinutes = "speech.sleepTimer.v1"
-        /// 第三方 API（OpenAI 兼容）配置；API 密钥不在这里，走 Keychain。
-        static let openAIBaseURL = "speech.openaiBaseURL.v1"
-        static let openAIModel = "speech.openaiModel.v1"
-        static let openAIVoice = "speech.openaiVoice.v1"
         /// 上次收听位置（按书），供重启后继续听；键值为前缀加书籍身份。
         static let resumePointPrefix = "speech.resume.v1."
     }

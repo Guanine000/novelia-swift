@@ -5,8 +5,8 @@ import Foundation
 /// 使用服务返回的句子时间轴同步高亮与翻页；每段最多约 3KB 转义文本，会话内缓存最多 8MiB，停止即清空。
 @MainActor
 final class EdgeSpeechEngine: SpeechEngine {
-    /// Edge 与第三方 API（OpenAI 兼容）共用同一条分段播放管线，只差引擎标识、音色来源与文案。
-    let kind: SpeechEngineKind
+    private(set) var preparationMessage = "正在加载朗读章节…"
+    let kind: SpeechEngineKind = .edge
     var capabilities: SpeechCapabilities {
         var value: SpeechCapabilities = [.voiceSelection, .rateControl, .backgroundAudio, .chapterNavigation, .volumeControl]
         if kind == .edge { value.insert(.pitchControl) }
@@ -14,18 +14,13 @@ final class EdgeSpeechEngine: SpeechEngine {
         if !timedPositions.isEmpty { value.insert(.sentenceNavigation) }
         return value
     }
-    var availableVoices: [SpeechVoiceOption] { voicesProvider?() ?? SpeechSettingsStore().edgeVoices }
+    var availableVoices: [SpeechVoiceOption] { SpeechSettingsStore().edgeVoices }
     private(set) var state: SpeechPlaybackState = .idle { didSet { onStateChange?(state) } }
     var onStateChange: ((SpeechPlaybackState) -> Void)?
 
     private let service: (any CloudSpeechSynthesizing)?
     private let chapterCount: Int
-    /// 第三方 API 用自己的音色字段；默认仍读 Edge 音色。
-    private let voiceIdentifier: (SpeechSettings) -> String
-    private let voicesProvider: (() -> [SpeechVoiceOption])?
-    private let serviceLabel: String
-    private let unavailableMessage: String
-    private let chapterText: (Int) async throws -> String
+    private var chapterText: (Int) async throws -> String
     private var settings = SpeechSettings.default
     private var chunks: [CloudSpeechText.Chunk] = []
     private var chapterIndex = 0
@@ -35,8 +30,9 @@ final class EdgeSpeechEngine: SpeechEngine {
     private var player: AVAudioPlayer?
     private let bridge = EdgeAudioDelegate()
     private var pauseRequested = false
+    private var ownsAudioSession = false
     private var cache = SpeechAudioMemoryCache()
-    private let onReadingPosition: ((SpeechReadingPosition?, SpeechSettings) -> Void)?
+    private var onReadingPosition: ((SpeechReadingPosition?, SpeechSettings) -> Void)?
     private var chapterUTF16Length = 0
     private var progressTimer: Timer?
     private var timedPositions: [(CloudSpeechBoundary, Range<Int>)] = []
@@ -48,17 +44,9 @@ final class EdgeSpeechEngine: SpeechEngine {
     private var failedChapter: Int?
 
     init(service: (any CloudSpeechSynthesizing)?, chapterCount: Int,
-         kind: SpeechEngineKind = .edge,
-         voiceIdentifier: @escaping (SpeechSettings) -> String = { $0.edgeVoiceIdentifier },
-         voicesProvider: (() -> [SpeechVoiceOption])? = nil,
-         serviceLabel: String = "Edge",
-         unavailableMessage: String = "当前环境不提供 Edge 在线朗读。",
          onReadingPosition: ((SpeechReadingPosition?, SpeechSettings) -> Void)? = nil,
          chapterText: @escaping (Int) async throws -> String) {
         self.onReadingPosition = onReadingPosition
-        self.kind = kind
-        self.voiceIdentifier = voiceIdentifier; self.voicesProvider = voicesProvider
-        self.serviceLabel = serviceLabel; self.unavailableMessage = unavailableMessage
         self.service = service; self.chapterCount = chapterCount; self.chapterText = chapterText
         bridge.onFinish = { [weak self] player, success in
             Task { @MainActor in self?.finished(player: player, success: success) }
@@ -68,14 +56,14 @@ final class EdgeSpeechEngine: SpeechEngine {
     func start(from anchor: SpeechAnchor) async {
         guard !Task.isCancelled else { return }
         stop()
-        guard service != nil else { state = .failed(unavailableMessage); return }
+        guard service != nil else { state = .failed("当前环境不提供 Edge 在线朗读。"); return }
         let generation = self.generation
         state = .preparing
         do {
             try activate()
             let task = Task { [weak self] in
                 guard let self else { return }
-                await self.load(chapter: anchor.chapterIndex, progression: anchor.progression, generation: generation, sourceOffset: anchor.sourceUTF16Offset, exactVisibleStart: anchor.startsAtVisibleOffset)
+                await self.load(chapter: anchor.chapterIndex, progression: anchor.progression, generation: generation, sourceOffset: anchor.sourceUTF16Offset, exactVisibleStart: anchor.startsAtVisibleOffset, resumeText: anchor.resumeText)
             }
             worker = task
             await withTaskCancellationHandler(operation: { await task.value }, onCancel: { task.cancel() })
@@ -93,7 +81,7 @@ final class EdgeSpeechEngine: SpeechEngine {
         pauseRequested = false
         do { try activate() } catch { fail("无法恢复音频播放，请重试。"); return }
         if let player {
-            guard player.play() else { fail("无法播放\(serviceLabel)音频，请重试。"); return }
+            guard player.play() else { fail("无法播放Edge音频，请重试。"); return }
             if let utterance = currentUtterance { state = .playing(utterance) }; prefetchNext()
         } else { state = .preparing }
     }
@@ -134,9 +122,15 @@ final class EdgeSpeechEngine: SpeechEngine {
         if let activeSentence, activeSentence + 1 < timedPositions.count { seekSentence(activeSentence + 1); return }
         invalidate(); chunkIndex += 1; schedule()
     }
+    /// 接管现有播放器和时间轴，返回书内时不重新请求音频或重置 currentTime。
+    func rebindReadingContext(to replacement: EdgeSpeechEngine) {
+        chapterText = replacement.chapterText
+        onReadingPosition = replacement.onReadingPosition
+    }
+
     func update(settings: SpeechSettings) {
         let next = settings.clamped()
-        if voiceIdentifier(next) != voiceIdentifier(self.settings) || next.rate != self.settings.rate
+        if next.edgeVoiceIdentifier != self.settings.edgeVoiceIdentifier || next.rate != self.settings.rate
             || next.pitch != self.settings.pitch || next.edgePrefetchEnabled != self.settings.edgePrefetchEnabled {
             cancelPrefetch()
         }
@@ -156,7 +150,7 @@ final class EdgeSpeechEngine: SpeechEngine {
         readingPosition = SpeechReadingPosition(chapterIndex: chapterIndex, sentenceRange: range,
                                                currentOffset: range.lowerBound, chapterUTF16Length: chapterUTF16Length)
         state = .playing(SpeechUtterance(text: boundary.text, chapterIndex: chapterIndex,
-                                        utf16Offset: range.lowerBound, wordRange: nil))
+                                        utf16Offset: range.lowerBound, wordRange: nil, chapterUTF16Length: chapterUTF16Length))
         onReadingPosition?(readingPosition, settings)
     }
     private func seekSentence(_ index: Int) {
@@ -164,7 +158,7 @@ final class EdgeSpeechEngine: SpeechEngine {
         player.currentTime = timedPositions[index].0.time
         activeSentence = nil
         if !state.isPlaying {
-            guard player.play() else { fail("无法播放\(serviceLabel)音频，请重试。"); return }
+            guard player.play() else { fail("无法播放Edge音频，请重试。"); return }
             pauseRequested = false
             if let utterance = currentUtterance { state = .playing(utterance) }
         }
@@ -189,7 +183,7 @@ final class EdgeSpeechEngine: SpeechEngine {
     private func prefetchNext() {
         guard state.isPlaying, settings.edgePrefetchEnabled, let service, prefetch == nil,
               chunks.indices.contains(chunkIndex + 1) else { return }
-        let text = chunks[chunkIndex + 1].text, voice = voiceIdentifier(settings), rate = settings.rate, pitch = settings.pitch
+        let text = chunks[chunkIndex + 1].text, voice = settings.edgeVoiceIdentifier, rate = settings.rate, pitch = settings.pitch
         let key = audioKey(text: text, voice: voice, rate: rate, pitch: pitch)
         guard cache.getAudio(key) == nil else { return }
         let revision = audioRevision, id = UUID()
@@ -220,10 +214,10 @@ final class EdgeSpeechEngine: SpeechEngine {
         if let activeSentence, timedPositions.indices.contains(activeSentence) {
             let (boundary, range) = timedPositions[activeSentence]
             return SpeechUtterance(text: boundary.text, chapterIndex: chapterIndex,
-                                   utf16Offset: range.lowerBound, wordRange: nil)
+                                   utf16Offset: range.lowerBound, wordRange: nil, chapterUTF16Length: chapterUTF16Length)
         }
         return SpeechUtterance(text: chunk.text, chapterIndex: chapterIndex,
-                               utf16Offset: chunk.sourceRange.lowerBound, wordRange: nil)
+                               utf16Offset: chunk.sourceRange.lowerBound, wordRange: nil, chapterUTF16Length: chapterUTF16Length)
     }
     private func invalidate() {
         clearProgress(); cancelPrefetch(); pendingSentence = nil
@@ -239,14 +233,17 @@ final class EdgeSpeechEngine: SpeechEngine {
             else { await self.load(chapter: self.chapterIndex + 1, progression: 0, generation: generation) }
         }
     }
-    private func load(chapter start: Int, progression: Double, generation: UUID, sourceOffset: Int? = nil, exactVisibleStart: Bool = false) async {
+    private func load(chapter start: Int, progression: Double, generation: UUID, sourceOffset: Int? = nil, exactVisibleStart: Bool = false, resumeText: String? = nil) async {
         guard self.generation == generation, !Task.isCancelled else { return }
         var index = start
         failedChapter = start
         do {
             while index >= 0 && index < chapterCount {
                 failedChapter = index
+                preparationMessage = "正在加载朗读章节…"
+                state = .preparing
                 let text = try await chapterText(index)
+                let sourceOffset = sourceOffset ?? resumeText.flatMap { SpeechText.selectedOffset($0, in: text, near: progression) }
                 try Task.checkCancellation()
                 guard self.generation == generation else { return }
                 let requestedProgression = index == start
@@ -272,7 +269,9 @@ final class EdgeSpeechEngine: SpeechEngine {
     private func prepare(generation: UUID) async {
         guard self.generation == generation, !Task.isCancelled,
               let service, let utterance = currentUtterance else { return }
-        let voice = voiceIdentifier(settings), rate = settings.rate, pitch = settings.pitch
+        preparationMessage = "正在请求Edge语音音频…"
+        state = .preparing
+        let voice = settings.edgeVoiceIdentifier, rate = settings.rate, pitch = settings.pitch
         let key = audioKey(text: utterance.text, voice: voice, rate: rate, pitch: pitch)
         do {
             let audio: CloudSpeechAudio
@@ -322,12 +321,12 @@ final class EdgeSpeechEngine: SpeechEngine {
             guard self.generation == generation, !Task.isCancelled else { return }
             // 网络适配器已将服务错误转换为不含正文/地址/令牌的本地化消息。
             if let message = (error as? LocalizedError)?.errorDescription { fail(message) }
-            else { fail("\(serviceLabel)音频合成失败，请重试或改用本地朗读。") }
+            else { fail("Edge音频合成失败，请重试或改用本地朗读。") }
         }
     }
     private func finished(player: AVAudioPlayer, success: Bool) {
         guard self.player === player else { return }
-        guard success else { fail("\(serviceLabel)音频播放失败，请重试。"); return }
+        guard success else { fail("Edge音频播放失败，请重试。"); return }
         clearProgress(); self.player = nil; chunkIndex += 1; schedule()
     }
     private func fail(_ message: String) {
@@ -339,8 +338,13 @@ final class EdgeSpeechEngine: SpeechEngine {
         let audio = AVAudioSession.sharedInstance()
         try audio.setCategory(.playback, mode: .spokenAudio, policy: .longFormAudio)
         try audio.setActive(true)
+        ownsAudioSession = true
     }
-    private func deactivate() { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+    private func deactivate() {
+        guard ownsAudioSession else { return }
+        ownsAudioSession = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
 }
 
 private final class EdgeAudioDelegate: NSObject, AVAudioPlayerDelegate {

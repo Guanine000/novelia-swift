@@ -533,6 +533,7 @@ final class EPUBReaderModel: ObservableObject {
         Color(pageBackground)
     }
 
+    var bookBackgroundFollow = ReaderBookBackgroundFollow.default
     private var backgroundRefreshTask: Task<Void, Never>?
     /// 合并短时间内密集出现的背景或字体通知（用于防抖，不用于解决竞态）。
     func refreshBackground() {
@@ -627,7 +628,8 @@ final class EPUBReaderModel: ObservableObject {
         spreadCache.removeAll()
         failedChapters.removeAll()
         generation += 1
-        let book = EPUBPageBook(generation: generation, coordinator: layoutCoordinator)
+        let book = EPUBPageBook(generation: generation, coordinator: layoutCoordinator,
+                                ignoresNearWhite: bookBackgroundFollow == .ignoreNearWhite)
         book.onPagesChanged = { [weak self] in
             self?.objectWillChange.send()
         }

@@ -46,6 +46,7 @@ final class SpeechRemoteSession: ObservableObject {
 
     /// 停止朗读或离开阅读器时注销，避免锁屏残留无效控件与后台通知。
     func deactivate() {
+        guard isRegistered else { return }
         registrationID = UUID()
         let center = MPRemoteCommandCenter.shared()
         for (command, token) in registrations { command.removeTarget(token) }

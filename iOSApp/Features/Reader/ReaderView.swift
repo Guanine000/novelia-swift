@@ -114,6 +114,7 @@ struct ReaderView: View {
                                   ready: !chapter.originalText.isEmpty)
         }
         }
+        .environment(\.speechBookRoute, .online(novel))
         .onAppear {
             settings.activateBook("online:" + novel.id)
             ReaderKeepScreenOn.activate()
@@ -225,13 +226,12 @@ struct ReaderView: View {
                                                                chapterUTF16Length: 0, startIndexHint: nil) },
                                           title: novel.title,
                                           bookKey: "online:" + novel.id,
-                                          jumpToSpoken: { speech.suspendFollow(false); scrollToSpeech(proxy, force: true) },
+                                          chapterTitle: { index in novel.chapters.indices.contains(index) ? novel.chapters[index].title : nil },
+                                          jumpToSpoken: { scrollToSpeech(proxy, force: true) },
                                           onResumeSaved: { point in
                                               guard novel.chapters.indices.contains(point.chapterIndex) else { return }
                                               chapterIndex = point.chapterIndex
-                                              speech.start(from: SpeechAnchor(chapterIndex: point.chapterIndex,
-                                                                              progression: point.progression,
-                                                                              chapterUTF16Length: 0, startIndexHint: nil))
+                                              speech.start(from: point.anchor)
                                           }) {
                         SystemSpeechEngine(chapterCount: novel.chapters.count, onReadingPosition: { position, _ in
                             speechPosition = position

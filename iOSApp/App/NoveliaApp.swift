@@ -278,6 +278,10 @@ struct RootView: View {
                     case .me: SettingsView()
                     }
                 }
+                // 由标签页内容的安全区承载，避免跨页听书条覆盖直板机底部标签栏。
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    SpeechMiniBarHost(store: services.speechHandoff)
+                }
                 .tabItem { Label(tab.title, systemImage: tab.systemImage) }
                 .tag(tab)
             }
@@ -288,7 +292,7 @@ struct RootView: View {
             UserDefaults.standard.set(tab.rawValue, forKey: SettingsKey.tabBarLastSelected)
         }
         // 从迷你条发起「回到书内朗读处」：书库标签负责按书籍身份打开对应书籍。
-        .onValueChange(of: services.speechHandoff.openRequest) { _, request in
+        .onReceive(services.speechHandoff.$openRequest) { request in
             if request != nil { selectedTab = .library }
         }
         .tint(AppThemeColor.color(for: appThemeColorRaw, customHex: appThemeCustomHex))
@@ -315,10 +319,6 @@ struct RootView: View {
         .environmentObject(libraryWordCounts)
         .environmentObject(updates)
         .environment(\.speechHandoff, services.speechHandoff)
-        // 跨页听书条：只有阅读器退出且仍在播放时才有会话，阅读中由移交回收保持隐藏。
-        .overlay(alignment: .bottom) {
-            SpeechMiniBarHost(store: services.speechHandoff)
-        }
         .modifier(WebDAVAutoSyncTriggers(sync: webDAVSync, web: webNovelDownloads, wenku: wenkuDownloads,
                                          library: services.local.library, blockedTags: services.local.blockedTags,
                                          identityMaps: services.local.readerSettings.webEPUBMaps, bookmarks: services.local.bookmarks))
@@ -362,6 +362,7 @@ struct RootView: View {
         .onValueChange(of: scenePhase) { _, phase in
             // 切换前后台会触发阅读器截图与重排，记录时间点以便与阅读日志对照。
             Self.lifecycleLogger.notice(ReaderDiagnosticMessage.scenePhase(Self.phaseName(phase)))
+            if phase != .active { services.speechHandoff.session?.flushResumePoint() }
             if phase == .active { Task { await restoreSessions() } }
         }
         .sheet(isPresented: $auth.isLoginPresented) {
@@ -372,6 +373,8 @@ struct RootView: View {
             CompatNavigationStack {
                 EPUBReaderHost(initialURL: nil)
             }
+            .environmentObject(services)
+            .environment(\.speechHandoff, services.speechHandoff)
             .environmentObject(services.local.readerSettings)
             .environmentObject(services.local.recording)
             .environmentObject(services.local.blockedTags)
