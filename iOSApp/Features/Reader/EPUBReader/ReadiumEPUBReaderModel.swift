@@ -101,6 +101,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published private(set) var currentTOCIndex: Int?
     private var textBook: PagedTextBook?
     private var textPositionTask: Task<Void, Never>?
+    /// 翻页换算与听书进度共用代次。后发起的写入生效，先完成的过期任务不能把进度写回去。
+    private var textProgressGeneration = 0
     private var receivedTextLocation = false
     /// EPUB 打开后导航器报告的第一个位置就是恢复的位置，不写入，避免刷新同步时间戳。
     private var receivedBookLocation = false
@@ -249,9 +251,11 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             if book.readiumIdentity != nil { return }
         }
         textPositionTask?.cancel()
+        textProgressGeneration += 1
+        let generation = textProgressGeneration
         textPositionTask = Task { [weak self] in
             guard let html = try? await source.chapterHTML(at: unit), !Task.isCancelled,
-                  let self, self.locator == location else { return }
+                  let self, self.locator == location, self.textProgressGeneration == generation else { return }
             let length = EPUBChapterProgress.textLength(html: html)
             let progression = min(1, max(0, location.locations.progression ?? 0))
             book.onPosition(unit, EPUBChapterProgress.offset(progression: progression, length: length))
@@ -623,10 +627,15 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         listeningProgressTask?.cancel()
         if let textBook, textBook.bookmarkKey?.hasPrefix("txt:") == true,
            let source = textBook.source as? TextChapterSource, (0..<source.chapterCount).contains(point.chapterIndex) {
-            listeningProgressTask = Task {
-                guard let html = try? await source.chapterHTML(at: point.chapterIndex), !Task.isCancelled else { return }
+            textProgressGeneration += 1
+            let generation = textProgressGeneration
+            listeningProgressTask = Task { [weak self] in
+                guard let self else { return }
+                guard let html = try? await source.chapterHTML(at: point.chapterIndex), !Task.isCancelled,
+                      self.textProgressGeneration == generation else { return }
                 let offset = point.sourceUTF16Offset ?? EPUBChapterProgress.offset(progression: point.progression,
                     length: EPUBChapterProgress.textLength(html: html))
+                guard self.textProgressGeneration == generation else { return }
                 textBook.onPosition(point.chapterIndex, offset)
             }
         } else if let hash = bookHash, let publication, publication.readingOrder.indices.contains(point.chapterIndex) {

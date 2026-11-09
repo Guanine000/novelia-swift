@@ -190,8 +190,27 @@ struct TXTAdjustmentCoordinates {
         var cursor = 0, units = [Unit]()
         for chapter in chapters {
             let body = chapter.body
-            let found = source.range(of: body, options: [], range: NSRange(location: cursor, length: source.length - cursor))
-            guard found.location != NSNotFound else { throw TXTAdjustmentError.invalidDirectory }
+            // 标题已覆盖到章末，或剩余文字修剪后为空。空串的 NSString 查找返回 NSNotFound，
+            // 不能因此拒绝保存；该章仍占一个零长度单元，阅读位置落在章首。
+            let found: NSRange
+            if body.isEmpty {
+                let bodyStart: Int
+                let regionEnd: Int
+                if let boundaries, boundaries.indices.contains(chapter.index) {
+                    let boundary = boundaries[chapter.index]
+                    regionEnd = chapter.index + 1 < boundaries.count ? boundaries[chapter.index + 1].start : source.length
+                    bodyStart = min(source.length, max(0, boundary.start + boundary.titleLength))
+                } else {
+                    bodyStart = cursor
+                    regionEnd = cursor
+                }
+                let start = min(source.length, max(cursor, bodyStart))
+                let end = min(source.length, max(start, regionEnd))
+                found = NSRange(location: start, length: end - start)
+            } else {
+                found = source.range(of: body, options: [], range: NSRange(location: cursor, length: source.length - cursor))
+                guard found.location != NSNotFound else { throw TXTAdjustmentError.invalidDirectory }
+            }
             cursor = NSMaxRange(found)
             let bytes = body.utf8
             let cuts = TXTTextUnitCuts.cuts(utf8: bytes, maximumUTF8: 36_000)

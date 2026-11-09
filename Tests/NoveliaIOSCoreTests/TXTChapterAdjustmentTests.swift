@@ -56,7 +56,7 @@ final class TXTChapterAdjustmentTests: XCTestCase {
     }
 
     func testManualTwoChapterDirectoryBypassesAutomaticThreshold() throws {
-        var book = try document("第一章 开始\r\n内容\r\n第二章 后续\r\n正文")
+        var book = try document("第一章 开始\r\n内容\r\n第二章 后续\r\n后面内容")
         XCTAssertEqual(book.boundaries.count, 1)
         try book.setTitle(selection: (book.text as NSString).range(of: "第二章 后续"))
         XCTAssertEqual(book.boundaries.count, 2)
@@ -124,6 +124,21 @@ final class TXTChapterAdjustmentTests: XCTestCase {
         let location = try XCTUnwrap(map.location(rawOffset: second))
         XCTAssertEqual(map.units[location.unit].chapter, 1)
         XCTAssertEqual(map.rawOffset(unit: location.unit, offset: location.offset), second)
+    }
+
+    func testTrailingTitleWithEmptyBodyStillMaps() throws {
+        var book = try document("开头\n新标题")
+        try book.setTitle(selection: (book.text as NSString).range(of: "新标题"))
+        XCTAssertEqual(book.chapters().map(\.body), ["开头", ""])
+        let map = try TXTAdjustmentCoordinates(text: book.text, chapters: book.chapters(), projection: .init(), boundaries: book.boundaries)
+        let inFirst = try XCTUnwrap(map.location(rawOffset: (book.text as NSString).range(of: "开头").location))
+        XCTAssertEqual(map.units[inFirst.unit].chapter, 0)
+        let atTitle = try XCTUnwrap(map.location(rawOffset: book.boundaries[1].start))
+        XCTAssertEqual(map.units[atTitle.unit].chapter, 1)
+        var blank = try document("开头\n新标题\n   ")
+        try blank.setTitle(selection: (blank.text as NSString).range(of: "新标题"))
+        XCTAssertEqual(blank.chapters()[1].body, "")
+        _ = try TXTAdjustmentCoordinates(text: blank.text, chapters: blank.chapters(), projection: .init(), boundaries: blank.boundaries)
     }
 
     func testLongChapterUsesSameBoundedUnitCuts() throws {
