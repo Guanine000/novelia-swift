@@ -306,6 +306,23 @@ final class CharacterLexiconTests: XCTestCase {
         XCTAssertEqual(store.entities.first?.facts.count, 2)
     }
     @MainActor
+    func testDetailUpdaterAppendsOnlyTheRequestedPerson() async throws {
+        let suite = "CharacterDetail-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = CharacterLexiconStore(defaults: defaults)
+        try store.confirmOrder(work: scope().work, volumes: scope().volumes)
+        let id = try store.accept(.init(facts: [early()]), scope: scope())
+        let ai = ReadingAIStore(defaults: defaults, keys: MemoryReadingAIKeys(), client: CharacterDetailAI())
+        var config = ReadingAIConfiguration(); config.isEnabled = true; config.baseURL = "https://test.example/v1"; config.model = "fixture"
+        try ai.save(config, newKey: "fake")
+        let chapter = RecapChapter(index: 0, title: "一", text: earlyQuote + "张三摘下兜帽，望向远处。")
+        let added = try await CharacterDetailUpdater.enrich(name: "面具人", entityID: id, book: "v1", identity: "i1",
+            chapters: [chapter], scope: scope(), store: store, ai: ai)
+        XCTAssertEqual(added, 1)
+        XCTAssertEqual(store.entities.count, 1)
+        XCTAssertEqual(store.entities.first?.facts.count, 2)
+    }
+    @MainActor
     func testExplicitAppendPreservesAttributionAndOldArchiveCompatibility() throws {
         let suite = "CharacterAppend-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -717,6 +734,20 @@ final class CharacterLexiconTests: XCTestCase {
         XCTAssertThrowsError(try missing.validated())
     }
 
+}
+
+private actor CharacterDetailAI: ReadingAICompleting {
+    func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest) async throws -> ReadingAIResponse {
+        let input = try JSONSerialization.jsonObject(with: Data(request.input.utf8)) as! [String: Any]
+        let chapter = input["chapter"] as! Int
+        let data = try JSONSerialization.data(withJSONObject: ["candidates": [
+            ["name": "面具人", "facts": [["chapter": chapter, "text": "独自离开村子。",
+                                         "quote": "面具人将地图交给同伴，随后独自离开了村子。"]]],
+            ["name": "张三", "facts": [["chapter": chapter, "text": "戴兜帽的人。",
+                                       "quote": "张三摘下兜帽，望向远处。"]]],
+        ]])
+        return .init(text: String(decoding: data, as: UTF8.self), inputTokens: nil, outputTokens: nil)
+    }
 }
 
 private actor CharacterRetryAI: ReadingAICompleting {

@@ -20,7 +20,7 @@ struct CharacterSeriesView: View {
     @State private var currentBook = ""
     @State private var scanSeries = false
     @State private var requestLimit = 64
-    @State private var concurrency = 2
+    @State private var concurrency = 3
     @State private var query = ""
     @State private var ready = false
     @State private var identities: [String: String] = [:]
@@ -270,6 +270,7 @@ private struct CharacterCardView: View {
     @State private var updateTask: Task<Void, Never>?
     @State private var updateMessage: String?
     @State private var confirmingDelete = false
+    @State private var enriching = false
     @State private var updateStarted = Date()
     private var scope: CharacterScope { refreshedScope ?? initialScope }
     private var person: VisibleCharacter? { scope.visible(store.entities).first { $0.id == id } }
@@ -356,6 +357,7 @@ private struct CharacterCardView: View {
                         }
                     }
                     Divider()
+                    Button("补充细节") { enrich() }.disabled(enriching || updating)
                     Button("删除此人物", role: .destructive) { confirmingDelete = true }
                 } label: { Image(systemName: "ellipsis").foregroundStyle(NoveliaStyle.brandGreen) }
             }
@@ -565,6 +567,35 @@ private struct CharacterCardView: View {
             catch { self.error = error.localizedDescription }
         }
     }
+    /// 建档阶段每人只有一条事实；想看更多就在这里对这个人单独补一次。
+    private func enrich() {
+        guard let person, !enriching else { return }
+        var seen = Set<String>(), picks: [(book: String, chapter: Int)] = []
+        for fact in person.facts.reversed() {
+            if seen.insert("\(fact.book)#\(fact.chapter)").inserted { picks.append((fact.book, fact.chapter)) }
+            if picks.count >= 3 { break }
+        }
+        guard let first = picks.first, let book = books.first(where: { $0.key == first.book }) else {
+            self.error = CharacterLexiconError.missing.localizedDescription; return
+        }
+        enriching = true; error = nil; updateMessage = nil
+        Task {
+            defer { enriching = false }
+            do {
+                let volume = try await CharacterVolumeLoader.load(book, settings: settings)
+                var chapters = [RecapChapter]()
+                for pick in picks where pick.book == first.book {
+                    chapters += try await volume.source.load(pick.chapter..<(pick.chapter + 1))
+                }
+                guard !chapters.isEmpty else { throw CharacterLexiconError.changed }
+                let added = try await CharacterDetailUpdater.enrich(
+                    name: person.name, entityID: id, book: first.book, identity: volume.source.identity,
+                    chapters: chapters, scope: scope, store: store, ai: ai) { updateMessage = $0 }
+                updateMessage = added > 0 ? "已补充\(added)条细节。" : "这几章没有新的细节。"
+            } catch is CancellationError {
+            } catch { self.error = error.localizedDescription }
+        }
+    }
     private func update() {
         updateTask?.cancel(); updating = true; error = nil; updateStarted = Date(); updateMessage = nil
         updateTask = Task {
@@ -652,19 +683,23 @@ private enum CharacterBookUpdater {
                 try Task.checkCancellation()
                 guard ai.configuration == config else { throw CancellationError() }
                 var batch = [PreparedChapter]()
-                var cursor = chapter
-                while cursor < upper, batch.count < parallel {
-                    let text = try await value.source.load(cursor..<(cursor + 1))
-                    try Task.checkCancellation()
-                    guard text.count == 1, text.first?.index == cursor else { throw CharacterLexiconError.changed }
+                // 整批一次性取正文：EPUB 的读取闭包每次调用都会重算整本哈希并重新解包，
+                // 按章逐次调用会让本地解包串行排到网络请求前面。
+                let end = min(chapter + parallel, upper)
+                let texts = try await value.source.load(chapter..<end)
+                try Task.checkCancellation()
+                guard texts.count == end - chapter, texts.enumerated().allSatisfy({ $0.element.index == chapter + $0.offset }) else {
+                    throw CharacterLexiconError.changed
+                }
+                for text in texts {
                     // 封面、版权页、作者简介和分卷标题页没有剧情，直接记检查点跳过：
                     // 送进模型只会把作者／译者当成角色，还占掉一次请求预算。
-                    let empty = text.allSatisfy { $0.text.isEmpty } || CharacterExtractionPlan.isNonContent(text)
-                    let plan = empty ? nil : try CharacterExtractionPlan(scope: scope, book: key, identity: expected, chapters: text)
+                    let empty = text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || CharacterExtractionPlan.isNonContent([text])
+                    let plan = empty ? nil : try CharacterExtractionPlan(scope: scope, book: key, identity: expected, chapters: [text])
                     if let plan { guard plan.chunks.count <= limit else { throw CharacterLexiconError.chapterBudget(plan.chunks.count) } }
-                    batch.append(PreparedChapter(chapter: cursor, plan: plan))
-                    cursor += 1
+                    batch.append(PreparedChapter(chapter: text.index, plan: plan))
                 }
+                let cursor = end
                 guard budget.used + batch.compactMap({ $0.plan?.chunks.count }).reduce(0, +) <= limit else { throw CharacterLexiconError.requestBudget }
 
                 if let last = batch.last, batch.contains(where: { $0.plan != nil }) {

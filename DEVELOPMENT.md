@@ -774,7 +774,9 @@ Core 的 `ReadingRecapPlan` 要求输入为边界之前连续 1–3 章，正文
 
 人物自动化由 `CharacterSeriesView` 提供“仅本书／系列所有书籍”和生成／更新入口。确认卷序后，`CharacterScope.readBoundaries` 按每卷真实保存位置限制范围，当前书内入口优先使用实际位置；缺失卷、无进度卷和后卷排除，不默认前卷读完。每次按钮操作先刷新本地状态；当前阅读位置不等同逐章读完记录，跳读空缺不能识别。
 
-`CharacterAutomaticUpdater` 逐章调用 `CharacterExtractionPlan`，单章最多2 MiB、256块，每块8000字节并重叠200字符。空章直接推进检查点，不发请求；`CharacterExtractionPlan.isNonContent` 判定不足350字的封面、版权页、作者简介、目录与分卷标题页同样只记检查点，避免把作者／译者当作角色并浪费请求。单章必须在本轮请求预算内才开始。默认每轮64次新请求，可选择32/64/128/256，缓存命中不计费请求。
+`CharacterAutomaticUpdater` 逐章调用 `CharacterExtractionPlan`，单章最多2 MiB、256块，每块8000字节并重叠200字符。**扫描采用建档模式**：每人只要一条 40 字以内的身份事实，输出量约为逐人详写的四分之一到三分之一；细节由 `CharacterDetailUpdater` 在人物详情页按需补，复用 `detailRequest` 与同一套逐条核验，再通过 `append` 追加到现有卡片，不推进扫描检查点。空章直接推进检查点，不发请求；`CharacterExtractionPlan.isNonContent` 判定不足350字的封面、版权页、作者简介、目录与分卷标题页同样只记检查点，避免把作者／译者当作角色并浪费请求。单章必须在本轮请求预算内才开始。默认每轮64次新请求，可选择32/64/128/256，缓存命中不计费请求。
+
+取正文按批一次调用 `LocalRecapSource.load`：EPUB 的读取闭包每次调用都会重算整本 SHA-256 并重新解包，逐章调用会让本地解包串行排在网络请求前面。
 
 提取与落盘拆成 `extract` / `apply` 两步：并发时按批同时请求多章（1／2／3，默认 2），落盘仍严格按章序串行提交，检查点不会因为后完成的章节而跳过前面的失败章；批次内任一章失败则只提交它之前的章。请求额度用带锁的计数器在后台线程扣减，避免并发下超额。同名重复卡由 `CharacterLexiconStore.duplicates` 分组、用户在“校准重复人物”里确认合并，不自动合并。
 

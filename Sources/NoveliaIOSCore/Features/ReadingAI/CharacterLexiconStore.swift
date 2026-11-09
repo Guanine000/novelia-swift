@@ -381,6 +381,43 @@ struct CharacterScanCheckpoint: Codable, Equatable {
     let nextChapter: Int
 }
 
+/// 单人补细节：扫描阶段每人只建一条档，打开卡片后按需对这个名字再跑一次。
+/// 只处理指定的少量章节，产出仍走同一套逐条核验，再追加到现有卡片。
+@MainActor
+enum CharacterDetailUpdater {    static func enrich(name: String, entityID: String, book: String, identity: String, chapters: [RecapChapter],
+                       scope: CharacterScope, store: CharacterLexiconStore, ai: ReadingAIStore,
+                       maximumRequests: Int = 6, beforeRequest: () throws -> Void = {}, progress: (String) -> Void = { _ in }) async throws -> Int {
+        guard ai.isReadyForGeneration else { throw ai.configuration.isEnabled ? ReadingAIError.missingKey : ReadingAIError.disabled }
+        guard scope.identities[book] == identity else { throw CharacterLexiconError.changed }
+        let configuration = ai.configuration
+        var requests = 0, added = 0
+        for chapter in chapters {
+            try Task.checkCancellation()
+            let plan = try CharacterExtractionPlan(scope: scope, book: book, identity: identity, chapters: [chapter])
+            for chunk in plan.chunks {
+                try Task.checkCancellation()
+                guard requests < maximumRequests else { return added }
+                guard ai.configuration == configuration else { throw CancellationError() }
+                progress("正在补充「\(name)」 · 第\(chapter.index + 1)章")
+                let request = try plan.detailRequest(chunk, name: name, outputTokens: configuration.maximumOutputTokens)
+                try beforeRequest(); requests += 1
+                let output: String
+                do { output = try await ai.generate(request).text }
+                catch is CancellationError { throw CancellationError() }
+                catch { continue }   // 单块失败不影响其他章节，用户可再点一次
+                guard let candidates = try? plan.validate(output, chunk: chunk) else { continue }
+                for candidate in candidates where candidate.name == name {
+                    let fresh = candidate.facts.filter { CharacterLexiconStore.valid($0) }
+                    guard !fresh.isEmpty else { continue }
+                    try store.append(.init(id: candidate.id, facts: fresh), to: entityID, scope: scope)
+                    added += fresh.count
+                }
+            }
+        }
+        return added
+    }
+}
+
 /// 单章完成才落盘；失败/取消保留前面完整章节的检查点，不持久化本章半成品。
 @MainActor
 enum CharacterAutomaticUpdater {
