@@ -11,7 +11,9 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
         let configuration = (configuration.copy() as? URLSessionConfiguration) ?? .ephemeral
         configuration.httpCookieStorage = nil; configuration.urlCredentialStorage = nil; configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.timeoutIntervalForRequest = 60; configuration.timeoutIntervalForResource = 120
+        // 非流式请求在生成期间不返回任何字节，默认 60 秒的"等待新数据"看门狗会把一段
+        // 4096–8192 tokens 的正常生成直接掐断。按常用接口最慢情况留足余量。
+        configuration.timeoutIntervalForRequest = 300; configuration.timeoutIntervalForResource = 600
         sessionConfiguration = configuration
     }
 

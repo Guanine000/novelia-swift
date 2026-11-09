@@ -275,6 +275,19 @@ final class CharacterLexiconStore: ObservableObject, CharacterSyncLocal {
     private static func factKey(_ fact: CharacterFact) -> String {
         "\(fact.book)|\(fact.identity)|\(fact.chapter)|\(fact.offset)|\(fact.name)|\(fact.text)|\(fact.quote)"
     }
+    /// 整卡删除：先把该人物全部事实记为已否决证据，再移除人物。
+    /// 只删个人事实而不记指纹的话，换模型或重扫同版本正文会把整张卡重新生成出来。
+    func removeEntity(_ id: String, scope: CharacterScope) throws {
+        guard let index = archive.entities.firstIndex(where: { $0.id == id && $0.work == scope.work }) else { throw CharacterLexiconError.scope }
+        var next = archive
+        if next.rejected == nil { next.rejected = [] }
+        for fact in next.entities[index].facts {
+            let key = Self.evidenceKey(fact)
+            if next.rejected?.contains(key) != true { next.rejected?.append(key) }
+        }
+        next.entities.removeAll { $0.id == id }
+        try commit(next)
+    }
     func confirm(fact: String, entity: String, scope: CharacterScope) throws {
         guard let i = archive.entities.firstIndex(where: { $0.id == entity && $0.work == scope.work }),
               let j = archive.entities[i].facts.firstIndex(where: { $0.id == fact && scope.permits($0) }) else { throw CharacterLexiconError.scope }

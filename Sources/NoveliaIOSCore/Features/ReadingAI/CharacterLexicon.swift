@@ -304,7 +304,12 @@ enum CharacterGenerator {
             let saved = cache?.read(key)
             let output: String
             if let saved { output = saved }
-            else { try beforeRequest(); output = try await ai.generate(request).text }
+            else {
+                try beforeRequest()
+                // 请求发出后立刻回报一次，界面才不会在整个生成期间停在"0 次请求"。
+                progress(index + 1, plan.chunks.count)
+                output = try await ai.generate(request).text
+            }
             try Task.checkCancellation()
             guard ai.configuration == config else { throw CancellationError() }
             let verified: [CharacterCandidate]
@@ -317,6 +322,7 @@ enum CharacterGenerator {
                 guard saved == nil else { cache?.remove(key); throw error }
                 try Task.checkCancellation()
                 try beforeRequest()
+                progress(index + 1, plan.chunks.count)
                 let retry = try await ai.generate(request).text
                 try Task.checkCancellation()
                 guard ai.configuration == config else { throw CancellationError() }

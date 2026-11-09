@@ -220,6 +220,8 @@ private struct CharacterCardView: View {
     @State private var updating = false
     @State private var updateTask: Task<Void, Never>?
     @State private var updateMessage: String?
+    @State private var confirmingDelete = false
+    @State private var updateStarted = Date()
     private var scope: CharacterScope { refreshedScope ?? initialScope }
     private var person: VisibleCharacter? { scope.visible(store.entities).first { $0.id == id } }
     private var confirmedFacts: [CharacterFact] { person?.facts.filter { $0.needsReview != true } ?? [] }
@@ -304,6 +306,8 @@ private struct CharacterCardView: View {
                             }
                         }
                     }
+                    Divider()
+                    Button("删除此人物", role: .destructive) { confirmingDelete = true }
                 } label: { Image(systemName: "ellipsis").foregroundStyle(NoveliaStyle.brandGreen) }
             }
         }
@@ -312,6 +316,14 @@ private struct CharacterCardView: View {
             CharacterFactEditor(fact: fact) { text in try store.edit(fact: fact.id, entity: id, text: text, scope: scope) }
         }
         .sheet(isPresented: $managingPortrait) { portraitEditor }
+        .alert("删除「\(person?.name ?? "")」？", isPresented: $confirmingDelete) {
+            Button("删除", role: .destructive) {
+                if (try? store.removeEntity(id, scope: scope)) != nil { dismiss() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("该人物卡及其全部事实会被删除，并在当前正文版本记为已否决，重新扫描不会自动恢复。")
+        }
         .sheet(isPresented: $showingPortrait) {
             NavigationView {
                 CharacterPortraitImage(store: store, id: id, scope: scope, name: person?.name ?? "", compact: false, fits: true)
@@ -441,7 +453,13 @@ private struct CharacterCardView: View {
         VStack(spacing: 0) {
             if updating {
                 Button { updateTask?.cancel() } label: {
-                    VStack(spacing: 3) { HStack { ProgressView().tint(.white); Text("暂停更新") }; Text(updateMessage ?? "正在处理新增章节…").font(.caption) }
+                    VStack(spacing: 3) {
+                        HStack { ProgressView().tint(.white); Text("暂停更新") }
+                        // 一次高分块生成可能要几分钟，秒表能区分"在跑"和"真卡死"。
+                        TimelineView(.periodic(from: updateStarted, by: 1)) { context in
+                            Text((updateMessage ?? "正在处理新增章节…") + " · 已等待\(Int(max(0, context.date.timeIntervalSince(updateStarted))))秒").font(.caption)
+                        }
+                    }
                         .frame(maxWidth: .infinity).padding(.vertical, 12).foregroundStyle(.white)
                 }.buttonStyle(.plain).background(NoveliaStyle.brandGreen).clipShape(RoundedRectangle(cornerRadius: 12))
             } else {
@@ -497,7 +515,7 @@ private struct CharacterCardView: View {
         }
     }
     private func update() {
-        updateTask?.cancel(); updating = true; error = nil
+        updateTask?.cancel(); updating = true; error = nil; updateStarted = Date(); updateMessage = nil
         updateTask = Task {
             defer { updating = false }
             do {

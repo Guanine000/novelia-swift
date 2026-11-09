@@ -247,6 +247,22 @@ final class CharacterLexiconTests: XCTestCase {
         XCTAssertEqual(calls, 2)
     }
     @MainActor
+    func testRemoveEntityDeletesWholeCardAndKeepsEvidenceRejected() throws {
+        let suite = "CharacterRemove-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = CharacterLexiconStore(defaults: defaults)
+        try store.confirmOrder(work: scope().work, volumes: scope().volumes)
+        let id = try store.accept(.init(facts: [early()]), scope: scope())
+        XCTAssertEqual(store.entities.count, 1)
+        try store.removeEntity(id, scope: scope())
+        XCTAssertTrue(store.entities.isEmpty)
+        // 同一正文版本的同一证据已被否决，重新扫描不该把整张卡再建回来。
+        let plan = try CharacterExtractionPlan(scope: scope(), book: "v1", identity: "i1",
+            chapters: [.init(index: 0, title: "一", text: earlyQuote)])
+        try store.applyAutomatic([.init(facts: [early()])], plan: plan, signature: "sig")
+        XCTAssertTrue(store.entities.isEmpty)
+    }
+    @MainActor
     func testExplicitAppendPreservesAttributionAndOldArchiveCompatibility() throws {
         let suite = "CharacterAppend-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
