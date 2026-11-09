@@ -276,6 +276,9 @@ final class EPUBPageBook {
 
     func sourceHash(spineIndex: Int) -> String? { chapters[spineIndex]?.sourceHash }
     func mainThreadLayoutSteps(spineIndex: Int) -> Int? { chapters[spineIndex]?.mainThreadLayoutSteps }
+    func savedOffset(spineIndex: Int, sourceOffset: Int) -> Int? {
+        chapters[spineIndex].map { $0.positionMap.legacy(sourceOffset) }
+    }
     func savedLength(spineIndex: Int) -> Int? {
         chapters[spineIndex].map { $0.positionMap.legacy($0.sourceText.utf16.count) }
     }

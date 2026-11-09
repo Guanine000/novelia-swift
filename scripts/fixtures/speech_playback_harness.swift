@@ -338,6 +338,9 @@ actor PendingCloudSpeech: CloudSpeechSynthesizing {
         let resumeStore = SpeechResumeStore(defaults: resumeDefaults)
         let resuming = SpeechPlaybackController(resumeStore: resumeStore)
         resuming.bookKey = "txt:restart"
+        resuming.settings.followsReadingPosition = false
+        var progressSaves = [SpeechResumePoint]()
+        resuming.onProgressSave = { progressSaves.append($0) }
         let resumeEngine = SystemSpeechEngine(chapterCount: 2) { _ in "第一句。第二句。" }
         resuming.attach(resumeEngine)
         resuming.start(from: SpeechAnchor(chapterIndex: 0, progression: 0, chapterUTF16Length: 0, startIndexHint: nil))
@@ -348,9 +351,12 @@ actor PendingCloudSpeech: CloudSpeechSynthesizing {
         check(resumeStore.load(bookKey: "txt:restart")?.sourceUTF16Offset == 0, "同章逐句变化保持写盘节流")
         resuming.pause()
         check(resumeStore.load(bookKey: "txt:restart")?.sourceUTF16Offset == 4, "暂停立即补存最新句首")
+        check(progressSaves.last?.sourceUTF16Offset == 4, "关闭跟读仍按实际朗读位置保存书籍进度")
+        let progressSaveCount = progressSaves.count
         let pausedAt = resumeStore.load(bookKey: "txt:restart")?.updatedAt
         resuming.flushResumePoint()
         check(resumeStore.load(bookKey: "txt:restart")?.updatedAt == pausedAt, "重复暂停或后台补存不重复写盘")
+        check(progressSaves.count == progressSaveCount, "重复补存不重复通知书籍进度")
         resuming.resume(); resuming.skipForward()
         await wait { resuming.state.utterance?.chapterIndex == 1 }
         resuming.skipForward(); await drain()

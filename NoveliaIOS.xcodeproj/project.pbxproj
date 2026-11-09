@@ -286,6 +286,12 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		7A8F185E1871ED85D75E32BF /* TXTChapterAdjustmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1684F02EB3975D519AFDA24E /* TXTChapterAdjustmentView.swift */; };
 		02AA531FA5D4E6DCB3C68E2F /* TXTAdjustmentMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC0FCEC892A571AB5E47864E /* TXTAdjustmentMigration.swift */; };
 		236C7DF8ED9E16F50E2B90AD /* TXTAdjustmentMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC0FCEC892A571AB5E47864E /* TXTAdjustmentMigration.swift */; };
+		0BD300450DE22BA47D3A17EB /* ReadingTimeEstimate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61EC990BF69B724CD842E0A8 /* ReadingTimeEstimate.swift */; };
+		6C4EB232C78616723159519C /* ReadingTimeEstimate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61EC990BF69B724CD842E0A8 /* ReadingTimeEstimate.swift */; };
+		BE700CE452E5FB9CB15499C3 /* ReadingTimeEstimateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D505843883514A6857EEA04 /* ReadingTimeEstimateStore.swift */; };
+		C0692DA97B17885CAA696743 /* ReadingTimeEstimateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D505843883514A6857EEA04 /* ReadingTimeEstimateStore.swift */; };
+		8C607327557C6356C89BAB64 /* ReaderRemainingTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0503F6C083764440C88110 /* ReaderRemainingTime.swift */; };
+		43510B642C77BB0AFA47CC49 /* ReaderRemainingTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0503F6C083764440C88110 /* ReaderRemainingTime.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -428,6 +434,9 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 		7291FB22401D6BE8390730A3 /* TXTChapterAdjustment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Features/Reader/TXTChapterAdjustment.swift; sourceTree = SOURCE_ROOT; };
 		1684F02EB3975D519AFDA24E /* TXTChapterAdjustmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/TXTChapterAdjustmentView.swift; sourceTree = SOURCE_ROOT; };
 		CC0FCEC892A571AB5E47864E /* TXTAdjustmentMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/TXTAdjustmentMigration.swift; sourceTree = SOURCE_ROOT; };
+		61EC990BF69B724CD842E0A8 /* ReadingTimeEstimate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Features/Reader/ReadingTimeEstimate.swift; sourceTree = SOURCE_ROOT; };
+		6D505843883514A6857EEA04 /* ReadingTimeEstimateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Features/Reader/ReadingTimeEstimateStore.swift; sourceTree = SOURCE_ROOT; };
+		5E0503F6C083764440C88110 /* ReaderRemainingTime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/ReaderRemainingTime.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -463,6 +472,9 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 		D10000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				5E0503F6C083764440C88110 /* ReaderRemainingTime.swift */,
+				6D505843883514A6857EEA04 /* ReadingTimeEstimateStore.swift */,
+				61EC990BF69B724CD842E0A8 /* ReadingTimeEstimate.swift */,
 				CC0FCEC892A571AB5E47864E /* TXTAdjustmentMigration.swift */,
 				1684F02EB3975D519AFDA24E /* TXTChapterAdjustmentView.swift */,
 				7291FB22401D6BE8390730A3 /* TXTChapterAdjustment.swift */,
@@ -866,6 +878,9 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8C607327557C6356C89BAB64 /* ReaderRemainingTime.swift in Sources */,
+				BE700CE452E5FB9CB15499C3 /* ReadingTimeEstimateStore.swift in Sources */,
+				0BD300450DE22BA47D3A17EB /* ReadingTimeEstimate.swift in Sources */,
 				02AA531FA5D4E6DCB3C68E2F /* TXTAdjustmentMigration.swift in Sources */,
 				C8A49E356856547311ECD0D0 /* TXTChapterAdjustmentView.swift in Sources */,
 				19FF6083CA45148C723AF5F8 /* TXTChapterAdjustment.swift in Sources */,
@@ -1008,6 +1023,9 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				43510B642C77BB0AFA47CC49 /* ReaderRemainingTime.swift in Sources */,
+				C0692DA97B17885CAA696743 /* ReadingTimeEstimateStore.swift in Sources */,
+				6C4EB232C78616723159519C /* ReadingTimeEstimate.swift in Sources */,
 				236C7DF8ED9E16F50E2B90AD /* TXTAdjustmentMigration.swift in Sources */,
 				7A8F185E1871ED85D75E32BF /* TXTChapterAdjustmentView.swift in Sources */,
 				037A7C2066018B17D6C052F9 /* TXTChapterAdjustment.swift in Sources */,

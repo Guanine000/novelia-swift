@@ -47,6 +47,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published private(set) var embeddedTOCCount = 0
     @Published private(set) var tocReadFailed = false
     @Published var isTOCDiagnosticsExpanded = false
+    @Published private(set) var readingTimePoint = ReadingTimePoint.start
     @Published private(set) var locator: Locator?
     @Published private(set) var style = EPUBReaderStyle()
     @Published private(set) var isDarkMode = false
@@ -616,6 +617,40 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         } else { speech.attach(local) }
     }
 
+    private var listeningProgressTask: Task<Void, Never>?
+    func recordListeningProgress(_ point: SpeechResumePoint) {
+        guard point.bookKey == bookmarkKey else { return }
+        listeningProgressTask?.cancel()
+        if let textBook, textBook.bookmarkKey?.hasPrefix("txt:") == true,
+           let source = textBook.source as? TextChapterSource, (0..<source.chapterCount).contains(point.chapterIndex) {
+            listeningProgressTask = Task {
+                guard let html = try? await source.chapterHTML(at: point.chapterIndex), !Task.isCancelled else { return }
+                let offset = point.sourceUTF16Offset ?? EPUBChapterProgress.offset(progression: point.progression,
+                    length: EPUBChapterProgress.textLength(html: html))
+                textBook.onPosition(point.chapterIndex, offset)
+            }
+        } else if let hash = bookHash, let publication, publication.readingOrder.indices.contains(point.chapterIndex) {
+            var fraction = (Double(point.chapterIndex) + point.progression) / Double(max(1, publication.readingOrder.count))
+            var savedSpokenLocator = false
+            if let json = point.locatorJSON, let value = try? JSONValue(jsonString: json),
+               let locator = try? Locator(json: value, warnings: nil),
+               navigationIndex?.resourceIndex(for: locator.href) == point.chapterIndex {
+                fraction = locator.locations.totalProgression ?? fraction
+                if let key = locatorKey, let timeKey = locatorTimeKey {
+                    settings.defaults.set(json, forKey: key); settings.defaults.set(Date(), forKey: timeKey)
+                    savedSpokenLocator = true
+                }
+            }
+            // 系统/云端只有句首坐标；清掉旧可见页 Locator，避免一秒容差把新收听位置判旧。
+            if !savedSpokenLocator, let key = locatorKey, let timeKey = locatorTimeKey {
+                settings.defaults.removeObject(forKey: key); settings.defaults.removeObject(forKey: timeKey)
+            }
+            settings.recordEPUBPosition(hash: hash, fraction: fraction, spineIndex: point.chapterIndex,
+                chapterOffset: point.sourceUTF16Offset, chapterProgression: point.progression,
+                context: webContext, paths: webChapterPaths)
+        }
+    }
+
     /// 续听先解析持久化 Locator（旧记录按章与比例恢复），等待导航完成再起播。
     func resumeSpeech(at point: SpeechResumePoint) {
         prepareSpeech()
@@ -871,6 +906,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         let kind = textBook == nil ? "epub" : (textBook?.bookmarkKey == nil ? "online" : "txt")
         func resource(_ locator: Locator?) -> Int { locator.flatMap { navigationIndex?.resourceIndex(for: $0.href) } ?? -1 }
         func permille(_ value: Double?) -> Int { value.map { Int((min(max($0, 0), 1) * 1000).rounded()) } ?? -1 }
+        readingTimePoint = .init(resource: resource(current), fraction: current.locations.progression ?? 0,
+            reason: ["turnForward", "swipe", "outerSwipe"].contains(cause) ? .forward : .reset)
         Self.shareable.notice(ReaderDiagnosticMessage.readiumPositionChanged(
             kind: kind, cause: cause, fromResource: resource(previous), fromProgress: permille(previous?.locations.progression),
             toResource: resource(current), toProgress: permille(current.locations.progression),
@@ -1047,6 +1084,31 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             && scroll.contentOffset.x + scroll.bounds.width >= scroll.contentSize.width - 1
     }
 
+
+    var localTimeSource: LocalReadingTimeSource? {
+        guard status == .ready else { return nil }
+        let projection = settings.projection
+        if let textBook, let metrics = textBook.localTimeMetrics,
+           textBook.bookmarkKey?.hasPrefix("txt:") == true {
+            return .init(id: (textBook.readiumIdentity ?? textBook.bookmarkKey!) + "|" + projection.identity,
+                         load: { try await metrics(projection) })
+        }
+        guard let publication, let container = imageContainer, let hash = bookHash else { return nil }
+        var spines = [Int](), starts = [Int](), previousGroup: Int?
+        for (index, link) in publication.readingOrder.enumerated() {
+            let path = EPUBContainer.normalizePath(EPUBContainer.stripFragment(link.href.removingPercentEncoding ?? link.href))
+            let candidates = container.spine.indices.filter {
+                container.spine[$0].href == path || container.spine[$0].href.hasSuffix("/" + path) || path.hasSuffix("/" + container.spine[$0].href)
+            }
+            // 无法唯一映射至本地 ZIP 资源就不估计，不通过 Publication 请求外部资源。
+            guard candidates.count == 1 else { return nil }
+            spines.append(candidates[0])
+            let group = navigationIndex?.tocIndex(for: link.url())
+            if index == 0 || group == nil || group != previousGroup { starts.append(index) }
+            previousGroup = group
+        }
+        return .epub(url: container.fileURL, hash: hash, spines: spines, starts: starts, projection: projection)
+    }
 
     var chapterCount: Int { publication?.readingOrder.count ?? 0 }
 
@@ -1357,6 +1419,7 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
 
     /// Readium 每次应用设置都会把根视图涂成背景色；清空以露出宿主绘制的阅读背景。
     func navigator(_ navigator: VisualNavigator, presentationDidChange presentation: VisualNavigatorPresentation) {
+        readingTimePoint.reason = .reset
         (navigator as? UIViewController)?.view.backgroundColor = .clear
     }
 
