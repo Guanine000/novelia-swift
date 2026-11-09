@@ -210,16 +210,21 @@ private struct ReadingRecapSheet: View {
                         ForEach(result.events) { event in
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(event.summary)
-                                DisclosureGroup("出处 · 第 \(event.chapter + 1) 章 · \(event.title)") {
-                                    Text(event.quote).font(.footnote)
-                                    if let chapter = chapters.first(where: { $0.index == event.chapter }) {
-                                        NavigationLink("查看出处原文") { RecapEvidenceView(chapter: chapter, event: event) }
+                                // 回顾不再要求模型抄原文，因此只有在拿到引文时才显示出处入口。
+                                if event.quote.isEmpty {
+                                    Text("第 \(event.chapter + 1) 章 · \(event.title)").font(.caption).foregroundStyle(.secondary)
+                                } else {
+                                    DisclosureGroup("出处 · 第 \(event.chapter + 1) 章 · \(event.title)") {
+                                        Text(event.quote).font(.footnote)
+                                        if let chapter = chapters.first(where: { $0.index == event.chapter }) {
+                                            NavigationLink("查看出处原文") { RecapEvidenceView(chapter: chapter, event: event) }
+                                        }
                                     }
                                 }
                             }
                         }
                     } header: { Text("AI 前情回顾") } footer: {
-                        Text("引文已与本地原文核对，AI 概括仍可能有误。查阅出处不改变续读位置。")
+                        Text("回顾只依据已读章节正文，AI 概括仍可能有误；查阅出处不改变续读位置。")
                     }
                 }
                 Section {

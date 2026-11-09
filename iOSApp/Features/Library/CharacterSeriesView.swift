@@ -143,8 +143,11 @@ struct CharacterSeriesView: View {
                             Text("1章（最稳）").tag(1)
                             Text("2章").tag(2)
                             Text("3章").tag(3)
+                            Text("4章").tag(4)
+                            Text("5章").tag(5)
+                            Text("6章（需接口扛得住）").tag(6)
                         }.disabled(progress != nil)
-                        Text("并发只重叠请求，落盘仍按章序；并发会提高同名人物在不同章节被建成两张卡的可能，跑完可用“校准重复人物”合并。")
+                        Text("并发只重叠请求，落盘仍按章序；并发会提高同名人物在不同章节被建成两张卡的可能，跑完可用“校准重复人物”合并。单 key 建议不超过 3，多把 key 或限流宽松的接口可以开更高。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     if !ai.isReadyForGeneration { Text("请先在AI阅读辅助中配置接口、模型和密钥并启用服务。").font(.footnote) }
@@ -231,8 +234,11 @@ struct CharacterSeriesView: View {
     }
     private func loadScope(cancelGeneration: Bool = true) async {
         if cancelGeneration { cancel() }
-        ready = false; identities = [:]; boundaries = [:]; statuses = [:]
-        guard confirmed else { return }
+        // 从人物卡返回会重跑一次：已有数据时保留用着的 identities/boundaries，别把 scope 清成 nil，
+        // 否则列表会先整块消失再重建，滚动位置被顶回最上方。
+        let hadData = ready
+        if !hadData { identities = [:]; boundaries = [:]; statuses = [:] }
+        guard confirmed else { ready = false; return }
         let snapshot = loadID
         for key in eligibleBooks {
             guard let book = books.first(where: { $0.key == key }) else { continue }
@@ -796,10 +802,15 @@ private enum CharacterBookUpdater {
         guard let milliseconds else { return "—" }
         return String(format: "%.1f秒", Double(milliseconds) / 1_000)
     }
-    private struct PreparedChapter {
-        let chapter: Int
+    /// 一个请求单位：要么是一段连续章节合并成一个计划，要么是一条没有正文的章节（直接记检查点）。
+    private struct PreparedUnit {
+        let chapters: [Int]
         let plan: CharacterExtractionPlan?
+        var first: Int { chapters.first ?? 0 }
+        var label: String { chapters.count > 1 ? "第 \(chapters[0] + 1)–\(chapters[chapters.count - 1] + 1) 章" : "第 \(first + 1) 章" }
     }
+    /// 一次请求最多合并多少章：省掉每章一次首字等待与整段提示词，同时不让单次输出过大。
+    private static let chaptersPerRequest = 3
     static func run(books: [LibraryBook], scope: CharacterScope, selection: [String], settings: ReaderSettings,
                     store: CharacterLexiconStore, ai: ReadingAIStore, limit: Int, concurrency: Int = 1,
                     progress: (String) -> Void) async throws -> (completed: Int, requests: Int, modelMilliseconds: Int, localMilliseconds: Int) {
@@ -808,7 +819,8 @@ private enum CharacterBookUpdater {
         guard ai.isReadyForGeneration else { throw ai.configuration.isEnabled ? ReadingAIError.missingKey : ReadingAIError.disabled }
         let budget = RequestBudget(limit: limit)
         // 并发只发生在请求阶段：落盘严格按章序，检查点才不会被后面的章节跳过前面的失败章。
-        let parallel = max(1, min(3, concurrency))
+        let parallel = max(1, min(6, concurrency))
+        let window = parallel * Self.chaptersPerRequest
         var completed = 0
         // 分段计时：把"读章/分块"算作本地，"等待模型生成"算作模型，落盘单独计。
         var modelMilliseconds = 0, localMilliseconds = 0
@@ -828,11 +840,11 @@ private enum CharacterBookUpdater {
             while chapter < upper {
                 try Task.checkCancellation()
                 guard ai.configuration == config else { throw CancellationError() }
-                var batch = [PreparedChapter]()
+                var batch = [PreparedUnit]()
                 let timings = ChapterTimings()
                 // 整批一次性取正文：EPUB 的读取闭包每次调用都会重算整本哈希并重新解包，
                 // 按章逐次调用会让本地解包串行排到网络请求前面。
-                let end = min(chapter + parallel, upper)
+                let end = min(chapter + window, upper)
                 let loadStart = now()
                 let texts = try await value.source.load(chapter..<end)
                 localMilliseconds += milliseconds(since: loadStart)
@@ -841,37 +853,55 @@ private enum CharacterBookUpdater {
                     throw CharacterLexiconError.changed
                 }
                 let planStart = now()
+                var pack = [RecapChapter]()
+                var packBytes = 0
+                func flushPack() throws {
+                    guard !pack.isEmpty else { return }
+                    let plan = try CharacterExtractionPlan(scope: scope, book: key, identity: expected, chapters: pack,
+                                                           maxChaptersPerChunk: Self.chaptersPerRequest)
+                    guard plan.chunks.count <= limit else { throw CharacterLexiconError.chapterBudget(plan.chunks.count) }
+                    batch.append(PreparedUnit(chapters: pack.map(\.index), plan: plan))
+                    pack.removeAll(); packBytes = 0
+                }
                 for text in texts {
                     // 封面、版权页、作者简介和分卷标题页没有剧情，直接记检查点跳过：
                     // 送进模型只会把作者／译者当成角色，还占掉一次请求预算。
                     let empty = text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || CharacterExtractionPlan.isNonContent([text])
-                    let plan = empty ? nil : try CharacterExtractionPlan(scope: scope, book: key, identity: expected, chapters: [text])
-                    if let plan { guard plan.chunks.count <= limit else { throw CharacterLexiconError.chapterBudget(plan.chunks.count) } }
-                    batch.append(PreparedChapter(chapter: text.index, plan: plan))
+                    if empty {
+                        try flushPack()
+                        batch.append(PreparedUnit(chapters: [text.index], plan: nil))
+                        continue
+                    }
+                    let bytes = text.text.utf8.count
+                    if !pack.isEmpty, pack.count >= Self.chaptersPerRequest || packBytes + bytes + 1 > 8_000 {
+                        try flushPack()
+                    }
+                    pack.append(text); packBytes += bytes + (pack.count > 1 ? 1 : 0)
                 }
+                try flushPack()
                 localMilliseconds += milliseconds(since: planStart)
                 let cursor = end
                 guard budget.used + batch.compactMap({ $0.plan?.chunks.count }).reduce(0, +) <= limit else { throw CharacterLexiconError.requestBudget }
 
                 if let last = batch.last, batch.contains(where: { $0.plan != nil }) {
-                    progress("《\(book.title)》第 \(chapter + 1)–\(last.chapter + 1) 章\(batch.count > 1 ? "并行" : "")处理中；本轮\(budget.used)次请求")
+                    progress("《\(book.title)》\(batch.map(\.label).joined(separator: "、"))处理中；本轮\(budget.used)次请求")
                 }
-                var results = CharacterOrderedResults<CharacterAutomaticUpdater.Extraction?>(order: batch.map(\.chapter))
-                for item in batch where item.plan == nil { results.receive(.success(nil), at: item.chapter) }
+                var results = CharacterOrderedResults<CharacterAutomaticUpdater.Extraction?>(order: batch.map(\.first))
+                for item in batch where item.plan == nil { results.receive(.success(nil), at: item.first) }
                 func commit(_ number: Int, _ extraction: CharacterAutomaticUpdater.Extraction?) throws {
                     try Task.checkCancellation()
                     guard ai.configuration == config,
-                          let item = batch.first(where: { $0.chapter == number }) else { throw CancellationError() }
+                          let item = batch.first(where: { $0.first == number }) else { throw CancellationError() }
                     let applyStart = now()
                     if let plan = item.plan, let extraction {
                         try CharacterAutomaticUpdater.apply(extraction, plan: plan, store: store)
-                    } else {
-                        try store.completeEmptyChapter(book: key, identity: expected, chapter: item.chapter, scope: scope, signature: signature)
+                    } else if let only = item.chapters.first {
+                        try store.completeEmptyChapter(book: key, identity: expected, chapter: only, scope: scope, signature: signature)
                     }
                     let applyMilliseconds = milliseconds(since: applyStart)
                     localMilliseconds += applyMilliseconds
-                    completed += 1
-                    progress("《\(book.title)》第 \(item.chapter + 1) 章已保存 · 请求 \(Self.seconds(timings.value(item.chapter))) · 落盘 \(applyMilliseconds)ms；本轮\(budget.used)次请求")
+                    completed += item.chapters.count
+                    progress("《\(book.title)》\(item.label)已保存 · 请求 \(Self.seconds(timings.value(item.first))) · 落盘 \(applyMilliseconds)ms；本轮\(budget.used)次请求")
                 }
                 try results.drain(commit)
                 let modelStart = now()
@@ -880,14 +910,15 @@ private enum CharacterBookUpdater {
                         guard let plan = item.plan else { continue }
                         group.addTask {
                             let chapterStart = Date()
+                            let key = item.first
                             do {
                                 let extraction = try await CharacterAutomaticUpdater.extract(plan: plan, store: store, ai: ai,
                                     beforeRequest: { try budget.reserve() }) { _, _ in }
-                                timings.set(Int(Date().timeIntervalSince(chapterStart) * 1_000), for: item.chapter)
-                                return (item.chapter, .success(extraction))
+                                timings.set(Int(Date().timeIntervalSince(chapterStart) * 1_000), for: key)
+                                return (key, .success(extraction))
                             } catch {
-                                timings.set(Int(Date().timeIntervalSince(chapterStart) * 1_000), for: item.chapter)
-                                return (item.chapter, .failure(error))
+                                timings.set(Int(Date().timeIntervalSince(chapterStart) * 1_000), for: key)
+                                return (key, .failure(error))
                             }
                         }
                     }

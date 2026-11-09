@@ -233,6 +233,21 @@ final class CharacterLexiconTests: XCTestCase {
         XCTAssertEqual(candidates.map(\.name), ["甲"])
         XCTAssertEqual(candidates.first?.facts.count, 1)
     }
+    func testRosterWithoutQuoteLocatesEvidenceInTheChapter() throws {
+        let sentence = "甲把信交给乙，随后离开了房间。"
+        let text = "开场白。" + sentence + "乙把信收进抽屉，然后关灯睡觉。"
+        let plan = try CharacterExtractionPlan(scope: scope(), book: "v1", identity: "i1",
+            chapters: [.init(index: 0, title: "第一章", text: text)])
+        // 建档模式下模型不再输出引文，由本地按名字定位。
+        let response = "{\"candidates\":[{\"name\":\"甲\",\"facts\":[{\"chapter\":0,\"text\":\"把信交给乙。\",\"category\":\"身份\"}]}]}"
+        let fact = try XCTUnwrap(plan.validate(response, chunk: plan.chunks[0]).first?.facts.first)
+        XCTAssertTrue(fact.quote.contains("甲"))
+        XCTAssertGreaterThanOrEqual(fact.quote.utf16.count, 10)
+        XCTAssertEqual((text as NSString).range(of: fact.quote).location, fact.offset)
+        // 名字不在正文里就无法定位出处，整块没有有效事实时应报错而不是静默丢人。
+        let missing = "{\"candidates\":[{\"name\":\"丙\",\"facts\":[{\"chapter\":0,\"text\":\"不在本段出现。\"}]}]}"
+        XCTAssertThrowsError(try plan.validate(missing, chunk: plan.chunks[0]))
+    }
     func testFencedJSONResponseIsAcceptedAndStillVerified() throws {
         let quote = "甲把信交给乙，随后离开了房间。"
         let plan = try CharacterExtractionPlan(scope: scope(), book: "v1", identity: "i1", chapters: [.init(index: 0, title: "第一章", text: quote)])
@@ -254,9 +269,10 @@ final class CharacterLexiconTests: XCTestCase {
     func testFactMissingAFieldIsSkippedWithoutLosingTheChunk() throws {
         let quote = "甲把信交给乙，随后离开了房间。"
         let plan = try CharacterExtractionPlan(scope: scope(), book: "v1", identity: "i1", chapters: [.init(index: 0, title: "第一章", text: quote)])
-        // 第一条缺 quote：只丢这一条，不能连累同一个人物的另一条，更不能让整块 JSON 解析失败。
+        // 第一条缺 text：只丢这一条，不能连累同一个人物的另一条，更不能让整块 JSON 解析失败。
+        // （缺 quote 不再算缺字段：建档模式本来就不要求模型输出引文。）
         let response = """
-        {"candidates":[{"name":"甲","facts":[{"chapter":0,"text":"缺少引文的事实。"},{"chapter":0,"text":"甲交出信件。","quote":"\(quote)"}]}]}
+        {"candidates":[{"name":"甲","facts":[{"chapter":0},{"chapter":0,"text":"甲交出信件。","quote":"\(quote)"}]}]}
         """
         let candidates = try plan.validate(response, chunk: plan.chunks[0])
         XCTAssertEqual(candidates.first?.name, "甲")
@@ -375,6 +391,21 @@ final class CharacterLexiconTests: XCTestCase {
             XCTFail("请求失败必须明确报错")
         } catch { XCTAssertEqual(error as? ReadingAIError, .transport) }
         XCTAssertEqual(store.entities.first?.facts.count, 1)
+    }
+    func testBatchedPlanRejectsChaptersBeyondTheReadBoundary() throws {
+        let scope = CharacterScope(work: "stable-work", volumes: ["v1"], currentBook: "v1", currentChapter: 2,
+            identities: ["v1": "i1"], readBoundaries: ["v1": 2])
+        // 已读位置是第 2 章（下标 2 表示只读过 0、1），把第 2 章也拼进去就必须拒绝。
+        XCTAssertThrowsError(try CharacterExtractionPlan(scope: scope, book: "v1", identity: "i1",
+            chapters: [.init(index: 0, title: "一", text: earlyQuote), .init(index: 1, title: "二", text: earlyQuote),
+                       .init(index: 2, title: "三", text: earlyQuote)], maxChaptersPerChunk: 3))
+        // 边界内的多章合并允许，且检查点按最后一章推进。
+        let plan = try CharacterExtractionPlan(scope: scope, book: "v1", identity: "i1",
+            chapters: [.init(index: 0, title: "一", text: earlyQuote), .init(index: 1, title: "二", text: "张三摘下兜帽，望向远处。")],
+            maxChaptersPerChunk: 3)
+        XCTAssertEqual(plan.chapterCount, 2)
+        XCTAssertEqual(plan.lastChapter, 1)
+        XCTAssertEqual(plan.chunks.count, 1)
     }
     @MainActor
     func testExplicitAppendPreservesAttributionAndOldArchiveCompatibility() throws {

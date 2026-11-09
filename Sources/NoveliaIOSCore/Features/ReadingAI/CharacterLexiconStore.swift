@@ -245,9 +245,7 @@ final class CharacterLexiconStore: ObservableObject, CharacterSyncLocal {
         let rejected = Set(next.rejected ?? [])
         for candidate in candidates {
             let facts = candidate.facts.filter { fact in
-                !rejected.contains(Self.evidenceKey(fact)) && fact.book == plan.book && fact.identity == plan.identity && plan.chunks.contains { chunk in
-                    chunk.chapter == fact.chapter && fact.offset >= chunk.offset && fact.offset < chunk.offset + chunk.text.utf16.count
-                }
+                !rejected.contains(Self.evidenceKey(fact)) && fact.book == plan.book && fact.identity == plan.identity && plan.contains(fact)
             }
             guard !facts.isEmpty else { continue }
             guard facts.allSatisfy({ plan.scope.permits($0) && Self.valid($0) }) else { throw CharacterLexiconError.evidence }
@@ -270,7 +268,7 @@ final class CharacterLexiconStore: ObservableObject, CharacterSyncLocal {
                 next.entities.append(.init(id: candidate.id, work: plan.scope.work, facts: values))
             }
         }
-        let end = (plan.chunks.map(\.chapter).max() ?? -1) + 1
+        let end = plan.lastChapter + 1
         if next.scans == nil { next.scans = [:] }
         let key = Self.scanKey(work: plan.scope.work, book: plan.book)
         let old = next.scans?[key]
@@ -474,7 +472,8 @@ enum CharacterAutomaticUpdater {
     static func extract(plan: CharacterExtractionPlan, store: CharacterLexiconStore, ai: ReadingAIStore,
                         beforeRequest: () throws -> Void = {}, progress: (Int, Int) -> Void) async throws -> Extraction {
         let configuration = ai.configuration
-        guard plan.chapterCount == 1, store.order(work: plan.scope.work) == plan.scope.volumes else { throw CharacterLexiconError.scope }
+        // 一次请求可以覆盖连续 1–3 章；超过就说明调用方没有按批次构造计划。
+        guard (1...3).contains(plan.chapterCount), store.order(work: plan.scope.work) == plan.scope.volumes else { throw CharacterLexiconError.scope }
         guard configuration.isEnabled else { throw ReadingAIError.disabled }
         let signature = try signature(identity: plan.identity, scope: plan.scope, configuration: configuration)
         if let chapter = plan.chunks.first?.chapter,

@@ -5,6 +5,9 @@ import Foundation
 /// 独立 Session 拒绝重定向，避免把密钥或正文转交另一个来源。
 final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
     private let sessionConfiguration: URLSessionConfiguration
+    /// 复用一个 Session：每次新建都要重新 TLS 握手、重建 HTTP/2 连接，按章发请求时
+    /// 每次 200–500ms 会白白累加。取消依靠 Task 取消具体请求，不影响同 Session 的其他请求。
+    private let session: URLSession
     /// 正文上限：完整 JSON 响应或流式拼装后的文本都不能超过它。
     private static let maximumResponseBytes = 1_024 * 1_024
     /// 流式原始字节上限：每个 SSE 事件都带 JSON 外壳，逐 token 推送时外壳总量远大于正文，
@@ -19,7 +22,9 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
         // 4096–8192 tokens 的正常生成直接掐断。按常用接口最慢情况留足余量。
         configuration.timeoutIntervalForRequest = 300; configuration.timeoutIntervalForResource = 600
         sessionConfiguration = configuration
+        session = URLSession(configuration: configuration, delegate: ReadingAIRedirectGuard(), delegateQueue: nil)
     }
+    deinit { session.invalidateAndCancel() }
 
     func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest) async throws -> ReadingAIResponse {
         try await complete(configuration: configuration, apiKey: apiKey, request: request) { _, _ in }
@@ -30,9 +35,6 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
     func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest,
                   onProgress: @escaping @Sendable (Int, String) -> Void) async throws -> ReadingAIResponse {
         let request = try Self.urlRequest(configuration: configuration, apiKey: apiKey, request: request)
-        let session = URLSession(configuration: sessionConfiguration, delegate: ReadingAIRedirectGuard(), delegateQueue: nil)
-        // 任务独占 Session，提前拒绝、超限和取消均关闭底层连接，不留下继续接收的请求。
-        defer { session.invalidateAndCancel() }
         do {
             try Task.checkCancellation()
             let (bytes, response) = try await session.bytes(for: request)
