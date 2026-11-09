@@ -27,6 +27,7 @@ struct PagedTextBook {
     var searchChapterText: ((Int) async throws -> String)? = nil
     /// 目录字数（本地 TXT）；在线小说为 nil，不显示字数。
     var tocWordCounts: (@Sendable () async -> ReaderTOCWordCounts)? = nil
+    var adjustTXTChapters: (() -> Void)? = nil
 }
 
 #if !NOVELIA_READIUM_ONLY
@@ -295,6 +296,9 @@ private struct EPUBReaderViewContent: View {
             chapterTitle: currentChapterTitle,
             titleTrailer: { EmptyView() },
             menu: {
+                if let action = textBook?.adjustTXTChapters {
+                    Button("TXT分章调整") { speech.stop(); action() }
+                }
                 if let accessory { accessory }
                 if let key = model.bookmarkKey {
                     ReaderBookmarkButton(store: settings.bookmarks, bookKey: model.currentBookmarkKey ?? key, pageRange: model.currentPageRange,

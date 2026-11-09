@@ -261,6 +261,16 @@ Readium 的 HTML 根背景设为透明，阅读背景由宿主绘制在导航器
 
 阅读位置有内容身份与引擎位置两个层次。持久化模型位于 Domain，进度由 `ReadingPositionStore` 管理；TXT 分页单元、EPUB spine/offset 和 Readium locator 的转换留在阅读实现。改变拆分策略或 locator 映射时检查旧进度、字号变化、旋转、目录跳转和引擎切换后的定位。
 
+### TXT 手工目录
+
+`ReaderSettings.txtAdjustments` 持有 `TXTChapterAdjustmentStore`，生产目录为 Application Support/TXTChapterAdjustments，替代组装使用隔离目录。`TXTAdjustmentDocument` 只调整规范化原文上的 UTF-16 边界，删除边界不删除文字。自动基线由 `TXTChapterParser.adjustmentBoundaries` 直接使用识别出的行号生成，不按标题全书反查。原有自动解析与缓存格式保持不变；有手工快照时 `ReaderSettings.txtBook` 应用边界，规则指纹加入调整 revision，分页缓存与 Readium Locator 因此自然失效。
+
+`TXTChapterAdjustmentView` 从滚动/原生/Readium 菜单进入独立的只读原文选区页，每次装载至多约 12000 个 UTF-16 单元并对齐完整字符。选区在同章内直接生成边界，章首更新标题，首章不可删除。跨原文分段的选择需调整选区，当前不提供跨分段拖选。持久化按文件哈希保存，修订号 CAS 拒绝迟到编辑；撤销仅持有本次会话内的历史边界与不可变文本。
+
+`TXTAdjustmentMigration` 读取同一进度/书签实例，在后台按原 UTF-8 分页切分构建原文段落坐标。现有书签以分页单元/比例保存，承接精度不高于原记录；文字替换改变段长时只在该段内近似映射。目录与待承接状态一起原子提交，之后经时间合并应用；进程中断或书签落盘失败，下次打开重放迁移，不覆盖更晚的修改与墓碑。目录打开前停止朗读，目录变化时一次性清理本书失效的旧续听点。分页回调在调整页显示期间停止写入旧目录位置。手工目录暂不参与 WebDAV，跨设备目录兼容不在当前契约内。
+
+对应 Core 行为与持久化回归位于 `TXTChapterAdjustmentTests`；分页/滚动迁移与 UIKit 选区仍需 App 编译、UI 及真机验证。架构检查不能替代上述验证。
+
 ### 文本分页与按需加载
 
 `TextChapterSource` 将 TXT 或在线内容转为经过转义的 XHTML 段落，供章节接口消费。TXT 长章节拆为分页单元，仅章节起始单元进入目录；不要把 XHTML 标签长度当成源文本偏移。拆分和定位同时涉及 UTF-8、UTF-16 与章节索引，修改时验证 emoji、组合字符、卷标题、无标题全文和分章规则变化。

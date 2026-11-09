@@ -9,6 +9,11 @@ final class ReaderSettings: ObservableObject {
     @Published private(set) var activeBookID: String?
     @Published private(set) var bookPreferences: [String: BookReadingPreferences] = [:]
     @Published var projectionRevision = 0
+    /// 只属于当前安装的阅读会话代次，防止旧阅读器退出时写回旧目录位置。
+    private(set) var txtReaderIdentities: [String: String] = [:]
+    func registerTXTBook(_ book: TXTParsedBook) { txtReaderIdentities[book.contentHash] = book.rulesFingerprint }
+    func invalidateTXTBook(hash: String) { txtReaderIdentities.removeValue(forKey: hash) }
+    let txtAdjustments: TXTChapterAdjustmentStore
     let offlineChapters: OnlineChapterOfflineStore
     private static let bookPreferencesKey = "reader.bookPreferences.v1"
     var usesBookPreferences: Bool { activeStylePreferences != nil }
@@ -61,6 +66,9 @@ final class ReaderSettings: ObservableObject {
          bookmarks: ReaderBookmarkStore? = nil, offlineDirectory: URL? = nil) {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         offlineChapters = OnlineChapterOfflineStore(directory: offlineDirectory ?? (defaults === UserDefaults.standard ? support.appendingPathComponent("OfflineChapters") : FileManager.default.temporaryDirectory.appendingPathComponent("OfflineChapters-" + UUID().uuidString)))
+        txtAdjustments = TXTChapterAdjustmentStore(directory: defaults === UserDefaults.standard
+            ? support.appendingPathComponent("TXTChapterAdjustments", isDirectory: true)
+            : (offlineDirectory ?? FileManager.default.temporaryDirectory.appendingPathComponent("TXTAdjustments-" + UUID().uuidString)).appendingPathComponent("TXTChapterAdjustments", isDirectory: true))
         self.positions = positions ?? ReadingPositionStore(defaults: defaults)
         self.bookmarks = bookmarks ?? ReaderBookmarkStore()
         self.defaults = defaults

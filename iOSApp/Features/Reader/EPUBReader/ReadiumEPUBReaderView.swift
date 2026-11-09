@@ -261,6 +261,9 @@ private struct ReadiumEPUBReaderViewContent: View {
             },
             menu: {
                 if textBook == nil { Text("Readium 阅读引擎") }
+                if let action = textBook?.adjustTXTChapters {
+                    Button("TXT分章调整") { model.speech.stop(); action() }
+                }
                 if let accessory { accessory }
                 if let key = model.bookmarkKey, model.status == .ready {
                     ReaderBookmarkButton(store: settings.bookmarks, bookKey: model.currentBookmarkKey ?? key, pageRange: model.currentPageRange,

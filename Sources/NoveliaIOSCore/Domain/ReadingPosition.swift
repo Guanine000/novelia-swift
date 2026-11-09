@@ -1,6 +1,6 @@
 import Foundation
 
-struct SyncedReadingPosition: Codable, Equatable {
+struct SyncedReadingPosition: Codable, Equatable, Sendable {
     /// 网络小说：章节序号。EPUB：spine 序号（保存偏移量之前的版本没有该字段）。
     /// TXT（`txt:<hash>`）：按阅读器章节规则得到的章节序号。
     var chapterIndex: Int?
