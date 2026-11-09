@@ -128,5 +128,8 @@
   "SystemSpeechEngine.swift": "iOSApp/Features/Reader/Speech/SystemSpeechEngine.swift",
   "SpeechSettingsView.swift": "iOSApp/Features/Settings/SpeechSettingsView.swift",
   "test_speech_playback.py": "scripts/test_speech_playback.py",
-  "speech_playback_harness.swift": "scripts/fixtures/speech_playback_harness.swift"
+  "speech_playback_harness.swift": "scripts/fixtures/speech_playback_harness.swift",
+  "TXTChapterAdjustment.swift": "Sources/NoveliaIOSCore/Features/Reader/TXTChapterAdjustment.swift",
+  "TXTChapterAdjustmentView.swift": "iOSApp/Features/Reader/TXTChapterAdjustmentView.swift",
+  "TXTAdjustmentMigration.swift": "iOSApp/Features/Reader/TXTAdjustmentMigration.swift"
 }

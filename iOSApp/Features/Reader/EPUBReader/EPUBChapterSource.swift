@@ -269,26 +269,7 @@ extension TextChapterSource {
     /// 单元起始字节偏移量（首项始终为 0，末项为正文长度）。行文本
     /// 即将超过 `maximumUTF8` 字节时，单元在换行处结束。
     nonisolated static func unitCuts(utf8: String.UTF8View, maximumUTF8: Int) -> [Int] {
-        let scan: (UnsafeBufferPointer<UInt8>) -> [Int] = { bytes in
-            var cuts = [0]
-            var unitBytes = 0
-            var lineStart = 0
-            for index in 0...bytes.count {
-                guard index == bytes.count || bytes[index] == 0x0A || bytes[index] == 0x0D else { continue }
-                let lineBytes = index - lineStart
-                if lineBytes > 0 {
-                    if unitBytes > 0, unitBytes + lineBytes > maximumUTF8 {
-                        cuts.append(lineStart)
-                        unitBytes = 0
-                    }
-                    unitBytes += lineBytes
-                }
-                lineStart = index + 1
-            }
-            cuts.append(bytes.count)
-            return cuts
-        }
-        return utf8.withContiguousStorageIfAvailable(scan) ?? Array(utf8).withUnsafeBufferPointer(scan)
+        TXTTextUnitCuts.cuts(utf8: utf8, maximumUTF8: maximumUTF8)
     }
 }
 

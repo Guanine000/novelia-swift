@@ -12,6 +12,8 @@ struct DownloadedWebNovelTXTReader: View {
     let title: String
     let rules: TXTChapterRuleConfiguration
     var statisticsID: String? = nil
+    @State private var adjustmentRevision = 0
+    @State private var isShowingAdjustment = false
     @State private var chapters: [TXTChapter]?
     @State private var chapterIndex = 0
     /// 加载后的内容哈希，用作阅读位置的键（与分页模式共享）。
@@ -42,12 +44,17 @@ struct DownloadedWebNovelTXTReader: View {
         Group {
         if preferenceID == nil { ProgressView("准备阅读偏好…") }
         else if settings.pagedTextReading {
-            TXTPagedReader(url: url, title: title, rules: rules, statisticsID: statisticsID)
+            TXTPagedReader(url: url, title: title, rules: rules, statisticsID: statisticsID,
+                           isAdjustmentActive: { isShowingAdjustment }, onAdjust: { isShowingAdjustment = true })
+                .id(adjustmentRevision)
         } else {
             scrollReader
                 .trackReadingTime(ReadingBook(id: statisticsID ?? "txt:\(url.lastPathComponent)", title: title, kind: .txt),
-                                  ready: chapters?.indices.contains(chapterIndex) == true && bodyChunksChapterIndex == chapterIndex)
+                                  ready: !isShowingAdjustment && chapters?.indices.contains(chapterIndex) == true && bodyChunksChapterIndex == chapterIndex)
         }
+        }
+        .sheet(isPresented: $isShowingAdjustment) {
+            TXTChapterAdjustmentView(url: url, rules: rules) { adjustmentRevision += 1 }
         }
         .task(id: url) {
             let hash = try? await Task.detached { try FileContentHash.sha256(url) }.value
@@ -179,6 +186,7 @@ struct DownloadedWebNovelTXTReader: View {
             }
             ToolbarItem(placement: .compatTopBarTrailing) {
                 Menu {
+                Button("TXT分章调整") { speech.stop(); isShowingAdjustment = true }
                 Button("书内搜索") { isShowingSearch = true }
                 if let point = readingReturnPoint {
                     Button("回到刚才阅读处") { selectedSearchHit = nil; chapterIndex = point.chapter; returnAnchor = point.anchor; readingReturnPoint = nil }
@@ -271,14 +279,18 @@ struct DownloadedWebNovelTXTReader: View {
             }
             .compatPresentationDetents(.medium, .large)
         }
-        .task(id: url) {
+        .task(id: "\(url.path)|\(adjustmentRevision)") {
             do {
                 // 每份文件内容只解码和划分章节一次（TXTBookCache）；
                 // 重新打开、切换模式或重建此视图时复用结果。
                 let trace = DiagnosticContext.newTraceID()
                 TXTDiagnosticLog.logger.info("TXT open requested; trace=\(trace, privacy: .public), source=open, mode=scroll, mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
-                let book = try await TXTBookCache.shared.book(at: url, rules: rules, source: .open, trace: trace)
+                let book = try await settings.txtBook(url: url, rules: rules, trace: trace)
                 guard !Task.isCancelled else { return }
+                if adjustmentRevision > 0 {
+                    readingReturnPoint = nil; returnAnchor = nil; selectedSearchHit = nil
+                    speechPosition = nil; visibleAnchor = nil; bodyChunksChapterIndex = nil
+                }
                 if let saved = settings.positions.txtPosition(hash: book.contentHash) {
                     chapterIndex = min(max(saved.chapter, 0), max(book.chapters.count - 1, 0))
                 }
@@ -288,6 +300,21 @@ struct DownloadedWebNovelTXTReader: View {
                 parsedBook = book
                 tocWordCounts = nil
                 chapters = book.chapters
+                if adjustmentRevision > 0, !book.text.isEmpty,
+                   let position = settings.positions.txtPosition(hash: book.contentHash), let unit = position.unit {
+                    let projection = settings.projection
+                    let map = try await Task.detached(priority: .userInitiated) {
+                        try TXTAdjustmentCoordinates(text: book.text, chapters: book.chapters, projection: projection)
+                    }.value
+                    if map.units.indices.contains(unit), let raw = map.rawOffset(unit: unit, offset: position.offset ?? 0),
+                       let first = map.units.first(where: { $0.chapter == chapterIndex })?.spans.first,
+                       book.chapters.indices.contains(chapterIndex) {
+                        let body = book.chapters[chapterIndex].body as NSString
+                        let offset = min(body.length, max(0, raw - first.raw.lowerBound))
+                        let visibleOffset = projection.apply(body.substring(to: offset)).utf16.count
+                        selectedSearchHit = .init(chapterIndex: chapterIndex, progression: 0, before: "", match: "", after: "", utf16Offset: visibleOffset)
+                    }
+                }
             } catch {
                 guard !Task.isCancelled else { return }
                 let nsError = error as NSError
@@ -297,12 +324,13 @@ struct DownloadedWebNovelTXTReader: View {
         }
         .onValueChange(of: chapterIndex) { _, newIndex in
             if speechPosition?.chapterIndex != newIndex { speech.suspendFollow(true) }
-            guard let contentHash else { return }
+            guard !isShowingAdjustment, let contentHash,
+                  parsedBook?.rulesFingerprint == settings.txtReaderIdentities[contentHash] else { return }
             let saved = settings.positions.txtPosition(hash: contentHash) ?? TXTReadingPosition(chapter: newIndex)
             guard saved.chapter != newIndex || settings.positions.all()["txt:\(contentHash)"] == nil else { return }
             settings.positions.recordTXT(hash: contentHash, position: saved.movingToChapter(newIndex))
         }
-        .task(id: "\(url.path)|\(chapterIndex)|\(chapters?.count ?? 0)|\(settings.projection.identity)") {
+        .task(id: "\(url.path)|\(parsedBook?.rulesFingerprint ?? "")|\(chapterIndex)|\(chapters?.count ?? 0)|\(settings.projection.identity)") {
             guard let chapters, chapters.indices.contains(chapterIndex) else { return }
             let body = settings.projection.apply(chapters[chapterIndex].body)
             let chunks = await Task.detached(priority: .userInitiated) {
@@ -381,6 +409,8 @@ private struct TXTPagedReader: View {
     let title: String
     let rules: TXTChapterRuleConfiguration
     var statisticsID: String? = nil
+    var isAdjustmentActive: () -> Bool
+    var onAdjust: () -> Void
     #if !NOVELIA_READIUM_ONLY
     @AppStorage(SettingsKey.readerEPUBReadium) private var usesReadium = false
     #endif
@@ -425,7 +455,7 @@ private struct TXTPagedReader: View {
         do {
             let trace = DiagnosticContext.newTraceID()
             TXTDiagnosticLog.logger.info("TXT open requested; trace=\(trace, privacy: .public), source=open, mode=paged, mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
-            let parsed = try await TXTBookCache.shared.book(at: url, rules: rules, source: .open, trace: trace)
+            let parsed = try await settings.txtBook(url: url, rules: rules, trace: trace)
             let identity = "txt|\(parsed.contentHash)|\(parsed.rulesFingerprint)"
             let units = await TXTPagedUnits.shared.units(for: parsed, identity: identity)
             guard !Task.isCancelled else { return }
@@ -436,7 +466,7 @@ private struct TXTPagedReader: View {
             book = PagedTextBook(
                 source: source, startUnit: start.unit, startOffset: start.offset,
                 onPosition: { [weak source] unit, offset in
-                    guard let source else { return }
+                    guard !isAdjustmentActive(), settings.txtReaderIdentities[hash] == parsed.rulesFingerprint, let source else { return }
                     let position = TXTReadingPosition(chapter: source.tocEntry(containingUnit: unit) ?? 0, unit: unit,
                                                       offset: offset, unitCount: source.chapterCount)
                     // 打开时会报告恢复的页面；若重新写入时间戳，下次同步时
@@ -446,7 +476,8 @@ private struct TXTPagedReader: View {
                 }, readiumIdentity: identity,
                 positionUpdatedAt: settings.positions.all()["txt:\(hash)"]?.updatedAt,
                 bookmarkKey: "txt:\(hash)",
-                tocWordCounts: { await BookWordCounter.txtTOCCounts(parsed) })
+                tocWordCounts: { await BookWordCounter.txtTOCCounts(parsed) },
+                adjustTXTChapters: onAdjust)
         } catch {
             guard !Task.isCancelled else { return }
             let nsError = error as NSError

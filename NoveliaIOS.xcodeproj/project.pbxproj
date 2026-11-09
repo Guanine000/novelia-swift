@@ -280,6 +280,12 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		2B2665366F802BEA96ADA669 /* OfflineChapterManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 797A8D09988579E3C6802C34 /* OfflineChapterManagementView.swift */; };
 		0F2EE32B12CF321379A245F8 /* LibraryDragSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7191223E3177B5A17C222DE /* LibraryDragSelection.swift */; };
 		D9F526FD435DD16E3FB23E96 /* LibraryDragSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7191223E3177B5A17C222DE /* LibraryDragSelection.swift */; };
+		19FF6083CA45148C723AF5F8 /* TXTChapterAdjustment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7291FB22401D6BE8390730A3 /* TXTChapterAdjustment.swift */; };
+		037A7C2066018B17D6C052F9 /* TXTChapterAdjustment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7291FB22401D6BE8390730A3 /* TXTChapterAdjustment.swift */; };
+		C8A49E356856547311ECD0D0 /* TXTChapterAdjustmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1684F02EB3975D519AFDA24E /* TXTChapterAdjustmentView.swift */; };
+		7A8F185E1871ED85D75E32BF /* TXTChapterAdjustmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1684F02EB3975D519AFDA24E /* TXTChapterAdjustmentView.swift */; };
+		02AA531FA5D4E6DCB3C68E2F /* TXTAdjustmentMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC0FCEC892A571AB5E47864E /* TXTAdjustmentMigration.swift */; };
+		236C7DF8ED9E16F50E2B90AD /* TXTAdjustmentMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC0FCEC892A571AB5E47864E /* TXTAdjustmentMigration.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -419,6 +425,9 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 		4939217317548F3B8629737E /* LibraryWenkuAssociationEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSApp/Features/Library/LibraryWenkuAssociationEditor.swift"; sourceTree = SOURCE_ROOT; };
 		797A8D09988579E3C6802C34 /* OfflineChapterManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSApp/Features/Reader/OfflineChapterManagementView.swift"; sourceTree = SOURCE_ROOT; };
 		C7191223E3177B5A17C222DE /* LibraryDragSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSApp/Features/Library/LibraryDragSelection.swift"; sourceTree = SOURCE_ROOT; };
+		7291FB22401D6BE8390730A3 /* TXTChapterAdjustment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Features/Reader/TXTChapterAdjustment.swift; sourceTree = SOURCE_ROOT; };
+		1684F02EB3975D519AFDA24E /* TXTChapterAdjustmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/TXTChapterAdjustmentView.swift; sourceTree = SOURCE_ROOT; };
+		CC0FCEC892A571AB5E47864E /* TXTAdjustmentMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/TXTAdjustmentMigration.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -454,6 +463,9 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 		D10000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				CC0FCEC892A571AB5E47864E /* TXTAdjustmentMigration.swift */,
+				1684F02EB3975D519AFDA24E /* TXTChapterAdjustmentView.swift */,
+				7291FB22401D6BE8390730A3 /* TXTChapterAdjustment.swift */,
 				D10000000000000000000002 /* iOSApp */,
 				D10000000000000000000003 /* Sources/NoveliaIOSCore */,
 				D10000000000000000000005 /* EPUBReader */,
@@ -854,6 +866,9 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				02AA531FA5D4E6DCB3C68E2F /* TXTAdjustmentMigration.swift in Sources */,
+				C8A49E356856547311ECD0D0 /* TXTChapterAdjustmentView.swift in Sources */,
+				19FF6083CA45148C723AF5F8 /* TXTChapterAdjustment.swift in Sources */,
 				FEA000000000000000000003 /* ArchitectureFixtureBackend.swift in Sources */,
 				FEA000000000000000000002 /* ArchitectureValidation.swift in Sources */,
 				FEA000000000000000000001 /* SessionTokenStore.swift in Sources */,
@@ -993,6 +1008,9 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				236C7DF8ED9E16F50E2B90AD /* TXTAdjustmentMigration.swift in Sources */,
+				7A8F185E1871ED85D75E32BF /* TXTChapterAdjustmentView.swift in Sources */,
+				037A7C2066018B17D6C052F9 /* TXTChapterAdjustment.swift in Sources */,
 				A15F00000000000000000001 /* ArchitectureFixtureBackend.swift in Sources */,
 				A15F00000000000000000002 /* ArchitectureValidation.swift in Sources */,
 				A15F00000000000000000003 /* SessionTokenStore.swift in Sources */,

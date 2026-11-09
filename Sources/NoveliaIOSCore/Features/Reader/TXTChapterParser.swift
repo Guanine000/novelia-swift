@@ -279,6 +279,33 @@ enum TXTChapterParser {
         return (chapters, Statistics(lines: lines.count, headings: chapterHeadings.count, fellBackToFullText: false))
     }
 
+    /// 调整模式复用标题判定，并直接使用行坐标，不按标题字符串反查位置。
+    static func adjustmentBoundaries(_ normalizedText: String, rules: TXTChapterRuleConfiguration) -> [TXTChapterBoundary] {
+        let lines = normalizedText.components(separatedBy: "\n")
+        let matchers = rules.enabledCustomRules.compactMap { rule -> CustomMatcher? in
+            guard let regex = try? NSRegularExpression(pattern: rule.pattern) else { return nil }
+            return CustomMatcher(id: rule.id, regex: regex)
+        }
+        var headings = lines.enumerated().compactMap {
+            parseHeading($0.element, lineIndex: $0.offset, rules: rules, customMatchers: matchers)
+        }
+        headings = enforceIncreasingNumbers(removeLeadingTableOfContents(headings, lines: lines))
+        let count = headings.filter { if case .volume = $0.kind { return false }; return true }.count
+        guard count >= 3 else { return [.init(start: 0, titleLength: 0, title: "全文", volume: nil)] }
+        var starts = [Int](), offset = 0
+        for line in lines { starts.append(offset); offset += line.utf16.count + 1 }
+        var result = [TXTChapterBoundary](), volume: String?
+        for heading in headings {
+            if case .volume = heading.kind { volume = heading.title; continue }
+            let line = lines[heading.line], start = starts[heading.line]
+            if result.isEmpty, start > 0 {
+                result.append(.init(start: 0, titleLength: 0, title: "前言", volume: volume))
+            }
+            result.append(.init(start: start, titleLength: line.utf16.count, title: heading.title, volume: volume))
+        }
+        return result
+    }
+
     private static func parseHeading(
         _ rawLine: String,
         lineIndex: Int,
