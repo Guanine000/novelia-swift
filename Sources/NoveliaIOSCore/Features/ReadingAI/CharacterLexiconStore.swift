@@ -93,7 +93,9 @@ final class CharacterLexiconStore: ObservableObject, CharacterSyncLocal {
         for key in Set(old.scans?.keys.map { $0 } ?? []).union(new.scans?.keys.map { $0 } ?? []) where old.scans?[key] != new.scans?[key] {
             state.scans[key] = .init(value: new.scans?[key], updatedAt: date)
         }
-        state.rejected.formUnion(new.rejected ?? [])
+        // 否决记录按整表赋值而不是并集：重建人物卡要能撤销它，
+        // 而调用方传入的 Archive 始终是完整状态，不存在只带增量的情况。
+        state.rejected = Set(new.rejected ?? [])
         return try state.validated()
     }
     func characterSnapshot() throws -> CharacterSyncState {
@@ -275,6 +277,33 @@ final class CharacterLexiconStore: ObservableObject, CharacterSyncLocal {
     private static func factKey(_ fact: CharacterFact) -> String {
         "\(fact.book)|\(fact.identity)|\(fact.chapter)|\(fact.offset)|\(fact.name)|\(fact.text)|\(fact.quote)"
     }
+    /// 重建人物卡：清空本作品的人物、逐书检查点与请求缓存，并清空"已否决"记录，
+    /// 让用户之前删掉的条目也能重新被提取出来。卷序保留。
+    /// 否决记录是按内容哈希存的、不区分作品：这里整表清空，其他作品下次重扫时
+    /// 被删条目同样可能重新出现，这是本次重建的已知代价。
+    /// 角色图片随人物一起失效（sync 记录由 commit 写成墓碑）。
+    func reset(scope: CharacterScope) throws {
+        guard archive.orders[scope.work] == scope.volumes else { throw CharacterLexiconError.scope }
+        var next = archive
+        next.entities.removeAll { $0.work == scope.work }
+        next.rejected = []
+        if next.scans != nil {
+            for book in scope.volumes { next.scans?.removeValue(forKey: Self.scanKey(work: scope.work, book: book)) }
+        }
+        try commit(next)
+        extractionCache.removeAll(work: scope.work)
+    }
+    /// 当前阅读范围内的同名多卡，供"校准重复人物"逐个确认合并。
+    /// 只按完全相同的显示名分组；别名不同、名字相近的都不自动归组。
+    func duplicates(scope: CharacterScope) -> [CharacterDuplicateGroup] {
+        Dictionary(grouping: scope.visible(entities), by: \.name)
+            .filter { $0.value.count > 1 }
+            .map { .init(name: $0.key, members: $0.value.sorted {
+                $0.facts.count != $1.facts.count ? $0.facts.count > $1.facts.count
+                    : ($0.facts.first?.chapter ?? 0) < ($1.facts.first?.chapter ?? 0)
+            }) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
     /// 整卡删除：先把该人物全部事实记为已否决证据，再移除人物。
     /// 只删个人事实而不记指纹的话，换模型或重扫同版本正文会把整张卡重新生成出来。
     func removeEntity(_ id: String, scope: CharacterScope) throws {
@@ -360,20 +389,40 @@ enum CharacterAutomaticUpdater {
         let model = String(decoding: try encoder.encode(configuration), as: UTF8.self)
         return FileContentHash.sha256(Data(("automatic-v2|" + CharacterExtractionPlan.promptVersion + "|" + identity + "|" + scope.volumes.joined(separator: "|") + "|" + model).utf8))
     }
-    static func update(plan: CharacterExtractionPlan, store: CharacterLexiconStore, ai: ReadingAIStore,
-                       beforeRequest: () throws -> Void = {}, progress: (Int, Int) -> Void) async throws {
+    /// 一次提取的产物：签名随结果一起返回，落盘阶段不再读配置，便于并发提取后按章序提交。
+    struct Extraction: Sendable {
+        let signature: String
+        let candidates: [CharacterCandidate]
+        /// 该章此前已完成，本次没有真正请求。
+        let skipped: Bool
+    }
+    /// 只做提取，不写档案：并发时多章可以同时跑，落盘仍按章序串行。
+    static func extract(plan: CharacterExtractionPlan, store: CharacterLexiconStore, ai: ReadingAIStore,
+                        beforeRequest: () throws -> Void = {}, progress: (Int, Int) -> Void) async throws -> Extraction {
         let configuration = ai.configuration
         guard plan.chapterCount == 1, store.order(work: plan.scope.work) == plan.scope.volumes else { throw CharacterLexiconError.scope }
         guard configuration.isEnabled else { throw ReadingAIError.disabled }
         let signature = try signature(identity: plan.identity, scope: plan.scope, configuration: configuration)
         if let chapter = plan.chunks.first?.chapter,
-           chapter < store.scannedThrough(work: plan.scope.work, book: plan.book, signature: signature) { return }
+           chapter < store.scannedThrough(work: plan.scope.work, book: plan.book, signature: signature) {
+            return .init(signature: signature, candidates: [], skipped: true)
+        }
         let visible = plan.scope.visible(store.entities)
         let seed = visible.map { CharacterCandidate(id: $0.id, facts: $0.facts.filter { $0.needsReview != true }) }.filter { !$0.facts.isEmpty }
         let result = try await CharacterGenerator.generate(plan: plan, ai: ai, cache: store.extractionCache, seed: seed,
             beforeRequest: beforeRequest, progress: progress)
         try Task.checkCancellation()
         guard ai.configuration == configuration else { throw CancellationError() }
-        try store.applyAutomatic(result, plan: plan, signature: signature)
+        return .init(signature: signature, candidates: result, skipped: false)
+    }
+    /// 按章序落盘；成功一章才推进一章的检查点。
+    static func apply(_ extraction: Extraction, plan: CharacterExtractionPlan, store: CharacterLexiconStore) throws {
+        try store.applyAutomatic(extraction.candidates, plan: plan, signature: extraction.signature)
+    }
+    /// 单章提取并立即落盘；顺序扫描与单元测试使用这个入口。
+    static func update(plan: CharacterExtractionPlan, store: CharacterLexiconStore, ai: ReadingAIStore,
+                       beforeRequest: () throws -> Void = {}, progress: (Int, Int) -> Void) async throws {
+        let extraction = try await extract(plan: plan, store: store, ai: ai, beforeRequest: beforeRequest, progress: progress)
+        try apply(extraction, plan: plan, store: store)
     }
 }

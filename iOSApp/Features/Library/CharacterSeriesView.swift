@@ -20,6 +20,7 @@ struct CharacterSeriesView: View {
     @State private var currentBook = ""
     @State private var scanSeries = false
     @State private var requestLimit = 64
+    @State private var concurrency = 2
     @State private var query = ""
     @State private var ready = false
     @State private var identities: [String: String] = [:]
@@ -29,6 +30,7 @@ struct CharacterSeriesView: View {
     @State private var progress: String?
     @State private var generation: Task<Void, Never>?
     @State private var token = UUID()
+    @State private var confirmingReset = false
     private var confirmed: Bool { !order.isEmpty && store.order(work: workID) == order }
     private var eligibleBooks: [String] {
         guard let index = order.firstIndex(of: currentBook) else { return [] }
@@ -41,6 +43,7 @@ struct CharacterSeriesView: View {
             identities: identities, readBoundaries: boundaries)
     }
     private var visible: [VisibleCharacter] { scope.map { $0.visible(store.entities, query: query) } ?? [] }
+    private var duplicateGroups: [CharacterDuplicateGroup] { scope.map { store.duplicates(scope: $0) } ?? [] }
     private var loadID: String { currentBook + "|" + order.joined(separator: ",") + "|\(settings.projectionRevision)|\(confirmed)" }
     private var actionID: String { loadID + "|\(scanSeries)" }
     private func title(_ key: String) -> String { books.first { $0.key == key }?.title ?? "缺失的卷" }
@@ -95,11 +98,20 @@ struct CharacterSeriesView: View {
                             .disabled(progress != nil || !ai.isReadyForGeneration)
                         Text("本轮新增 \(remainingChapters) 章，最多\(requestLimit)次新请求，每次输出上限 \(ai.configuration.maximumOutputTokens) tokens；发送至 \((try? ai.configuration.endpoint().host) ?? "所配置接口")，可能产生费用。匹配缓存不产生请求。")
                             .font(.footnote)
+                        Button("重新创建人物卡", role: .destructive) { confirmingReset = true }
+                            .disabled(progress != nil || !ai.isReadyForGeneration)
                     }
                     DisclosureGroup("用量上限") {
                         Picker("本轮新请求上限", selection: $requestLimit) {
                             ForEach([32, 64, 128, 256], id: \.self) { Text("\($0)次").tag($0) }
                         }.disabled(progress != nil)
+                        Picker("同时处理章节", selection: $concurrency) {
+                            Text("1章（最稳）").tag(1)
+                            Text("2章").tag(2)
+                            Text("3章").tag(3)
+                        }.disabled(progress != nil)
+                        Text("并发只重叠请求，落盘仍按章序；并发会提高同名人物在不同章节被建成两张卡的可能，跑完可用“校准重复人物”合并。")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     if !ai.isReadyForGeneration { Text("请先在AI阅读辅助中配置接口、模型和密钥并启用服务。").font(.footnote) }
                 } header: { Text("自动生成人物卡") } footer: {
@@ -111,7 +123,8 @@ struct CharacterSeriesView: View {
                         ForEach(visible) { person in
                             NavigationLink {
                                 CharacterCardView(id: person.id, initialScope: scope, books: books,
-                                    workTitle: library.series.series[workID]?.name ?? "", includeSeries: scanSeries, requestLimit: requestLimit, store: store, ai: ai)
+                                    workTitle: library.series.series[workID]?.name ?? "", includeSeries: scanSeries, requestLimit: requestLimit,
+                                    concurrency: concurrency, store: store, ai: ai)
                             } label: {
                                 HStack(spacing: 12) {
                                     CharacterPortraitImage(store: store, id: person.id, scope: scope, name: person.name, compact: true)
@@ -127,15 +140,38 @@ struct CharacterSeriesView: View {
                         }
                         if visible.isEmpty { Text("当前阅读范围内暂无人物卡，点击生成即可建立。").foregroundStyle(.secondary) }
                     } header: { Text("人物卡") }
+                    if !duplicateGroups.isEmpty {
+                        Section {
+                            NavigationLink {
+                                CharacterDuplicateReviewView(scope: scope, store: store)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Label("校准重复人物（\(duplicateGroups.count) 组）", systemImage: "rectangle.stack.badge.minus")
+                                    Text("并发提取后同一人物可能在不同章节各建一张卡；这里逐组确认合并。")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
                 }
             }
             if let progress {
-                Section { HStack { ProgressView(); Text(progress) }; Button("暂停") { cancel(); message = "已暂停，完成的章节已保存。点击更新继续。" } }
+                Section {
+                    HStack { ProgressView(); Text(progress) }
+                    if ai.streamedCharacters > 0 { Text("本次回复已接收 \(ai.streamedCharacters) 字").font(.caption).foregroundStyle(.secondary) }
+                    Button("暂停") { cancel(); message = "已暂停，完成的章节已保存。点击更新继续。" }
+                }
             }
             if let message { Section { Text(message).font(.footnote) } }
         }
         .navigationTitle("跨卷人物词条")
         .toolbar { ToolbarItem(placement: .compatTopBarTrailing) { EditButton().disabled(progress != nil) } }
+        .alert("重新创建人物卡？", isPresented: $confirmingReset) {
+            Button("清空并重新开始", role: .destructive) { resetCards() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("将删除本作品的全部人物卡、角色图片和逐章检查点，同时清空本机的“已否决”记录——之前删掉的条目也会重新参与提取。卷序保留。之后点“生成人物卡”从第一章重新扫描，会产生新的模型费用。")
+        }
         .onAppear {
             guard order.isEmpty else { return }
             let saved = store.order(work: workID).filter { key in books.contains { $0.key == key } }
@@ -149,6 +185,16 @@ struct CharacterSeriesView: View {
         .onDisappear { cancel() }
     }
     private func cancel() { token = UUID(); generation?.cancel(); generation = nil; progress = nil }
+    /// 重建后必须让检查点、进度与列表一起刷新，所以统一走一次 loadScope。
+    private func resetCards() {
+        guard let scope else { return }
+        cancel()
+        do {
+            try store.reset(scope: scope)
+            message = "已清空本作品的人物卡与检查点，点“生成人物卡”从第一章重新开始。"
+            Task { await loadScope(cancelGeneration: false) }
+        } catch { message = error.localizedDescription }
+    }
     private func loadScope(cancelGeneration: Bool = true) async {
         if cancelGeneration { cancel() }
         ready = false; identities = [:]; boundaries = [:]; statuses = [:]; message = nil
@@ -183,10 +229,12 @@ struct CharacterSeriesView: View {
                 try Task.checkCancellation()
                 guard snapshot == token, actionID == identity, ai.configuration == config, let scope else { throw CancellationError() }
                 let result = try await CharacterBookUpdater.run(books: books, scope: scope, selection: selection, settings: settings,
-                    store: store, ai: ai, limit: limit) { text in if snapshot == token { progress = text } }
+                    store: store, ai: ai, limit: limit, concurrency: concurrency) { text in if snapshot == token { progress = text } }
                 completed = result.completed; requests = result.requests
                 guard snapshot == token, !Task.isCancelled else { return }
+                let duplicates = store.duplicates(scope: scope).count
                 message = "本轮完成\(completed)章，新增\(requests)次请求。人物卡已保存；缺失或无进度的书籍未纳入。疑点可在卡片中核实。"
+                    + (duplicates > 0 ? "发现\(duplicates)组同名人物，可用“校准重复人物”合并。" : "")
             } catch is CancellationError {} catch {
                 guard snapshot == token, !Task.isCancelled else { return }
                 message = error.localizedDescription + " 完成的章节已保存，更新可继续。"
@@ -204,6 +252,7 @@ private struct CharacterCardView: View {
     let workTitle: String
     let includeSeries: Bool
     let requestLimit: Int
+    let concurrency: Int
     @ObservedObject var store: CharacterLexiconStore
     @ObservedObject var ai: ReadingAIStore
     @EnvironmentObject private var settings: ReaderSettings
@@ -457,7 +506,9 @@ private struct CharacterCardView: View {
                         HStack { ProgressView().tint(.white); Text("暂停更新") }
                         // 一次高分块生成可能要几分钟，秒表能区分"在跑"和"真卡死"。
                         TimelineView(.periodic(from: updateStarted, by: 1)) { context in
-                            Text((updateMessage ?? "正在处理新增章节…") + " · 已等待\(Int(max(0, context.date.timeIntervalSince(updateStarted))))秒").font(.caption)
+                            Text((updateMessage ?? "正在处理新增章节…")
+                                + (ai.streamedCharacters > 0 ? " · 已接收\(ai.streamedCharacters)字" : "")
+                                + " · 已等待\(Int(max(0, context.date.timeIntervalSince(updateStarted))))秒").font(.caption)
                         }
                     }
                         .frame(maxWidth: .infinity).padding(.vertical, 12).foregroundStyle(.white)
@@ -530,7 +581,7 @@ private struct CharacterCardView: View {
                     currentChapter: boundaries[initialScope.currentBook] ?? 0, identities: identities, readBoundaries: boundaries)
                 try Task.checkCancellation(); refreshedScope = fresh
                 let result = try await CharacterBookUpdater.run(books: books, scope: fresh, selection: fresh.booksForScan(series: includeSeries),
-                    settings: settings, store: store, ai: ai, limit: requestLimit) { updateMessage = $0 }
+                    settings: settings, store: store, ai: ai, limit: requestLimit, concurrency: concurrency) { updateMessage = $0 }
                 updateMessage = "完成\(result.completed)章，新增\(result.requests)次请求。缺书或无进度的卷未纳入。"
             } catch is CancellationError { updateMessage = "已暂停，完成章节已保存。" }
             catch { self.error = error.localizedDescription + " 完成章节已保存，可继续更新。" }
@@ -559,13 +610,33 @@ private struct CharacterCardView: View {
 /// 主列表与人物详情共用同一更新执行路径，防止界面改版改变范围、请求预算或检查点契约。
 @MainActor
 private enum CharacterBookUpdater {
+    /// 并发提取时共用的请求额度。请求体本身在后台线程，计数用锁保护以便从非隔离上下文调用。
+    private final class RequestBudget: @unchecked Sendable {
+        private let lock = NSLock()
+        private var usedValue = 0
+        let limit: Int
+        init(limit: Int) { self.limit = limit }
+        var used: Int { lock.lock(); defer { lock.unlock() }; return usedValue }
+        func reserve() throws {
+            lock.lock(); defer { lock.unlock() }
+            guard usedValue < limit else { throw CharacterLexiconError.requestBudget }
+            usedValue += 1
+        }
+    }
+    private struct PreparedChapter {
+        let chapter: Int
+        let plan: CharacterExtractionPlan?
+    }
     static func run(books: [LibraryBook], scope: CharacterScope, selection: [String], settings: ReaderSettings,
-                    store: CharacterLexiconStore, ai: ReadingAIStore, limit: Int,
+                    store: CharacterLexiconStore, ai: ReadingAIStore, limit: Int, concurrency: Int = 1,
                     progress: (String) -> Void) async throws -> (completed: Int, requests: Int) {
         let config = ai.configuration
         guard store.order(work: scope.work) == scope.volumes else { throw CharacterLexiconError.scope }
         guard ai.isReadyForGeneration else { throw ai.configuration.isEnabled ? ReadingAIError.missingKey : ReadingAIError.disabled }
-        var requests = 0, completed = 0
+        let budget = RequestBudget(limit: limit)
+        // 并发只发生在请求阶段：落盘严格按章序，检查点才不会被后面的章节跳过前面的失败章。
+        let parallel = max(1, min(3, concurrency))
+        var completed = 0
         for key in selection {
             try Task.checkCancellation()
             guard ai.configuration == config else { throw CancellationError() }
@@ -575,29 +646,60 @@ private enum CharacterBookUpdater {
             guard lower < upper else { continue }
             let value = try await CharacterVolumeLoader.load(book, settings: settings)
             guard value.source.identity == expected else { throw CharacterLexiconError.changed }
-            for chapter in lower..<upper {
+
+            var chapter = lower
+            while chapter < upper {
                 try Task.checkCancellation()
                 guard ai.configuration == config else { throw CancellationError() }
-                let text = try await value.source.load(chapter..<(chapter + 1))
-                try Task.checkCancellation()
-                guard text.count == 1, text.first?.index == chapter else { throw CharacterLexiconError.changed }
-                guard ai.configuration == config else { throw CancellationError() }
-                // 封面、版权页、作者简介和分卷标题页没有剧情，提前记检查点直接跳过：
-                // 送进模型只会把作者／译者当成角色，还占掉一次请求预算。
-                if text.allSatisfy({ $0.text.isEmpty }) || CharacterExtractionPlan.isNonContent(text) {
-                    try store.completeEmptyChapter(book: key, identity: expected, chapter: chapter, scope: scope, signature: signature)
-                } else {
-                    let plan = try CharacterExtractionPlan(scope: scope, book: key, identity: expected, chapters: text)
-                    guard plan.chunks.count <= limit else { throw CharacterLexiconError.chapterBudget(plan.chunks.count) }
-                    guard requests + plan.chunks.count <= limit else { throw CharacterLexiconError.requestBudget }
-                    try await CharacterAutomaticUpdater.update(plan: plan, store: store, ai: ai, beforeRequest: {
-                        guard requests < limit else { throw CharacterLexiconError.requestBudget }; requests += 1
-                    }) { index, count in progress("《\(book.title)》第\(chapter + 1)章 · \(index)/\(count)；本轮\(requests)次请求") }
+                var batch = [PreparedChapter]()
+                var cursor = chapter
+                while cursor < upper, batch.count < parallel {
+                    let text = try await value.source.load(cursor..<(cursor + 1))
+                    try Task.checkCancellation()
+                    guard text.count == 1, text.first?.index == cursor else { throw CharacterLexiconError.changed }
+                    // 封面、版权页、作者简介和分卷标题页没有剧情，直接记检查点跳过：
+                    // 送进模型只会把作者／译者当成角色，还占掉一次请求预算。
+                    let empty = text.allSatisfy { $0.text.isEmpty } || CharacterExtractionPlan.isNonContent(text)
+                    let plan = empty ? nil : try CharacterExtractionPlan(scope: scope, book: key, identity: expected, chapters: text)
+                    if let plan { guard plan.chunks.count <= limit else { throw CharacterLexiconError.chapterBudget(plan.chunks.count) } }
+                    batch.append(PreparedChapter(chapter: cursor, plan: plan))
+                    cursor += 1
                 }
-                completed += 1
+                guard budget.used + batch.compactMap({ $0.plan?.chunks.count }).reduce(0, +) <= limit else { throw CharacterLexiconError.requestBudget }
+
+                if let last = batch.last, batch.contains(where: { $0.plan != nil }) {
+                    progress("《\(book.title)》第 \(chapter + 1)–\(last.chapter + 1) 章\(batch.count > 1 ? "并行" : "")处理中；本轮\(budget.used)次请求")
+                }
+                var extractions = [Int: CharacterAutomaticUpdater.Extraction]()
+                try await withThrowingTaskGroup(of: (Int, CharacterAutomaticUpdater.Extraction).self) { group in
+                    for item in batch {
+                        guard let plan = item.plan else { continue }
+                        group.addTask {
+                            let extraction = try await CharacterAutomaticUpdater.extract(plan: plan, store: store, ai: ai, beforeRequest: {
+                                try budget.reserve()
+                            }) { _, _ in }
+                            return (item.chapter, extraction)
+                        }
+                    }
+                    for try await (number, extraction) in group { extractions[number] = extraction }
+                }
+
+                // 提交阶段：按章序逐章落盘，遇到失败立即停止，后续章节不推进检查点。
+                for item in batch {
+                    try Task.checkCancellation()
+                    guard ai.configuration == config else { throw CancellationError() }
+                    if let plan = item.plan, let extraction = extractions[item.chapter] {
+                        try CharacterAutomaticUpdater.apply(extraction, plan: plan, store: store)
+                    } else {
+                        try store.completeEmptyChapter(book: key, identity: expected, chapter: item.chapter, scope: scope, signature: signature)
+                    }
+                    completed += 1
+                    progress("《\(book.title)》第 \(item.chapter + 1) 章完成；本轮\(budget.used)次请求")
+                }
+                chapter = cursor
             }
         }
-        return (completed, requests)
+        return (completed, budget.used)
     }
 }
 
@@ -731,5 +833,59 @@ private struct CharacterPortraitImage: View {
             guard !Task.isCancelled, self.hash == hash else { return }
             image = data.flatMap { UIImage(data: $0) }
         }
+    }
+}
+
+/// 并发提取的收口：同名多卡逐组确认合并。默认保留事实最多的一张，
+/// 合并后事实与图片都进目标卡，来源卡删除；不按别名或相似名猜测。
+@MainActor
+private struct CharacterDuplicateReviewView: View {
+    let scope: CharacterScope
+    @ObservedObject var store: CharacterLexiconStore
+    @State private var error: String?
+    @State private var message: String?
+    private var groups: [CharacterDuplicateGroup] { store.duplicates(scope: scope) }
+    var body: some View {
+        List {
+            if groups.isEmpty {
+                Section { Text("没有需要合并的同名人物。").foregroundStyle(.secondary) }
+            }
+            ForEach(groups) { group in
+                Section {
+                    ForEach(group.members) { member in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(member.name)
+                                if member.id == group.members.first?.id {
+                                    Text("合并到此").font(.caption2).foregroundStyle(NoveliaStyle.brandGreen)
+                                }
+                                Spacer()
+                                Text("\(member.facts.count)条").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Text("第\(member.facts.map(\.chapter).min().map { $0 + 1 } ?? 1)起 · 共\(member.facts.count)条事实")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Button("合并为一张") { merge(group) }
+                } header: { Text(group.name + " · \(group.members.count)张") }
+            }
+            if let message { Section { Text(message).font(.footnote) } }
+            if let error { Section { Text(error).font(.footnote).foregroundStyle(NoveliaStyle.danger) } }
+        }
+        .navigationTitle("校准重复人物")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            Button("全部合并") { for group in groups { merge(group) } }.disabled(groups.isEmpty)
+        }
+    }
+    private func merge(_ group: CharacterDuplicateGroup) {
+        guard let target = group.members.first else { return }
+        error = nil
+        var merged = 0
+        for member in group.members where member.id != target.id {
+            do { try store.merge(member.id, into: target.id, scope: scope); merged += 1 }
+            catch { self.error = error.localizedDescription; return }
+        }
+        message = "「\(group.name)」已合并\(merged)张卡到事实最多的一张。"
     }
 }

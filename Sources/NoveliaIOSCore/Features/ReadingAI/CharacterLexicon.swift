@@ -42,6 +42,16 @@ struct VisibleCharacter: Identifiable, Equatable {
     var aliases: [String] { Array(Set(facts.map(\.name))).filter { $0 != name }.sorted() }
 }
 
+/// 同名的多张人物卡。并发提取时同一人物可能在相邻章节各自建档；这里只给出候选，
+/// 合并仍要用户确认——同名不能证明同一人，可能是书里两个同姓角色。
+struct CharacterDuplicateGroup: Identifiable, Equatable {
+    let name: String
+    /// 事实最多的一张排在最前，作为默认合并目标。
+    let members: [VisibleCharacter]
+    var id: String { name }
+    var factCount: Int { members.reduce(0) { $0 + $1.facts.count } }
+}
+
 /// 卷序必须由用户确认；每条事实独立过滤，不使用人物首次出现时间代替事实的获知位置。
 struct CharacterScope: Equatable, Sendable {
     let work: String
@@ -261,7 +271,7 @@ final class CharacterExtractionCache {
         var responses: [String: String] = [:]
     }
     private let defaults: UserDefaults
-    private let storageKey = "reader.characters.extractionCache.v2"
+    private let storageKey = "reader.characters.extractionCache.v3"
     private var archive = Archive()
     init(defaults: UserDefaults) {
         self.defaults = defaults
@@ -272,6 +282,14 @@ final class CharacterExtractionCache {
     func read(_ key: String) -> String? { archive.responses[key] }
     func remove(_ key: String) {
         archive.responses.removeValue(forKey: key); archive.order.removeAll { $0 == key }
+        if let data = try? JSONEncoder().encode(archive) { defaults.set(data, forKey: storageKey) }
+    }
+    /// 键以「作品ID|正文摘要」开头，重建人物卡时只清掉本作品的缓存，不动其他书。
+    func removeAll(work: String) {
+        let prefix = work + "|"
+        for key in archive.responses.keys where key.hasPrefix(prefix) {
+            archive.responses.removeValue(forKey: key); archive.order.removeAll { $0 == key }
+        }
         if let data = try? JSONEncoder().encode(archive) { defaults.set(data, forKey: storageKey) }
     }
     func save(_ response: String, key: String) {
@@ -300,7 +318,7 @@ enum CharacterGenerator {
             let request = try plan.request(chunk, known: known, outputTokens: config.maximumOutputTokens)
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             let model = String(decoding: try encoder.encode(config), as: UTF8.self)
-            let key = FileContentHash.sha256(Data((CharacterExtractionPlan.promptVersion + "|" + plan.scope.work + "|" + plan.book + "|" + plan.identity + "|" + model + "|" + request.instruction + "|" + request.input).utf8))
+            let key = plan.scope.work + "|" + FileContentHash.sha256(Data((CharacterExtractionPlan.promptVersion + "|" + plan.scope.work + "|" + plan.book + "|" + plan.identity + "|" + model + "|" + request.instruction + "|" + request.input).utf8))
             let saved = cache?.read(key)
             let output: String
             if let saved { output = saved }

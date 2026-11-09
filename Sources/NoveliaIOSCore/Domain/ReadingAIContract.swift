@@ -5,6 +5,17 @@ import Foundation
 /// 不持有书库、原文加载器或会话历史，避免基础设施自行读取未来章节。
 protocol ReadingAICompleting: Sendable {
     func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest) async throws -> ReadingAIResponse
+    /// 流式版本：`onCharacters` 报告当前已收到的正文字数，用于长时间生成时给用户实时反馈。
+    /// 不支持流式的实现可以只实现上一个方法，默认退化为一次性返回。
+    func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest,
+                  onCharacters: @escaping @Sendable (Int) -> Void) async throws -> ReadingAIResponse
+}
+
+extension ReadingAICompleting {
+    func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest,
+                  onCharacters: @escaping @Sendable (Int) -> Void) async throws -> ReadingAIResponse {
+        try await complete(configuration: configuration, apiKey: apiKey, request: request)
+    }
 }
 
 /// 由 App 注入的安全凭据能力。生产使用 Keychain，替代组装使用独立内存。

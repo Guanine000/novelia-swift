@@ -263,6 +263,49 @@ final class CharacterLexiconTests: XCTestCase {
         XCTAssertTrue(store.entities.isEmpty)
     }
     @MainActor
+    func testResetClearsCardsCheckpointsAndRevivesRejectedEvidence() throws {
+        let suite = "CharacterReset-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = CharacterLexiconStore(defaults: defaults)
+        try store.confirmOrder(work: scope().work, volumes: scope().volumes)
+        let plan = try CharacterExtractionPlan(scope: scope(), book: "v1", identity: "i1",
+            chapters: [.init(index: 0, title: "一", text: earlyQuote)])
+        try store.applyAutomatic([.init(facts: [early()])], plan: plan, signature: "sig")
+        XCTAssertEqual(store.entities.count, 1)
+        XCTAssertEqual(store.scannedThrough(work: scope().work, book: "v1", signature: "sig"), 1)
+        let id = try XCTUnwrap(store.entities.first?.id)
+        try store.removeEntity(id, scope: scope())
+        // 主动删除后同一证据被否决，重扫不会再建卡。
+        try store.applyAutomatic([.init(facts: [early()])], plan: plan, signature: "sig")
+        XCTAssertTrue(store.entities.isEmpty)
+        // 重新创建：清卡、清检查点，并让用户删过的条目重新参与提取。
+        try store.reset(scope: scope())
+        XCTAssertEqual(store.scannedThrough(work: scope().work, book: "v1", signature: "sig"), 0)
+        try store.applyAutomatic([.init(facts: [early()])], plan: plan, signature: "sig")
+        XCTAssertEqual(store.entities.count, 1)
+    }
+    @MainActor
+    func testDuplicateGroupsFindSameNameCardsAndMergeKeepsFacts() throws {
+        let suite = "CharacterDuplicates-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = CharacterLexiconStore(defaults: defaults)
+        try store.confirmOrder(work: scope().work, volumes: scope().volumes)
+        let first = early()
+        let second = CharacterFact(book: "v1", identity: "i1", chapter: 1, offset: 0, name: "面具人",
+            text: "独自离开村子。", quote: "面具人独自离开了村子，没有回头。")
+        try store.accept(.init(facts: [first]), scope: scope())
+        try store.accept(.init(facts: [second]), scope: scope())
+        let groups = store.duplicates(scope: scope())
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups.first?.members.count, 2)
+        let target = try XCTUnwrap(groups.first?.members.first)
+        let source = try XCTUnwrap(groups.first?.members.last)
+        try store.merge(source.id, into: target.id, scope: scope())
+        XCTAssertTrue(store.duplicates(scope: scope()).isEmpty)
+        XCTAssertEqual(store.entities.count, 1)
+        XCTAssertEqual(store.entities.first?.facts.count, 2)
+    }
+    @MainActor
     func testExplicitAppendPreservesAttributionAndOldArchiveCompatibility() throws {
         let suite = "CharacterAppend-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -344,7 +387,7 @@ final class CharacterLexiconTests: XCTestCase {
         try ai.save(config, newKey: "fake")
         let plan = try CharacterExtractionPlan(scope: scope(), book: "v1", identity: "i1", chapters: [.init(index: 0, title: "一", text: earlyQuote)])
         _ = try await CharacterGenerator.generate(plan: plan, ai: ai, cache: CharacterExtractionCache(defaults: defaults)) { _, _ in }
-        let storageKey = "reader.characters.extractionCache.v2"
+        let storageKey = "reader.characters.extractionCache.v3"
         var archive = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(defaults.data(forKey: storageKey))) as? [String: Any])
         var responses = try XCTUnwrap(archive["responses"] as? [String: String])
         let key = try XCTUnwrap(responses.keys.first)

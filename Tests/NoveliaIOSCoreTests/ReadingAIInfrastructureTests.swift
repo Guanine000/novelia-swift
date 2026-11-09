@@ -24,6 +24,7 @@ final class ReadingAIInfrastructureTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer isolated-test-key")
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
         XCTAssertEqual(body["max_tokens"] as? Int, 4_096)
+        XCTAssertEqual(body["stream"] as? Bool, true)
         XCTAssertNil(body["max_completion_tokens"])
         XCTAssertEqual((body["response_format"] as? [String: String])?["type"], "json_object")
         let messages = try XCTUnwrap(body["messages"] as? [[String: String]])
@@ -50,6 +51,19 @@ final class ReadingAIInfrastructureTests: XCTestCase {
         XCTAssertThrowsError(try OpenAIReadingClient.decode(body(reason: "stop", content: "  ")))
         let valid = Data("{\"choices\":[{\"message\":{\"content\":\"结果\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":4}}".utf8)
         XCTAssertEqual(try OpenAIReadingClient.decode(valid), .init(text: "结果", inputTokens: 20, outputTokens: 4))
+    }
+
+    func testStreamingResponseIsAssembledAndReportsReceivedCharacters() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ReadingAITestURLProtocol.self]
+        let client = OpenAIReadingClient(configuration: configuration)
+        final class Box: @unchecked Sendable { var counts: [Int] = [] }
+        let box = Box()
+        let response = try await client.complete(configuration: config("https://stream.example/v1"), apiKey: "fake",
+                                                 request: .connectionTest) { box.counts.append($0) }
+        XCTAssertEqual(response.text, "OK")
+        // 流式只按字符数节流回调，最后补一次完整值。
+        XCTAssertEqual(box.counts.last, 2)
     }
 
     func testTransportAcceptsOnlyBoundedSuccessfulTextResponses() async throws {
@@ -187,10 +201,20 @@ private final class ReadingAITestURLProtocol: URLProtocol {
         let code = host == "auth.example" ? 401 : (host == "redirect.example" ? 307 : 200)
         var headers = ["Content-Type": "application/json", "Location": "https://never-follow.example/v1/chat/completions"]
         if host == "oversize.example" { headers["Content-Length"] = "2097152" }
+        if host == "stream.example" { headers["Content-Type"] = "text/event-stream" }
         let response = HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         let valid = "{\"choices\":[{\"message\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}"
-        let text = host == "success.example" ? valid : "private-server-body"
+        let stream = """
+        data: {"choices":[{"delta":{"content":"O"},"finish_reason":null}]}
+
+        data: {"choices":[{"delta":{"content":"K"},"finish_reason":"stop"}]}
+
+        data: [DONE]
+
+
+        """
+        let text = host == "success.example" ? valid : (host == "stream.example" ? stream : "private-server-body")
         client?.urlProtocol(self, didLoad: Data(text.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
