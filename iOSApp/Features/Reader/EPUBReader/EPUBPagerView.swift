@@ -23,7 +23,7 @@ enum EPUBLinkHit: Equatable {
     case plain(String)
 }
 
-struct EPUBPagerView: UIViewRepresentable {
+struct EPUBPagerView: UIViewControllerRepresentable {
     struct PageImages: Equatable {
         var previous: CGImage?
         var current: CGImage?
@@ -62,32 +62,21 @@ struct EPUBPagerView: UIViewRepresentable {
     var characterLookup: ((String) -> Void)? = nil
     var selectionTranslate: ((String) -> Void)? = { _ in }
     /// 三页位图由宿主从同一份排版缓存派生；每次 SwiftUI 更新都会重放。
+    var curlEnabled = false
+    var paperInsets: UIEdgeInsets = .zero
+    var paperColor: UIColor = .systemBackground
+    var paperBackground: UIImage?
     var images: PageImages
 
-    func makeUIView(context: Context) -> EPUBPagerUIView {
-        let view = EPUBPagerUIView()
-        view.canTurnProvider = canTurn
-        view.commitHandler = onCommit
-        view.animatingChangeHandler = onAnimatingChange
-        view.blockedTurnHandler = onBlockedTurn
-        view.linkHitTestProvider = linkHitTest
-        view.imageTapProvider = onImageTap
-        view.noteTapHandler = onNoteTap
-        view.plainLinkTapHandler = onPlainLinkTap
-        view.centerTapHandler = onCenterTap
-        view.selectionRangeProvider = selectionRangeAt
-        view.selectionRectsProvider = selectionRects
-        view.selectedTextProvider = selectedText
-        view.speechTapHandler = onSpeechTap
-        view.speakSelectionHandler = onSpeakSelection
-        view.selectionTranslateHandler = selectionTranslate
-        view.characterLookupHandler = characterLookup
-        view.apply(images: images)
-        view.applySpeechRects(speechRects)
-        return view
+    func makeUIViewController(context: Context) -> EPUBPagerContainer {
+        let container = EPUBPagerContainer()
+        container.loadViewIfNeeded()
+        updateUIViewController(container, context: context)
+        return container
     }
 
-    func updateUIView(_ view: EPUBPagerUIView, context: Context) {
+    func updateUIViewController(_ container: EPUBPagerContainer, context: Context) {
+        let view = container.interaction
         view.canTurnProvider = canTurn
         view.commitHandler = onCommit
         view.animatingChangeHandler = onAnimatingChange
@@ -104,7 +93,8 @@ struct EPUBPagerView: UIViewRepresentable {
         view.speakSelectionHandler = onSpeakSelection
         view.selectionTranslateHandler = selectionTranslate
         view.characterLookupHandler = characterLookup
-        view.apply(images: images)
+        container.update(images: images, curl: curlEnabled, insets: paperInsets,
+                         color: paperColor, background: paperBackground)
         view.applySpeechRects(speechRects)
     }
 }
@@ -134,7 +124,10 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
     private let handlesLayer = CAShapeLayer()
     private var adjustingStart = false
     private var selectionBounds: [CGRect] = []
-    private var longPressGesture: UILongPressGestureRecognizer!
+    fileprivate var longPressGesture: UILongPressGestureRecognizer!
+    private var panGesture: UIPanGestureRecognizer!
+    var curlTurnHandler: ((Bool) -> Void)?
+    var curlSelectionHandler: ((Bool) -> Void)?
     var speechTapHandler: (() -> Void)?
     var speakSelectionHandler: ((NSRange) -> Void)?
     private var spokenRects: [CGRect] = []
@@ -170,6 +163,7 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
         currentImageView.layer.addSublayer(handlesLayer)
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        panGesture = pan
         pan.maximumNumberOfTouches = 1
         pan.delegate = self
         addGestureRecognizer(pan)
@@ -230,7 +224,7 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
     }
 
     /// CFEqual 不接受 NULL，空槽位单独比较。
-    private static func sameImage(_ a: CGImage?, _ b: CGImage?) -> Bool {
+    fileprivate static func sameImage(_ a: CGImage?, _ b: CGImage?) -> Bool {
         switch (a, b) {
         case (nil, nil): return true
         case (let x?, let y?): return CFEqual(x, y)
@@ -268,6 +262,29 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
             pageSize = bounds.size
             layoutStripContent()
         }
+    }
+
+    /// 系统卷页承载纸面，本视图只保留正文坐标内的交互与独立高亮。
+    func configureCurl(_ enabled: Bool) {
+        for image in [previousImageView, currentImageView, nextImageView] { image.isHidden = enabled }
+        // 高亮图层挂在当前位图上，因此隐藏图片时改为只清空 UIImage，保留图层。
+        currentImageView.isHidden = false
+        if enabled { previousImageView.image = nil; currentImageView.image = nil; nextImageView.image = nil }
+        else { layoutStripContent() }
+        updateCurlSelection()
+    }
+
+    private func updateCurlSelection() {
+        guard curlTurnHandler != nil else { panGesture.isEnabled = true; return }
+        let selecting = selectionInitialRange != nil
+        panGesture.isEnabled = selecting
+        curlSelectionHandler?(selecting)
+    }
+
+    func setCurlAnimating(_ active: Bool) {
+        isAnimating = active
+        animatingChangeHandler?(active)
+        layer.opacity = active ? 0 : 1
     }
 
     // MARK: 手势
@@ -424,6 +441,7 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
             handles.append(UIBezierPath(ovalIn: CGRect(x: last.maxX - 6, y: last.maxY - 2, width: 12, height: 12)))
         }
         handlesLayer.path = handles.cgPath
+        updateCurlSelection()
     }
 
     private func presentCopyMenu(at point: CGPoint) {
@@ -436,7 +454,7 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
         editMenuInteraction.presentEditMenu(with: configuration)
     }
 
-    private func clearSelection() {
+    fileprivate func clearSelection() {
         editMenuInteraction.dismissMenu()
         selectionInitialRange = nil
         selectionMovingRange = nil
@@ -444,6 +462,7 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
         selectionLayer.path = nil
         handlesLayer.path = nil
         selectionBounds = []
+        updateCurlSelection()
     }
 
     private func snapBack() {
@@ -462,6 +481,7 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
     /// 吸附到目标页：动画只移动 strip，结束后回调宿主提交新页（宿主用同一 PageID 的
     /// 缓存位图刷新，strip 归零后视觉不变）。
     private func completeTurn(forward: Bool) {
+        if let curlTurnHandler { curlTurnHandler(forward); return }
         let width = max(bounds.width, pageSize.width)
         isAnimating = true
         animatingChangeHandler?(true)
@@ -549,5 +569,195 @@ extension EPUBPagerUIView: UIEditMenuInteractionDelegate {
             let range = NSRange(location: start, length: max(NSMaxRange(first), NSMaxRange(last)) - start)
             self.clearSelection(); self.speakSelectionHandler?(range)
         }
+    }
+}
+
+/// SwiftUI 拥有的原生分页宿主。纸面使用全屏坐标，交互视图保留原正文坐标；
+/// 只缓存前/当前/后三张纸，不改变模型的分页结果和进度所有权。
+final class EPUBPagerContainer: UIViewController, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
+    let interaction = EPUBPagerUIView()
+    private var pager: UIPageViewController?
+    private var pages: [Int: EPUBCurlSheet] = [:]
+    private var input = EPUBPagerView.PageImages(previous: nil, current: nil, next: nil)
+    private var deferred: (EPUBPagerView.PageImages, Bool, UIEdgeInsets, UIColor, UIImage?)?
+    private var paperInsets = UIEdgeInsets.zero
+    private var paperColor = UIColor.systemBackground
+    private var paperBackground: UIImage?
+    private var paperSize = CGSize.zero
+    private var turning = false
+    private var staleCurrent: CGImage?
+    private var awaitingCommit = false
+    private var curl = false
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .clear
+        view.addSubview(interaction)
+    }
+
+    func update(images: EPUBPagerView.PageImages, curl: Bool, insets: UIEdgeInsets, color: UIColor, background: UIImage?) {
+        if turning { deferred = (images, curl, insets, color, background); return }
+        // 已经显示目标快照时，等待模型提交，不能重放提交前的当前页。
+        if awaitingCommit, EPUBPagerUIView.sameImage(images.current, staleCurrent), self.curl == curl { return }
+        awaitingCommit = false
+        let changed = input != images || self.curl != curl || paperInsets != (curl ? insets : .zero)
+            || !paperColor.isEqual(color) || paperBackground !== background
+        input = images; self.curl = curl; paperInsets = curl ? insets : .zero
+        paperColor = color; paperBackground = background
+        if curl, pager == nil { installCurl() }
+        if !curl { removeCurl() }
+        interaction.apply(images: images)
+        interaction.configureCurl(curl)
+        layoutSurfaces()
+        if curl, changed { rebuildSheets() }
+    }
+
+    private func installCurl() {
+        let controller = UIPageViewController(transitionStyle: .pageCurl, navigationOrientation: .horizontal)
+        controller.dataSource = self; controller.delegate = self
+        addChild(controller)
+        controller.view.backgroundColor = .clear
+        view.insertSubview(controller.view, belowSubview: interaction)
+        controller.didMove(toParent: self)
+        pager = controller
+        // 迁移公开 pan 到共同祖先，让正文交互层与纸面共享拖动；
+        // 系统 tap 关闭，保留现有链接/注脚优先和中部显隐规则。
+        for gesture in controller.gestureRecognizers {
+            if gesture is UIPanGestureRecognizer {
+                view.addGestureRecognizer(gesture)
+                gesture.require(toFail: interaction.longPressGesture)
+            } else { gesture.isEnabled = false }
+        }
+        interaction.curlTurnHandler = { [weak self] in self?.turn(forward: $0) }
+        interaction.curlSelectionHandler = { [weak controller] selecting in
+            controller?.gestureRecognizers.filter { $0 is UIPanGestureRecognizer }.forEach { $0.isEnabled = !selecting }
+        }
+    }
+
+    private func removeCurl() {
+        guard let pager else { return }
+        for gesture in pager.gestureRecognizers where gesture.view === view { view.removeGestureRecognizer(gesture) }
+        pager.willMove(toParent: nil); pager.view.removeFromSuperview(); pager.removeFromParent()
+        self.pager = nil; pages = [:]; paperSize = .zero
+        interaction.curlTurnHandler = nil; interaction.curlSelectionHandler = nil
+    }
+
+    private func layoutSurfaces() {
+        pager?.view.frame = view.bounds
+        interaction.frame = curl
+            ? CGRect(origin: CGPoint(x: paperInsets.left, y: paperInsets.top), size: input.size)
+            : view.bounds
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard !turning else { return }
+        layoutSurfaces()
+        if curl, paperSize != view.bounds.size { rebuildSheets() }
+    }
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if turning { finishTurn(completed: false) }
+    }
+
+    private func rebuildSheets() {
+        guard let pager, !turning, view.bounds.width > 0, view.bounds.height > 0 else { return }
+        paperSize = view.bounds.size
+        var result: [Int: EPUBCurlSheet] = [:]
+        for (slot, image) in [(-1, input.previous), (0, input.current), (1, input.next)] {
+            guard let image else { continue }
+            result[slot] = EPUBCurlSheet(slot: slot, image: compose(image))
+        }
+        pages = result
+        if let current = pages[0] { pager.setViewControllers([current], direction: .forward, animated: false) }
+    }
+    private func compose(_ image: CGImage) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = view.window?.screen.scale ?? UIScreen.main.scale
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+            paperColor.setFill(); context.fill(view.bounds)
+            if let background = paperBackground {
+                let scale = max(view.bounds.width / background.size.width, view.bounds.height / background.size.height)
+                let size = CGSize(width: background.size.width * scale, height: background.size.height * scale)
+                background.draw(in: CGRect(x: (view.bounds.width-size.width)/2, y: (view.bounds.height-size.height)/2, width: size.width, height: size.height))
+            }
+            // 延展位图最外侧的背景像素，避免书籍彩色扉页或自定义背景在安全区出现异色带。
+            let x = paperInsets.left, y = paperInsets.top
+            let w = input.size.width, h = input.size.height
+            let right = max(0, view.bounds.width-x-w), bottom = max(0, view.bounds.height-y-h)
+            let iw = CGFloat(image.width), ih = CGFloat(image.height)
+            func edge(_ source: CGRect, _ target: CGRect) {
+                guard target.width > 0, target.height > 0, let crop = image.cropping(to: source) else { return }
+                UIImage(cgImage: crop).draw(in: target)
+            }
+            edge(CGRect(x: 0, y: 0, width: iw, height: 1), CGRect(x: x, y: 0, width: w, height: y))
+            edge(CGRect(x: 0, y: ih-1, width: iw, height: 1), CGRect(x: x, y: y+h, width: w, height: bottom))
+            edge(CGRect(x: 0, y: 0, width: 1, height: ih), CGRect(x: 0, y: y, width: x, height: h))
+            edge(CGRect(x: iw-1, y: 0, width: 1, height: ih), CGRect(x: x+w, y: y, width: right, height: h))
+            for (sx, dx, dw) in [(CGFloat(0), CGFloat(0), x), (iw-1, x+w, right)] {
+                edge(CGRect(x: sx, y: 0, width: 1, height: 1), CGRect(x: dx, y: 0, width: dw, height: y))
+                edge(CGRect(x: sx, y: ih-1, width: 1, height: 1), CGRect(x: dx, y: y+h, width: dw, height: bottom))
+            }
+            UIImage(cgImage: image).draw(in: CGRect(x: x, y: y, width: w, height: h))
+        }
+    }
+    private func neighbor(_ controller: UIViewController, forward: Bool) -> UIViewController? {
+        guard !awaitingCommit, let sheet = controller as? EPUBCurlSheet else { return nil }
+        let slot = sheet.slot + (forward ? 1 : -1)
+        guard let page = pages[slot] else { return nil }
+        if slot != 0, !turning, interaction.canTurnProvider?(forward) != true { return nil }
+        return page
+    }
+    func pageViewController(_ pageViewController: UIPageViewController, viewControllerBefore viewController: UIViewController) -> UIViewController? {
+        neighbor(viewController, forward: false)
+    }
+    func pageViewController(_ pageViewController: UIPageViewController, viewControllerAfter viewController: UIViewController) -> UIViewController? {
+        neighbor(viewController, forward: true)
+    }
+    func pageViewController(_ pageViewController: UIPageViewController, willTransitionTo pendingViewControllers: [UIViewController]) { beginTurn() }
+    func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool, previousViewControllers: [UIViewController], transitionCompleted completed: Bool) { finishTurn(completed: completed) }
+
+    private func beginTurn() {
+        guard !turning else { return }
+        turning = true
+        interaction.clearSelection()
+        interaction.setCurlAnimating(true)
+    }
+    private func finishTurn(completed: Bool) {
+        guard turning else { return }
+        let slot = (pager?.viewControllers?.first as? EPUBCurlSheet)?.slot ?? 0
+        turning = false
+        interaction.setCurlAnimating(false)
+        if completed, slot != 0 {
+            staleCurrent = input.current; awaitingCommit = true
+            interaction.commitHandler?(slot > 0)
+        } else { rebuildSheets() }
+        if let deferred {
+            self.deferred = nil
+            update(images: deferred.0, curl: deferred.1, insets: deferred.2, color: deferred.3, background: deferred.4)
+        }
+    }
+    private func turn(forward: Bool) {
+        guard !turning, !awaitingCommit else { return }
+        guard let pager, interaction.canTurnProvider?(forward) == true,
+              let target = pages[forward ? 1 : -1] else { interaction.blockedTurnHandler?(forward); return }
+        beginTurn()
+        pager.setViewControllers([target], direction: forward ? .forward : .reverse, animated: true) { [weak self] finished in
+            self?.finishTurn(completed: finished)
+        }
+    }
+}
+
+/// 动画开始前合成的一张不可变纸面，包含正文与上下页边背景。
+private final class EPUBCurlSheet: UIViewController {
+    let slot: Int
+    private let image: UIImage
+    init(slot: Int, image: UIImage) { self.slot = slot; self.image = image; super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    override func loadView() {
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleToFill
+        imageView.isUserInteractionEnabled = true
+        view = imageView
     }
 }

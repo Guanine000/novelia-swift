@@ -177,6 +177,9 @@ struct ReaderBottomBarShell<Content: View>: View {
     let hiddenPercentText: String?
     /// 工具栏隐藏时的底色；nil 保持透明。
     var hiddenBackground: Color? = nil
+    /// 工具栏显示时把材质铺到屏幕最下缘。仿真翻页的纸面满屏延伸到安全区，
+    /// 不铺时底栏下方会露出正在卷动的那一条纸面；其他引擎保持原样。
+    var coversBottomSafeArea = false
     var readingTime: AnyView? = nil
     @ViewBuilder var content: Content
 
@@ -208,6 +211,7 @@ struct ReaderBottomBarShell<Content: View>: View {
         .background {
             if showChrome {
                 Rectangle().fill(.thinMaterial)
+                    .ignoresSafeArea(edges: coversBottomSafeArea ? .bottom : [])
             } else if let hiddenBackground {
                 hiddenBackground.opacity(0.92)
             }
@@ -380,6 +384,7 @@ struct ReaderStyleSheet: View {
     /// 删除自定义字体后，若当前样式仍引用它则回退到书籍默认字体。
     let onDeletedFont: (String) -> Void
     let onMarkIssue: () -> Void
+    var supportsNativePageTurn = false
 
     var body: some View {
         CompatNavigationStack {
@@ -404,6 +409,15 @@ struct ReaderStyleSheet: View {
                     Text("主题与背景即时生效；字体、字号和排版调整点击“应用”后保存。")
                 }
                 Section("分页") {
+                    if supportsNativePageTurn {
+                        Picker("翻页动画", selection: $settings.nativePageCurlEnabled) {
+                            Text("跟手平移").tag(false)
+                            Text("仿真翻页").tag(true)
+                        }
+                        .accessibilityIdentifier("reader-native-page-turn")
+                        Text("即时生效，仅用于原生分页。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     Toggle("双页模式", isOn: Binding(get: { draftStyle.doublePage == true }, set: { draftStyle.doublePage = $0 }))
                     Text("每次显示两页；横屏或 iPad 上阅读更舒适。章节末尾不足两页时保留空白页。")
                         .font(.caption).foregroundStyle(.secondary)
