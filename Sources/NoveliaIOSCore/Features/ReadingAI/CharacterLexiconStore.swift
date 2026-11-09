@@ -21,6 +21,8 @@ final class CharacterLexiconStore: ObservableObject, CharacterSyncLocal {
         var progress: String? = nil
         var message: String? = nil
         var events: [String] = []
+        var userRequest: String? = nil
+        var replySession: UUID? = nil
     }
     @Published var runs: [String: RunState] = [:]
     var runningTasks: [String: Task<Void, Never>] = [:]
@@ -512,5 +514,19 @@ struct CharacterOrderedResults<Value> {
             try commit(chapter, result.get())
             pending.removeValue(forKey: chapter); next += 1
         }
+    }
+}
+
+/// 从尚未闭合的结构化回复中投影已完整到达的人名和描述，原始内容仍可展开核对。
+enum CharacterReplyPresentation {
+    static func text(_ raw: String) -> String {
+        guard raw.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") else { return raw }
+        guard let regex = try? NSRegularExpression(pattern: #""(name|text)"\s*:\s*("(?:\\.|[^"\\])*")"#) else { return "" }
+        let source = raw as NSString
+        return regex.matches(in: raw, range: NSRange(location: 0, length: source.length)).compactMap { match in
+            let quoted = source.substring(with: match.range(at: 2))
+            guard let data = quoted.data(using: .utf8), let value = try? JSONDecoder().decode(String.self, from: data) else { return nil }
+            return source.substring(with: match.range(at: 1)) == "name" ? "\n" + value : value
+        }.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

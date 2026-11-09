@@ -2,22 +2,27 @@
 import Combine
 import Foundation
 
-/// AppServices 持有的唯一 AI 入口。只保存配置，密钥通过注入能力访问；不保存正文或生成历史。
+/// AppServices 持有的唯一 AI 入口。配置持久化，密钥通过注入能力访问；回复记录仅保留有界内存。
 /// 配置变化或删除密钥时取消进行中任务，旧请求不得把迟到结果交给新会话。
 @MainActor
 final class ReadingAIStore: ObservableObject {
+    @TaskLocal static var conversationID: String?
     @Published private(set) var configuration: ReadingAIConfiguration
     @Published private(set) var hasSavedKey = false
     /// 当前请求已收到的正文字数；长时间生成时界面据此显示实时进度，请求结束或取消后归零。
     struct RequestProgress: Identifiable {
         let id: UUID
+        var conversationID: String? = nil
+        var started = Date()
+        var status = "正在回复"
         var characters = 0
         var preview = ""
         var lastReceived: Date? = nil
     }
     @Published private(set) var requestProgress: [UUID: RequestProgress] = [:]
+    @Published private(set) var completedReplies: [RequestProgress] = []
     var streamedCharacters: Int { requestProgress.values.reduce(0) { $0 + $1.characters } }
-    /// 当前请求已收到的正文末尾片段，供"AI 运行记录"实时预览。
+    /// 最近更新的请求正文，供实时回复展示；各请求仍独立保存在 requestProgress。
     var streamedPreview: String {
         requestProgress.values.sorted { ($0.lastReceived ?? .distantPast) > ($1.lastReceived ?? .distantPast) }.first?.preview ?? ""
     }
@@ -97,10 +102,10 @@ final class ReadingAIStore: ObservableObject {
         try request.validate()
         guard let key = try keys.read(scope: config.endpoint().absoluteString), !key.isEmpty else { throw ReadingAIError.missingKey }
         let id = UUID(), snapshot = revision, client = client
-        requestProgress[id] = RequestProgress(id: id)
+        requestProgress[id] = RequestProgress(id: id, conversationID: Self.conversationID)
         let task = Task {
             try await client.complete(configuration: config, apiKey: key, request: request) { received, tail in
-                // 客户端在后台线程回调，回到主线程只写计数和末尾片段，避免高频刷新拖慢生成。
+                // 客户端已节流回调，回到主线程按请求更新计数与正文。
                 Task { @MainActor [weak self] in
                     guard let self, self.revision == snapshot, self.tasks[id]?.isCancelled == false,
                           var value = self.requestProgress[id] else { return }
@@ -111,13 +116,27 @@ final class ReadingAIStore: ObservableObject {
             }
         }
         tasks[id] = task
-        defer { tasks.removeValue(forKey: id); requestProgress.removeValue(forKey: id) }
+        var finalStatus = "回复未完成"
+        defer {
+            tasks.removeValue(forKey: id)
+            if var reply = requestProgress.removeValue(forKey: id), reply.conversationID != nil, !reply.preview.isEmpty {
+                reply.status = finalStatus
+                completedReplies.append(reply)
+                // 仅保留最近回复；进程结束即丢弃，不写入偏好、日志或同步。
+                while completedReplies.count > 16 || completedReplies.reduce(0, { $0 + $1.preview.utf8.count }) > 4 * 1_024 * 1_024 {
+                    completedReplies.removeFirst()
+                }
+            }
+        }
         do {
             let result = try await withTaskCancellationHandler(operation: { try await task.value }, onCancel: { task.cancel() })
             try Task.checkCancellation()
             guard revision == snapshot else { throw CancellationError() }
+            requestProgress[id]?.preview = result.text
+            requestProgress[id]?.characters = result.text.count
+            finalStatus = "回复已接收，资料以核验后保存结果为准"
             return result
-        } catch is CancellationError { throw CancellationError() }
+        } catch is CancellationError { finalStatus = "已暂停 · 回复未完成"; throw CancellationError() }
         catch let error as ReadingAIError { throw error }
         catch { throw ReadingAIError.transport }
     }

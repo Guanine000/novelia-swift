@@ -74,6 +74,23 @@ struct CharacterSeriesView: View {
 
     var body: some View {
         List {
+            if progress != nil || message != nil || !aiLog.isEmpty {
+                Section {
+                    Button { showingAILog = true } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "bubble.left.and.bubble.right").foregroundStyle(NoveliaStyle.brandGreen)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(progress != nil ? "阅读助手正在整理" : "查看本轮对话").font(.headline)
+                                Text(progress ?? message ?? "查看处理过程与结果")
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }.buttonStyle(.plain)
+                    if progress != nil { Button("暂停整理") { cancel() } }
+                } header: { Text("阅读助手") }
+            }
             Section {
                 ForEach(order, id: \.self) { key in Text(title(key)) }
                     .onMove { offsets, destination in cancel(); order.move(fromOffsets: offsets, toOffset: destination) }
@@ -172,20 +189,13 @@ struct CharacterSeriesView: View {
                     }
                 }
             }
-            if let progress {
-                Section {
-                    HStack { ProgressView(); Text(progress) }
-                    if ai.streamedCharacters > 0 { Text("\(ai.requestProgress.count) 个请求进行中 · 合计已接收 \(ai.streamedCharacters) 字").font(.caption).foregroundStyle(.secondary) }
-                    Button("查看 AI 输出") { showingAILog = true }
-                    Button("暂停") { cancel(); message = "已暂停，完成的章节已保存。点击更新继续。" }
-                }
-            }
-            if let message { Section { Text(message).font(.footnote) } }
         }
         .navigationTitle("跨卷人物词条")
         .toolbar { ToolbarItem(placement: .compatTopBarTrailing) { EditButton().disabled(progress != nil) } }
         .sheet(isPresented: $showingAILog) {
-            CharacterAILogView(ai: ai, status: progress, events: aiLog)
+            CharacterAILogView(workID: workID, store: store, ai: ai,
+                canContinue: ready && confirmed && ai.isReadyForGeneration,
+                onContinue: generate)
         }
         .alert("重新创建人物卡？", isPresented: $confirmingReset) {            Button("清空并重新开始", role: .destructive) { resetCards() }
             Button("取消", role: .cancel) {}
@@ -221,7 +231,7 @@ struct CharacterSeriesView: View {
     }
     private func loadScope(cancelGeneration: Bool = true) async {
         if cancelGeneration { cancel() }
-        ready = false; identities = [:]; boundaries = [:]; statuses = [:]; message = nil
+        ready = false; identities = [:]; boundaries = [:]; statuses = [:]
         guard confirmed else { return }
         let snapshot = loadID
         for key in eligibleBooks {
@@ -246,8 +256,13 @@ struct CharacterSeriesView: View {
     private func generate() {
         guard generation == nil else { return }
         cancel(); message = nil; progress = "准备生成…"; resetAILog()
+        store.runs[workID]?.userRequest = "请整理\(scanSeries ? "这个系列" : "《" + title(currentBook) + "》")已读范围内的人物资料，只使用已读完整章节。"
+        aiLog = ["我会先检查本地书籍和阅读位置，再分章整理人物资料。每章完成核验后保存，你可以随时暂停或返回阅读。"]
+        showingAILog = true
         let snapshot = token, selection = selectedBooks, identity = actionID, config = ai.configuration, limit = requestLimit
+        store.runs[workID]?.replySession = snapshot
         generation = Task {
+          await ReadingAIStore.$conversationID.withValue(snapshot.uuidString) {
             var requests = 0, completed = 0
             do {
                 await loadScope(cancelGeneration: false)
@@ -271,6 +286,7 @@ struct CharacterSeriesView: View {
                 message = error.localizedDescription + " 完成的章节已保存，更新可继续。"
             }
             if snapshot == token { progress = nil; generation = nil }
+          }
         }
     }
 }
@@ -308,6 +324,8 @@ private struct CharacterCardView: View {
         nonmutating set { store.runningTasks[enrichmentKey] = newValue }
     }
     @State private var updateMessage: String?
+    @State private var showingConversation = false
+    @State private var conversationIsDetail = true
     @State private var confirmingDelete = false
     private var enriching: Bool { enrichmentTask != nil }
     @State private var updateStarted = Date()
@@ -398,6 +416,12 @@ private struct CharacterCardView: View {
                     Divider()
                     Button("补充细节") { enrich() }.disabled(enriching || updating || !ai.isReadyForGeneration)
                     if enriching { Button("暂停补充") { store.pause(work: enrichmentKey) } }
+                    if store.runs[enrichmentKey] != nil {
+                        Button("查看补充对话") { conversationIsDetail = true; showingConversation = true }
+                    }
+                    if store.runs[initialScope.work] != nil {
+                        Button("查看更新对话") { conversationIsDetail = false; showingConversation = true }
+                    }
                     Button("删除此人物", role: .destructive) { confirmingDelete = true }
                 } label: { Image(systemName: "ellipsis").foregroundStyle(NoveliaStyle.brandGreen) }
             }
@@ -405,6 +429,11 @@ private struct CharacterCardView: View {
         .safeAreaInset(edge: .bottom) { updateBar }
         .sheet(item: $editing) { fact in
             CharacterFactEditor(fact: fact) { text in try store.edit(fact: fact.id, entity: id, text: text, scope: scope) }
+        }
+        .sheet(isPresented: $showingConversation) {
+            CharacterAILogView(workID: conversationIsDetail ? enrichmentKey : initialScope.work, store: store, ai: ai,
+                canContinue: ai.isReadyForGeneration && person != nil,
+                onContinue: { if conversationIsDetail { enrich() } else { update() } })
         }
         .sheet(isPresented: $managingPortrait) { portraitEditor }
         .alert("删除「\(person?.name ?? "")」？", isPresented: $confirmingDelete) {
@@ -620,9 +649,12 @@ private struct CharacterCardView: View {
             self.error = CharacterLexiconError.missing.localizedDescription; return
         }
         error = nil; updateMessage = nil
-        store.runs[enrichmentKey] = .init(progress: "准备补充细节…")
+        store.runs[enrichmentKey] = .init(progress: "准备补充细节…", userRequest: "请补充「\(person.name)」在已读章节中的人物资料。")
         let detailToken = store.runs[enrichmentKey]!.token
+        store.runs[enrichmentKey]?.replySession = detailToken
+        conversationIsDetail = true; showingConversation = true
         enrichmentTask = Task {
+          await ReadingAIStore.$conversationID.withValue(detailToken.uuidString) {
             defer {
                 if store.runs[enrichmentKey]?.token == detailToken {
                     enrichmentTask = nil; store.runs[enrichmentKey]?.progress = nil
@@ -657,14 +689,19 @@ private struct CharacterCardView: View {
                     store.runs[enrichmentKey]?.message = error.localizedDescription + " 已保存的细节保留，可重试。"
                 }
             }
+          }
         }
     }
     private func update() {
         guard !updating else { return }
         error = nil; updateStarted = Date(); updateMessage = nil
-        store.runs[initialScope.work] = .init(progress: "准备生成…")
+        store.runs[initialScope.work] = .init(progress: "准备生成…",
+            userRequest: "请更新\(includeSeries ? "系列" : "本书")已读范围内的人物资料。")
         let runToken = store.runs[initialScope.work]!.token
+        store.runs[initialScope.work]?.replySession = runToken
+        conversationIsDetail = false; showingConversation = true
         updateTask = Task {
+          await ReadingAIStore.$conversationID.withValue(runToken.uuidString) {
             defer {
                 if store.runs[initialScope.work]?.token == runToken {
                     store.runningTasks[initialScope.work] = nil
@@ -684,7 +721,13 @@ private struct CharacterCardView: View {
                 try Task.checkCancellation(); refreshedScope = fresh
                 let result = try await CharacterBookUpdater.run(books: books, scope: fresh, selection: fresh.booksForScan(series: includeSeries),
                     settings: settings, store: store, ai: ai, limit: requestLimit, concurrency: concurrency) {
-                        if store.runs[initialScope.work]?.token == runToken { store.runs[initialScope.work]?.progress = $0 }
+                        if store.runs[initialScope.work]?.token == runToken {
+                            store.runs[initialScope.work]?.progress = $0
+                            store.runs[initialScope.work]?.events.append($0)
+                            if let count = store.runs[initialScope.work]?.events.count, count > 80 {
+                                store.runs[initialScope.work]?.events.removeFirst(count - 80)
+                            }
+                        }
                     }
                 updateMessage = "完成\(result.completed)章，新增\(result.requests)次请求。缺书或无进度的卷未纳入。"
                 if store.runs[initialScope.work]?.token == runToken { store.runs[initialScope.work]?.message = updateMessage }
@@ -693,6 +736,7 @@ private struct CharacterCardView: View {
                 self.error = error.localizedDescription + " 完成章节已保存，可继续更新。"
                 if store.runs[initialScope.work]?.token == runToken { store.runs[initialScope.work]?.message = self.error }
             }
+          }
         }
     }
     @ViewBuilder private func factActions(_ fact: CharacterFact) -> some View {
@@ -1009,43 +1053,118 @@ private struct CharacterDuplicateReviewView: View {
     }
 }
 
-/// AI 运行记录：把模型正在吐出的内容直接显示出来，让人看到确实在跑，而不是只有一个转圈。
-/// 只展示最近片段与步骤，不落盘、不含密钥。
+/// 对话展示来自真实任务事件和已保存结果，不增加模型调用，也不展示推测的思考过程。
+/// 直接观察共享 Store，面板打开后仍随任务完成、失败和暂停实时更新。
 @MainActor
 private struct CharacterAILogView: View {
+    let workID: String
+    @ObservedObject var store: CharacterLexiconStore
     @ObservedObject var ai: ReadingAIStore
-    let status: String?
-    let events: [String]
+    let canContinue: Bool
+    let onContinue: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var followsLatest = true
+    private var run: CharacterLexiconStore.RunState? { store.runs[workID] }
+    private var running: Bool { store.runningTasks[workID] != nil }
+    private var replies: [ReadingAIStore.RequestProgress] {
+        let owner = run?.replySession?.uuidString
+        return (ai.completedReplies + Array(ai.requestProgress.values)).filter { $0.conversationID == owner && owner != nil }
+            .sorted { $0.started < $1.started }
+    }
+    private var revision: String { "\(run?.events.count ?? 0)|\(run?.progress ?? "")|\(run?.message ?? "")|\(replies.reduce(0) { $0 + $1.characters })" }
+
     var body: some View {
         NavigationView {
-            List {
-                Section {
-                    HStack { ProgressView(); Text(status ?? "等待中…").font(.footnote) }
-                    Text("已接收 \(ai.streamedCharacters) 字").font(.caption).foregroundStyle(.secondary)
-                } header: { Text("当前请求") }
-                Section {
-                    ForEach(ai.requestProgress.values.sorted { $0.id.uuidString < $1.id.uuidString }) { request in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("请求 " + String(request.id.uuidString.prefix(6)) + " · 已接收 \(request.characters) 字").font(.caption)
-                            Text(request.preview.isEmpty ? "等待模型回复…" : request.preview)
-                                .font(.system(.caption, design: .monospaced))
+            VStack(spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 18) {
+                            if let request = run?.userRequest { bubble(request, user: true) }
+                            ForEach(Array((run?.events ?? []).enumerated()), id: \.offset) { index, event in
+                                if index == 0 && !event.hasPrefix("《") {
+                                    bubble(event)
+                                } else {
+                                    HStack(alignment: .top, spacing: 10) {
+                                        Image(systemName: event.contains("已保存") ? "checkmark.circle.fill" : "doc.text.magnifyingglass")
+                                            .foregroundStyle(NoveliaStyle.brandGreen)
+                                        Text(event).font(.footnote).foregroundStyle(NoveliaStyle.muted)
+                                    }.padding(.leading, 8).accessibilityElement(children: .combine)
+                                }
+                            }
+                            ForEach(replies) { reply in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    bubble(CharacterReplyPresentation.text(reply.preview).isEmpty ? "正在接收人物资料…" : CharacterReplyPresentation.text(reply.preview))
+                                    Text(reply.status).font(.caption).foregroundStyle(NoveliaStyle.muted).padding(.leading, 14)
+                                    DisclosureGroup("原始回复") {
+                                        Text(reply.preview).font(.system(.caption, design: .monospaced))
+                                            .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
+                                    }.font(.caption).padding(.leading, 14)
+                                }
+                            }
+                            if running {
+                                HStack(alignment: .top, spacing: 10) {
+                                    ProgressView()
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(run?.progress ?? "正在准备…").font(.footnote)
+                                        Text("完成的章节会自动保存，可以先返回阅读。")
+                                            .font(.caption).foregroundStyle(NoveliaStyle.muted)
+                                    }
+                                }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(NoveliaStyle.card).clipShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
+                            }
+                            if let message = run?.message { bubble(message) }
+                            DisclosureGroup("运行详情") {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("以下为当前 AI 请求的原始回复片段，人物资料保存前会核验出处。")
+                                        .font(.caption).foregroundStyle(NoveliaStyle.muted)
+                                    ForEach(ai.requestProgress.values.sorted { $0.id.uuidString < $1.id.uuidString }) { request in
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            Text("请求 " + String(request.id.uuidString.prefix(6)) + " · 已接收 \(request.characters) 字").font(.caption)
+                                            Text(request.preview.isEmpty ? "等待模型回复…" : request.preview)
+                                                .font(.system(.caption, design: .monospaced))
+                                        }
+                                    }
+                                    if ai.requestProgress.isEmpty { Text("当前没有运行中的请求").font(.caption) }
+                                }.padding(.top, 8)
+                            }.font(.footnote).foregroundStyle(NoveliaStyle.muted)
+                            Color.clear.frame(height: 1).id("latest")
+                        }.padding(16)
+                    }
+                    .onAppear { proxy.scrollTo("latest", anchor: .bottom) }
+                    .onValueChange(of: revision) { _, _ in
+                        if followsLatest { withAnimation { proxy.scrollTo("latest", anchor: .bottom) } }
+                    }
+                }
+                Divider()
+                VStack(spacing: 10) {
+                    Toggle("跟随最新消息", isOn: $followsLatest).font(.caption)
+                    HStack(spacing: 12) {
+                        Button("查看人物卡") { dismiss() }.buttonStyle(.bordered)
+                        Spacer()
+                        if running {
+                            Button("暂停整理") { store.pause(work: workID) }.buttonStyle(.borderedProminent)
+                        } else {
+                            Button("继续更新") { onContinue() }.buttonStyle(.borderedProminent).disabled(!canContinue)
                         }
                     }
-                    if ai.requestProgress.isEmpty { Text("当前没有运行中的请求").font(.caption).foregroundStyle(.secondary) }
-                } header: { Text("模型输出（实时）") } footer: {
-                    Text("显示的是模型的原始回复片段，包含 JSON 结构；写入人物卡前会逐条核验出处。")
-                }
-                Section {
-                    if events.isEmpty { Text("暂无步骤").foregroundStyle(.secondary).font(.footnote) }
-                    ForEach(Array(events.enumerated().suffix(30).reversed()), id: \.offset) { _, text in
-                        Text(text).font(.caption)
-                    }
-                } header: { Text("最近步骤") }
+                }.padding(16)
             }
-            .navigationTitle("AI 运行记录")
+            .background(NoveliaStyle.paper.ignoresSafeArea())
+            .navigationTitle("阅读助手")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .compatTopBarTrailing) { Button("关闭") { dismiss() } } }
         }
+    }
+    private func bubble(_ text: String, user: Bool = false) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            if user { Spacer(minLength: 32) }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(user ? "你" : "阅读助手").font(.caption).foregroundStyle(NoveliaStyle.muted)
+                Text(text).font(.body).foregroundStyle(NoveliaStyle.ink).fixedSize(horizontal: false, vertical: true)
+            }.padding(14)
+                .background(user ? NoveliaStyle.brandGreen.opacity(0.12) : NoveliaStyle.card)
+                .clipShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
+            if !user { Spacer(minLength: 16) }
+        }.accessibilityElement(children: .combine)
     }
 }

@@ -3,6 +3,13 @@ import XCTest
 @testable import NoveliaIOSCore
 
 final class CharacterLexiconTests: XCTestCase {
+    func testReplyPresentationOnlyDisplaysReceivedStrings() {
+        let partial = #"{"candidates":[{"name":"林舟","facts":[{"text":"港口调查员","quote":"仍未完成"#
+        XCTAssertEqual(CharacterReplyPresentation.text(partial), "林舟\n港口调查员")
+        XCTAssertEqual(CharacterReplyPresentation.text(#"{"candidates":[{"name":"林"#), "")
+        XCTAssertEqual(CharacterReplyPresentation.text("普通回复"), "普通回复")
+    }
+
     func testOrderedResultsCommitPrefixBeforeLaterFailure() throws {
         var values = CharacterOrderedResults<String>(order: [0, 1, 2])
         var saved = [Int]()

@@ -109,14 +109,14 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
                 text += content
                 // 限的是拼装后的正文，不是带 JSON 外壳的原始事件流。
                 guard text.utf8.count <= maximumResponseBytes else { throw ReadingAIError.responseLimit }
-                // 高频回调会拖慢界面，按字符数节流；最后再补一次完整值。末尾片段用于界面实时预览。
-                if text.count - reported >= 120 { reported = text.count; onProgress(reported, String(text.suffix(240))) }
+                // 高频回调会拖慢界面，按字符数节流；最后再补一次完整值。完整已接收正文用于对话展示。
+                if text.count - reported >= 120 { reported = text.count; onProgress(reported, text) }
             }
             if let value = chunk.choices?.first?.finish_reason { finish = value }
             if let value = chunk.usage { usage = value }
         }
         try Task.checkCancellation()
-        onProgress(text.count, String(text.suffix(240)))
+        onProgress(text.count, text)
         if finish == "length" { throw ReadingAIError.truncated }
         if finish == "content_filter" { throw ReadingAIError.refused }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ReadingAIError.invalidResponse }

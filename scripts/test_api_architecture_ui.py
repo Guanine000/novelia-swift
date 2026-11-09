@@ -176,6 +176,35 @@ final class TapTests: XCTestCase {
   XCTAssertFalse(app.buttons["移除角色形象"].exists)
   zeroExternalRequests(app)
  }
+ func testCharacterAgentConversation() {
+  continueAfterFailure = false
+  let app = XCUIApplication(bundleIdentifier: bundle)
+  app.launchArguments = ["-architectureValidation", "-resetArchitectureValidation", "-architectureTXT",
+                         "-architectureCharacterPortrait", "-architectureCharacterStandalone", "-architectureCharacterConversation"]
+  app.launch(); defer { app.terminate() }
+  XCTAssertTrue(app.tabBars.buttons["书库"].waitForExistence(timeout: 30)); app.tabBars.buttons["书库"].tap()
+  let more = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "更多操作：架构验证TXT")).firstMatch
+  XCTAssertTrue(more.waitForExistence(timeout: 20)); more.tap()
+  let entry = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "AI 人物词条")).firstMatch
+  XCTAssertTrue(entry.waitForExistence(timeout: 20)); entry.tap()
+  let conversation = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "查看本轮对话")).firstMatch
+  XCTAssertTrue(conversation.waitForExistence(timeout: 20)); conversation.tap()
+  XCTAssertTrue(app.navigationBars["阅读助手"].waitForExistence(timeout: 15))
+  // 对话按时间排列，结果位于底部；初始定位到底部后可向上查看请求。
+  XCTAssertTrue(app.staticTexts["本轮完成2章，人物卡已保存。"].waitForExistence(timeout: 10))
+  XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "正在寻找失踪的妹妹林澈")).firstMatch.waitForExistence(timeout: 10))
+  XCTAssertTrue(app.buttons["查看人物卡"].exists)
+  XCTAssertTrue(app.switches["跟随最新消息"].exists)
+  XCTAssertTrue(app.buttons["继续更新"].exists)
+  XCTAssertFalse(app.buttons["继续更新"].isEnabled, "未配置AI时继续入口应禁用")
+  let details = app.buttons["运行详情"]
+  XCTAssertTrue(details.exists); details.tap()
+  XCTAssertTrue(app.staticTexts["当前没有运行中的请求"].waitForExistence(timeout: 10))
+  let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "阅读助手对话"; shot.lifetime = .keepAlways; add(shot)
+  app.buttons["查看人物卡"].tap()
+  XCTAssertTrue(app.navigationBars["跨卷人物词条"].waitForExistence(timeout: 10))
+  zeroExternalRequests(app)
+ }
  func testCharacterScopeChoiceAndUnreadSafety() {
   let app = start(txt: true)
   app.buttons["书库"].firstMatch.tap()

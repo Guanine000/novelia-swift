@@ -4,6 +4,21 @@ import XCTest
 
 final class ReadingAIInfrastructureTests: XCTestCase {
     @MainActor
+    func testConversationRetainsCompletedReplyWithoutPersistingIt() async throws {
+        let suite = "ReadingAIConversation-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let keys = MemoryReadingAIKeys()
+        let store = ReadingAIStore(defaults: defaults, keys: keys, client: RecordingReadingAI())
+        try store.save(config(), newKey: "test-key")
+        _ = try await ReadingAIStore.$conversationID.withValue("conversation-one") { try await store.generate(.connectionTest) }
+        XCTAssertTrue(store.requestProgress.isEmpty)
+        XCTAssertEqual(store.completedReplies.first?.preview, "OK")
+        XCTAssertEqual(store.completedReplies.first?.conversationID, "conversation-one")
+        let reopened = ReadingAIStore(defaults: defaults, keys: keys, client: RecordingReadingAI())
+        XCTAssertTrue(reopened.completedReplies.isEmpty)
+    }
+
+    @MainActor
     func testConcurrentProgressIsIsolatedAndLateCallbacksAreIgnored() async throws {
         let suite = "ReadingAIProgress-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -102,9 +117,12 @@ final class ReadingAIInfrastructureTests: XCTestCase {
         configuration.protocolClasses = [ReadingAITestURLProtocol.self]
         let client = OpenAIReadingClient(configuration: configuration)
         // 原始事件流约 1.3 MiB，拼装后的正文只有 5200 字，必须成功而不是报“超过 1 MiB”。
+        final class ReplyBox: @unchecked Sendable { var text = "" }
+        let box = ReplyBox()
         let response = try await client.complete(configuration: config("https://bigstream.example/v1"), apiKey: "fake",
-                                                 request: .connectionTest)
+                                                 request: .connectionTest) { _, text in box.text = text }
         XCTAssertEqual(response.text.count, 5_200)
+        XCTAssertEqual(box.text, response.text, "对话必须收到完整回复，而非仅末尾片段")
     }
 
     func testTransportAcceptsOnlyBoundedSuccessfulTextResponses() async throws {

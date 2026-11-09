@@ -85,4 +85,4 @@
 
 普通问题请通过 [Issues](https://github.com/Guanine000/novelia-swift/issues) 提交。公开反馈前请移除账号、令牌、WebDAV 凭据、私人书籍和个人信息。安全漏洞请通过[私密安全报告](https://github.com/Guanine000/novelia-swift/security/advisories/new)提交。
 
-AI 人物资料支持分章保存、离页继续和可暂停的按需细节补充，详见[功能说明](docs/FEATURES.md)。
+AI 人物资料支持对话式进度、分章保存、离页继续和可暂停的按需细节补充，详见[功能说明](docs/FEATURES.md)。

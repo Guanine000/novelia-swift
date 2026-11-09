@@ -77,6 +77,16 @@ extension AppServices {
             if !standalone { local.library.assign(book, to: series) }
             local.library.markOpened(book)
             try! local.readerSettings.characters.confirmOrder(work: series, volumes: [book.key])
+            if ProcessInfo.processInfo.arguments.contains("-architectureCharacterConversation") {
+                // 合成对话仅供独立 Debug App 检查布局，不读取凭据或请求真实模型。
+                local.readerSettings.characters.runs[series] = .init(
+                    message: "本轮完成2章，人物卡已保存。", events: [
+                        "我会先检查本地书籍和阅读位置，再分章整理人物资料。",
+                        "《架构验证TXT》第 1–2 章并行处理中",
+                        "《架构验证TXT》第 1 章已保存",
+                        "《架构验证TXT》第 2 章已保存"
+                    ], userRequest: "请整理这本书已读范围内的人物资料。", replySession: UUID())
+            }
             Task {
                 let volume = try! await CharacterVolumeLoader.load(book, settings: local.readerSettings)
                 let scope = CharacterScope(work: series, volumes: [book.key], currentBook: book.key, currentChapter: 2,
@@ -139,9 +149,19 @@ extension AppServices {
             tokenStore: FixtureTokenStore(username: ArchitectureFixtureBackend.username), refreshQueue: refreshQueue)
         let forum = ForumAuthStore(configuration: configuration,
             tokenStore: FixtureTokenStore(username: ArchitectureFixtureBackend.username), refreshQueue: refreshQueue)
+        let conversationAI: ReadingAIStore?
+        if ProcessInfo.processInfo.arguments.contains("-architectureCharacterConversation") {
+            let ai = ReadingAIStore(defaults: local.readerSettings.defaults, keys: MemoryReadingAIKeys(), client: ArchitectureCharacterReplyAI())
+            var value = ReadingAIConfiguration(); value.baseURL = "https://unused.example/v1"; value.model = "fixture"
+            try! ai.save(value, newKey: "synthetic-fixture-key")
+            if let session = local.readerSettings.characters.runs.values.first?.replySession {
+                Task { _ = try? await ReadingAIStore.$conversationID.withValue(session.uuidString) { try await ai.testConnection() } }
+            }
+            conversationAI = ai
+        } else { conversationAI = nil }
         return AppServices(configuration: configuration, api: backend.services(), account: account,
             forumAccount: forum, local: local, performsUpdateChecks: false,
-            speechService: ProcessInfo.processInfo.arguments.contains("-architectureSpeechAudio") ? ArchitectureSpeechAudio() : nil)
+            speechService: ProcessInfo.processInfo.arguments.contains("-architectureSpeechAudio") ? ArchitectureSpeechAudio() : nil, readingAI: conversationAI)
     }
     /// 只为独立 Debug App 生成固定合成样本，基准脚本在计时前单独执行此步骤。
     private static func seedPerformanceLibrary() {
@@ -272,6 +292,23 @@ private enum ArchitectureWebEPUBFixture {
             try await add("Text/episode\(index).xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>\(title)</title></head><body><h1>\(title)</h1><p>\(text)</p></body></html>")
         }
         return url
+    }
+}
+/// 合成流式回复，只供独立验证 App 检查消息展示，不连接外部接口。
+private struct ArchitectureCharacterReplyAI: ReadingAICompleting {
+    func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest) async throws -> ReadingAIResponse {
+        .init(text: #"{"candidates":[{"name":"林舟","facts":[{"text":"港口调查员，沉着寡言，重视承诺。"},{"text":"正在寻找失踪的妹妹林澈。"}]}]}"#, inputTokens: nil, outputTokens: nil)
+    }
+    func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest,
+                  onProgress: @escaping @Sendable (Int, String) -> Void) async throws -> ReadingAIResponse {
+        let result = try await complete(configuration: configuration, apiKey: apiKey, request: request)
+        for count in stride(from: 20, to: result.text.count, by: 20) {
+            try Task.checkCancellation()
+            let partial = String(result.text.prefix(count)); onProgress(partial.count, partial)
+            try await Task.sleep(nanoseconds: 150_000_000)
+        }
+        onProgress(result.text.count, result.text)
+        return result
     }
 }
 #endif
