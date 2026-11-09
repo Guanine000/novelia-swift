@@ -300,7 +300,13 @@ private struct EPUBReaderViewContent: View {
             titleTrailer: { EmptyView() },
             menu: {
                 if let action = textBook?.adjustTXTChapters {
-                    Button("TXT分章调整") { speech.stop(); action() }
+                    Button {
+                        speech.stop()
+                        action()
+                    } label: {
+                        Label("TXT分章调整", systemImage: "text.alignleft")
+                    }
+                    .accessibilityLabel("TXT分章调整")
                 }
                 if let accessory { accessory }
                 if let key = model.bookmarkKey {

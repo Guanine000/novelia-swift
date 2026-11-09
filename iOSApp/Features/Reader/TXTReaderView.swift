@@ -204,7 +204,13 @@ struct DownloadedWebNovelTXTReader: View {
             }
             ToolbarItem(placement: .compatTopBarTrailing) {
                 Menu {
-                Button("TXT分章调整") { speech.stop(); isShowingAdjustment = true }
+                Button {
+                    speech.stop()
+                    isShowingAdjustment = true
+                } label: {
+                    Label("TXT分章调整", systemImage: "text.alignleft")
+                }
+                .accessibilityLabel("TXT分章调整")
                 Button("书内搜索") { isShowingSearch = true }
                 if let point = readingReturnPoint {
                     Button("回到刚才阅读处") { selectedSearchHit = nil; chapterIndex = point.chapter; returnAnchor = point.anchor; readingReturnPoint = nil }
