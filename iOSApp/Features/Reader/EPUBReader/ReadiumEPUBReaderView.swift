@@ -263,7 +263,13 @@ private struct ReadiumEPUBReaderViewContent: View {
             menu: {
                 if textBook == nil { Text("Readium 阅读引擎") }
                 if let action = textBook?.adjustTXTChapters {
-                    Button("TXT分章调整") { model.speech.stop(); action() }
+                    Button {
+                        model.speech.stop()
+                        action()
+                    } label: {
+                        Label("TXT分章调整", systemImage: "text.alignleft")
+                    }
+                    .accessibilityLabel("TXT分章调整")
                 }
                 if let accessory { accessory }
                 if let key = model.bookmarkKey, model.status == .ready {
