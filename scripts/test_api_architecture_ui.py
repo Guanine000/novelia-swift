@@ -121,6 +121,95 @@ final class TapTests: XCTestCase {
   XCTAssertTrue(app.buttons["按目录核对章节"].waitForExistence(timeout: 15))
  }
  // 双向切换主题后，正文中央点按必须仍能隐藏并恢复控件。
+ func testNoAutomaticRecapWhenConfiguredAPIHasNoSavedKey() {
+  continueAfterFailure = false
+  let app = XCUIApplication(bundleIdentifier: bundle)
+  app.launchArguments = ["-architectureValidation", "-resetArchitectureValidation", "-architectureTXT", "-architectureRecapMissingKey"]
+  app.launch()
+  XCTAssertTrue(app.staticTexts["architecture-validation-status"].waitForExistence(timeout: 20))
+  app.buttons["书库"].firstMatch.tap()
+  let more = app.buttons["更多操作：架构验证TXT"]
+  XCTAssertTrue(more.waitForExistence(timeout: 20)); more.tap()
+  app.buttons["阅读"].firstMatch.tap()
+  XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 30))
+  XCTAssertFalse(app.alerts["要生成前情回顾吗？"].waitForExistence(timeout: 4))
+  zeroExternalRequests(app)
+ }
+ func testCharacterPortraitDisplayRemovalAndPersistence() {
+  continueAfterFailure = false
+  let app = XCUIApplication(bundleIdentifier: bundle)
+  app.launchArguments = ["-architectureValidation", "-resetArchitectureValidation", "-architectureTXT", "-architectureCharacterPortrait"]
+  app.launch()
+  XCTAssertTrue(app.staticTexts["architecture-validation-status"].waitForExistence(timeout: 20))
+  func openCard() {
+   app.buttons["书库"].firstMatch.tap()
+   let segment = app.segmentedControls.buttons.matching(NSPredicate(format: "label CONTAINS %@", "系列")).firstMatch
+   XCTAssertTrue(segment.waitForExistence(timeout: 20)); segment.tap()
+   let series = app.staticTexts["雾港来信"].firstMatch
+   XCTAssertTrue(series.waitForExistence(timeout: 20)); series.tap()
+   app.buttons["系列操作"].tap(); app.buttons["AI 人物词条"].tap()
+   let person = app.staticTexts["林舟"].firstMatch
+   reveal(person, app: app); person.tap()
+   XCTAssertTrue(app.buttons["编辑角色形象"].waitForExistence(timeout: 20))
+   XCTAssertTrue(app.staticTexts["人物档案"].exists)
+   XCTAssertTrue(app.staticTexts["人物关系"].exists)
+   XCTAssertTrue(app.staticTexts["重要经历"].exists)
+  }
+  openCard()
+  let card = XCTAttachment(screenshot: app.screenshot()); card.name = "人物卡分栏布局-有图"; card.lifetime = .keepAlways; add(card)
+  app.buttons["编辑角色形象"].tap()
+  XCTAssertTrue(app.buttons["从文件选择角色图片"].waitForExistence(timeout: 10))
+  let remove = app.buttons["移除角色形象"]
+  XCTAssertTrue(remove.waitForExistence(timeout: 20))
+  let image = XCTAttachment(screenshot: app.screenshot()); image.name = "合成角色形象"; image.lifetime = .keepAlways; add(image)
+  remove.tap()
+  XCTAssertTrue(app.buttons["从相册添加角色形象"].waitForExistence(timeout: 10))
+  XCTAssertFalse(remove.exists)
+  app.navigationBars["角色形象"].buttons["完成"].tap()
+  let layout = XCTAttachment(screenshot: app.screenshot()); layout.name = "人物卡分栏布局-无图"; layout.lifetime = .keepAlways; add(layout)
+  zeroExternalRequests(app)
+  app.terminate(); app.launchArguments = ["-architectureValidation"]; app.launch()
+  XCTAssertTrue(app.staticTexts["architecture-validation-status"].waitForExistence(timeout: 20))
+  openCard()
+  app.buttons["编辑角色形象"].tap()
+  XCTAssertTrue(app.buttons["从相册添加角色形象"].waitForExistence(timeout: 10))
+  XCTAssertFalse(app.buttons["移除角色形象"].exists)
+  zeroExternalRequests(app)
+ }
+ func testCharacterScopeChoiceAndUnreadSafety() {
+  let app = start(txt: true)
+  app.buttons["书库"].firstMatch.tap()
+  let book = app.staticTexts["架构验证TXT"].firstMatch
+  XCTAssertTrue(book.waitForExistence(timeout: 20)); book.press(forDuration: 0.8)
+  let move = app.buttons["移入系列"].firstMatch
+  XCTAssertTrue(move.waitForExistence(timeout: 10)); move.tap()
+  let create = app.buttons["新建系列…"].firstMatch
+  XCTAssertTrue(create.waitForExistence(timeout: 10)); create.tap()
+  let field = app.textFields.firstMatch
+  XCTAssertTrue(field.waitForExistence(timeout: 10)); field.typeText("人物范围验证")
+  app.buttons["创建并移入"].tap()
+  let done = app.buttons["完成"].firstMatch
+  if done.exists { done.tap() }
+  let seriesTab = app.segmentedControls.buttons.matching(NSPredicate(format: "label CONTAINS %@", "系列")).firstMatch
+  XCTAssertTrue(seriesTab.waitForExistence(timeout: 15)); seriesTab.tap()
+  let series = app.staticTexts["人物范围验证"].firstMatch
+  XCTAssertTrue(series.waitForExistence(timeout: 15)); series.tap()
+  app.buttons["系列操作"].tap()
+  app.buttons["AI 人物词条"].tap()
+  let confirm = app.buttons["确认以上卷序"]
+  XCTAssertTrue(confirm.waitForExistence(timeout: 15)); confirm.tap()
+  let only = app.segmentedControls.buttons["仅本书"]
+  let all = app.segmentedControls.buttons["系列所有书籍"]
+  XCTAssertTrue(only.waitForExistence(timeout: 15)); XCTAssertTrue(only.isSelected)
+  XCTAssertTrue(all.exists); all.tap(); XCTAssertTrue(all.isSelected)
+  let unavailable = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "没有可扫描的已读完整章节")).firstMatch
+  XCTAssertTrue(unavailable.waitForExistence(timeout: 20))
+  let generate = app.buttons["生成人物卡"]
+  reveal(generate, app: app)
+  XCTAssertFalse(generate.isEnabled, "无已读章节或AI关闭时不允许发送正文")
+  let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "人物范围选择与未读保护"; shot.lifetime = .keepAlways; add(shot)
+  zeroExternalRequests(app)
+ }
  func testReadiumThemeSwitchPreservesCenterTap() {
   let app = openDownloadedNetworkBook(readium: true); defer { app.terminate() }
   for color in ["浅色", "深色", "浅色"] {

@@ -26,6 +26,7 @@ final class WebDAVSyncStore: ObservableObject {
     @Published var syncTags: Bool { didSet { defaults.set(syncTags, forKey: SettingsKey.WebDAV.syncTags) } }
     @Published var syncBackgrounds: Bool { didSet { defaults.set(syncBackgrounds, forKey: SettingsKey.WebDAV.syncBackgrounds) } }
     @Published var syncFonts: Bool { didSet { defaults.set(syncFonts, forKey: SettingsKey.WebDAV.syncFonts) } }
+    @Published var syncCharacters: Bool { didSet { defaults.set(syncCharacters, forKey: SettingsKey.WebDAV.syncCharacters) } }
     @Published var syncStatistics: Bool { didSet { defaults.set(syncStatistics, forKey: SettingsKey.WebDAV.syncStatistics) } }
     @Published var autoSyncEnabled: Bool {
         didSet {
@@ -89,6 +90,7 @@ final class WebDAVSyncStore: ObservableObject {
         syncTags = defaults.object(forKey: SettingsKey.WebDAV.syncTags) as? Bool ?? true
         syncBackgrounds = defaults.bool(forKey: SettingsKey.WebDAV.syncBackgrounds)
         syncFonts = defaults.bool(forKey: SettingsKey.WebDAV.syncFonts)
+        syncCharacters = defaults.object(forKey: SettingsKey.WebDAV.syncCharacters) as? Bool ?? true
         syncStatistics = defaults.bool(forKey: SettingsKey.WebDAV.syncStatistics)
         autoSyncEnabled = defaults.bool(forKey: SettingsKey.WebDAV.autoSync)
         autoState = defaults.data(forKey: SettingsKey.WebDAV.autoSyncState)
@@ -113,10 +115,10 @@ final class WebDAVSyncStore: ObservableObject {
     }
 
     private var options: WebDAVSyncOptions {
-        WebDAVSyncOptions(books: syncBooks, tags: syncTags, backgrounds: syncBackgrounds, fonts: syncFonts)
+        WebDAVSyncOptions(books: syncBooks, tags: syncTags, backgrounds: syncBackgrounds, fonts: syncFonts, characters: syncCharacters)
     }
 
-    private var hasContentOptions: Bool { options.books || options.tags || options.backgrounds || options.fonts }
+    private var hasContentOptions: Bool { options.books || options.tags || options.backgrounds || options.fonts || options.characters }
 
     /// 立即同步：开启的清单内容，以及开启时的阅读时长。
     func sync(web: any SyncBookLibrary<DownloadedWebNovel>, wenku: any SyncBookLibrary<LocalWenkuEPUB>) async {
@@ -183,12 +185,24 @@ final class WebDAVSyncStore: ObservableObject {
             let before = WebDAVAutoSyncPolicy.fingerprint(local: local, web: web, wenku: wenku, options: options)
             do {
                 if manifestGate.isBusy { progressDetail = "正在等待云端删除完成…" }
-                let result = try await manifestGate.run {
+                let result: WebDAVSyncRunResult
+                if options.books || options.tags || options.backgrounds || options.fonts {
+                    result = try await manifestGate.run {
                     try await WebDAVSyncEngine.runRetryingConcurrentChange {
                         // 手动同步核对服务器 blobs/ 并补传缺失文件；自动同步为节省请求不核对。
                         WebDAVSyncEngine(remote: client, local: local, web: web, wenku: wenku,
                                          options: options, defaults: defaults, cloud: cloudBooks,
                                          verifiesBlobs: trigger == nil) { [weak self] in self?.show($0) }
+                    }
+                }
+                } else { result = .init(imported: 0, removedLocal: 0, lacksETag: false) }
+                var missingPortraits = 0
+                if options.characters, let characters = local.characterSync {
+                    stage = "同步人物卡与角色图片"
+                    progressDetail = "正在同步人物资料与角色图片…"
+                    missingPortraits = try await manifestGate.run {
+                        let remote = try WebDAVClient(address: self.trimmedAddress, username: self.username.trimmingCharacters(in: .whitespacesAndNewlines), password: self.password, folderCache: folderCache, characterCards: true)
+                        return try await CharacterWebDAVSync.run(remote: remote, local: characters, verifiesImages: trigger == nil)
                     }
                 }
                 if options.books, web.books.contains(where: { $0.novel.isRemote }) || !cloudBooks.webBooks.isEmpty || !local.webEPUBMaps.isEmpty || local.readingPositions.keys.contains(where: { $0.hasPrefix("webepub:") }) {
@@ -208,6 +222,8 @@ final class WebDAVSyncStore: ObservableObject {
                 summary = (options.books ? "云端新增 \(imported) 本书；本机网络小说 \(web.books.count) 本、文库 \(wenku.books.count) 本，未下载 \(cloudCount) 本。" : "")
                     + (options.tags ? "已同步屏蔽标签。" : "") + (options.backgrounds ? "已同步阅读背景。" : "")
                     + (options.fonts ? "已同步导入字体。" : "")
+                    + (options.characters ? "已同步人物卡与角色图片。" : "")
+                    + (missingPortraits > 0 ? "有\(missingPortraits)张角色图片缺失，请在仍有图片的设备同步补传。" : "")
                     + (result.removedLocal > 0 ? "其他设备已从云端删除 \(result.removedLocal) 本书，本机副本已一并删除。" : "")
                     + (result.repairedBlobs > 0 ? "已补传 \(result.repairedBlobs) 个云端缺失的文件。" : "")
                     + Self.missingSummary(result)
@@ -581,6 +597,7 @@ struct WebDAVSyncView: View {
                 Toggle("标签同步", isOn: $syncStore.syncTags)
                 Toggle("阅读背景同步", isOn: $syncStore.syncBackgrounds)
                 Toggle("导入字体同步", isOn: $syncStore.syncFonts)
+                Toggle("人物卡与角色图片同步", isOn: $syncStore.syncCharacters)
             } header: {
                 Text("同步内容")
             } footer: {

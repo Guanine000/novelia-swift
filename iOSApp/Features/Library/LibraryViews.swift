@@ -650,6 +650,7 @@ private struct LibraryAddToSeriesSheet: View {
     let books: [LibraryBook]
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var state: LibraryStateStore
+    @EnvironmentObject private var readerSettings: ReaderSettings
     @State private var selection = Set<String>()
     @State private var query = ""
 
@@ -694,6 +695,7 @@ private struct LibraryAddToSeriesSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("添加 \(selection.count)") {
                         for book in books where selection.contains(book.key) {
+                            try? readerSettings.characters.migrateWork(from: book.key, to: seriesID)
                             state.assign(book, to: seriesID)
                         }
                         dismiss()
@@ -777,6 +779,8 @@ final class LibraryBookActions: ObservableObject {
     @Published var wenkuDetail: WenkuNovelOutline?
     /// 列表行只保留核心信息，其余元数据在详细信息里查看。
     @Published var detailBook: LibraryBook?
+    /// 书籍“更多”菜单发起的 AI 人物词条；未入系列的书以书键作为 work，移入系列时迁移数据。
+    @Published var characterBook: LibraryBook?
     /// 下载完成的书，页面据此打开阅读。
     @Published var downloadedBookKey: String?
     /// 多选：长按书籍进入，点击切换选择。
@@ -888,6 +892,7 @@ struct LibrarySelectionBar: View {
     /// 压缩包标题前缀：书库为“书库”，系列详情传入系列名。
     var archiveTitle = "书库"
     @EnvironmentObject private var state: LibraryStateStore
+    @EnvironmentObject private var readerSettings: ReaderSettings
 
     private var selected: [LibraryBook] { books.filter { actions.selectedKeys.contains($0.key) } }
     private var shareableCount: Int { selected.filter { !$0.isCloudOnly }.count }
@@ -903,7 +908,10 @@ struct LibrarySelectionBar: View {
             Menu {
                 ForEach(state.series.activeSeries) { series in
                     Button(series.name) {
-                        selected.forEach { state.assign($0, to: series.id) }
+                        selected.forEach {
+                            try? readerSettings.characters.migrateWork(from: $0.key, to: series.id)
+                            state.assign($0, to: series.id)
+                        }
                         actions.endSelection()
                     }
                 }
@@ -965,10 +973,15 @@ struct LibraryBookActionDialogs: ViewModifier {
     @EnvironmentObject private var webDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
     @EnvironmentObject private var syncStore: WebDAVSyncStore
+    @EnvironmentObject private var readerSettings: ReaderSettings
+    @EnvironmentObject private var services: AppServices
 
     func body(content: Content) -> some View {
         content
             .compatNavigationDestination(item: $actions.wenkuDetail) { outline in WenkuDetailView(outline: outline) }
+            .compatNavigationDestination(item: $actions.characterBook) { book in
+                characterEntry(for: book)
+            }
             .sheet(item: $actions.updateConfigurationBook) { book in
                 WebNovelEPUBUpdateOptionsSheet(book: book) { configuration in
                     actions.updateConfigurationBook = nil
@@ -1089,7 +1102,7 @@ struct LibraryBookActionDialogs: ViewModifier {
                     let books = actions.newSeriesBooks
                     if let first = books.first {
                         let id = state.createSeries(named: actions.newSeriesName.isEmpty ? first.title : actions.newSeriesName)
-                        books.forEach { state.assign($0, to: id) }
+                        books.forEach { assign($0, to: id) }
                     }
                     actions.newSeriesBooks = []
                     actions.endSelection()
@@ -1186,6 +1199,25 @@ struct LibraryBookActionDialogs: ViewModifier {
             } message: {
                 Text(actions.actionError ?? "")
             }
+    }
+
+    /// 移入系列前把单书键下的人物卡迁移到系列 ID，避免“AI 人物词条”生成的卡片在移入系列后不可见。
+    private func assign(_ book: LibraryBook, to seriesID: String) {
+        try? readerSettings.characters.migrateWork(from: book.key, to: seriesID)
+        state.assign(book, to: seriesID)
+    }
+
+    /// 书籍“更多”菜单发起的 AI 人物词条：已在系列中的书沿用系列 ID 与全部成员；未入系列的书以书键作 work。
+    @ViewBuilder
+    private func characterEntry(for book: LibraryBook) -> some View {
+        if let series = state.series.seriesID(forBook: book.key) {
+            let keys = state.series.bookKeys(inSeries: series)
+            CharacterSeriesView(workID: series,
+                books: state.books(web: webDownloads, wenku: wenkuDownloads, cloud: syncStore.cloudBooks).filter { keys.contains($0.key) },
+                store: readerSettings.characters, ai: services.readingAI, initialBook: book.key)
+        } else {
+            CharacterSeriesView(workID: book.key, books: [book], store: readerSettings.characters, ai: services.readingAI, initialBook: book.key)
+        }
     }
 
     private func updateEPUB(_ book: DownloadedWebNovel, configuration: WebNovelEPUBUpdateConfiguration? = nil) {
@@ -1373,6 +1405,7 @@ struct LibraryBookMenuItems: View {
     @EnvironmentObject private var webDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
     @EnvironmentObject private var state: LibraryStateStore
+    @EnvironmentObject private var readerSettings: ReaderSettings
     let book: LibraryBook
     let actions: LibraryBookActions
     let open: (LibraryBook) -> Void
@@ -1395,6 +1428,9 @@ struct LibraryBookMenuItems: View {
         } else {
             Button { open(book) } label: { Label("阅读", systemImage: "book") }
         }
+        Button { actions.characterBook = book } label: {
+            Label("AI 人物词条", systemImage: "person.text.rectangle")
+        }
         Divider()
         if case .wenku = book.origin, !book.isCloudOnly {
             Button { actions.editingBook = book } label: {
@@ -1403,7 +1439,7 @@ struct LibraryBookMenuItems: View {
         }
         Menu {
             ForEach(state.series.activeSeries.filter { $0.id != currentSeries }) { series in
-                Button(series.name) { state.assign(book, to: series.id) }
+                Button(series.name) { assign(book, to: series.id) }
             }
             Divider()
             Button {
@@ -1416,7 +1452,7 @@ struct LibraryBookMenuItems: View {
             Label(currentSeries == nil ? "移入系列" : "移到其他系列", systemImage: "rectangle.stack.badge.plus")
         }
         if currentSeries != nil {
-            Button { state.assign(book, to: nil) } label: {
+            Button { assign(book, to: nil) } label: {
                 Label("移出系列", systemImage: "rectangle.stack.badge.minus")
             }
         }
@@ -1429,6 +1465,17 @@ struct LibraryBookMenuItems: View {
         } else {
             localFileItems(for: book)
         }
+    }
+
+    /// 移入系列前把单书键下的人物卡迁移到系列 ID；移出单书系列时回迁，避免卡片"消失"。
+    private func assign(_ book: LibraryBook, to seriesID: String?) {
+        if let seriesID {
+            try? readerSettings.characters.migrateWork(from: book.key, to: seriesID)
+        } else if let current = state.series.seriesID(forBook: book.key),
+                  state.series.bookKeys(inSeries: current) == [book.key] {
+            try? readerSettings.characters.migrateWork(from: current, to: book.key)
+        }
+        state.assign(book, to: seriesID)
     }
 
     @ViewBuilder

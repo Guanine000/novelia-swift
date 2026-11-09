@@ -21,12 +21,12 @@ enum CharacterVolumeLoader {
             let saved = settings.positions.all()["txt:" + hash]
             let position = snapshot?.position.flatMap { (saved?.updatedAt ?? .distantPast) <= $0.updatedAt ? $0 : saved } ?? saved
             let boundary = min(max(0, position?.chapterIndex ?? 0), max(0, parsed.chapters.count - 1))
-            return .init(source: .txt(parsed, title: book.title, chapter: parsed.chapters.count, projection: projection), boundary: boundary)
+            return .init(source: .txt(parsed, title: book.title, chapter: parsed.chapters.count, projection: projection, maximumChapterBytes: CharacterExtractionPlan.maximumBytes), boundary: boundary)
         }
         let container = try await EPUBContainer.open(fileURL: url)
         let spine = min(max(0, settings.positions.epubPosition(hash: hash)?.chapterIndex ?? 0), max(0, container.spine.count - 1))
         guard let current = LocalRecapSource.epub(container, hash: hash, currentSpine: spine, projection: projection),
-              let full = LocalRecapSource.epub(container, hash: hash, currentSpine: spine, projection: projection, completeVolume: true) else { throw CharacterLexiconError.missing }
+              let full = LocalRecapSource.epub(container, hash: hash, currentSpine: spine, projection: projection, completeVolume: true, maximumChapterBytes: CharacterExtractionPlan.maximumBytes) else { throw CharacterLexiconError.missing }
         return .init(source: full, boundary: current.currentChapter)
     }
 }

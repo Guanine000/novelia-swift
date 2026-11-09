@@ -1303,3 +1303,103 @@ final class WebNovelEPUBIdentitySyncTests: XCTestCase {
         XCTAssertTrue(local.readingPositions.isEmpty)
     }
 }
+
+@MainActor
+final class CharacterWebDAVSyncTests: XCTestCase {
+    private func fixture(_ label: String) throws -> (CharacterLexiconStore, UserDefaults, URL, String) {
+        let suite = "CharacterWebDAV-\(label)-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return (CharacterLexiconStore(defaults: defaults, portraitDirectory: directory), defaults, directory, suite)
+    }
+    private func scope() -> CharacterScope {
+        .init(work: "work", volumes: ["book"], currentBook: "book", currentChapter: 3, identities: ["book": "version"], readBoundaries: ["book": 3])
+    }
+    private func add(_ store: CharacterLexiconStore) throws -> String {
+        try store.confirmOrder(work: "work", volumes: ["book"])
+        let fact = CharacterFact(book: "book", identity: "version", chapter: 0, offset: 0, name: "林舟",
+            text: "林舟与同伴一起寻找线索。", quote: "林舟来到旧码头，决定与同伴一起寻找线索。")
+        return try store.accept(.init(facts: [fact]), scope: scope())
+    }
+    func testTwoDevicesSyncCardsPortraitCheckpointAndDeletion() async throws {
+        let (a, da, pa, sa) = try fixture("a"), (b, db, pb, sb) = try fixture("b")
+        defer { da.removePersistentDomain(forName: sa); db.removePersistentDomain(forName: sb); try? FileManager.default.removeItem(at: pa); try? FileManager.default.removeItem(at: pb) }
+        let log = EventLog(), remote = FakeRemote(log: log, directory: pa)
+        let id = try add(a), image = Data([0xff, 0xd8, 0xff, 0x11, 0xff, 0xd9])
+        try a.setPortrait(image, entity: id, scope: scope())
+        try a.completeEmptyChapter(book: "book", identity: "version", chapter: 2, scope: scope(), signature: "compatible-signature")
+        _ = try await CharacterWebDAVSync.run(remote: remote, local: a)
+        _ = try await CharacterWebDAVSync.run(remote: remote, local: b)
+        XCTAssertEqual(b.entities, a.entities)
+        XCTAssertEqual(b.scannedThrough(work: "work", book: "book", signature: "compatible-signature"), 3)
+        let hash = try XCTUnwrap(b.portrait(for: id, scope: scope())?.hash)
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(b.portraitFile(hash))), image)
+        let puts = remote.puts.count, uploads = log.count("remote.upload")
+        _ = try await CharacterWebDAVSync.run(remote: remote, local: b)
+        XCTAssertEqual(remote.puts.count, puts)
+        XCTAssertEqual(log.count("remote.upload"), uploads)
+        try b.setPortrait(nil, entity: id, scope: scope())
+        _ = try await CharacterWebDAVSync.run(remote: remote, local: b)
+        _ = try await CharacterWebDAVSync.run(remote: remote, local: a)
+        XCTAssertNil(a.portrait(for: id, scope: scope()))
+        XCTAssertNil(remote.blobs[hash])
+        let fact = try XCTUnwrap(b.entities.first?.facts.first)
+        try b.remove(fact: fact.id, entity: id, scope: scope())
+        _ = try await CharacterWebDAVSync.run(remote: remote, local: b)
+        _ = try await CharacterWebDAVSync.run(remote: remote, local: a)
+        XCTAssertTrue(a.entities.isEmpty)
+        XCTAssertEqual(a.scannedThrough(work: "work", book: "book", signature: "compatible-signature"), 3)
+    }
+    func testConditionalRetryAndLiveLocalEditSurviveUploadWait() async throws {
+        let (a, da, pa, sa) = try fixture("a"), (b, db, pb, sb) = try fixture("b")
+        defer { da.removePersistentDomain(forName: sa); db.removePersistentDomain(forName: sb); try? FileManager.default.removeItem(at: pa); try? FileManager.default.removeItem(at: pb) }
+        let remote = FakeRemote(log: EventLog(), directory: pa), id = try add(a)
+        try b.applyCharacters(a.characterSnapshot())
+        let image = Data([0xff, 0xd8, 0xff, 0x12, 0xff, 0xd9])
+        try a.setPortrait(image, entity: id, scope: scope())
+        remote.putErrors = [.concurrentChange]
+        _ = try await CharacterWebDAVSync.run(remote: remote, local: a)
+        XCTAssertEqual(remote.puts.count, 2)
+        let fact = try XCTUnwrap(b.entities.first?.facts.first)
+        remote.onDownload = { try? b.edit(fact: fact.id, entity: id, text: "下载期间用户修订的事实。", scope: self.scope()) }
+        _ = try await CharacterWebDAVSync.run(remote: remote, local: b)
+        XCTAssertEqual(b.entities[0].facts[0].text, "下载期间用户修订的事实。")
+        _ = try await CharacterWebDAVSync.run(remote: remote, local: b)
+        XCTAssertTrue(remote.manifest?.characters?.facts[fact.id]?.value?.fact.manual == true)
+    }
+    func testCancellationAndCorruptImageNeverApplyUncommittedCards() async throws {
+        let (a, da, pa, sa) = try fixture("a"), (b, db, pb, sb) = try fixture("b")
+        defer { da.removePersistentDomain(forName: sa); db.removePersistentDomain(forName: sb); try? FileManager.default.removeItem(at: pa); try? FileManager.default.removeItem(at: pb) }
+        let remote = FakeRemote(log: EventLog(), directory: pa), id = try add(a)
+        try a.setPortrait(Data([0xff, 0xd8, 0xff, 0x13, 0xff, 0xd9]), entity: id, scope: scope())
+        _ = try await CharacterWebDAVSync.run(remote: remote, local: a)
+        let task = Task { try await CharacterWebDAVSync.run(remote: remote, local: b) }
+        remote.onDownload = { task.cancel() }
+        do { _ = try await task.value; XCTFail() } catch is CancellationError {}
+        XCTAssertTrue(b.entities.isEmpty)
+        let hash = try XCTUnwrap(a.portrait(for: id, scope: scope())?.hash)
+        XCTAssertNil(b.portraitFile(hash))
+        remote.onDownload = nil; remote.blobs[hash] = Data("not-an-image".utf8)
+        do { _ = try await CharacterWebDAVSync.run(remote: remote, local: b); XCTFail() } catch WebDAVSyncError.invalidAsset {}
+        XCTAssertTrue(b.entities.isEmpty)
+        XCTAssertTrue(remote.handedOut.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+    }
+    func testMissingPortraitDoesNotDropCardsAndManualSyncRepairsFromAnotherDevice() async throws {
+        let (a, da, pa, sa) = try fixture("a"), (b, db, pb, sb) = try fixture("b")
+        defer { da.removePersistentDomain(forName: sa); db.removePersistentDomain(forName: sb); try? FileManager.default.removeItem(at: pa); try? FileManager.default.removeItem(at: pb) }
+        let remote = FakeRemote(log: EventLog(), directory: pa), id = try add(a)
+        try a.setPortrait(Data([0xff, 0xd8, 0xff, 0x14, 0xff, 0xd9]), entity: id, scope: scope())
+        _ = try await CharacterWebDAVSync.run(remote: remote, local: a)
+        let hash = try XCTUnwrap(a.portrait(for: id, scope: scope())?.hash)
+        remote.blobs.removeValue(forKey: hash)
+        let missing = try await CharacterWebDAVSync.run(remote: remote, local: b)
+        XCTAssertEqual(missing, 1)
+        XCTAssertEqual(b.entities.count, 1)
+        _ = try await CharacterWebDAVSync.run(remote: remote, local: a, verifiesImages: true)
+        XCTAssertNotNil(remote.blobs[hash])
+        _ = try await CharacterWebDAVSync.run(remote: remote, local: b)
+        XCTAssertNotNil(b.portraitFile(hash))
+        remote.omitsETag = true
+        do { _ = try await CharacterWebDAVSync.run(remote: remote, local: b); XCTFail() } catch WebDAVSyncError.unsupportedConditions {}
+    }
+}

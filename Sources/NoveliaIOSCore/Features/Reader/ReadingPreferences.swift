@@ -2,7 +2,7 @@ import Foundation
 
 /// 只改变展示文本，原文件和网络缓存始终保留原文。规则最长优先、单次扫描，不递归替换。
 public struct ReadingTextProjection: Codable, Equatable, Sendable {
-    public enum Chinese: String, Codable, CaseIterable, Identifiable {
+    public enum Chinese: String, Codable, CaseIterable, Identifiable, Sendable {
         case original, simplified, traditional
         public var id: String { rawValue }
         var title: String { switch self { case .original: "保持原文"; case .simplified: "简体中文"; case .traditional: "繁體中文" } }

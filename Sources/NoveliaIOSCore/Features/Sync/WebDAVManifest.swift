@@ -29,6 +29,8 @@ struct WebDAVBook<Record: Codable>: Codable {
 extension WebDAVBook: Equatable where Record: Equatable {}
 
 struct WebDAVManifest: Codable {
+    /// 仅独立 characters-v1 目录使用，旧客户端不会读取或覆盖该目录。
+    var characters: CharacterSyncState? = nil
     var webEPUBMaps: [String: WebNovelEPUBMap]? = nil
     var version = 1
     var webBooks: [WebDAVBook<DownloadedWebNovel>] = []
@@ -75,4 +77,113 @@ enum WebDAVSyncError: LocalizedError, Equatable {
         case .missingBlob: "云端缺少这本书的文件。请在仍有这本书的设备上手动同步一次，会自动补传缺失的文件。"
         }
     }
+}
+
+/// 人物同步按事实ID合并，移动/合并/拆分改变归属，删除保留墓碑；不上传扫描缓存或AI配置。
+struct CharacterSyncFact: Codable, Equatable {
+    let entity: String
+    let work: String
+    let fact: CharacterFact
+}
+struct CharacterPortrait: Codable, Equatable {
+    let hash: String
+    let book: String
+    let identity: String
+    /// 添加图片时的阅读边界；回退到更早位置时隐藏，避免用户图片泄露后续形象。
+    let boundary: Int
+}
+struct CharacterSyncValue<Value: Codable & Equatable>: Codable, Equatable {
+    var value: Value?
+    var updatedAt: Date
+}
+struct CharacterSyncState: Codable, Equatable {
+    var version = 1
+    var facts: [String: CharacterSyncValue<CharacterSyncFact>] = [:]
+    var orders: [String: CharacterSyncValue<[String]>] = [:]
+    var portraits: [String: CharacterSyncValue<CharacterPortrait>] = [:]
+    var rejected: Set<String> = []
+    var scans: [String: CharacterSyncValue<CharacterScanCheckpoint>] = [:]
+    private enum CodingKeys: String, CodingKey { case version, facts, orders, portraits, rejected, scans }
+    init() {}
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decode(Int.self, forKey: .version)
+        facts = try values.decodeIfPresent([String: CharacterSyncValue<CharacterSyncFact>].self, forKey: .facts) ?? [:]
+        orders = try values.decodeIfPresent([String: CharacterSyncValue<[String]>].self, forKey: .orders) ?? [:]
+        portraits = try values.decodeIfPresent([String: CharacterSyncValue<CharacterPortrait>].self, forKey: .portraits) ?? [:]
+        rejected = try values.decodeIfPresent(Set<String>.self, forKey: .rejected) ?? []
+        scans = try values.decodeIfPresent([String: CharacterSyncValue<CharacterScanCheckpoint>].self, forKey: .scans) ?? [:]
+    }
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(version, forKey: .version)
+        try values.encode(facts, forKey: .facts); try values.encode(orders, forKey: .orders)
+        try values.encode(portraits, forKey: .portraits); try values.encode(rejected.sorted(), forKey: .rejected)
+        try values.encode(scans, forKey: .scans)
+    }
+    func validated() throws -> Self {
+        guard version == 1, facts.count <= 40_000, orders.count <= 2_000, portraits.count <= 2_000, scans.count <= 10_000, rejected.count <= 20_000,
+              rejected.allSatisfy(WebDAVAsset.isValidHash) else { throw WebDAVSyncError.invalidAsset }
+        for (id, record) in facts {
+            guard !id.isEmpty, id.utf8.count <= 128, record.updatedAt.timeIntervalSince1970.isFinite else { throw WebDAVSyncError.invalidAsset }
+            if let value = record.value {
+                guard value.fact.id == id, !value.entity.isEmpty, value.entity.utf8.count <= 128,
+                      !value.work.isEmpty, value.work.utf8.count <= 128, value.fact.book.utf8.count <= 2_048,
+                      value.fact.identity.utf8.count <= 2_048, CharacterLexiconStore.valid(value.fact) else { throw WebDAVSyncError.invalidAsset }
+            }
+        }
+        for (work, record) in orders {
+            guard !work.isEmpty, work.utf8.count <= 128, record.updatedAt.timeIntervalSince1970.isFinite else { throw WebDAVSyncError.invalidAsset }
+            if let order = record.value {
+                guard order.count <= 2_000, Set(order).count == order.count,
+                      order.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 2_048 }) else { throw WebDAVSyncError.invalidAsset }
+            }
+        }
+        for (id, record) in portraits {
+            guard !id.isEmpty, id.utf8.count <= 128, record.updatedAt.timeIntervalSince1970.isFinite else { throw WebDAVSyncError.invalidAsset }
+            if let value = record.value {
+                guard WebDAVAsset.isValidHash(value.hash), value.boundary >= 0, !value.book.isEmpty,
+                      value.book.utf8.count <= 2_048, value.identity.utf8.count <= 2_048 else { throw WebDAVSyncError.invalidAsset }
+            }
+        }
+        for (key, record) in scans {
+            guard WebDAVAsset.isValidHash(key), record.updatedAt.timeIntervalSince1970.isFinite else { throw WebDAVSyncError.invalidAsset }
+            if let scan = record.value {
+                guard !scan.signature.isEmpty, scan.signature.utf8.count <= 128, (0...1_000_000).contains(scan.nextChapter) else { throw WebDAVSyncError.invalidAsset }
+            }
+        }
+        guard try JSONEncoder().encode(self).count <= 8 * 1_024 * 1_024 else { throw WebDAVSyncError.invalidAsset }
+        return self
+    }
+    static func merged(_ a: Self, _ b: Self) throws -> Self {
+        _ = try a.validated(); _ = try b.validated()
+        var value = a
+        value.facts = merge(a.facts, b.facts); value.orders = merge(a.orders, b.orders)
+        value.portraits = merge(a.portraits, b.portraits); value.rejected.formUnion(b.rejected)
+        value.scans = merge(a.scans, b.scans)
+        for key in Set(a.scans.keys).intersection(b.scans.keys) {
+            if let left = a.scans[key], let right = b.scans[key], let x = left.value, let y = right.value, x.signature == y.signature {
+                value.scans[key] = .init(value: x.nextChapter >= y.nextChapter ? x : y, updatedAt: max(left.updatedAt, right.updatedAt))
+            }
+        }
+        return try value.validated()
+    }
+    private static func merge<T>(_ a: [String: CharacterSyncValue<T>], _ b: [String: CharacterSyncValue<T>]) -> [String: CharacterSyncValue<T>] {
+        var result = a
+        for (key, incoming) in b {
+            guard let current = result[key] else { result[key] = incoming; continue }
+            if incoming.updatedAt > current.updatedAt { result[key] = incoming }
+            else if incoming.updatedAt == current.updatedAt {
+                // 同时写入确定性决胜，删除优先，避免不同设备反复翻转。
+                if incoming.value == nil { result[key] = incoming }
+                else if current.value != nil {
+                    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+                    let lhs = (try? encoder.encode(current)) ?? Data(), rhs = (try? encoder.encode(incoming)) ?? Data()
+                    if lhs.lexicographicallyPrecedes(rhs) { result[key] = incoming }
+                }
+            }
+        }
+        return result
+    }
+    var portraitHashes: Set<String> { Set(portraits.values.compactMap { $0.value?.hash }) }
 }

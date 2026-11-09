@@ -206,16 +206,15 @@ final class EPUBContainer {
         try Task.checkCancellation()
         // 目录中的大小可能不实，解压时也累计检查。
         guard entry.uncompressedSize <= maxEntryBytes else { throw EPUBError.entryTooLarge }
-        var data = Data()
+        let buffer = EntryDataBuffer()
         let consumer: Consumer = { chunk in
             try Task.checkCancellation()
-            guard UInt64(data.count + chunk.count) <= maxEntryBytes else { throw EPUBError.entryTooLarge }
-            data.append(chunk)
+            try buffer.append(chunk, limit: maxEntryBytes)
         }
         do {
             // ZIPFoundation 返回实际 CRC，调用方负责与目录记录比较。
             let checksum = try await archive.extract(entry, consumer: consumer)
-            guard checksum == entry.checksum, UInt64(data.count) == entry.uncompressedSize else {
+            guard checksum == entry.checksum, UInt64(buffer.snapshot().count) == entry.uncompressedSize else {
                 throw EPUBError.unreadableEntry(path: entry.path)
             }
             try Task.checkCancellation()
@@ -227,7 +226,24 @@ final class EPUBContainer {
             // 用户界面保留包内路径；日志只记录固定错误分类，避免写出书名或正文。
             throw EPUBError.unreadableEntry(path: entry.path)
         }
-        return data
+        return buffer.snapshot()
+    }
+
+    /// ZIP 消费回调可跨执行器运行；锁同时保护累计大小检查和写入，不共享可变局部变量。
+    private final class EntryDataBuffer: @unchecked Sendable {
+        private let lock = NSLock()
+        private var data = Data()
+        func append(_ chunk: Data, limit: UInt64) throws {
+            lock.lock()
+            defer { lock.unlock() }
+            guard UInt64(data.count) + UInt64(chunk.count) <= limit else { throw EPUBError.entryTooLarge }
+            data.append(chunk)
+        }
+        func snapshot() -> Data {
+            lock.lock()
+            defer { lock.unlock() }
+            return data
+        }
     }
 
     private static func entryText(_ entry: Entry, from archive: Archive) async throws -> String {

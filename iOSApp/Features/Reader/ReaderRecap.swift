@@ -9,15 +9,17 @@ struct LocalRecapSource {
     let currentChapter: Int
     let load: @Sendable (Range<Int>) async throws -> [RecapChapter]
 
-    static func txt(_ book: TXTParsedBook, title: String, chapter: Int, projection: ReadingTextProjection) -> Self {
+    static func txt(_ book: TXTParsedBook, title: String, chapter: Int, projection: ReadingTextProjection, maximumChapterBytes: Int = 96 * 1_024) -> Self {
         .init(bookKey: "txt:" + book.contentHash, identity: FileContentHash.sha256(Data((book.contentHash + "|" + book.rulesFingerprint + "|" + projection.identity).utf8)),
               title: title, currentChapter: chapter) { range in
             guard range.lowerBound >= 0, range.upperBound <= chapter, range.upperBound <= book.chapters.count else { throw ReadingRecapError.invalidScope }
             let task = Task.detached(priority: .utility) {
-                try range.map { index in
+                var totalBytes = 0
+                return try range.map { index in
                     try Task.checkCancellation()
                     let item = book.chapters[index], text = projection.apply(book.chapters[index].body)
-                    guard text.utf8.count <= 96 * 1_024 else { throw ReadingRecapError.tooLarge }
+                    totalBytes += text.utf8.count
+                    guard totalBytes <= maximumChapterBytes else { throw ReadingRecapError.tooLarge }
                     return RecapChapter(index: index, title: item.title, text: text)
                 }
             }
@@ -25,7 +27,7 @@ struct LocalRecapSource {
         }
     }
     @MainActor
-    static func epub(_ container: EPUBContainer, hash: String, currentSpine: Int, projection: ReadingTextProjection, completeVolume: Bool = false) -> Self? {
+    static func epub(_ container: EPUBContainer, hash: String, currentSpine: Int, projection: ReadingTextProjection, completeVolume: Bool = false, maximumChapterBytes: Int = 96 * 1_024) -> Self? {
         guard container.spine.indices.contains(currentSpine) else { return nil }
         let entries = container.toc.filter { $0.spineIndex != nil }
         var starts = Array(Set(entries.compactMap(\.spineIndex).filter { container.spine.indices.contains($0) } + [0])).sorted()
@@ -40,7 +42,7 @@ struct LocalRecapSource {
                 guard try FileContentHash.sha256(url) == hash else { throw ReadingRecapError.invalidScope }
                 let copy = try await EPUBContainer.open(fileURL: url)
                 copy.displayProjection = projection
-                var chapters = [RecapChapter]()
+                var chapters = [RecapChapter](), totalBytes = 0
                 for index in range {
                     try Task.checkCancellation()
                     let end = index + 1 < chapterStarts.count ? chapterStarts[index + 1] : count
@@ -48,8 +50,10 @@ struct LocalRecapSource {
                     for spine in chapterStarts[index]..<end {
                         try Task.checkCancellation()
                         text += BookTextSearch.plainText(html: try await copy.chapterHTML(at: spine)) + "\n"
-                        guard text.utf8.count <= 96 * 1_024 else { throw ReadingRecapError.tooLarge }
+                        guard text.utf8.count <= maximumChapterBytes else { throw ReadingRecapError.tooLarge }
                     }
+                    totalBytes += text.utf8.count
+                    guard totalBytes <= maximumChapterBytes else { throw ReadingRecapError.tooLarge }
                     chapters.append(.init(index: index, title: titles[index], text: text))
                 }
                 return chapters
@@ -61,6 +65,7 @@ struct LocalRecapSource {
 
 private struct CharacterLookupKey: EnvironmentKey { static let defaultValue: ((String) -> Void)? = nil }
 private struct ReadingRecapActionKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
+private struct CharacterCardsKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
 extension EnvironmentValues {
     var characterLookup: ((String) -> Void)? {
         get { self[CharacterLookupKey.self] }
@@ -70,14 +75,20 @@ extension EnvironmentValues {
         get { self[ReadingRecapActionKey.self] }
         set { self[ReadingRecapActionKey.self] = newValue }
     }
+    var characterCards: (() -> Void)? {
+        get { self[CharacterCardsKey.self] }
+        set { self[CharacterCardsKey.self] = newValue }
+    }
 }
 @MainActor
 struct ReaderRecapMenu: View {
     @ObservedObject var store: ReadingRecapStore
     @Environment(\.readingRecapAction) private var open
     @Environment(\.characterLookup) private var characters
+    @Environment(\.characterCards) private var cards
     var body: some View {
         Menu {
+            Button("查看角色卡") { cards?() }.disabled(cards == nil)
             Button("查询人物词条") { characters?("") }.disabled(characters == nil)
             Button("生成 AI 前情回顾") { open?() }.disabled(open == nil)
             Picker("久未阅读时询问", selection: $store.promptAfterDays) {
@@ -101,6 +112,7 @@ struct ReaderRecapPresentation: ViewModifier {
     @State private var prompts = false
     @State private var showing = false
     @State private var showingCharacters = false
+    @State private var showingCards = false
     @State private var characterQuery = ""
     private var activityID: String { active && scenePhase == .active && !prompts && !showing && !showingCharacters ? source?.bookKey ?? "none" : "inactive" }
     private var openAction: (() -> Void)? {
@@ -111,10 +123,12 @@ struct ReaderRecapPresentation: ViewModifier {
         content
             .environment(\.readingRecapAction, openAction)
             .environment(\.characterLookup, source == nil ? nil : { text in characterQuery = text; showingCharacters = true })
+            .environment(\.characterCards, libraryBookKey == nil ? nil : { showingCards = true })
             .task(id: source?.bookKey) {
                 guard let source, visitedBook != source.bookKey else { return }
                 visitedBook = source.bookKey
-                prompts = services.readingAI.configuration.isEnabled && store.claimPrompt(book: source.bookKey, boundary: source.currentChapter)
+                services.readingAI.refreshKeyStatus()
+                prompts = services.readingAI.isReadyForGeneration && store.claimPrompt(book: source.bookKey, boundary: source.currentChapter)
             }
             .task(id: activityID) {
                 guard activityID != "inactive", let source else { return }
@@ -124,9 +138,9 @@ struct ReaderRecapPresentation: ViewModifier {
                     store.recordReading(book: source.bookKey)
                 }
             }
-            .onValueChange(of: source?.identity) { _, _ in showing = false; showingCharacters = false }
+            .onValueChange(of: source?.identity) { _, _ in showing = false; showingCharacters = false; showingCards = false }
             .onValueChange(of: source?.currentChapter) { previous, _ in
-                if previous != nil { showing = false; showingCharacters = false; prompts = false }
+                if previous != nil { showing = false; showingCharacters = false; showingCards = false; prompts = false }
             }
             .alert("要生成前情回顾吗？", isPresented: $prompts) {
                 Button("继续阅读", role: .cancel) {}
@@ -139,6 +153,14 @@ struct ReaderRecapPresentation: ViewModifier {
                     if let source {
                         ReadingCharactersEntry(libraryBook: libraryBookKey, source: source, query: characterQuery)
                             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("返回阅读") { showingCharacters = false } } }
+                    }
+                }
+            }
+            .sheet(isPresented: $showingCards) {
+                NavigationView {
+                    if let libraryBookKey {
+                        ReadingCharacterCardsEntry(libraryBookKey: libraryBookKey)
+                            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("返回阅读") { showingCards = false } } }
                     }
                 }
             }

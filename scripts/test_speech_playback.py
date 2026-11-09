@@ -26,6 +26,9 @@ def main():
     handoff = '@MainActor\nfinal class SpeechHandoffStore' + handoff
     fragments = [handoff] + [p.read_text() for p in core] + [system, readium, remote, (speech / 'EdgeSpeechEngine.swift').read_text(), (ROOT / 'iOSApp/App/Integrations/SpeechEngineFactory.swift').read_text()]
     actual = '\n'.join('\n'.join(line for line in s.splitlines() if not line.startswith('import ')) for s in fragments)
+    # 只替换测试组装的默认存储，不让无参数控制器继承上次进程留下的偏好或续听记录。
+    assert actual.count('UserDefaults = .standard') >= 2, actual.count('UserDefaults = .standard')
+    actual = actual.replace('UserDefaults = .standard', 'UserDefaults = speechHarnessDefaults')
     fixture = (ROOT / 'scripts/fixtures/speech_playback_harness.swift').read_text()
     source = fixture.replace('// ACTUAL_PLAYBACK_SOURCES', actual)
     with tempfile.TemporaryDirectory(prefix='novelia-speech-tests-') as folder:

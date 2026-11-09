@@ -27,6 +27,7 @@ extension SyncBookLibrary {
 /// 书籍以外随同步合并的本机状态：阅读位置、书库系列、屏蔽标签、阅读背景与导入字体。
 @MainActor
 protocol WebDAVSyncLocalState {
+    var characterSync: (any CharacterSyncLocal)? { get }
     var readingPositions: [String: SyncedReadingPosition] { get }
     func mergeReadingPositions(_ remote: [String: SyncedReadingPosition], webBooks: [DownloadedWebNovel])
     var librarySeries: LibrarySeriesState { get }
@@ -50,6 +51,7 @@ protocol WebDAVSyncLocalState {
 }
 
 extension WebDAVSyncLocalState {
+    var characterSync: (any CharacterSyncLocal)? { nil }
     var webEPUBMaps: [String: WebNovelEPUBMap] { [:] }
     func applyWebEPUBMaps(_ maps: [String: WebNovelEPUBMap]) throws {}
     var bookmarks: [String: ReaderBookmark] { [:] }
@@ -61,6 +63,7 @@ struct WebDAVSyncOptions: Equatable {
     var tags: Bool
     var backgrounds: Bool
     var fonts: Bool
+    var characters = true
 }
 
 /// 同步进度：`stage` 用于失败提示，`detail` 显示在进度浮窗。
@@ -524,3 +527,66 @@ struct WebDAVSyncRunResult: Equatable {
 /// 串行执行会写入 WebDAV 清单的操作（书籍等内容同步与云端删除），先到先执行。
 /// 没有 ETag 的服务器无法用条件写入阻止覆盖，本机至少不让两个操作交错读写清单。
 typealias WebDAVManifestWriteGate = SerialAsyncGate
+
+@MainActor
+protocol CharacterSyncLocal: AnyObject {
+    func characterSnapshot() throws -> CharacterSyncState
+    func applyCharacters(_ state: CharacterSyncState) throws
+    func portraitFile(_ hash: String) -> URL?
+    func installPortrait(_ data: Data, hash: String) throws
+    func discardUnreferencedPortrait(_ hash: String)
+}
+
+/// 人物使用独立目录，不让旧版v1清单写回丢弃新增字段。图片先传，条件提交成功后再合并本机。
+@MainActor
+enum CharacterWebDAVSync {
+    static func run(remote: any WebDAVRemote, local: any CharacterSyncLocal, verifiesImages: Bool = false) async throws -> Int {
+        try await remote.verifyConnection(); try await remote.prepareFolders()
+        var downloaded: Set<String> = []
+        defer { downloaded.forEach { local.discardUnreferencedPortrait($0) } }
+        for attempt in 0..<3 {
+            try Task.checkCancellation()
+            let snapshot = try local.characterSnapshot()
+            let (manifest, etag, existed) = try await remote.fetchManifest()
+            guard !existed || etag != nil else { throw WebDAVSyncError.unsupportedConditions }
+            let previous = try (manifest.characters ?? .init()).validated()
+            let merged = try CharacterSyncState.merged(snapshot, previous)
+            var remoteImages = previous.portraitHashes
+            if verifiesImages, let present = try? await remote.listBlobs() { remoteImages.formIntersection(present) }
+            var missing = 0
+            for hash in merged.portraitHashes.sorted() {
+                try Task.checkCancellation()
+                if let file = local.portraitFile(hash) {
+                    if !remoteImages.contains(hash) { try await remote.uploadBlob(file, hash: hash) }
+                } else if remoteImages.contains(hash) {
+                    do {
+                        let temporary = try await remote.downloadBlob(hash)
+                        defer { try? FileManager.default.removeItem(at: temporary) }
+                        let size = try temporary.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
+                        guard size <= 1_024 * 1_024 else { throw WebDAVSyncError.invalidAsset }
+                        try local.installPortrait(Data(contentsOf: temporary), hash: hash)
+                        downloaded.insert(hash)
+                    } catch WebDAVSyncError.missingBlob { missing += 1 }
+                } else { missing += 1 }
+            }
+            try Task.checkCancellation()
+            do {
+                if !existed || merged != previous {
+                    var next = manifest; next.characters = merged
+                    try await remote.putManifest(next, etag: etag, existed: existed)
+                }
+            } catch WebDAVSyncError.concurrentChange where attempt < 2 { continue }
+            try Task.checkCancellation()
+            // applyCharacters再次合并实时状态，保留网络等待期间的本机修改。
+            try local.applyCharacters(merged)
+            for hash in previous.portraitHashes.subtracting(merged.portraitHashes) {
+                try Task.checkCancellation()
+                do { try await remote.deleteBlob(hash) }
+                catch is CancellationError { throw CancellationError() }
+                catch { /* 元数据删除已提交，无引用文件清理失败不复活图片。 */ }
+            }
+            return missing
+        }
+        throw WebDAVSyncError.concurrentChange
+    }
+}

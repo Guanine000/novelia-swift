@@ -563,7 +563,7 @@ Readium 与 Yuedu 是 Reader 功能内部的引擎选择。两个模型使用 Ap
 
 续听由播放控制器接收真实句首源偏移／正文长度，Readium 通过当前 Locator 的资源路径映射到实际章节。记录扩展为可选源偏移与 Locator JSON，旧记录缺字段时仍按章内比例恢复；Locator 仅在当前出版物对应章节有效时使用。Readium 续听先异步定位并等待导航完成，再传入明确 Locator 起播，避免导航尚未完成时朗读旧可见页。播放过程中沿用写盘节流，暂停、停止、前后台与移交时补存，空闲控制器不覆盖已保存记录。
 
-朗读生命周期回归运行 `python3 scripts/test_speech_playback.py`：以可控平台桩运行实际 App 控制器、系统/Readium 引擎和远程会话，覆盖停止与迟到正文、跨章、旧回调、Readium 定位取消及锁屏命令路由；不会真实发声。入口/跟读控件接线有静态守卫。实际界面回归使用独立验证 App 的 `test_api_architecture_ui.py --only-testing TapTests/TapTests/testNativeSpeechPanelSurvivesChromeAndShowsCapabilities`（需按下文提供 `--device` 与 `--app`），检查系统 TTS 面板控件、关闭面板、顶栏隐藏/恢复后暂停状态保留以及显式停止。加 `--speech-regressions` 可同时运行原生跟读自动翻页、手动翻页挂起跟读与位置恢复、Readium 在线/TXT 可用性，以及在线/TXT 滚动跟读与拖动挂起的针对性 UI 场景。不据此声称真实发声、旧系统或后台音频通过；真实音频中断与后台仍需设备验收。
+朗读生命周期回归运行 `python3 scripts/test_speech_playback.py`：以可控平台桩运行实际 App 控制器、系统/Readium 引擎和远程会话，覆盖停止与迟到正文、跨章、旧回调、Readium 定位取消及锁屏命令路由；不会真实发声。测试组装将默认偏好与续听存储注入每次运行独立的临时 suite，退出时清理，避免跨次状态污染。入口/跟读控件接线有静态守卫。实际界面回归使用独立验证 App 的 `test_api_architecture_ui.py --only-testing TapTests/TapTests/testNativeSpeechPanelSurvivesChromeAndShowsCapabilities`（需按下文提供 `--device` 与 `--app`），检查系统 TTS 面板控件、关闭面板、顶栏隐藏/恢复后暂停状态保留以及显式停止。加 `--speech-regressions` 可同时运行原生跟读自动翻页、手动翻页挂起跟读与位置恢复、Readium 在线/TXT 可用性，以及在线/TXT 滚动跟读与拖动挂起的针对性 UI 场景。不据此声称真实发声、旧系统或后台音频通过；真实音频中断与后台仍需设备验收。
 
 按实际风险选择验证，不要求每次文档或简单界面修改运行全部测试，也不编写只复述实现的测试。
 
@@ -759,9 +759,9 @@ python3 scripts/check_architecture_release.py '<Release Novelia.app 内的 Novel
 
 ## AI 前情回顾
 
-`ReaderSettings.recaps` 持有唯一 `ReadingRecapStore`，保存按书哈希隔离的最后实际阅读时间、提示间隔和最多 32 本的有界结果缓存，独立于统计／WebDAV。`ReaderRecapPresentation` 在本次打开的新日期写入前判断提示，前台正文连续可读 15 秒才更新日期。提示默认 7 天，实例内 30 分钟认领窗口避免引擎切换重建视图重复提示，第一章或 AI 关闭不自动询问；不从旧进度时间戳推断阅读间隔。
+`ReaderSettings.recaps` 持有唯一 `ReadingRecapStore`，保存按书哈希隔离的最后实际阅读时间、提示间隔和最多 32 本的有界结果缓存，独立于统计／WebDAV。`ReaderRecapPresentation` 在本次打开的新日期写入前判断提示，前台正文连续可读 15 秒才更新日期。提示默认 7 天，只在ReadingAIStore的isReadyForGeneration为真（已启用、配置有效、当前接口存在非空可读取密钥）时认领；检查前刷新凭据状态，缺API或密钥不弹提示。实例内 30 分钟认领窗口避免引擎切换重建视图重复提示，第一章或 AI 关闭不自动询问；不从旧进度时间戳推断阅读间隔。
 
-`LocalRecapSource` 只接收已有 TXT 或本地 EPUB。原生／Readium 的 TXT 分页均用 `TextChapterSource.tocEntry` 把单元转为逻辑章；EPUB 按目录 spine 起点分组，Readium 当前资源必须唯一映射至包内 spine。读取闭包在创建时绑定当前章上界，范围越界直接拒绝；使用独立 ZIP 容器，不调用在线内容服务，不导航主阅读器。`PagedTextBook.localRecapBook` 仅本地 TXT 提供，在线正文不提供此能力。
+`LocalRecapSource` 只接收已有 TXT 或本地 EPUB。原生／Readium 的 TXT 分页均用 `TextChapterSource.tocEntry` 把单元转为逻辑章；EPUB 按目录 spine 起点分组，Readium 当前资源必须唯一映射至包内 spine。读取闭包在创建时绑定当前章上界，范围越界直接拒绝；使用独立 ZIP 容器，不调用在线内容服务，不导航主阅读器。ZIP 条目消费回调通过加锁缓冲区累计正文，大小校验与追加在同一临界区完成，避免跨执行器共享可变局部变量。`PagedTextBook.localRecapBook` 仅本地 TXT 提供，在线正文不提供此能力。
 
 Core 的 `ReadingRecapPlan` 要求输入为边界之前连续 1–3 章，正文总预算 96 KiB，按字符安全分块且最多 12 次顺序请求。`ReadingRecapGenerator` 每块发送前后核对配置，取消或任何块失败都不交付部分结果。模型只返回结构化事件，每条的章号、连续引文和源 UTF-16 偏移均校验；汇总不再引入第二次自由生成，去重后保留最多五件最近事件。校验限制证据边界，不等同语义正确率保证。
 
@@ -772,10 +772,28 @@ Core 的 `ReadingRecapPlan` 要求输入为边界之前连续 1–3 章，正文
 
 `ReaderSettings.characters` 持有唯一 `CharacterLexiconStore`，以稳定系列 ID 作为作品身份，单独保存用户确认的书籍键卷序及人物 UUID。`CharacterFact` 独立携带显示名称、正文版本、卷章、UTF-16 引文范围、原文和手工修订状态；人物没有独立的全局真名／简介，`CharacterScope.visible` 在逐事实过滤后才派生名称、别名、首次记录与查询匹配，避免未来字段混入已知人物。卷序变化后原资料保留，并用新序列和当前章重新筛选。
 
-AI 每次接收一卷此前连续 1–3 章，复用回顾分块预算；`CharacterExtractionPlan` 验证请求范围、模型人名、章号及精确引文，`CharacterGenerator` 顺序执行且核对配置代次。只返回未持久化候选，用户接受后创建独立人物，绝不按姓名自动归并。显式合并保留各事实获知位置，拆分只操作当前可见事实；编辑保留原证据并标记手工修订。归档键 `reader.characters.archive.v1` 上限 4 MiB／2000 人物／20000 事实，损坏或未知版本保留原数据并停止写入，不静默清空。
+人物自动化由 `CharacterSeriesView` 提供“仅本书／系列所有书籍”和生成／更新入口。确认卷序后，`CharacterScope.readBoundaries` 按每卷真实保存位置限制范围，当前书内入口优先使用实际位置；缺失卷、无进度卷和后卷排除，不默认前卷读完。每次按钮操作先刷新本地状态；当前阅读位置不等同逐章读完记录，跳读空缺不能识别。
 
-`CharacterSeriesView` 显式观察 App 注入的同一人物 Store 和 AI Store，按卷、提取目标和章节范围使用独立的可取消读取任务，改变范围取消旧生成并丢弃候选。书库到只读来源的连接位于 `App/Integrations/CharacterVolumeLoader.swift`：读取本地文件、分章覆盖和进度快照，但不调用会迁移进度的 `ReaderSettings.txtBook`，不激活另一套单书设置，不写阅读位置或书签；旧版和缺失卷不贡献事实。只保留必要源对象及其他卷的版本摘要，避免同时常驻全系列 TXT 正文。
+`CharacterAutomaticUpdater` 逐章调用 `CharacterExtractionPlan`，单章最多2 MiB、256块，每块8000字节并重叠200字符。空章直接推进检查点，不发请求；单章必须在本轮请求预算内才开始。默认每轮64次新请求，可选择32/64/128/256，缓存命中不计费请求。人物与 `CharacterScanCheckpoint` 同一档案事务保存，单章全部成功才推进位置；取消或失败保留此前完整章节。可选 `scans`/`rejected` 字段兼容旧v1档案，未知/损坏档案仍停止写入。检查点签名包含正文投影身份、卷序、模型参数和自动化提示词代次，变化后重新处理；回退不删除进度，但展示始终重新按阅读边界过滤。
+
+跨批上下文来自 App 注入的同一人物Store，严格过滤到当前处理块之前，只带稳定ID、名字、最近60字符提示，最多12人/约3000字节；待核实事实不作为后续提示。不同称谓不自行合并，同名但未返回明确已知ID的候选保持独立。新候选ID包含版本、卷、块、条目、人名及引文，避免模型重排名称后与旧人物错误复用ID。`CharacterNameEvidence` 的可选书籍和版本字段支持跨卷人名证据，旧档案缺字段视为同卷；读取出处时分别核验两个来源，不写主阅读位置。
+
+模型的uncertain、代词关联、同名歧义和非经历类别的潜在变化标记为待核实，自动保存但不进入确定概览；无疑点的新事实按ID增量追加，不覆盖旧事实。人物概览仅用本地分组，无额外概括模型请求。确认、合并和拆分仍保留出处；删除同时保存有界证据指纹，模型更换后重扫同版本正文也不重新加入被否决的同一证据，不保存被删除描述全文。归档上限16 MiB/2000人物/20000事实，损坏或未知版本保留原数据并停止写入。人物、确认卷序、否决证据、图片和完整章节检查点参与WebDAV；请求缓存、临时分块、API配置与密钥不参与。
+
+`CharacterExtractionCache` 缓存已核验块的结构化响应，最多256项/2 MiB，不含密钥；键包含正文身份、卷、模型参数、提示词和请求上下文，命中仍复验证据。失败重试复用完整成功块，不自动重试网络。阶段性缓存可保留未完成章的成功分块，但不将其展示为已完成卡片。
+
+`CharacterVolumeLoader` 连接书库文件、分章与进度，使用只读副本，不调用会迁移位置的 `ReaderSettings.txtBook`，不激活另一套单书设置。界面预检仅保留版本与边界；生成时逐卷打开、逐章释放正文，不同时常驻整个系列。页面退出、切换范围或配置均取消生成并丢弃迟到结果。UI回归 `test_api_architecture_ui.py --only-testing TapTests/TapTests/testCharacterScopeChoiceAndUnreadSafety` 在独立验证App内使用合成TXT检查范围按钮和无已读章节保护，不调用真实AI；自动入库、增量更新与跨卷证据由Core合成测试覆盖。
 
 `ReadingCharactersEntry` 负责阅读器到明确系列的导航适配，使用书库键或唯一文件哈希匹配，不按书名猜测。`ReaderRecapPresentation` 提供查询环境动作；原生选字菜单与 Readium 编辑动作传入人名，TXT 滚动使用普通菜单查询。查询不触发 AI。出处单独读取本地章节，核验版本和引文；安全同名章节回退仍检查当前进度，不导航主阅读器、不计阅读时长。
 
 `CharacterLexiconTests` 覆盖回退时隐藏身份与别名查询、缺失／变更卷、跨作品隔离、伪引文及越界章、同名不合并、显式合并后防剧透、拆分／修订证据保留、卷序确认和损坏存储保护。真机的选字、导航、旧系统和真实模型质量必须独立验证；静态语法与工程登记不能替代双 scheme 编译。
+
+### 人物图片与同步
+
+`CharacterPortraitCodec` 在后台用ImageIO缩略解码并重新编码JPEG，源文件最多20 MiB，输出最长边1024像素/1 MiB，丢弃原图元数据。相册复用iOS15兼容选择器，文件入口持有安全作用域直到读取完成。图片以SHA-256命名存入App容器的CharacterPortraits，图片总目录限64 MiB；Store接收注入目录，测试使用独立临时目录。显示按保存图片时的书籍版本和阅读边界过滤。合并优先目标图片，空目标承接源图片；拆分不复制；移除以同步墓碑表示，已无引用的本地图片在事务提交后清理。
+
+人物同步使用 `NoveliaSync/characters-v1/index.json` 和独立blobs，复用WebDAVRemote的强ETag/条件写入、命名空间隔离及最多3次冲突重读。`CharacterSyncState` 逐事实记录数据、所属人物/作品和修改时间，删除保留墓碑；同一事实在合并/拆分中移动归属而不丢出处。不同事实并集，同ID较新修改胜出，同时间删除优先并确定性决胜。确认卷序与图片逐记录合并；相同检查点签名取较大nextChapter，不同签名按记录版本选择且本机必须重新核对签名，不能用新版本的进度跳过旧版本。
+
+`CharacterLexiconStore.commit` 将资料、同步记录与检查点原子保存，旧归档缺sync字段迁移为逐事实记录并修复重复事实ID；损坏原档停止写入。网络期间的本机修改在applyCharacters时再次合并，不用请求开始时的快照覆盖实时状态。资料限20000条、同步事实（含墓碑）限40000条、远端状态限8 MiB、本机归档（含同步元数据）限16 MiB；达到上限明确失败，不截断墓碑。否决指纹跨设备合并，被否决的同版本证据不重新进入人物表。
+
+图片先上传，条件提交成功后才合并人物元数据；下载逐张校验大小/哈希，取消或失败清理无引用暂存图片。缺图不丢弃人物卡，手动同步核对并从本机副本补传；失效图片记录显示占位。元数据删除成功后尽力清理远端无引用图片，失败不复活记录。人物改动与检查点进入自动同步指纹并通过App适配触发延迟同步；扫描缓存不进入指纹。App使用同一人物Store，独立Debug验证App仅使用合成TXT/合成图片/内存凭据；新验证参数和种子代码必须在Release排除检查中拒绝。

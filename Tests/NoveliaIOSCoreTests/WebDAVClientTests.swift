@@ -91,6 +91,13 @@ final class WebDAVClientTests: XCTestCase {
 
     // MARK: 地址
 
+    func testCharacterCardsUseIsolatedNamespaceAndFolderCacheIdentity() throws {
+        let cards = try WebDAVClient(address: "https://dav.example/dav/", username: "user", password: "fake", configuration: configuration, characterCards: true)
+        let original = try client()
+        XCTAssertEqual(cards.root.path, "/dav/NoveliaSync/characters-v1")
+        XCTAssertNotEqual(cards.serverKey, original.serverKey)
+        XCTAssertEqual(original.root.path, root)
+    }
     func testAddressMustBePlainHTTPSFolder() throws {
         for address in ["http://dav.example/dav/", "https:///dav/", "https://user:pw@dav.example/dav/",
                         "https://dav.example/dav/?a=1", "https://dav.example/dav/#top", "not a url"] {

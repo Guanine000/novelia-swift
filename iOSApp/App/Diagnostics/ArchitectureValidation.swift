@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #if DEBUG
 import Foundation
+import UIKit
 import ReadiumZIPFoundation
 
 extension AppServices {
@@ -12,7 +13,7 @@ extension AppServices {
         if ProcessInfo.processInfo.arguments.contains("-resetArchitectureValidation") {
             UserDefaults.standard.removePersistentDomain(forName: Bundle.main.bundleIdentifier!)
             let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            for name in ["Library", "WebNovelDownloads", "WenkuEPUB", "ReadingStatistics", "Bookmarks"] {
+            for name in ["Library", "WebNovelDownloads", "WenkuEPUB", "ReadingStatistics", "Bookmarks", "CharacterPortraits"] {
                 try? FileManager.default.removeItem(at: support.appendingPathComponent(name))
             }
         }
@@ -34,8 +35,10 @@ extension AppServices {
             let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             let directory = support.appendingPathComponent("WenkuEPUB", isDirectory: true)
             try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let text = "第一章 起点\n" + String(repeating: "本地TXT验证正文，通过原有分章和Readium管线阅读。\n\n", count: 80)
-                + "第二章 续听\n" + String(repeating: "第二章验证正文，用于跨章续听和重启恢复。\n\n", count: 80)
+            let sentence = ProcessInfo.processInfo.arguments.contains("-architectureCharacterPortrait")
+                ? "林舟是港口调查员，沉着寡言，重视承诺。\n林舟在寻找失踪的妹妹林澈，始终没有放弃。\n林舟与白岚是同行伙伴，两人决定共同调查。\n林舟在旧码头发现妹妹失踪的线索，并收起了地图。\n林舟猜想面具人来自北方，但尚未找到确切证据。\n林舟可能知道旧仓库的秘密，但他没有说明。\n\n" : "本地TXT验证正文，通过原有分章和Readium管线阅读。\n\n"
+            let text = "第一章 起点\n" + String(repeating: sentence, count: 80)
+                + "第二章 续听\n" + String(repeating: ProcessInfo.processInfo.arguments.contains("-architectureCharacterPortrait") ? "林舟决定与白岚共同调查，并约定次日在旧码头会合。\n\n" : "第二章验证正文，用于跨章续听和重启恢复。\n\n", count: 80)
                 + "第三章 终点\n" + String(repeating: "第三章验证正文，用于完整分章识别。\n\n", count: 80)
             try! Data(text.utf8).write(to: directory.appendingPathComponent("architecture.txt"))
             let record = LocalWenkuEPUB(id: UUID(), title: "架构验证TXT", filename: "architecture.txt", addedAt: Date(),
@@ -53,6 +56,64 @@ extension AppServices {
             backgrounds: ReaderBackgroundStore(defaults: .standard, directory: support.appendingPathComponent("ReaderBackgrounds")),
             cloudBooks: CloudBookStore(directory: support.appendingPathComponent("WebDAVCloudBooks")),
             passwordStore: WebDAVPasswordStore(load: { credentials.password }, save: { credentials.password = $0 }))
+        if ProcessInfo.processInfo.arguments.contains("-architectureRecapMissingKey") {
+            let url = support.appendingPathComponent("WenkuEPUB/architecture.txt")
+            let hash = try! FileContentHash.sha256(url)
+            local.positions.recordTXT(hash: hash, position: .init(chapter: 2))
+            local.readerSettings.recaps.recordReading(book: "txt:" + hash, now: Date().addingTimeInterval(-8 * 86_400))
+            var value = ReadingAIConfiguration(); value.isEnabled = true; value.baseURL = "https://unused.example/v1"; value.model = "fixture"
+            UserDefaults.standard.set(try! JSONEncoder().encode(value), forKey: "reader.ai.configuration.v1")
+        }
+        if ProcessInfo.processInfo.arguments.contains("-architectureCharacterPortrait") {
+            let directory = support.appendingPathComponent("WenkuEPUB", isDirectory: true)
+            let records = try! JSONDecoder().decode([LocalWenkuEPUB].self, from: Data(contentsOf: directory.appendingPathComponent("library.json")))
+            let record = records.first { $0.filename == "architecture.txt" }!
+            let url = directory.appendingPathComponent(record.filename)
+            let book = LibraryBook(origin: .wenku(record), fileURL: url, coverURL: nil)
+            local.positions.recordTXT(hash: try! FileContentHash.sha256(url), position: .init(chapter: 2))
+            // 单书变体验证“更多 → AI 人物词条”直达：不建系列，作品键直接用书键。
+            let standalone = ProcessInfo.processInfo.arguments.contains("-architectureCharacterStandalone")
+            let series = standalone ? book.key : local.library.createSeries(named: "雾港来信")
+            if !standalone { local.library.assign(book, to: series) }
+            local.library.markOpened(book)
+            try! local.readerSettings.characters.confirmOrder(work: series, volumes: [book.key])
+            Task {
+                let volume = try! await CharacterVolumeLoader.load(book, settings: local.readerSettings)
+                let scope = CharacterScope(work: series, volumes: [book.key], currentBook: book.key, currentChapter: 2,
+                    identities: [book.key: volume.source.identity], readBoundaries: [book.key: 2])
+                let chapters = try! await volume.source.load(0..<2)
+                func fact(_ text: String, quote: String, category: String, chapter: Int = 0, related: String? = nil, pending: Bool = false) -> CharacterFact {
+                    let offset = (chapters[chapter].text as NSString).range(of: quote).location
+                    return CharacterFact(book: book.key, identity: volume.source.identity, chapter: chapter, offset: offset,
+                        name: "林舟", text: text, quote: quote, category: category, needsReview: pending, relatedName: related)
+                }
+                let identityQuote = "林舟是港口调查员，沉着寡言，重视承诺。"
+                let goalQuote = "林舟在寻找失踪的妹妹林澈，始终没有放弃。"
+                let facts = [
+                    fact("港口调查员", quote: identityQuote, category: "身份"),
+                    fact("沉着、重视承诺", quote: identityQuote, category: "性格"),
+                    fact("寻找失踪的妹妹", quote: goalQuote, category: "目标"),
+                    fact("同行伙伴", quote: "林舟与白岚是同行伙伴，两人决定共同调查。", category: "关系", related: "白岚"),
+                    fact("妹妹", quote: goalQuote, category: "关系", related: "林澈"),
+                    fact("在旧码头发现失踪线索", quote: "林舟在旧码头发现妹妹失踪的线索，并收起了地图。", category: "经历"),
+                    fact("决定与白岚共同调查", quote: "林舟决定与白岚共同调查，并约定次日在旧码头会合。", category: "经历", chapter: 1),
+                    fact("面具人可能来自北方", quote: "林舟猜想面具人来自北方，但尚未找到确切证据。", category: "身份", pending: true),
+                    fact("可能知晓旧仓库的秘密", quote: "林舟可能知道旧仓库的秘密，但他没有说明。", category: "能力", pending: true)
+                ]
+                let id = "portrait-fixture-person"
+                let plan = try! CharacterExtractionPlan(scope: scope, book: book.key, identity: volume.source.identity, chapters: chapters)
+                let signature = try! CharacterAutomaticUpdater.signature(identity: volume.source.identity, scope: scope, configuration: ReadingAIConfiguration())
+                try! local.readerSettings.characters.applyAutomatic([.init(id: id, facts: facts)], plan: plan, signature: signature)
+                let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 800)).pngData { context in
+                    UIColor(red: 0.33, green: 0.59, blue: 0.46, alpha: 1).setFill()
+                    context.fill(CGRect(x: 0, y: 0, width: 600, height: 800))
+                    UIColor.white.setFill(); context.cgContext.fillEllipse(in: CGRect(x: 160, y: 150, width: 280, height: 280))
+                    context.cgContext.fill(CGRect(x: 110, y: 460, width: 380, height: 260))
+                }
+                let jpeg = CharacterPortraitCodec.jpeg(image, maximumPixels: 1_024)!
+                try! local.readerSettings.characters.setPortrait(jpeg, entity: id, scope: scope)
+            }
+        }
         local.readerSettings.pagedTextReading = readium
         let configuration = APIConfiguration(
             novelAPI: URL(string: "https://novels.example.invalid/api/")!,

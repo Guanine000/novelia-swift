@@ -225,6 +225,9 @@ actor PendingCloudSpeech: CloudSpeechSynthesizing {
     func resolve() { waiter?.resume(returning: Data([1,2,3])); waiter = nil }
 }
 
+let speechHarnessSuite = "SpeechHarness-\(UUID())"
+let speechHarnessDefaults = UserDefaults(suiteName: speechHarnessSuite)!
+
 @main struct SpeechRegressionTests {
     @MainActor static func drain() async { for _ in 0..<30 { await Task.yield() } }
     @MainActor static func wait(_ condition: () -> Bool) async {
@@ -236,6 +239,7 @@ actor PendingCloudSpeech: CloudSpeechSynthesizing {
         print("PASS: \(label)")
     }
     @MainActor static func main() async {
+        defer { speechHarnessDefaults.removePersistentDomain(forName: speechHarnessSuite) }
         let ux = SpeechPlaybackController()
         let uxSystem = SystemSpeechEngine(chapterCount: 1) { _ in "第一句。第二句。第三句。" }
         ux.bookKey = "txt:ux-\(UUID())"

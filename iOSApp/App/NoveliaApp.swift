@@ -321,7 +321,8 @@ struct RootView: View {
         .environment(\.speechHandoff, services.speechHandoff)
         .modifier(WebDAVAutoSyncTriggers(sync: webDAVSync, web: webNovelDownloads, wenku: wenkuDownloads,
                                          library: services.local.library, blockedTags: services.local.blockedTags,
-                                         identityMaps: services.local.readerSettings.webEPUBMaps, bookmarks: services.local.bookmarks))
+                                         identityMaps: services.local.readerSettings.webEPUBMaps, bookmarks: services.local.bookmarks,
+                                         characters: services.local.readerSettings.characters))
         .task { if services.performsUpdateChecks { await updates.check() } }
         .task(id: auth.username) {
             // 作品详情的收藏状态依赖这两份收藏；原先由“书架”页加载。

@@ -61,6 +61,7 @@ enum SettingsKey {
         static let syncBooks = "webdav.syncBooks"
         static let syncTags = "webdav.syncTags"
         static let syncBackgrounds = "webdav.syncBackgrounds"
+        static let syncCharacters = "webdav.syncCharacters"
         static let syncFonts = "webdav.syncFonts"
         static let syncStatistics = "webdav.syncStatistics"
         /// 自动同步开关，默认关闭；已有用户保持手动同步。

@@ -30,3 +30,31 @@ struct ReadingCharactersEntry: View {
         }
     }
 }
+
+/// 书内阅读菜单“查看角色卡”的导航适配：系列书沿用系列归属；未入系列的书以书键作作品键，
+/// 移入系列时人物卡数据自动迁移（见 CharacterLexiconStore.migrateWork）。
+@MainActor
+struct ReadingCharacterCardsEntry: View {
+    let libraryBookKey: String?
+    @EnvironmentObject private var readerSettings: ReaderSettings
+    @EnvironmentObject private var services: AppServices
+    @EnvironmentObject private var state: LibraryStateStore
+    @EnvironmentObject private var web: WebNovelDownloadStore
+    @EnvironmentObject private var wenku: WenkuLocalLibraryStore
+    @EnvironmentObject private var cloud: CloudBookStore
+
+    var body: some View {
+        let books = state.books(web: web, wenku: wenku, cloud: cloud)
+        let current = libraryBookKey.flatMap { key in books.first { $0.key == key } }
+        if let current, let series = state.series.seriesID(forBook: current.key) {
+            let keys = state.series.bookKeys(inSeries: series)
+            CharacterSeriesView(workID: series, books: books.filter { keys.contains($0.key) }, store: readerSettings.characters,
+                ai: services.readingAI, initialBook: current.key)
+        } else if let current {
+            CharacterSeriesView(workID: current.key, books: [current], store: readerSettings.characters,
+                ai: services.readingAI, initialBook: current.key)
+        } else {
+            Text("暂未找到对应的本地书籍，从书库重新打开本书后即可查看人物卡。").padding()
+        }
+    }
+}

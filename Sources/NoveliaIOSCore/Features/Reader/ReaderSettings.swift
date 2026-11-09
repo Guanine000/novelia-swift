@@ -72,7 +72,9 @@ final class ReaderSettings: ObservableObject {
         txtAdjustments = TXTChapterAdjustmentStore(directory: defaults === UserDefaults.standard
             ? support.appendingPathComponent("TXTChapterAdjustments", isDirectory: true)
             : (offlineDirectory ?? FileManager.default.temporaryDirectory.appendingPathComponent("TXTAdjustments-" + UUID().uuidString)).appendingPathComponent("TXTChapterAdjustments", isDirectory: true))
-        characters = CharacterLexiconStore(defaults: defaults)
+        characters = CharacterLexiconStore(defaults: defaults, portraitDirectory: defaults === UserDefaults.standard
+            ? support.appendingPathComponent("CharacterPortraits", isDirectory: true)
+            : (offlineDirectory ?? FileManager.default.temporaryDirectory.appendingPathComponent("Characters-" + UUID().uuidString)).appendingPathComponent("CharacterPortraits", isDirectory: true))
         recaps = ReadingRecapStore(defaults: defaults)
         remainingTime = ReadingTimeEstimateStore(defaults: defaults)
         self.positions = positions ?? ReadingPositionStore(defaults: defaults)

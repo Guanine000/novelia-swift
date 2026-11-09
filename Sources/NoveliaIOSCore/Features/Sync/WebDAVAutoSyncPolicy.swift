@@ -114,7 +114,7 @@ enum WebDAVAutoSyncPolicy {
                             wenku: any SyncBookLibrary<LocalWenkuEPUB>,
                             options: WebDAVSyncOptions) -> String {
         var hasher = Fingerprinter()
-        hasher.add("options", [options.books, options.tags, options.backgrounds, options.fonts])
+        hasher.add("options", [options.books, options.tags, options.backgrounds, options.fonts, options.characters])
         if options.books {
             hasher.add("web", web.books)
             hasher.add("wenku", wenku.books)
@@ -124,6 +124,7 @@ enum WebDAVAutoSyncPolicy {
             hasher.add("webEPUBMaps", local.webEPUBMaps)
         }
         if options.tags { hasher.add("tags", local.blockedTags) }
+        if options.characters { hasher.add("characters", try? local.characterSync?.characterSnapshot()) }
         return hasher.finish()
     }
 

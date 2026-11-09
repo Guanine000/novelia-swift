@@ -23,6 +23,7 @@ struct WebDAVAutoSyncTriggers: ViewModifier {
     let blockedTags: BlockedTagsStore
     let identityMaps: WebNovelEPUBMapStore
     let bookmarks: ReaderBookmarkStore
+    let characters: CharacterLexiconStore
 
     func body(content: Content) -> some View {
         content
@@ -39,6 +40,7 @@ struct WebDAVAutoSyncTriggers: ViewModifier {
             .onReceive(blockedTags.objectWillChange) { sync.localStateDidChange() }
             .onReceive(identityMaps.$maps.dropFirst()) { _ in sync.localStateDidChange() }
             .onReceive(bookmarks.$records.dropFirst()) { _ in sync.localStateDidChange() }
+            .onReceive(characters.objectWillChange) { sync.localStateDidChange() }
     }
 }
 
@@ -52,6 +54,8 @@ struct AppWebDAVSyncLocalState: WebDAVSyncLocalState {
     let library: any LibrarySeriesManaging
     let identityMaps: WebNovelEPUBMapStore
     let bookmarkStore: ReaderBookmarkStore
+    var characterStore: CharacterLexiconStore? = nil
+    var characterSync: (any CharacterSyncLocal)? { characterStore }
     var webEPUBMaps: [String: WebNovelEPUBMap] { identityMaps.maps }
     func applyWebEPUBMaps(_ maps: [String: WebNovelEPUBMap]) throws { try identityMaps.merge(maps) }
     var readingPositions: [String: SyncedReadingPosition] { positions.all() }

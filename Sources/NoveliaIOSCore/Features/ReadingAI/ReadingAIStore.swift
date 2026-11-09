@@ -22,8 +22,12 @@ final class ReadingAIStore: ObservableObject {
         configuration = (try? loaded.validated()) ?? .init()
         refreshKeyStatus()
     }
+    /// 自动阅读提示只在接口、模型和凭据均可用时出现，不因仅打开开关而打扰阅读。
+    var isReadyForGeneration: Bool {
+        configuration.isEnabled && hasSavedKey && (try? configuration.validated()) != nil
+    }
     func refreshKeyStatus() {
-        hasSavedKey = (try? configuration.endpoint().absoluteString).flatMap { try? keys.read(scope: $0) } != nil
+        hasSavedKey = (try? configuration.endpoint().absoluteString).flatMap { try? keys.read(scope: $0) }.map { !$0.isEmpty } ?? false
     }
     func save(_ value: ReadingAIConfiguration, newKey: String) throws {
         var value = value

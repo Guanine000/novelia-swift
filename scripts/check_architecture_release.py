@@ -11,7 +11,7 @@ parser.add_argument('--readium-only', action='store_true',
 args = parser.parse_args()
 data = args.executable.read_bytes()
 for marker in [b'-architectureValidation', b'-resetArchitectureValidation', b'-architectureReadium', b'-architecturePagination',
-               b'-architectureFailFirstSearch', b'-seedPerformanceLibrary', b'-performanceLibraryCount', b'-performanceLargeTXT', b'-architectureTXT', b'ArchitectureNetworkTrap', b'architecture-user']:
+               b'-architectureFailFirstSearch', b'-architectureCharacterPortrait', b'-architectureRecapMissingKey', b'-seedPerformanceLibrary', b'-performanceLibraryCount', b'-performanceLargeTXT', b'-architectureTXT', b'ArchitectureNetworkTrap', b'architecture-user']:
     if marker in data:
         raise SystemExit('Unexpected validation runtime marker: ' + marker.decode())
 symbols = subprocess.check_output(['nm', '-gj', str(args.executable)], text=True)

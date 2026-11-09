@@ -136,6 +136,30 @@ final class ReadingAIInfrastructureTests: XCTestCase {
         XCTAssertFalse(repaired.configuration.isEnabled)
         XCTAssertEqual(repaired.configuration.maximumOutputTokens, 2_048)
     }
+    @MainActor
+    func testAutomaticRecapRequiresConfiguredAPIModelAndReadableSavedKey() throws {
+        let suite = "RecapReadiness-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let keys = MemoryReadingAIKeys(), client = RecordingReadingAI()
+        let initial = ReadingAIStore(defaults: defaults, keys: keys, client: client)
+        XCTAssertFalse(initial.isReadyForGeneration)
+        let configuration = config()
+        defaults.set(try JSONEncoder().encode(configuration), forKey: "reader.ai.configuration.v1")
+        let missing = ReadingAIStore(defaults: defaults, keys: keys, client: client)
+        XCTAssertFalse(missing.isReadyForGeneration)
+        try missing.save(configuration, newKey: "isolated-test-key")
+        XCTAssertTrue(missing.isReadyForGeneration)
+        try keys.write(nil, scope: configuration.endpoint().absoluteString)
+        missing.refreshKeyStatus()
+        XCTAssertFalse(missing.isReadyForGeneration)
+        try keys.write("", scope: configuration.endpoint().absoluteString)
+        missing.refreshKeyStatus()
+        XCTAssertFalse(missing.isReadyForGeneration)
+        var disabled = configuration; disabled.isEnabled = false
+        try missing.save(disabled, newKey: "isolated-test-key")
+        XCTAssertFalse(missing.isReadyForGeneration)
+    }
+
 }
 
 private actor RecordingReadingAI: ReadingAICompleting {
