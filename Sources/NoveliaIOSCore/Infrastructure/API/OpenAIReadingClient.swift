@@ -22,13 +22,13 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
     }
 
     func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest) async throws -> ReadingAIResponse {
-        try await complete(configuration: configuration, apiKey: apiKey, request: request) { _ in }
+        try await complete(configuration: configuration, apiKey: apiKey, request: request) { _, _ in }
     }
 
     /// 优先按 SSE 流式接收：模型生成期间持续有字节到达，既不会触发空闲超时，
     /// 也能把"已接收字数"反馈给界面。服务端忽略 stream 而直接返回 JSON 时自动回退。
     func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest,
-                  onCharacters: @escaping @Sendable (Int) -> Void) async throws -> ReadingAIResponse {
+                  onProgress: @escaping @Sendable (Int, String) -> Void) async throws -> ReadingAIResponse {
         let request = try Self.urlRequest(configuration: configuration, apiKey: apiKey, request: request)
         let session = URLSession(configuration: sessionConfiguration, delegate: ReadingAIRedirectGuard(), delegateQueue: nil)
         // 任务独占 Session，提前拒绝、超限和取消均关闭底层连接，不留下继续接收的请求。
@@ -44,7 +44,7 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
                 throw ReadingAIError.responseLimit
             }
             if contentType.contains("text/event-stream") {
-                return try await Self.decodeStream(bytes, onCharacters: onCharacters)
+                return try await Self.decodeStream(bytes, onProgress: onProgress)
             }
             var data = Data()
             for try await byte in bytes {
@@ -84,7 +84,7 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
     /// 服务端只在最后一块给出 finish_reason，所以把停止／截断／过滤的判断放在流结束之后；
     /// 中途解析失败的单个事件直接跳过，不让一段脏数据作废整次生成。
     static func decodeStream(_ bytes: URLSession.AsyncBytes,
-                             onCharacters: @Sendable (Int) -> Void) async throws -> ReadingAIResponse {
+                             onProgress: @Sendable (Int, String) -> Void) async throws -> ReadingAIResponse {
         struct Chunk: Decodable {
             struct Choice: Decodable {
                 struct Delta: Decodable { let content: String? }
@@ -109,14 +109,14 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
                 text += content
                 // 限的是拼装后的正文，不是带 JSON 外壳的原始事件流。
                 guard text.utf8.count <= maximumResponseBytes else { throw ReadingAIError.responseLimit }
-                // 高频回调会拖慢界面，按字符数节流；最后再补一次完整值。
-                if text.count - reported >= 120 { reported = text.count; onCharacters(reported) }
+                // 高频回调会拖慢界面，按字符数节流；最后再补一次完整值。末尾片段用于界面实时预览。
+                if text.count - reported >= 120 { reported = text.count; onProgress(reported, String(text.suffix(240))) }
             }
             if let value = chunk.choices?.first?.finish_reason { finish = value }
             if let value = chunk.usage { usage = value }
         }
         try Task.checkCancellation()
-        onCharacters(text.count)
+        onProgress(text.count, String(text.suffix(240)))
         if finish == "length" { throw ReadingAIError.truncated }
         if finish == "content_filter" { throw ReadingAIError.refused }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ReadingAIError.invalidResponse }

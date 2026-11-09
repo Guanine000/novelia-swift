@@ -57,13 +57,16 @@ final class ReadingAIInfrastructureTests: XCTestCase {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ReadingAITestURLProtocol.self]
         let client = OpenAIReadingClient(configuration: configuration)
-        final class Box: @unchecked Sendable { var counts: [Int] = [] }
+        final class Box: @unchecked Sendable { var counts: [Int] = []; var tails: [String] = [] }
         let box = Box()
         let response = try await client.complete(configuration: config("https://stream.example/v1"), apiKey: "fake",
-                                                 request: .connectionTest) { box.counts.append($0) }
+                                                 request: .connectionTest) { count, tail in
+            box.counts.append(count); box.tails.append(tail)
+        }
         XCTAssertEqual(response.text, "OK")
         // 流式只按字符数节流回调，最后补一次完整值。
         XCTAssertEqual(box.counts.last, 2)
+        XCTAssertEqual(box.tails.last, "OK")
     }
 
     func testStreamingShellBytesDoNotCountAgainstTheTextLimit() async throws {

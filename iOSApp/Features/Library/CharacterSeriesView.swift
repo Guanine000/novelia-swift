@@ -31,6 +31,8 @@ struct CharacterSeriesView: View {
     @State private var generation: Task<Void, Never>?
     @State private var token = UUID()
     @State private var confirmingReset = false
+    @State private var showingAILog = false
+    @State private var aiLog: [String] = []
     private var confirmed: Bool { !order.isEmpty && store.order(work: workID) == order }
     private var eligibleBooks: [String] {
         guard let index = order.firstIndex(of: currentBook) else { return [] }
@@ -159,6 +161,7 @@ struct CharacterSeriesView: View {
                 Section {
                     HStack { ProgressView(); Text(progress) }
                     if ai.streamedCharacters > 0 { Text("本次回复已接收 \(ai.streamedCharacters) 字").font(.caption).foregroundStyle(.secondary) }
+                    Button("查看 AI 输出") { showingAILog = true }
                     Button("暂停") { cancel(); message = "已暂停，完成的章节已保存。点击更新继续。" }
                 }
             }
@@ -166,8 +169,10 @@ struct CharacterSeriesView: View {
         }
         .navigationTitle("跨卷人物词条")
         .toolbar { ToolbarItem(placement: .compatTopBarTrailing) { EditButton().disabled(progress != nil) } }
-        .alert("重新创建人物卡？", isPresented: $confirmingReset) {
-            Button("清空并重新开始", role: .destructive) { resetCards() }
+        .sheet(isPresented: $showingAILog) {
+            CharacterAILogView(ai: ai, status: progress, events: aiLog)
+        }
+        .alert("重新创建人物卡？", isPresented: $confirmingReset) {            Button("清空并重新开始", role: .destructive) { resetCards() }
             Button("取消", role: .cancel) {}
         } message: {
             Text("将删除本作品的全部人物卡、角色图片和逐章检查点，同时清空本机的“已否决”记录——之前删掉的条目也会重新参与提取。卷序保留。之后点“生成人物卡”从第一章重新扫描，会产生新的模型费用。")
@@ -179,12 +184,15 @@ struct CharacterSeriesView: View {
             order = saved + remaining; query = initialQuery
             currentBook = order.contains(initialBook ?? "") ? initialBook! : order.first ?? ""
         }
-        .task(id: loadID) { await loadScope() }
+        // 进人物卡详情会让本页"消失"、返回时又会重跑 .task：这两处都不能顺手取消生成，
+        // 否则点开一张卡就会把正在跑的扫描掐掉。只有显式暂停、改配置或换范围才取消。
+        .task(id: loadID) { await loadScope(cancelGeneration: generation == nil) }
         .onValueChange(of: scanSeries) { _, _ in cancel(); message = nil }
         .onValueChange(of: ai.configuration) { _, _ in cancel(); message = nil }
-        .onDisappear { cancel() }
     }
     private func cancel() { token = UUID(); generation?.cancel(); generation = nil; progress = nil }
+    /// 每次运行清空上一次的步骤记录，避免把两轮混在一起看。
+    private func resetAILog() { aiLog = [] }
     /// 重建后必须让检查点、进度与列表一起刷新，所以统一走一次 loadScope。
     private func resetCards() {
         guard let scope else { return }
@@ -220,7 +228,7 @@ struct CharacterSeriesView: View {
         ready = true
     }
     private func generate() {
-        cancel(); message = nil; progress = "准备生成…"
+        cancel(); message = nil; progress = "准备生成…"; resetAILog()
         let snapshot = token, selection = selectedBooks, identity = actionID, config = ai.configuration, limit = requestLimit
         generation = Task {
             var requests = 0, completed = 0
@@ -229,7 +237,13 @@ struct CharacterSeriesView: View {
                 try Task.checkCancellation()
                 guard snapshot == token, actionID == identity, ai.configuration == config, let scope else { throw CancellationError() }
                 let result = try await CharacterBookUpdater.run(books: books, scope: scope, selection: selection, settings: settings,
-                    store: store, ai: ai, limit: limit, concurrency: concurrency) { text in if snapshot == token { progress = text } }
+                    store: store, ai: ai, limit: limit, concurrency: concurrency) { text in
+                    if snapshot == token {
+                        progress = text
+                        aiLog.append(text)
+                        if aiLog.count > 80 { aiLog.removeFirst(aiLog.count - 80) }
+                    }
+                }
                 completed = result.completed; requests = result.requests
                 guard snapshot == token, !Task.isCancelled else { return }
                 let duplicates = store.duplicates(scope: scope).count
@@ -383,7 +397,8 @@ private struct CharacterCardView: View {
             }
         }
         .onValueChange(of: ai.configuration) { _, _ in updateTask?.cancel() }
-        .onDisappear { importTask?.cancel(); updateTask?.cancel() }
+        // 离开卡片（看出处、返回列表）不打断补充细节；图片导入是短任务，仍随页面结束。
+        .onDisappear { importTask?.cancel() }
     }
     private func hero(_ person: VisibleCharacter) -> some View {
         VStack(spacing: 9) {
@@ -922,5 +937,48 @@ private struct CharacterDuplicateReviewView: View {
             catch { self.error = error.localizedDescription; return }
         }
         message = "「\(group.name)」已合并\(merged)张卡到事实最多的一张。"
+    }
+}
+
+/// AI 运行记录：把模型正在吐出的内容直接显示出来，让人看到确实在跑，而不是只有一个转圈。
+/// 只展示最近片段与步骤，不落盘、不含密钥。
+@MainActor
+private struct CharacterAILogView: View {
+    @ObservedObject var ai: ReadingAIStore
+    let status: String?
+    let events: [String]
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationView {
+            List {
+                Section {
+                    HStack { ProgressView(); Text(status ?? "等待中…").font(.footnote) }
+                    Text("已接收 \(ai.streamedCharacters) 字").font(.caption).foregroundStyle(.secondary)
+                } header: { Text("当前请求") }
+                Section {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            Text(ai.streamedPreview.isEmpty ? "（尚未收到内容）" : ai.streamedPreview)
+                                .font(.system(.caption, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id("tail")
+                        }
+                        .frame(maxHeight: 240)
+                        .onValueChange(of: ai.streamedPreview) { _, _ in proxy.scrollTo("tail", anchor: .bottom) }
+                    }
+                } header: { Text("模型输出（实时）") } footer: {
+                    Text("显示的是模型的原始回复片段，包含 JSON 结构；写入人物卡前会逐条核验出处。")
+                }
+                Section {
+                    if events.isEmpty { Text("暂无步骤").foregroundStyle(.secondary).font(.footnote) }
+                    ForEach(Array(events.enumerated().suffix(30).reversed()), id: \.offset) { _, text in
+                        Text(text).font(.caption)
+                    }
+                } header: { Text("最近步骤") }
+            }
+            .navigationTitle("AI 运行记录")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .compatTopBarTrailing) { Button("关闭") { dismiss() } } }
+        }
     }
 }

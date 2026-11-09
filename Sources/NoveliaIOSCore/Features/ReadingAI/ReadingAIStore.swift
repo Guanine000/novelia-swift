@@ -10,6 +10,8 @@ final class ReadingAIStore: ObservableObject {
     @Published private(set) var hasSavedKey = false
     /// 当前请求已收到的正文字数；长时间生成时界面据此显示实时进度，请求结束或取消后归零。
     @Published private(set) var streamedCharacters = 0
+    /// 当前请求已收到的正文末尾片段，供"AI 运行记录"实时预览。
+    @Published private(set) var streamedPreview = ""
     private let defaults: UserDefaults
     private let keys: any ReadingAIKeyStoring
     private let client: any ReadingAICompleting
@@ -86,13 +88,14 @@ final class ReadingAIStore: ObservableObject {
         try request.validate()
         guard let key = try keys.read(scope: config.endpoint().absoluteString), !key.isEmpty else { throw ReadingAIError.missingKey }
         let id = UUID(), snapshot = revision, client = client
-        streamedCharacters = 0
+        streamedCharacters = 0; streamedPreview = ""
         let task = Task {
-            try await client.complete(configuration: config, apiKey: key, request: request) { received in
-                // 客户端在后台线程回调，回到主线程只写一个计数，避免高频刷新拖慢生成。
+            try await client.complete(configuration: config, apiKey: key, request: request) { received, tail in
+                // 客户端在后台线程回调，回到主线程只写计数和末尾片段，避免高频刷新拖慢生成。
                 Task { @MainActor [weak self] in
                     guard let self, self.revision == snapshot else { return }
                     self.streamedCharacters = max(self.streamedCharacters, received)
+                    self.streamedPreview = tail
                 }
             }
         }
