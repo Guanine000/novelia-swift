@@ -29,6 +29,7 @@ struct PagedTextBook {
     var tocWordCounts: (@Sendable () async -> ReaderTOCWordCounts)? = nil
     var adjustTXTChapters: (() -> Void)? = nil
     /// 仅本地 TXT 提供；在线文本不提供，避免为预测请求正文。
+    var localRecapBook: TXTParsedBook? = nil
     var localTimeMetrics: (@Sendable (ReadingTextProjection) async throws -> ReadingTimeMetrics)? = nil
 }
 
@@ -228,6 +229,11 @@ private struct EPUBReaderViewContent: View {
         .trackReadingTime(statisticsBook ?? ReadingBook(id: "epub:\(bookURL?.lastPathComponent ?? "sample")",
                                                        title: bookURL?.deletingPathExtension().lastPathComponent ?? "样例书", kind: .epub),
                           ready: model.status == .ready)
+        .modifier(ReaderRecapPresentation(store: settings.recaps, source: model.localRecapSource,
+            active: model.status == .ready && !model.isLayingOut && !speech.isActive
+                && !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingSpeech
+                && !isShowingBookPreferences && model.activeNote == nil && model.plainLinkMessage == nil,
+            libraryBookKey: statisticsBook?.id))
         .modifier(ReaderSpeechPresentation(controller: speech, isPresented: $isShowingSpeech,
                                   anchor: { model.speechAnchor },
                                   title: model.source?.bookTitle ?? "阅读器",
@@ -329,6 +335,7 @@ private struct EPUBReaderViewContent: View {
                     Button("回到刚才阅读处") { model.returnToReading() }
                 }
                 if model.localTimeSource != nil { ReaderRemainingTimeMenu(store: settings.remainingTime) }
+                if model.localRecapSource != nil { ReaderRecapMenu(store: settings.recaps) }
                 ReaderKeepScreenOnMenuItem()
                 Button { isShowingBookPreferences = true } label: { Label("本书文字处理", systemImage: "slider.horizontal.3") }
                 Button {
@@ -886,6 +893,7 @@ private struct EPUBReaderPageSurface: View, Equatable {
     let speechRects: [CGRect]
     let searchRects: [CGRect]
     @Environment(\.readerSpeechActions) private var speechActions
+    @Environment(\.characterLookup) private var characterLookup
     @State private var translateText: String?
     @State private var showsTranslate = false
 
@@ -924,6 +932,7 @@ private struct EPUBReaderPageSurface: View, Equatable {
                 speechActions.start(SpeechAnchor(chapterIndex: model.location.spineIndex, progression: 0,
                                                 chapterUTF16Length: 0, startIndexHint: nil, sourceUTF16Offset: range.location))
             },
+            characterLookup: characterLookup,
             selectionTranslate: { text in
                 translateText = text
                 showsTranslate = true

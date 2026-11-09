@@ -13,6 +13,8 @@ final class ReaderSettings: ObservableObject {
     private(set) var txtReaderIdentities: [String: String] = [:]
     func registerTXTBook(_ book: TXTParsedBook) { txtReaderIdentities[book.contentHash] = book.rulesFingerprint }
     func invalidateTXTBook(hash: String) { txtReaderIdentities.removeValue(forKey: hash) }
+    let characters: CharacterLexiconStore
+    let recaps: ReadingRecapStore
     let remainingTime: ReadingTimeEstimateStore
     let txtAdjustments: TXTChapterAdjustmentStore
     let offlineChapters: OnlineChapterOfflineStore
@@ -70,6 +72,8 @@ final class ReaderSettings: ObservableObject {
         txtAdjustments = TXTChapterAdjustmentStore(directory: defaults === UserDefaults.standard
             ? support.appendingPathComponent("TXTChapterAdjustments", isDirectory: true)
             : (offlineDirectory ?? FileManager.default.temporaryDirectory.appendingPathComponent("TXTAdjustments-" + UUID().uuidString)).appendingPathComponent("TXTChapterAdjustments", isDirectory: true))
+        characters = CharacterLexiconStore(defaults: defaults)
+        recaps = ReadingRecapStore(defaults: defaults)
         remainingTime = ReadingTimeEstimateStore(defaults: defaults)
         self.positions = positions ?? ReadingPositionStore(defaults: defaults)
         self.bookmarks = bookmarks ?? ReaderBookmarkStore()

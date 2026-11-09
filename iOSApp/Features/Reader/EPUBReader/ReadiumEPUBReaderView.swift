@@ -162,6 +162,10 @@ private struct ReadiumEPUBReaderViewContent: View {
             if let textBook { await model.open(textBook: textBook, systemIsDark: colorScheme == .dark) }
             else if let bookURL { await model.open(url: bookURL, systemIsDark: colorScheme == .dark) }
         }
+        .modifier(ReaderRecapPresentation(store: settings.recaps, source: model.localRecapSource,
+            active: model.status == .ready && !model.speech.isActive && !isShowingTOC && !isShowingStyle
+                && !isShowingBookmarks && !isShowingSpeech && !isShowingBookPreferences && model.activeNote == nil,
+            libraryBookKey: statisticsBook?.id))
         .onAppear {
             if speechHandoff?.openRequest == nil { speechHandoff?.release() }
             model.speech.onProgressSave = { [weak model = model] point in model?.recordListeningProgress(point) }
@@ -294,6 +298,7 @@ private struct ReadiumEPUBReaderViewContent: View {
                     Button("回到刚才阅读处") { model.returnToReading() }
                 }
                 if model.localTimeSource != nil { ReaderRemainingTimeMenu(store: settings.remainingTime) }
+                if model.localRecapSource != nil { ReaderRecapMenu(store: settings.recaps) }
                 ReaderKeepScreenOnMenuItem()
                 Button { isShowingBookPreferences = true } label: { Label("本书文字处理", systemImage: "slider.horizontal.3") }
                 Button {
@@ -522,16 +527,19 @@ private struct ReadiumEPUBReaderViewContent: View {
 
 /// 把模型当前的 EPUBNavigatorViewController 作为子控制器嵌入；重建导航器时由 `.id` 换新宿主。
 private struct ReadiumNavigatorHost: UIViewControllerRepresentable {
+    @Environment(\.characterLookup) private var characterLookup
     let model: ReadiumEPUBReaderModel
 
     func makeUIViewController(context: Context) -> ReadiumNavigatorContainer {
         let container = ReadiumNavigatorContainer()
+        container.onCharacterLookup = characterLookup
         container.onSpeakSelection = { [weak model] selection in model?.startSpeech(selection: selection) }
         if let navigator = model.navigator { container.embed(navigator) }
         return container
     }
 
     func updateUIViewController(_ container: ReadiumNavigatorContainer, context: Context) {
+        container.onCharacterLookup = characterLookup
         if let navigator = model.navigator, container.embedded !== navigator {
             container.embed(navigator)
         }
@@ -539,6 +547,16 @@ private struct ReadiumNavigatorHost: UIViewControllerRepresentable {
 }
 
 final class ReadiumNavigatorContainer: UIViewController {
+    var onCharacterLookup: ((String) -> Void)?
+    @objc func lookupCharacterSelection() {
+        guard let selection = (embedded as? EPUBNavigatorViewController)?.currentSelection,
+              let text = selection.locator.text.highlight else { return }
+        onCharacterLookup?(text)
+    }
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(lookupCharacterSelection) { return onCharacterLookup != nil }
+        return super.canPerformAction(action, withSender: sender)
+    }
     var onSpeakSelection: ((Selection) -> Void)?
     @objc func speakSelection() {
         guard let selection = (embedded as? EPUBNavigatorViewController)?.currentSelection else { return }

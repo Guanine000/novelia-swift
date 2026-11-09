@@ -292,6 +292,32 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		C0692DA97B17885CAA696743 /* ReadingTimeEstimateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D505843883514A6857EEA04 /* ReadingTimeEstimateStore.swift */; };
 		8C607327557C6356C89BAB64 /* ReaderRemainingTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0503F6C083764440C88110 /* ReaderRemainingTime.swift */; };
 		43510B642C77BB0AFA47CC49 /* ReaderRemainingTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E0503F6C083764440C88110 /* ReaderRemainingTime.swift */; };
+		41B3893D0DEC032D8AB875D8 /* ReadingAIContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C772DA1C3B114227BAD4EA7 /* ReadingAIContract.swift */; };
+		D4353FCF7EA05C61E64E8D68 /* ReadingAIContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C772DA1C3B114227BAD4EA7 /* ReadingAIContract.swift */; };
+		3E1E6494D35DE1CD62BDB2E2 /* OpenAIReadingClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50D80A99C113613A9FF2A5D9 /* OpenAIReadingClient.swift */; };
+		B58112BBFF27931775021D8C /* OpenAIReadingClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50D80A99C113613A9FF2A5D9 /* OpenAIReadingClient.swift */; };
+		81358AF929E19A3D63F17C44 /* ReadingAIKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82918D8A6DB65D6C2F7619A /* ReadingAIKeychain.swift */; };
+		5C418400B9AF6762D67E9862 /* ReadingAIKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82918D8A6DB65D6C2F7619A /* ReadingAIKeychain.swift */; };
+		D8542D63AE24B879E5AD4579 /* ReadingAIStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6703A6D977EB2B75EA758F96 /* ReadingAIStore.swift */; };
+		B0EDDD33B29EF1F1B414EB4B /* ReadingAIStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6703A6D977EB2B75EA758F96 /* ReadingAIStore.swift */; };
+		C30DC3925BC90595D763707F /* ReadingAISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ADC99550D7F36CC26335FB0 /* ReadingAISettingsView.swift */; };
+		AD067744C746569A73199E32 /* ReadingAISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ADC99550D7F36CC26335FB0 /* ReadingAISettingsView.swift */; };
+		6C3E52DD84B02A76B0AF62B0 /* ReadingRecap.swift in Sources */ = {isa = PBXBuildFile; fileRef = D530BF597C2D6E58B4DC0242 /* ReadingRecap.swift */; };
+		C1C36A2C28DA1775840978A2 /* ReadingRecap.swift in Sources */ = {isa = PBXBuildFile; fileRef = D530BF597C2D6E58B4DC0242 /* ReadingRecap.swift */; };
+		5D8F3082D899C08C3D10FF3B /* ReadingRecapStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD5CE619118B41020FB87E8A /* ReadingRecapStore.swift */; };
+		05093F82BC334F99388674B9 /* ReadingRecapStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD5CE619118B41020FB87E8A /* ReadingRecapStore.swift */; };
+		95380E9E08F5F29F295D453B /* ReaderRecap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 189E81BDD7A2993EE0BED36B /* ReaderRecap.swift */; };
+		44F5E635987B0495ED3E8ABC /* ReaderRecap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 189E81BDD7A2993EE0BED36B /* ReaderRecap.swift */; };
+		CBBA97787967925B75C0EC50 /* CharacterLexicon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E48AD0184BD652154FE91E3 /* CharacterLexicon.swift */; };
+		2CDE043160B2AEC12065FECF /* CharacterLexicon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E48AD0184BD652154FE91E3 /* CharacterLexicon.swift */; };
+		35D3A4EDCC7D1C19C90FA1A1 /* CharacterLexiconStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF028E33B1D50C10DA6AF24F /* CharacterLexiconStore.swift */; };
+		5CFB62BC67DC91B03A904CFE /* CharacterLexiconStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF028E33B1D50C10DA6AF24F /* CharacterLexiconStore.swift */; };
+		30365401E5F9BB475D4292A7 /* CharacterVolumeLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E854C22C4CAF76EC4619B8 /* CharacterVolumeLoader.swift */; };
+		709EA2C6C706B31819C2FCA6 /* CharacterVolumeLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94E854C22C4CAF76EC4619B8 /* CharacterVolumeLoader.swift */; };
+		F0B428D25E7CC5BF3F0BD048 /* ReadingCharactersEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D24038D26A5A1A5A34320D64 /* ReadingCharactersEntry.swift */; };
+		644385B483AFC07514AE8DFF /* ReadingCharactersEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D24038D26A5A1A5A34320D64 /* ReadingCharactersEntry.swift */; };
+		39466130E0D6E8F97106F7C2 /* CharacterSeriesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 384329C8926A69209ABA6008 /* CharacterSeriesView.swift */; };
+		AF2795795323F7D409C534FA /* CharacterSeriesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 384329C8926A69209ABA6008 /* CharacterSeriesView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -437,6 +463,19 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 		61EC990BF69B724CD842E0A8 /* ReadingTimeEstimate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Features/Reader/ReadingTimeEstimate.swift; sourceTree = SOURCE_ROOT; };
 		6D505843883514A6857EEA04 /* ReadingTimeEstimateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Features/Reader/ReadingTimeEstimateStore.swift; sourceTree = SOURCE_ROOT; };
 		5E0503F6C083764440C88110 /* ReaderRemainingTime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/ReaderRemainingTime.swift; sourceTree = SOURCE_ROOT; };
+		4C772DA1C3B114227BAD4EA7 /* ReadingAIContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Domain/ReadingAIContract.swift; sourceTree = SOURCE_ROOT; };
+		50D80A99C113613A9FF2A5D9 /* OpenAIReadingClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Infrastructure/API/OpenAIReadingClient.swift; sourceTree = SOURCE_ROOT; };
+		F82918D8A6DB65D6C2F7619A /* ReadingAIKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Infrastructure/API/ReadingAIKeychain.swift; sourceTree = SOURCE_ROOT; };
+		6703A6D977EB2B75EA758F96 /* ReadingAIStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Features/ReadingAI/ReadingAIStore.swift; sourceTree = SOURCE_ROOT; };
+		6ADC99550D7F36CC26335FB0 /* ReadingAISettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Settings/ReadingAISettingsView.swift; sourceTree = SOURCE_ROOT; };
+		D530BF597C2D6E58B4DC0242 /* ReadingRecap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Features/ReadingAI/ReadingRecap.swift; sourceTree = SOURCE_ROOT; };
+		BD5CE619118B41020FB87E8A /* ReadingRecapStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Features/ReadingAI/ReadingRecapStore.swift; sourceTree = SOURCE_ROOT; };
+		189E81BDD7A2993EE0BED36B /* ReaderRecap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/ReaderRecap.swift; sourceTree = SOURCE_ROOT; };
+		0E48AD0184BD652154FE91E3 /* CharacterLexicon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Features/ReadingAI/CharacterLexicon.swift; sourceTree = SOURCE_ROOT; };
+		FF028E33B1D50C10DA6AF24F /* CharacterLexiconStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Features/ReadingAI/CharacterLexiconStore.swift; sourceTree = SOURCE_ROOT; };
+		94E854C22C4CAF76EC4619B8 /* CharacterVolumeLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/App/Integrations/CharacterVolumeLoader.swift; sourceTree = SOURCE_ROOT; };
+		D24038D26A5A1A5A34320D64 /* ReadingCharactersEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/App/Integrations/ReadingCharactersEntry.swift; sourceTree = SOURCE_ROOT; };
+		384329C8926A69209ABA6008 /* CharacterSeriesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Library/CharacterSeriesView.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -472,6 +511,19 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 		D10000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				384329C8926A69209ABA6008 /* CharacterSeriesView.swift */,
+				D24038D26A5A1A5A34320D64 /* ReadingCharactersEntry.swift */,
+				94E854C22C4CAF76EC4619B8 /* CharacterVolumeLoader.swift */,
+				FF028E33B1D50C10DA6AF24F /* CharacterLexiconStore.swift */,
+				0E48AD0184BD652154FE91E3 /* CharacterLexicon.swift */,
+				189E81BDD7A2993EE0BED36B /* ReaderRecap.swift */,
+				BD5CE619118B41020FB87E8A /* ReadingRecapStore.swift */,
+				D530BF597C2D6E58B4DC0242 /* ReadingRecap.swift */,
+				6ADC99550D7F36CC26335FB0 /* ReadingAISettingsView.swift */,
+				6703A6D977EB2B75EA758F96 /* ReadingAIStore.swift */,
+				F82918D8A6DB65D6C2F7619A /* ReadingAIKeychain.swift */,
+				50D80A99C113613A9FF2A5D9 /* OpenAIReadingClient.swift */,
+				4C772DA1C3B114227BAD4EA7 /* ReadingAIContract.swift */,
 				5E0503F6C083764440C88110 /* ReaderRemainingTime.swift */,
 				6D505843883514A6857EEA04 /* ReadingTimeEstimateStore.swift */,
 				61EC990BF69B724CD842E0A8 /* ReadingTimeEstimate.swift */,
@@ -878,6 +930,19 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				39466130E0D6E8F97106F7C2 /* CharacterSeriesView.swift in Sources */,
+				F0B428D25E7CC5BF3F0BD048 /* ReadingCharactersEntry.swift in Sources */,
+				30365401E5F9BB475D4292A7 /* CharacterVolumeLoader.swift in Sources */,
+				35D3A4EDCC7D1C19C90FA1A1 /* CharacterLexiconStore.swift in Sources */,
+				CBBA97787967925B75C0EC50 /* CharacterLexicon.swift in Sources */,
+				95380E9E08F5F29F295D453B /* ReaderRecap.swift in Sources */,
+				5D8F3082D899C08C3D10FF3B /* ReadingRecapStore.swift in Sources */,
+				6C3E52DD84B02A76B0AF62B0 /* ReadingRecap.swift in Sources */,
+				C30DC3925BC90595D763707F /* ReadingAISettingsView.swift in Sources */,
+				D8542D63AE24B879E5AD4579 /* ReadingAIStore.swift in Sources */,
+				81358AF929E19A3D63F17C44 /* ReadingAIKeychain.swift in Sources */,
+				3E1E6494D35DE1CD62BDB2E2 /* OpenAIReadingClient.swift in Sources */,
+				41B3893D0DEC032D8AB875D8 /* ReadingAIContract.swift in Sources */,
 				8C607327557C6356C89BAB64 /* ReaderRemainingTime.swift in Sources */,
 				BE700CE452E5FB9CB15499C3 /* ReadingTimeEstimateStore.swift in Sources */,
 				0BD300450DE22BA47D3A17EB /* ReadingTimeEstimate.swift in Sources */,
@@ -1023,6 +1088,19 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AF2795795323F7D409C534FA /* CharacterSeriesView.swift in Sources */,
+				644385B483AFC07514AE8DFF /* ReadingCharactersEntry.swift in Sources */,
+				709EA2C6C706B31819C2FCA6 /* CharacterVolumeLoader.swift in Sources */,
+				5CFB62BC67DC91B03A904CFE /* CharacterLexiconStore.swift in Sources */,
+				2CDE043160B2AEC12065FECF /* CharacterLexicon.swift in Sources */,
+				44F5E635987B0495ED3E8ABC /* ReaderRecap.swift in Sources */,
+				05093F82BC334F99388674B9 /* ReadingRecapStore.swift in Sources */,
+				C1C36A2C28DA1775840978A2 /* ReadingRecap.swift in Sources */,
+				AD067744C746569A73199E32 /* ReadingAISettingsView.swift in Sources */,
+				B0EDDD33B29EF1F1B414EB4B /* ReadingAIStore.swift in Sources */,
+				5C418400B9AF6762D67E9862 /* ReadingAIKeychain.swift in Sources */,
+				B58112BBFF27931775021D8C /* OpenAIReadingClient.swift in Sources */,
+				D4353FCF7EA05C61E64E8D68 /* ReadingAIContract.swift in Sources */,
 				43510B642C77BB0AFA47CC49 /* ReaderRemainingTime.swift in Sources */,
 				C0692DA97B17885CAA696743 /* ReadingTimeEstimateStore.swift in Sources */,
 				6C4EB232C78616723159519C /* ReadingTimeEstimate.swift in Sources */,

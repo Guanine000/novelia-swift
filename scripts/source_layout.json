@@ -134,5 +134,18 @@
   "TXTAdjustmentMigration.swift": "iOSApp/Features/Reader/TXTAdjustmentMigration.swift",
   "ReadingTimeEstimate.swift": "Sources/NoveliaIOSCore/Features/Reader/ReadingTimeEstimate.swift",
   "ReadingTimeEstimateStore.swift": "Sources/NoveliaIOSCore/Features/Reader/ReadingTimeEstimateStore.swift",
-  "ReaderRemainingTime.swift": "iOSApp/Features/Reader/ReaderRemainingTime.swift"
+  "ReaderRemainingTime.swift": "iOSApp/Features/Reader/ReaderRemainingTime.swift",
+  "ReadingAIContract.swift": "Sources/NoveliaIOSCore/Domain/ReadingAIContract.swift",
+  "OpenAIReadingClient.swift": "Sources/NoveliaIOSCore/Infrastructure/API/OpenAIReadingClient.swift",
+  "ReadingAIKeychain.swift": "Sources/NoveliaIOSCore/Infrastructure/API/ReadingAIKeychain.swift",
+  "ReadingAIStore.swift": "Sources/NoveliaIOSCore/Features/ReadingAI/ReadingAIStore.swift",
+  "ReadingAISettingsView.swift": "iOSApp/Features/Settings/ReadingAISettingsView.swift",
+  "ReadingRecap.swift": "Sources/NoveliaIOSCore/Features/ReadingAI/ReadingRecap.swift",
+  "ReadingRecapStore.swift": "Sources/NoveliaIOSCore/Features/ReadingAI/ReadingRecapStore.swift",
+  "ReaderRecap.swift": "iOSApp/Features/Reader/ReaderRecap.swift",
+  "CharacterLexicon.swift": "Sources/NoveliaIOSCore/Features/ReadingAI/CharacterLexicon.swift",
+  "CharacterLexiconStore.swift": "Sources/NoveliaIOSCore/Features/ReadingAI/CharacterLexiconStore.swift",
+  "CharacterVolumeLoader.swift": "iOSApp/App/Integrations/CharacterVolumeLoader.swift",
+  "ReadingCharactersEntry.swift": "iOSApp/App/Integrations/ReadingCharactersEntry.swift",
+  "CharacterSeriesView.swift": "iOSApp/Features/Library/CharacterSeriesView.swift"
 }

@@ -235,6 +235,9 @@ struct SettingsView: View {
                 }
             }
             Section {
+                NavigationLink {
+                    ReadingAISettingsView(store: services.readingAI)
+                } label: { Label("AI 阅读辅助", systemImage: "sparkles") }
                 Toggle(isOn: $showsTOCDiagnostics) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("显示目录诊断信息")

@@ -51,6 +51,11 @@ struct DownloadedWebNovelTXTReader: View {
                 .id(adjustmentRevision)
         } else {
             scrollReader
+                .modifier(ReaderRecapPresentation(store: settings.recaps,
+                    source: parsedBook.map { .txt($0, title: title, chapter: chapterIndex, projection: settings.projection) },
+                    active: bodyChunksChapterIndex == chapterIndex && !speech.isActive && !isShowingContents
+                        && !isShowingSearch && !isShowingSpeech && !isShowingBookPreferences && !isShowingAdjustment,
+                    libraryBookKey: statisticsID))
                 .trackReadingTime(ReadingBook(id: statisticsID ?? "txt:\(url.lastPathComponent)", title: title, kind: .txt),
                                   ready: !isShowingAdjustment && chapters?.indices.contains(chapterIndex) == true && bodyChunksChapterIndex == chapterIndex)
         }
@@ -216,6 +221,7 @@ struct DownloadedWebNovelTXTReader: View {
                     Button("回到刚才阅读处") { selectedSearchHit = nil; chapterIndex = point.chapter; returnAnchor = point.anchor; readingReturnPoint = nil }
                 }
                 ReaderRemainingTimeMenu(store: settings.remainingTime)
+                ReaderRecapMenu(store: settings.recaps)
                 ReaderKeepScreenOnMenuItem()
                 Button("本书文字处理") { isShowingBookPreferences = true }
                 Button { settings.pagedTextReading = true } label: {
@@ -524,6 +530,7 @@ private struct TXTPagedReader: View {
                 bookmarkKey: "txt:\(hash)",
                 tocWordCounts: { await BookWordCounter.txtTOCCounts(parsed) },
                 adjustTXTChapters: onAdjust,
+                localRecapBook: parsed,
                 localTimeMetrics: { projection in
                     try await ReadingTimeMetrics.loadTXT(parsed, projection: projection, paged: true)
                 })

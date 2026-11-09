@@ -13,16 +13,20 @@ final class AppServices: ObservableObject {
     let api: APIServiceCollection
     let account: AccountAuthStore
     let forumAccount: ForumAuthStore
+    let readingAI: ReadingAIStore
     let speech: any SpeechEngineSelecting
     /// 阅读器退出后仍在播放的朗读会话；根视图的迷你条观察这里，阅读器出现时回收。
     let speechHandoff = SpeechHandoffStore()
 
     init(configuration: APIConfiguration, api: APIServiceCollection,
          account: AccountAuthStore, forumAccount: ForumAuthStore, local: LocalAppServices? = nil,
-         performsUpdateChecks: Bool = true, speechService: (any CloudSpeechSynthesizing)? = nil) {
+         performsUpdateChecks: Bool = true, speechService: (any CloudSpeechSynthesizing)? = nil,
+         readingAI: ReadingAIStore? = nil) {
         self.performsUpdateChecks = performsUpdateChecks
         speech = AppSpeechEngineFactory(service: speechService)
         self.local = local ?? LocalAppServices()
+        self.readingAI = readingAI ?? ReadingAIStore(defaults: self.local.readerSettings.defaults,
+                                                   keys: MemoryReadingAIKeys(), client: UnavailableReadingAIClient())
         self.configuration = configuration
         self.api = api
         self.account = account
@@ -44,7 +48,8 @@ final class AppServices: ObservableObject {
             novelToken: { [store = account.tokenStore] in store.read() },
             forumToken: { [store = forum.tokenStore] in store.read() })
         return AppServices(configuration: configuration, api: api, account: account, forumAccount: forum,
-                           speechService: EdgeSpeechClient())
+                           speechService: EdgeSpeechClient(),
+                           readingAI: ReadingAIStore(defaults: .standard, keys: ReadingAIKeychain(), client: OpenAIReadingClient()))
     }
 
 

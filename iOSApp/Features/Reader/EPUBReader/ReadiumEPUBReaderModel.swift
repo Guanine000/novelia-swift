@@ -424,7 +424,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         config.decorationTemplates["novelia-speech"] = HTMLDecorationTemplate(
             layout: .boxes, element: "<span role='button' aria-label='当前朗读句' class='novelia-speech-current'></span>",
             stylesheet: ".novelia-speech-current { background: rgba(255,210,0,0.30); border-radius: 3px; }")
-        config.editingActions = [EditingAction(title: "从此句朗读", action: #selector(ReadiumNavigatorContainer.speakSelection))] + EditingAction.defaultActions
+        config.editingActions = [EditingAction(title: "人物词条", action: #selector(ReadiumNavigatorContainer.lookupCharacterSelection)), EditingAction(title: "从此句朗读", action: #selector(ReadiumNavigatorContainer.speakSelection))] + EditingAction.defaultActions
         config.readiumCSSRSProperties.pageGutter = CSSPxLength(Double(style.leftMargin + style.rightMargin) / 2)
         // 根背景透明：书籍未设背景时露出宿主绘制的阅读背景；书籍给 body 设的背景
         // （如 `<body bgcolor>`）按 CSS 规则延伸到整个页面。
@@ -1094,6 +1094,20 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     }
 
 
+    var localRecapSource: LocalRecapSource? {
+        guard status == .ready, let publication, publication.readingOrder.indices.contains(readingTimePoint.resource) else { return nil }
+        if let book = textBook?.localRecapBook, let source = textBook?.source as? TextChapterSource {
+            return .txt(book, title: source.bookTitle, chapter: source.tocEntry(containingUnit: readingTimePoint.resource) ?? 0, projection: settings.projection)
+        }
+        guard let container = imageContainer, let hash = bookHash else { return nil }
+        let href = publication.readingOrder[readingTimePoint.resource].href
+        let path = EPUBContainer.normalizePath(EPUBContainer.stripFragment(href.removingPercentEncoding ?? href))
+        let candidates = container.spine.indices.filter {
+            container.spine[$0].href == path || container.spine[$0].href.hasSuffix("/" + path) || path.hasSuffix("/" + container.spine[$0].href)
+        }
+        guard candidates.count == 1 else { return nil }
+        return .epub(container, hash: hash, currentSpine: candidates[0], projection: settings.projection)
+    }
     var localTimeSource: LocalReadingTimeSource? {
         guard status == .ready else { return nil }
         let projection = settings.projection

@@ -744,3 +744,38 @@ python3 scripts/check_architecture_release.py '<Release Novelia.app 内的 Novel
 `ReaderRemainingTime.swift` 是共享 iOS 15 展示层，底栏常驻采样视图不随顶栏显隐销毁。`LocalReadingTimeSource` 只接受本地 EPUB 容器或已有 TXT，后台任务取消向内传播；Readium readingOrder 必须唯一映射至 ZIP spine，不通过 Publication 额外请求正文。没有完整字数或可用速度时明确提示，不把缺失章节当零字。布局、文字规则、前后台、弹层与听书切换会重建锚点。
 
 `SpeechPlaybackController.onProgressSave` 随真实收听续听点节流通知宿主，强制补存沿用暂停／停止／退出／后台路径。该回调与跟读开关独立；各本地宿主把实际章号、偏移／比例映射至既有进度存储，TXT 仍经过目录身份检查。滚动听书只有逻辑章号，同一章沿用 `movingToChapter`，不清除已有分页单元和偏移；换章后才丢弃旧单元。Readium 本地 Locator 同步写入本机恢复键，未提供 Locator 时由较新的通用位置恢复。听书暂停默读速度学习。`ReadingTimeEstimateTests` 覆盖逻辑章、无效位置、采样过滤、速率窗口与存储隔离；`scripts/test_speech_playback.py` 的真实控制器桩测试覆盖关闭跟读仍保存进度和重复补存去重。
+
+
+## AI 阅读辅助基础设施
+
+`AppServices.readingAI` 持有唯一 `ReadingAIStore`；生产由 `novelia` 入口组装 `OpenAIReadingClient` 与 `ReadingAIKeychain`。替代组装默认使用实例内 `MemoryReadingAIKeys` 和明确抛错的 `UnavailableReadingAIClient`，不访问生产密钥或网络。页面只消费 Store，具体 HTTP 编码与传输留在 Infrastructure/API。Domain 的 `ReadingAICompleting` 接收单次指令和明确输入，没有书库、未来章节加载器或对话历史；后续回顾／人物功能必须在调用前完成范围裁剪与用户发送意图确认。
+
+配置由 `ReadingAIConfiguration` 验证，存储键 `reader.ai.configuration.v1` 只含非密钥字段。密钥服务名为 `cc.novelia.ios.reading-ai.v1`，账户为规范化最终接口 URL 的 SHA-256；使用 `WhenUnlockedThisDeviceOnly`，不打开 Keychain 同步，不复用账号或已退役朗读服务的身份。换接口不携带旧密钥，保存失败不切换当前配置。
+
+客户端使用独占 ephemeral URLSession，拒绝重定向，关闭 Cookie／缓存／凭据存储；输入 128 KiB，返回按 AsyncBytes 增量接收且硬限 1 MiB，退出时取消底层 Session。请求限时且无自动重试，不记录头、正文、密钥和原始服务端错误。Store 为每个请求持有可取消任务，并以配置代次拒绝迟到结果。只接受 `finish_reason=stop` 的非空文本，截断／拒答／工具调用分别拒绝。输出 tokens 参数和 JSON 模式显式配置，JSON 结果的业务结构与事实出处由后续功能校验。
+
+`ReadingAIInfrastructureTests` 使用内存凭据、假生成服务和 URLProtocol 内存响应，覆盖请求隔离、大小／状态／返回结构、密钥作用域、取消及配置损坏恢复；不连接真实模型。连接测试只发送固定短句，JSON 模式使用对应 JSON 指令，AI 总开关关闭时也可由用户显式测试。Mac 验证仍运行 Package 测试与两个 scheme 编译；真实服务兼容、费用和 Keychain 设备行为需另行验证。
+
+
+## AI 前情回顾
+
+`ReaderSettings.recaps` 持有唯一 `ReadingRecapStore`，保存按书哈希隔离的最后实际阅读时间、提示间隔和最多 32 本的有界结果缓存，独立于统计／WebDAV。`ReaderRecapPresentation` 在本次打开的新日期写入前判断提示，前台正文连续可读 15 秒才更新日期。提示默认 7 天，实例内 30 分钟认领窗口避免引擎切换重建视图重复提示，第一章或 AI 关闭不自动询问；不从旧进度时间戳推断阅读间隔。
+
+`LocalRecapSource` 只接收已有 TXT 或本地 EPUB。原生／Readium 的 TXT 分页均用 `TextChapterSource.tocEntry` 把单元转为逻辑章；EPUB 按目录 spine 起点分组，Readium 当前资源必须唯一映射至包内 spine。读取闭包在创建时绑定当前章上界，范围越界直接拒绝；使用独立 ZIP 容器，不调用在线内容服务，不导航主阅读器。`PagedTextBook.localRecapBook` 仅本地 TXT 提供，在线正文不提供此能力。
+
+Core 的 `ReadingRecapPlan` 要求输入为边界之前连续 1–3 章，正文总预算 96 KiB，按字符安全分块且最多 12 次顺序请求。`ReadingRecapGenerator` 每块发送前后核对配置，取消或任何块失败都不交付部分结果。模型只返回结构化事件，每条的章号、连续引文和源 UTF-16 偏移均校验；汇总不再引入第二次自由生成，去重后保留最多五件最近事件。校验限制证据边界，不等同语义正确率保证。
+
+缓存键包含文件／目录／文字投影身份、实际正文哈希、当前边界、模型配置（不含启停开关）和提示词版本；从缓存恢复仍按本次正文与偏移重新验证。出处在独立只读页定位引文，不调用阅读位置／统计写入。`ReadingRecapTests` 覆盖未来章节排除、Unicode 分块、伪引文、异常偏移、预算拒绝、日期、回退缓存隔离与假模型生成；网络和 Keychain 回归沿用 AI 基础设施测试。
+
+
+## 跨卷人物词条
+
+`ReaderSettings.characters` 持有唯一 `CharacterLexiconStore`，以稳定系列 ID 作为作品身份，单独保存用户确认的书籍键卷序及人物 UUID。`CharacterFact` 独立携带显示名称、正文版本、卷章、UTF-16 引文范围、原文和手工修订状态；人物没有独立的全局真名／简介，`CharacterScope.visible` 在逐事实过滤后才派生名称、别名、首次记录与查询匹配，避免未来字段混入已知人物。卷序变化后原资料保留，并用新序列和当前章重新筛选。
+
+AI 每次接收一卷此前连续 1–3 章，复用回顾分块预算；`CharacterExtractionPlan` 验证请求范围、模型人名、章号及精确引文，`CharacterGenerator` 顺序执行且核对配置代次。只返回未持久化候选，用户接受后创建独立人物，绝不按姓名自动归并。显式合并保留各事实获知位置，拆分只操作当前可见事实；编辑保留原证据并标记手工修订。归档键 `reader.characters.archive.v1` 上限 4 MiB／2000 人物／20000 事实，损坏或未知版本保留原数据并停止写入，不静默清空。
+
+`CharacterSeriesView` 显式观察 App 注入的同一人物 Store 和 AI Store，按卷、提取目标和章节范围使用独立的可取消读取任务，改变范围取消旧生成并丢弃候选。书库到只读来源的连接位于 `App/Integrations/CharacterVolumeLoader.swift`：读取本地文件、分章覆盖和进度快照，但不调用会迁移进度的 `ReaderSettings.txtBook`，不激活另一套单书设置，不写阅读位置或书签；旧版和缺失卷不贡献事实。只保留必要源对象及其他卷的版本摘要，避免同时常驻全系列 TXT 正文。
+
+`ReadingCharactersEntry` 负责阅读器到明确系列的导航适配，使用书库键或唯一文件哈希匹配，不按书名猜测。`ReaderRecapPresentation` 提供查询环境动作；原生选字菜单与 Readium 编辑动作传入人名，TXT 滚动使用普通菜单查询。查询不触发 AI。出处单独读取本地章节，核验版本和引文；安全同名章节回退仍检查当前进度，不导航主阅读器、不计阅读时长。
+
+`CharacterLexiconTests` 覆盖回退时隐藏身份与别名查询、缺失／变更卷、跨作品隔离、伪引文及越界章、同名不合并、显式合并后防剧透、拆分／修订证据保留、卷序确认和损坏存储保护。真机的选字、导航、旧系统和真实模型质量必须独立验证；静态语法与工程登记不能替代双 scheme 编译。

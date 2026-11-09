@@ -470,6 +470,8 @@ struct LibraryView: View {
 // MARK: - 系列详情
 
 struct LibrarySeriesDetailView: View {
+    @EnvironmentObject private var readerSettings: ReaderSettings
+    @EnvironmentObject private var services: AppServices
     let seriesID: String
     var sourceFilter = LibrarySourceFilter.all
 
@@ -617,6 +619,10 @@ struct LibrarySeriesDetailView: View {
                 .accessibilityHint("进入多选，可批量移出系列、删除或压缩分享")
             }
             Menu {
+                NavigationLink {
+                    CharacterSeriesView(workID: seriesID, books: unfilteredMembers, store: readerSettings.characters, ai: services.readingAI,
+                        initialBook: unfilteredMembers.max { (state.lastOpened[$0.key] ?? .distantPast) < (state.lastOpened[$1.key] ?? .distantPast) }?.key)
+                } label: { Label("AI 人物词条", systemImage: "person.text.rectangle") }
                 Button { isCheckingNewVolumes = true } label: { Label("检查新卷", systemImage: "arrow.clockwise") }
                 Button { isAddingBooks = true } label: { Label("添加书籍", systemImage: "plus") }
                 LibrarySeriesMenuItems(seriesID: seriesID, name: series?.name ?? "", books: members, actions: bookActions)

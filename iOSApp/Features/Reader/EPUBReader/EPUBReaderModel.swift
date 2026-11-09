@@ -30,6 +30,7 @@ final class EPUBReaderModel: ObservableObject {
     var container: EPUBContainer? { source as? EPUBContainer }
     private(set) var pageBook: EPUBPageBook?
     @Published private(set) var readingTimePoint = ReadingTimePoint.start
+    private var recapTXT: TXTParsedBook?
     private var textTimeMetrics: (@Sendable (ReadingTextProjection) async throws -> ReadingTimeMetrics)?
     @Published private(set) var location = EPUBReadingLocation(spineIndex: 0, pageIndex: 0) {
         didSet {
@@ -59,6 +60,14 @@ final class EPUBReaderModel: ObservableObject {
                 }
             }
         }
+    }
+    var localRecapSource: LocalRecapSource? {
+        guard status == .ready else { return nil }
+        if let book = recapTXT, let source = source as? TextChapterSource {
+            return .txt(book, title: source.bookTitle, chapter: source.tocEntry(containingUnit: location.spineIndex) ?? 0, projection: settings.projection)
+        }
+        guard let container, let hash = openedBookHash else { return nil }
+        return .epub(container, hash: hash, currentSpine: location.spineIndex, projection: settings.projection)
     }
     var localTimeSource: LocalReadingTimeSource? {
         guard status == .ready, let source else { return nil }
@@ -315,6 +324,7 @@ final class EPUBReaderModel: ObservableObject {
         guard status == .idle, openTask == nil else { return }
         if let id = textBook.preferenceKey ?? textBook.bookmarkKey { settings.activateBook(id) }
         reloadStoredStyle()
+        recapTXT = textBook.localRecapBook
         textTimeMetrics = textBook.localTimeMetrics
         textBookmarkKey = textBook.bookmarkKey
         textTOCWordCounts = textBook.tocWordCounts

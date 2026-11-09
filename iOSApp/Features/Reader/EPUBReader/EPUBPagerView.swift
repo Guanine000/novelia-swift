@@ -59,6 +59,7 @@ struct EPUBPagerView: UIViewRepresentable {
     var onSpeechTap: () -> Void = {}
     var onSpeakSelection: (NSRange) -> Void = { _ in }
     /// 选中菜单里的「翻译」；宿主呈现系统翻译面板（iOS 17.4+）。
+    var characterLookup: ((String) -> Void)? = nil
     var selectionTranslate: ((String) -> Void)? = { _ in }
     /// 三页位图由宿主从同一份排版缓存派生；每次 SwiftUI 更新都会重放。
     var images: PageImages
@@ -80,6 +81,7 @@ struct EPUBPagerView: UIViewRepresentable {
         view.speechTapHandler = onSpeechTap
         view.speakSelectionHandler = onSpeakSelection
         view.selectionTranslateHandler = selectionTranslate
+        view.characterLookupHandler = characterLookup
         view.apply(images: images)
         view.applySpeechRects(speechRects)
         return view
@@ -101,6 +103,7 @@ struct EPUBPagerView: UIViewRepresentable {
         view.speechTapHandler = onSpeechTap
         view.speakSelectionHandler = onSpeakSelection
         view.selectionTranslateHandler = selectionTranslate
+        view.characterLookupHandler = characterLookup
         view.apply(images: images)
         view.applySpeechRects(speechRects)
     }
@@ -120,6 +123,7 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
     var selectionRectsProvider: ((NSRange) -> [CGRect])?
     var selectedTextProvider: ((NSRange) -> String?)?
     /// 选中菜单里的「翻译」；宿主呈现系统翻译面板（iOS 17.4+）。
+    var characterLookupHandler: ((String) -> Void)?
     var selectionTranslateHandler: ((String) -> Void)?
     private let strip = UIView()
     private let speechLayer = CAShapeLayer()
@@ -523,6 +527,11 @@ extension EPUBPagerUIView: UIEditMenuInteractionDelegate {
             self.presentSelectionController(controller)
         }
         var items: [UIMenuElement] = [copy, lookup]
+        if let handler = characterLookupHandler {
+            items.append(UIAction(title: "人物词条", image: UIImage(systemName: "person.text.rectangle")) { [weak self] _ in
+                self?.clearSelection(); handler(selectedText)
+            })
+        }
         if #available(iOS 17.4, *), let translateHandler = selectionTranslateHandler {
             items.append(UIAction(title: "翻译", image: UIImage(systemName: "translate")) { _ in
                 translateHandler(selectedText)
