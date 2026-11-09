@@ -61,6 +61,10 @@ final class ReaderSettings: ObservableObject {
     let bookmarks: ReaderBookmarkStore
     let webEPUBMaps: WebNovelEPUBMapStore
     let defaults: UserDefaults
+    /// 原生分页独有的本机动画偏好；不改变排版样式或 Readium 的导航方式。
+    @Published var nativePageCurlEnabled: Bool {
+        didSet { defaults.set(nativePageCurlEnabled, forKey: SettingsKey.readerNativePageCurl) }
+    }
     @Published private var storedFontSize: Double
     @Published private var storedAppearance: String
     @Published private var storedPagedText: Bool
@@ -80,6 +84,7 @@ final class ReaderSettings: ObservableObject {
         self.positions = positions ?? ReadingPositionStore(defaults: defaults)
         self.bookmarks = bookmarks ?? ReaderBookmarkStore()
         self.defaults = defaults
+        nativePageCurlEnabled = defaults.bool(forKey: SettingsKey.readerNativePageCurl)
         bookPreferences = defaults.data(forKey: Self.bookPreferencesKey).flatMap { try? JSONDecoder().decode([String: BookReadingPreferences].self, from: $0) } ?? [:]
         self.webEPUBMaps = WebNovelEPUBMapStore(defaults: defaults)
         let epubStyle = defaults.data(forKey: Self.epubStyleKey)

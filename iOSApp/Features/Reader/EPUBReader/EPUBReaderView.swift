@@ -122,6 +122,7 @@ private struct EPUBReaderViewContent: View {
                     }
                 case .ready:
                     EPUBReaderPageSurface(model: model, speech: speech, showChrome: $showChrome, size: geometry.size,
+                                          pageInsets: geometry.safeAreaInsets, curlEnabled: settings.nativePageCurlEnabled,
                                           speechRects: model.speechHighlightRects, searchRects: model.searchHighlightRects)
                         .equatable()
                         // 底栏不再放上一页／下一页按钮，保留 VoiceOver 的翻页动作。
@@ -367,7 +368,8 @@ private struct EPUBReaderViewContent: View {
             showChrome: showChrome,
             batteryLevel: Double(batteryLevel),
             hiddenPercentText: showChrome ? nil : FractionText.percent(model.overallProgress),
-            hiddenBackground: model.pageBackgroundColor,
+            hiddenBackground: settings.nativePageCurlEnabled ? .clear : model.pageBackgroundColor,
+            coversBottomSafeArea: settings.nativePageCurlEnabled,
             readingTime: AnyView(ReaderRemainingTimeView(store: settings.remainingTime,
                 source: model.localTimeSource, point: model.readingTimePoint, mode: "paged|" + settings.projection.identity,
                 active: model.status == .ready && !model.isLayingOut && !isScrubbing && !speech.isActive
@@ -590,7 +592,7 @@ private struct EPUBReaderViewContent: View {
                                  model.applyStyle(fallback)
                              }
                          },
-                         onMarkIssue: { model.markIssue() })
+                         onMarkIssue: { model.markIssue() }, supportsNativePageTurn: true)
     }
 
     // MARK: 注脚弹层
@@ -890,6 +892,8 @@ private struct EPUBReaderPageSurface: View, Equatable {
     @EnvironmentObject private var settings: ReaderSettings
     @Binding var showChrome: Bool
     let size: CGSize
+    let pageInsets: EdgeInsets
+    let curlEnabled: Bool
     let speechRects: [CGRect]
     let searchRects: [CGRect]
     @Environment(\.readerSpeechActions) private var speechActions
@@ -898,7 +902,7 @@ private struct EPUBReaderPageSurface: View, Equatable {
     @State private var showsTranslate = false
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.model === rhs.model && lhs.size == rhs.size && lhs.speechRects == rhs.speechRects && lhs.searchRects == rhs.searchRects
+        lhs.model === rhs.model && lhs.size == rhs.size && lhs.pageInsets == rhs.pageInsets && lhs.curlEnabled == rhs.curlEnabled && lhs.speechRects == rhs.speechRects && lhs.searchRects == rhs.searchRects
     }
 
     var body: some View {
@@ -937,14 +941,21 @@ private struct EPUBReaderPageSurface: View, Equatable {
                 translateText = text
                 showsTranslate = true
             },
+            curlEnabled: curlEnabled,
+            paperInsets: UIEdgeInsets(top: pageInsets.top, left: pageInsets.leading, bottom: pageInsets.bottom, right: pageInsets.trailing),
+            paperColor: UIColor(model.pageBackgroundColor),
+            paperBackground: settings.backgrounds.image(dark: model.isDarkMode, landscape: size.width > size.height),
             images: model.pagerImages()
         )
         .overlay {
             Path { path in for rect in searchRects { path.addRect(rect) } }
-                .fill(Color.yellow.opacity(0.35)).allowsHitTesting(false).accessibilityHidden(true)
+                .fill(Color.yellow.opacity(0.35))
+                .offset(x: curlEnabled ? pageInsets.leading : 0, y: curlEnabled ? pageInsets.top : 0)
+                .opacity(model.isAnimating ? 0 : 1)
+                .allowsHitTesting(false).accessibilityHidden(true)
         }
         .compatTranslationPresentation(isPresented: $showsTranslate, text: translateText)
-        .frame(width: size.width, height: size.height)
+        .ignoresSafeArea(edges: curlEnabled ? .all : [])
     }
 
 }
