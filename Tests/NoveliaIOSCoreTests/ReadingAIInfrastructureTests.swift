@@ -66,6 +66,16 @@ final class ReadingAIInfrastructureTests: XCTestCase {
         XCTAssertEqual(box.counts.last, 2)
     }
 
+    func testStreamingShellBytesDoNotCountAgainstTheTextLimit() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ReadingAITestURLProtocol.self]
+        let client = OpenAIReadingClient(configuration: configuration)
+        // 原始事件流约 1.3 MiB，拼装后的正文只有 5200 字，必须成功而不是报“超过 1 MiB”。
+        let response = try await client.complete(configuration: config("https://bigstream.example/v1"), apiKey: "fake",
+                                                 request: .connectionTest)
+        XCTAssertEqual(response.text.count, 5_200)
+    }
+
     func testTransportAcceptsOnlyBoundedSuccessfulTextResponses() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ReadingAITestURLProtocol.self]
@@ -202,6 +212,7 @@ private final class ReadingAITestURLProtocol: URLProtocol {
         var headers = ["Content-Type": "application/json", "Location": "https://never-follow.example/v1/chat/completions"]
         if host == "oversize.example" { headers["Content-Length"] = "2097152" }
         if host == "stream.example" { headers["Content-Type"] = "text/event-stream" }
+        if host == "bigstream.example" { headers["Content-Type"] = "text/event-stream" }
         let response = HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         let valid = "{\"choices\":[{\"message\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}"
@@ -214,7 +225,12 @@ private final class ReadingAITestURLProtocol: URLProtocol {
 
 
         """
-        let text = host == "success.example" ? valid : (host == "stream.example" ? stream : "private-server-body")
+        // 每个 token 一个事件，JSON 外壳总量远超正文：正文上限不能按原始字节数判定。
+        let padding = String(repeating: "a", count: 200)
+        let big = String(repeating: "data: {\"id\":\"\(padding)\",\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":null}]}\n\n", count: 5_200)
+            + "data: [DONE]\n\n"
+        let text = host == "success.example" ? valid
+            : (host == "stream.example" ? stream : (host == "bigstream.example" ? big : "private-server-body"))
         client?.urlProtocol(self, didLoad: Data(text.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }

@@ -752,7 +752,7 @@ python3 scripts/check_architecture_release.py '<Release Novelia.app 内的 Novel
 
 配置由 `ReadingAIConfiguration` 验证，存储键 `reader.ai.configuration.v1` 只含非密钥字段。密钥服务名为 `cc.novelia.ios.reading-ai.v1`，账户为规范化最终接口 URL 的 SHA-256；使用 `WhenUnlockedThisDeviceOnly`，不打开 Keychain 同步，不复用账号或已退役朗读服务的身份。换接口不携带旧密钥，保存失败不切换当前配置。
 
-客户端使用独占 ephemeral URLSession，拒绝重定向，关闭 Cookie／缓存／凭据存储；输入 128 KiB，返回按 AsyncBytes 增量接收且硬限 1 MiB，退出时取消底层 Session。请求以 `stream: true` 发送并按 `text/event-stream` 逐事件累加 delta；服务端改回整段 JSON 时按 Content-Type 回退到一次性解析。非流式回退路径仍保留 300 秒等待新数据、600 秒整体的超时：默认 60 秒会把一段 4096–8192 tokens 的正常输出直接掐断。请求限时且无自动重试，不记录头、正文、密钥和原始服务端错误。Store 为每个请求持有可取消任务，并以配置代次拒绝迟到结果。只接受 `finish_reason=stop` 的非空文本，截断／拒答／工具调用分别拒绝。输出 tokens 参数和 JSON 模式显式配置，JSON 结果的业务结构与事实出处由后续功能校验。
+客户端使用独占 ephemeral URLSession，拒绝重定向，关闭 Cookie／缓存／凭据存储；输入 128 KiB，返回按 AsyncBytes 增量接收，退出时取消底层 Session。请求以 `stream: true` 发送并按 `text/event-stream` 逐事件累加 delta；服务端改回整段 JSON 时按 Content-Type 回退到一次性解析。1 MiB 上限约束的是**拼装后的正文**（或整段 JSON 响应），流式原始字节另有 16 MiB 防护：逐 token 推送时每个事件都带 JSON 外壳，用正文上限去卡原始流会让长输出反而先失败。非流式回退路径仍保留 300 秒等待新数据、600 秒整体的超时：默认 60 秒会把一段 4096–8192 tokens 的正常输出直接掐断。请求限时且无自动重试，不记录头、正文、密钥和原始服务端错误。Store 为每个请求持有可取消任务，并以配置代次拒绝迟到结果。只接受 `finish_reason=stop` 的非空文本，截断／拒答／工具调用分别拒绝。输出 tokens 参数和 JSON 模式显式配置，JSON 结果的业务结构与事实出处由后续功能校验。
 
 `ReadingAIInfrastructureTests` 使用内存凭据、假生成服务和 URLProtocol 内存响应，覆盖请求隔离、大小／状态／返回结构、密钥作用域、取消及配置损坏恢复；不连接真实模型。连接测试只发送固定短句，JSON 模式使用对应 JSON 指令，AI 总开关关闭时也可由用户显式测试。Mac 验证仍运行 Package 测试与两个 scheme 编译；真实服务兼容、费用和 Keychain 设备行为需另行验证。
 

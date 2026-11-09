@@ -5,7 +5,11 @@ import Foundation
 /// 独立 Session 拒绝重定向，避免把密钥或正文转交另一个来源。
 final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
     private let sessionConfiguration: URLSessionConfiguration
+    /// 正文上限：完整 JSON 响应或流式拼装后的文本都不能超过它。
     private static let maximumResponseBytes = 1_024 * 1_024
+    /// 流式原始字节上限：每个 SSE 事件都带 JSON 外壳，逐 token 推送时外壳总量远大于正文，
+    /// 这里只用于防止异常服务端无限推送，不能拿正文上限去卡它。
+    private static let maximumStreamBytes = 16 * 1_024 * 1_024
 
     init(configuration: URLSessionConfiguration = .ephemeral) {
         let configuration = (configuration.copy() as? URLSessionConfiguration) ?? .ephemeral
@@ -34,8 +38,11 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
             let (bytes, response) = try await session.bytes(for: request)
             guard let http = response as? HTTPURLResponse else { throw ReadingAIError.invalidResponse }
             guard (200..<300).contains(http.statusCode) else { throw ReadingAIError.http(http.statusCode) }
-            guard response.expectedContentLength <= Int64(Self.maximumResponseBytes) else { throw ReadingAIError.responseLimit }
             let contentType = http.value(forHTTPHeaderField: "Content-Type") ?? ""
+            // 流式响应的长度未知或按外壳计算，正文大小在拼装后另行校验，不在这里按整体长度拒绝。
+            guard contentType.contains("text/event-stream") || response.expectedContentLength <= Int64(Self.maximumResponseBytes) else {
+                throw ReadingAIError.responseLimit
+            }
             if contentType.contains("text/event-stream") {
                 return try await Self.decodeStream(bytes, onCharacters: onCharacters)
             }
@@ -91,8 +98,8 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
         var text = "", finish: String?, usage: Chunk.Usage?, reported = 0, bytesRead = 0
         for try await line in bytes.lines {
             bytesRead += line.utf8.count + 1
-            guard bytesRead <= maximumResponseBytes else { throw ReadingAIError.responseLimit }
-            if bytesRead.isMultiple(of: 4_096) { try Task.checkCancellation() }
+            guard bytesRead <= maximumStreamBytes else { throw ReadingAIError.responseLimit }
+            if bytesRead.isMultiple(of: 65_536) { try Task.checkCancellation() }
             guard line.hasPrefix("data:") else { continue }
             let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
             if payload.isEmpty { continue }
@@ -100,6 +107,7 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
             guard let data = payload.data(using: .utf8), let chunk = try? JSONDecoder().decode(Chunk.self, from: data) else { continue }
             if let content = chunk.choices?.first?.delta?.content, !content.isEmpty {
                 text += content
+                // 限的是拼装后的正文，不是带 JSON 外壳的原始事件流。
                 guard text.utf8.count <= maximumResponseBytes else { throw ReadingAIError.responseLimit }
                 // 高频回调会拖慢界面，按字符数节流；最后再补一次完整值。
                 if text.count - reported >= 120 { reported = text.count; onCharacters(reported) }
