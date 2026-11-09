@@ -93,6 +93,144 @@ final class ForumMarkdownTests: XCTestCase {
         XCTAssertEqual(forumCommentMarkdownForSubmission("前!!!!剧透!!!!后"), "前!!剧透!!后")
     }
 
+    /// 帖子正文里的远程图（含 details 中的表格）必须从 Markdown 拆成可加载的地址，而不是留给不会画远程图的 Text。
+    func testRemoteImagesInDetailsTableAndInlineText() {
+        let markdown = """
+        说明
+        ::: details 实机截图
+        | ![](https://free.picui.cn/free/a.png) | ![](https://free.picui.cn/free/b.png) |
+        | --- | --- |
+        | ![](https://free.picui.cn/free/c.png) | ![](https://free.picui.cn/free/d.png) |
+        :::
+        """
+        let blocks = parseForumMarkdown(markdown)
+        XCTAssertEqual(blocks.count, 2)
+        guard case .paragraph = blocks[0].kind else { return XCTFail("lead paragraph") }
+        guard case .details(let title) = blocks[1].kind else { return XCTFail("details") }
+        XCTAssertEqual(title, "实机截图")
+        let inner = parseForumMarkdown(blocks[1].text)
+        XCTAssertEqual(inner.count, 1)
+        guard case .table(let rows) = inner[0].kind else { return XCTFail("screenshot table") }
+        XCTAssertEqual(rows.count, 2)
+        let urls = rows.flatMap { $0 }.map { cell -> String? in
+            let segments = forumInlineSegments(cell)
+            guard segments.count == 1, case .image(let image) = segments[0] else { return nil }
+            XCTAssertNil(image.link)
+            XCTAssertEqual(image.alt, "")
+            return forumMarkdownImageURL(image.destination, relativeTo: APIConfiguration.production.forumOrigin)?.absoluteString
+        }
+        XCTAssertEqual(urls, [
+            "https://free.picui.cn/free/a.png",
+            "https://free.picui.cn/free/b.png",
+            "https://free.picui.cn/free/c.png",
+            "https://free.picui.cn/free/d.png",
+        ])
+
+        for mode in [ForumMarkdownMode.article, .comment] {
+            let paragraph = parseForumMarkdown("见 ![](https://example.com/a.png) 图", mode: mode)
+            XCTAssertEqual(paragraph.count, 1)
+            let segments = forumInlineSegments(paragraph[0].text)
+            XCTAssertEqual(segments.count, 3)
+            guard case .text(let before) = segments[0], case .image(let image) = segments[1], case .text(let after) = segments[2] else {
+                return XCTFail("mixed paragraph \(mode)")
+            }
+            XCTAssertEqual(before, "见 ")
+            XCTAssertEqual(image.destination, "https://example.com/a.png")
+            XCTAssertEqual(after, " 图")
+        }
+
+        let stacked = forumInlineSegments("![](https://example.com/a.png)\n![](https://example.com/b.png)")
+        XCTAssertEqual(stacked.count, 2)
+        XCTAssertTrue(stacked.allSatisfy(\.isImage))
+
+        let titled = forumInlineSegments("![](https://example.com/a.png \"标题\")")
+        guard case .image(let titledImage) = titled.first else { return XCTFail("title") }
+        XCTAssertEqual(titledImage.destination, "https://example.com/a.png")
+
+        let bracketed = forumInlineSegments("![](<https://example.com/a b.png>)")
+        guard case .image(let bracketedImage) = bracketed.first else { return XCTFail("angle") }
+        XCTAssertEqual(bracketedImage.destination, "https://example.com/a b.png")
+
+        let linked = forumInlineSegments("[![封面](https://example.com/a.png)](https://n.novelia.cc/novel/x/y)")
+        guard linked.count == 1, case .image(let linkedImage) = linked[0] else { return XCTFail("linked image") }
+        XCTAssertEqual(linkedImage.alt, "封面")
+        XCTAssertEqual(linkedImage.destination, "https://example.com/a.png")
+        XCTAssertEqual(linkedImage.link, "https://n.novelia.cc/novel/x/y")
+
+        let richer = "[see ![x](https://example.com/a.png)](https://example.com/go)"
+        XCTAssertEqual(forumInlineSegments(richer), [.text(richer)], "image inside a text link must stay a link")
+        let plainLink = "[下载](https://example.com/download)"
+        XCTAssertEqual(forumInlineSegments(plainLink), [.text(plainLink)])
+        let coded = "文字 `![](https://example.com/a.png)` 结束"
+        XCTAssertEqual(forumInlineSegments(coded), [.text(coded)])
+        let escaped = "\\![](https://example.com/a.png)"
+        XCTAssertEqual(forumInlineSegments(escaped), [.text(escaped)])
+
+        let fenced = parseForumMarkdown("```\n![](https://example.com/a.png)\n```")
+        XCTAssertEqual(fenced.count, 1)
+        guard case .code = fenced[0].kind else { return XCTFail("fence") }
+        XCTAssertTrue(fenced[0].text.contains("![](https://example.com/a.png)"))
+    }
+
+    func testSpoilerImagesStayHiddenUntilRevealed() {
+        let wrapped = "!!!!![](https://example.com/a.png)!!!!"
+        XCTAssertEqual(forumInlineSegments(wrapped, spoilersRevealed: false), [.text(wrapped)])
+        let shown = forumInlineSegments(wrapped, spoilersRevealed: true)
+        guard shown.count == 1, case .image(let image) = shown[0] else { return XCTFail("revealed spoiler image \(shown)") }
+        XCTAssertEqual(image.destination, "https://example.com/a.png")
+
+        let mixed = "前文 !!隐藏 ![](https://example.com/a.png)!!"
+        let hidden = forumInlineSegments(mixed, spoilersRevealed: false)
+        XCTAssertEqual(hidden, [.text(mixed)])
+        let revealed = forumInlineSegments(mixed, spoilersRevealed: true)
+        XCTAssertFalse(revealed.contains { if case .text(let text) = $0 { return text.contains("!!") }; return false })
+        guard case .image(let revealedImage) = revealed.last else { return XCTFail("revealed mixed") }
+        XCTAssertEqual(revealedImage.destination, "https://example.com/a.png")
+
+        let outside = forumInlineSegments("![](https://example.com/a.png)\n!!隐藏!!", spoilersRevealed: false)
+        XCTAssertEqual(outside.count, 2)
+        XCTAssertTrue(outside[0].isImage)
+        guard case .text(let spoiler) = outside[1] else { return XCTFail("outside spoiler") }
+        XCTAssertTrue(spoiler.contains("!!隐藏!!"))
+
+        // `!![文字](url)!!` 含有 `![文字](url)`，不能被当成图片，否则剧透链接会被拆掉。
+        let spoilerLink = "!![测试链接](https://n.novelia.cc/novel/hameln/test)!!"
+        XCTAssertEqual(forumInlineSegments(spoilerLink, spoilersRevealed: false), [.text(spoilerLink)])
+        XCTAssertEqual(
+            forumInlineSegments(spoilerLink, spoilersRevealed: true),
+            [.text("[测试链接](https://n.novelia.cc/novel/hameln/test)")]
+        )
+    }
+
+    func testMarkdownImageURLsAcceptOnlyHTTP() {
+        let base = APIConfiguration.production.forumOrigin
+        XCTAssertEqual(
+            forumMarkdownImageURL("https://free.picui.cn/free/a.png", relativeTo: base)?.absoluteString,
+            "https://free.picui.cn/free/a.png"
+        )
+        XCTAssertEqual(
+            forumMarkdownImageURL("//cdn.example.com/a.png", relativeTo: base)?.absoluteString,
+            "https://cdn.example.com/a.png"
+        )
+        XCTAssertEqual(
+            forumMarkdownImageURL("/uploads/a.png", relativeTo: base)?.absoluteString,
+            "https://forum.novelia.cc/uploads/a.png"
+        )
+        XCTAssertEqual(
+            forumMarkdownImageURL("https://example.com/a b.png", relativeTo: base)?.absoluteString,
+            "https://example.com/a%20b.png"
+        )
+        XCTAssertNil(forumMarkdownImageURL("javascript:alert(1)", relativeTo: base))
+        XCTAssertNil(forumMarkdownImageURL("file:///tmp/a.png", relativeTo: base))
+        XCTAssertNil(forumMarkdownImageURL("", relativeTo: base))
+
+        let novel = forumMarkdownActionURL("/novel/kakuyomu/123")
+        XCTAssertEqual(novel?.path, "/novel/kakuyomu/123")
+        XCTAssertNil(novel?.scheme)
+        XCTAssertEqual(forumMarkdownActionURL("https://n.novelia.cc/novel/x/y")?.host, "n.novelia.cc")
+        XCTAssertNil(forumMarkdownActionURL("javascript:alert(1)"))
+    }
+
     /// 预览回复与分页重叠或顺序不同时，每次请求下一页并去重，不会卡在同一页或重复显示。
     func testReplyPagingAdvancesPagesAndSkipsShownReplies() {
         struct Reply: Identifiable, Equatable { let id: Int }

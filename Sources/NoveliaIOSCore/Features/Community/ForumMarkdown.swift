@@ -2,8 +2,8 @@ import Foundation
 import SwiftUI
 import UIKit
 
-// 论坛 Markdown 解析、剧透处理，以及论坛和小说链接路由。
-// 论坛视图与 Swift 包测试共用的纯逻辑。
+// 论坛 Markdown 解析、剧透处理、远程图片分段，以及论坛和小说链接路由。
+// 论坛视图与 Swift 包测试共用的纯逻辑。图片字节由界面按分段里的地址下载。
 
 struct ForumPostRoute: Identifiable {
     let postID: Int64
@@ -302,6 +302,273 @@ func forumInlineAttributes(_ input: String) throws -> AttributedString {
     return result
 }
 
+/// SwiftUI 的 `Text` 不会绘制 `AttributedString` 里的远程图片，空 alt 的单元格因此是空白。
+/// 把图片从行内文本里拆出来，交给界面用实际宽高加载；代码块和未揭示剧透里的图片语法保持原样。
+struct ForumMarkdownImage: Equatable {
+    var alt: String
+    var destination: String
+    /// 图片本身就是链接文字时的目标。普通图片为 nil。
+    var link: String?
+}
+
+enum ForumInlineSegment: Equatable {
+    case text(String)
+    case image(ForumMarkdownImage)
+
+    var isImage: Bool {
+        if case .image = self { return true }
+        return false
+    }
+}
+
+func forumInlineSegments(_ markdown: String, spoilersRevealed: Bool = true) -> [ForumInlineSegment] {
+    let source = spoilersRevealed ? forumMarkdownRemovingSpoilerMarkers(markdown) : markdown
+    let matches = forumMarkdownImageExpression.matches(in: source, range: NSRange(source.startIndex..., in: source))
+    guard !matches.isEmpty else { return [.text(source)] }
+    let codeRanges = forumInlineCodeRanges(source)
+    let spoilerRanges = spoilersRevealed ? [] : forumSpoilerMatches(source, pattern: forumSpoilerPattern).map(\.range)
+    var pieces: [ForumInlineSegment] = []
+    var cursor = source.startIndex
+    var acceptedImage = false
+
+    func appendText(upTo end: String.Index) {
+        guard end > cursor else { return }
+        pieces.append(.text(String(source[cursor..<end])))
+        cursor = end
+    }
+
+    for match in matches {
+        guard let imageRange = Range(match.range, in: source),
+              let altRange = Range(match.range(at: 1), in: source),
+              let destinationRange = Range(match.range(at: 2), in: source),
+              imageRange.lowerBound >= cursor else { continue }
+        if forumMarkdownIsEscaped(source, at: imageRange.lowerBound) { continue }
+        if forumIntersects(match.range, codeRanges) || forumIntersects(match.range, spoilerRanges) { continue }
+        let destination = forumCleanMarkdownDestination(String(source[destinationRange]))
+        guard !destination.isEmpty else { continue }
+        let alt = String(source[altRange]).trimmingCharacters(in: .whitespaces)
+        if let enclosure = forumEnclosingLink(in: source, image: imageRange) {
+            let label = source[source.index(after: enclosure.open)..<enclosure.close]
+            // 链接文字里还有别的内容时保持整段链接，避免拆掉可点的文字。
+            if label.trimmingCharacters(in: .whitespaces) != source[imageRange].trimmingCharacters(in: .whitespaces) {
+                continue
+            }
+            appendText(upTo: enclosure.open)
+            let link = forumCleanMarkdownDestination(enclosure.destination)
+            pieces.append(.image(ForumMarkdownImage(alt: alt, destination: destination, link: link.isEmpty ? nil : link)))
+            cursor = enclosure.end
+            acceptedImage = true
+            continue
+        }
+        appendText(upTo: imageRange.lowerBound)
+        pieces.append(.image(ForumMarkdownImage(alt: alt, destination: destination, link: nil)))
+        cursor = imageRange.upperBound
+        acceptedImage = true
+    }
+    appendText(upTo: source.endIndex)
+    guard acceptedImage else { return [.text(source)] }
+    return pieces.filter { segment in
+        guard case .text(let text) = segment else { return true }
+        return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+/// 正文图片只接受 http/https。相对地址相对 `base`（论坛站点来源）解析，不交给论坛 API。
+func forumMarkdownImageURL(_ destination: String, relativeTo base: URL) -> URL? {
+    let trimmed = forumCleanMarkdownDestination(destination)
+    guard !trimmed.isEmpty, !forumMarkdownRejectsScheme(trimmed) else { return nil }
+    let candidate = trimmed.hasPrefix("//") ? "https:" + trimmed : trimmed
+    if let url = forumStrictHTTPURL(candidate) { return url }
+    if candidate.contains("://") {
+        guard let encoded = forumPercentEncodedURLString(candidate) else { return nil }
+        return forumStrictHTTPURL(encoded)
+    }
+    let relative = forumPercentEncodedURLString(candidate) ?? candidate
+    guard let resolved = URL(string: relative, relativeTo: base)?.absoluteURL else { return nil }
+    return forumStrictHTTPURL(resolved.absoluteString)
+}
+
+/// 图片外层链接。绝对地址只保留 http/https；没有协议的路径原样返回，方便沿用小说/论坛路由。
+func forumMarkdownActionURL(_ destination: String) -> URL? {
+    let trimmed = forumCleanMarkdownDestination(destination)
+    guard !trimmed.isEmpty, !forumMarkdownRejectsScheme(trimmed) else { return nil }
+    if trimmed.hasPrefix("//") {
+        return forumStrictHTTPURL("https:" + trimmed)
+    }
+    if let url = URL(string: trimmed) {
+        if let scheme = url.scheme?.lowercased() {
+            guard scheme == "http" || scheme == "https" else { return nil }
+            return url
+        }
+        return url
+    }
+    guard let encoded = forumPercentEncodedURLString(trimmed) else { return nil }
+    return URL(string: encoded)
+}
+
+private let forumMarkdownImageExpression: NSRegularExpression = {
+    let pattern = #"!\[([^\]]*)\]\(\s*(<[^>\r\n]+>|[^)\s]+)(?:\s+(?:"[^"\r\n]*"|'[^'\r\n]*'|\([^)\r\n]*\)))?\s*\)"#
+    do { return try NSRegularExpression(pattern: pattern) }
+    catch { preconditionFailure("论坛图片正则无效：\(pattern)") }
+}()
+
+private struct ForumLinkEnclosure {
+    var open: String.Index
+    var close: String.Index
+    var destination: String
+    var end: String.Index
+}
+
+private func forumMarkdownRemovingSpoilerMarkers(_ markdown: String) -> String {
+    let matches = forumSpoilerMatches(markdown, pattern: forumSpoilerPattern)
+    guard !matches.isEmpty else { return markdown }
+    let source = markdown as NSString
+    let result = NSMutableString(string: markdown)
+    for match in matches.reversed() {
+        let inner = match.range(at: 1).location != NSNotFound ? match.range(at: 1) : match.range(at: 2)
+        guard inner.location != NSNotFound else { continue }
+        result.replaceCharacters(in: match.range, with: source.substring(with: inner))
+    }
+    return result as String
+}
+
+private func forumMarkdownIsEscaped(_ source: String, at index: String.Index) -> Bool {
+    var slashes = 0
+    var cursor = index
+    while cursor > source.startIndex {
+        let previous = source.index(before: cursor)
+        if source[previous] != "\\" { break }
+        slashes += 1
+        cursor = previous
+    }
+    return slashes % 2 == 1
+}
+
+private func forumIntersects(_ range: NSRange, _ others: [NSRange]) -> Bool {
+    others.contains { NSIntersectionRange(range, $0).length > 0 }
+}
+
+/// 同一行上、图片位于某个 `[...](...)` 文字中时返回该链接。调用方再用文字是否只有这张图决定拆不拆。
+private func forumEnclosingLink(in source: String, image: Range<String.Index>) -> ForumLinkEnclosure? {
+    var cursor = image.lowerBound
+    var open: String.Index?
+    while cursor > source.startIndex {
+        let previous = source.index(before: cursor)
+        let character = source[previous]
+        if character == "\n" || character == "\r" || character == ")" || character == "]" { break }
+        if character == "[", !forumMarkdownIsEscaped(source, at: previous) {
+            open = previous
+            break
+        }
+        cursor = previous
+    }
+    guard let open else { return nil }
+    var forward = image.upperBound
+    while forward < source.endIndex {
+        let character = source[forward]
+        if character == "\n" || character == "\r" { return nil }
+        let next = source.index(after: forward)
+        if character == "]", next < source.endIndex, source[next] == "(", !forumMarkdownIsEscaped(source, at: forward) {
+            guard let parsed = forumParseLinkDestination(in: source, from: forward) else { return nil }
+            return ForumLinkEnclosure(open: open, close: forward, destination: parsed.destination, end: parsed.end)
+        }
+        forward = next
+    }
+    return nil
+}
+
+private func forumParseLinkDestination(in source: String, from closeBracket: String.Index) -> (destination: String, end: String.Index)? {
+    var cursor = source.index(after: closeBracket)
+    guard cursor < source.endIndex, source[cursor] == "(" else { return nil }
+    cursor = source.index(after: cursor)
+    while cursor < source.endIndex, source[cursor] == " " || source[cursor] == "\t" {
+        cursor = source.index(after: cursor)
+    }
+    guard cursor < source.endIndex else { return nil }
+    let destination: String
+    if source[cursor] == "<" {
+        let start = source.index(after: cursor)
+        var end = start
+        while end < source.endIndex, source[end] != ">", source[end] != "\n", source[end] != "\r" {
+            end = source.index(after: end)
+        }
+        guard end < source.endIndex, source[end] == ">" else { return nil }
+        destination = String(source[start..<end])
+        cursor = source.index(after: end)
+    } else {
+        let start = cursor
+        while cursor < source.endIndex {
+            let character = source[cursor]
+            if character == "\\" {
+                let skipped = source.index(after: cursor)
+                cursor = skipped < source.endIndex ? source.index(after: skipped) : skipped
+                continue
+            }
+            if character == ")" || character == " " || character == "\t" || character == "\n" || character == "\r" { break }
+            cursor = source.index(after: cursor)
+        }
+        guard cursor > start else { return nil }
+        destination = String(source[start..<cursor])
+    }
+    while cursor < source.endIndex, source[cursor] == " " || source[cursor] == "\t" {
+        cursor = source.index(after: cursor)
+    }
+    if cursor < source.endIndex, let endDelimiter = forumMarkdownTitleEnd(source[cursor]) {
+        cursor = source.index(after: cursor)
+        while cursor < source.endIndex, source[cursor] != endDelimiter, source[cursor] != "\n", source[cursor] != "\r" {
+            cursor = source.index(after: cursor)
+        }
+        guard cursor < source.endIndex, source[cursor] == endDelimiter else { return nil }
+        cursor = source.index(after: cursor)
+        while cursor < source.endIndex, source[cursor] == " " || source[cursor] == "\t" {
+            cursor = source.index(after: cursor)
+        }
+    }
+    guard cursor < source.endIndex, source[cursor] == ")" else { return nil }
+    return (destination, source.index(after: cursor))
+}
+
+private func forumMarkdownTitleEnd(_ character: Character) -> Character? {
+    switch character {
+    case "\"": return "\""
+    case "'": return "'"
+    case "(": return ")"
+    default: return nil
+    }
+}
+
+private func forumCleanMarkdownDestination(_ raw: String) -> String {
+    var value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    if value.count >= 2, value.hasPrefix("<"), value.hasSuffix(">") {
+        value = String(value.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return value
+}
+
+private func forumMarkdownRejectsScheme(_ value: String) -> Bool {
+    if value.hasPrefix("//") { return false }
+    guard let colon = value.firstIndex(of: ":") else { return false }
+    let scheme = value[..<colon]
+    guard !scheme.isEmpty, !scheme.contains("/"),
+          scheme.unicodeScalars.allSatisfy({ CharacterSet.letters.contains($0) || $0 == "+" || $0 == "-" || $0 == "." }) else { return false }
+    let lowered = scheme.lowercased()
+    return lowered != "http" && lowered != "https"
+}
+
+private func forumStrictHTTPURL(_ string: String) -> URL? {
+    guard let url = URL(string: string),
+          let scheme = url.scheme?.lowercased(),
+          scheme == "http" || scheme == "https",
+          let host = url.host, !host.isEmpty else { return nil }
+    return url
+}
+
+private func forumPercentEncodedURLString(_ value: String) -> String? {
+    var allowed = CharacterSet.alphanumerics
+    allowed.insert(charactersIn: "-._~:/?#[]@!$&'()*+,;=%")
+    return value.addingPercentEncoding(withAllowedCharacters: allowed)
+}
+
 struct ForumNovelRoute: Hashable {
     let isCatalogue: Bool
     let provider: String?
@@ -334,16 +601,19 @@ final class ForumMarkdownCache: @unchecked Sendable {
     private final class Blocks { let value: [ForumMarkdownBlock]; init(_ value: [ForumMarkdownBlock]) { self.value = value } }
     private final class Inline { let value: AttributedString; init(_ value: AttributedString) { self.value = value } }
     private final class Flag { let value: Bool; init(_ value: Bool) { self.value = value } }
+    private final class SegmentList { let value: [ForumInlineSegment]; init(_ value: [ForumInlineSegment]) { self.value = value } }
 
     // NSCache 支持线程安全，并在内存压力下释放条目。
     private let blocks = NSCache<NSString, Blocks>()
     private let inline = NSCache<NSString, Inline>()
     private let spoilers = NSCache<NSString, Flag>()
+    private let segments = NSCache<NSString, SegmentList>()
 
     init(countLimit: Int = 600) {
         blocks.countLimit = countLimit
         inline.countLimit = countLimit * 4
         spoilers.countLimit = countLimit * 4
+        segments.countLimit = countLimit * 4
     }
 
     func blocks(_ markdown: String, mode: ForumMarkdownMode) -> [ForumMarkdownBlock] {
@@ -371,6 +641,15 @@ final class ForumMarkdownCache: @unchecked Sendable {
                                             conceal: conceal)
         inline.setObject(Inline(rendered), forKey: key)
         return rendered
+    }
+
+    /// 与行内属性分开缓存。剧透是否揭示会改变图片是否从标记里拆出来。
+    func inlineSegments(_ markdown: String, spoilersRevealed: Bool) -> [ForumInlineSegment] {
+        let key = "\(spoilersRevealed ? 1 : 0)\u{0}\(markdown)" as NSString
+        if let cached = segments.object(forKey: key) { return cached.value }
+        let parsed = forumInlineSegments(markdown, spoilersRevealed: spoilersRevealed)
+        segments.setObject(SegmentList(parsed), forKey: key)
+        return parsed
     }
 }
 
