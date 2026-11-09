@@ -752,7 +752,7 @@ python3 scripts/check_architecture_release.py '<Release Novelia.app 内的 Novel
 
 配置由 `ReadingAIConfiguration` 验证，存储键 `reader.ai.configuration.v1` 只含非密钥字段。密钥服务名为 `cc.novelia.ios.reading-ai.v1`，账户为规范化最终接口 URL 的 SHA-256；使用 `WhenUnlockedThisDeviceOnly`，不打开 Keychain 同步，不复用账号或已退役朗读服务的身份。换接口不携带旧密钥，保存失败不切换当前配置。
 
-客户端使用独占 ephemeral URLSession，拒绝重定向，关闭 Cookie／缓存／凭据存储；输入 128 KiB，返回按 AsyncBytes 增量接收，退出时取消底层 Session。请求以 `stream: true` 发送并按 `text/event-stream` 逐事件累加 delta；服务端改回整段 JSON 时按 Content-Type 回退到一次性解析。1 MiB 上限约束的是**拼装后的正文**（或整段 JSON 响应），流式原始字节另有 16 MiB 防护：逐 token 推送时每个事件都带 JSON 外壳，用正文上限去卡原始流会让长输出反而先失败。非流式回退路径仍保留 300 秒等待新数据、600 秒整体的超时：默认 60 秒会把一段 4096–8192 tokens 的正常输出直接掐断。请求限时且无自动重试，不记录头、正文、密钥和原始服务端错误。Store 为每个请求持有可取消任务，并以配置代次拒绝迟到结果。只接受 `finish_reason=stop` 的非空文本，截断／拒答／工具调用分别拒绝。输出 tokens 参数和 JSON 模式显式配置，JSON 结果的业务结构与事实出处由后续功能校验。
+客户端使用独占 ephemeral URLSession，拒绝重定向，关闭 Cookie／缓存／凭据存储；输入 128 KiB，返回按 AsyncBytes 增量接收，退出时取消底层 Session。请求以 `stream: true` 发送并按 `text/event-stream` 逐事件累加 delta；服务端改回整段 JSON 时按 Content-Type 回退到一次性解析。1 MiB 上限约束的是**拼装后的正文**（或整段 JSON 响应），流式原始字节另有 16 MiB 防护：逐 token 推送时每个事件都带 JSON 外壳，用正文上限去卡原始流会让长输出反而先失败。非流式回退路径仍保留 300 秒等待新数据、600 秒整体的超时：默认 60 秒会把一段 4096–8192 tokens 的正常输出直接掐断。请求限时且无自动重试，不记录头、正文、密钥和原始服务端错误。Store 为每个请求持有可取消任务与独立进度，汇总字数只计算正在运行的请求；结束或取消即清理，并以请求存活状态和配置代次拒绝迟到回调。只接受 `finish_reason=stop` 的非空文本，截断／拒答／工具调用分别拒绝。输出 tokens 参数和 JSON 模式显式配置，JSON 结果的业务结构与事实出处由后续功能校验。
 
 `ReadingAIInfrastructureTests` 使用内存凭据、假生成服务和 URLProtocol 内存响应，覆盖请求隔离、大小／状态／返回结构、密钥作用域、取消及配置损坏恢复；不连接真实模型。连接测试只发送固定短句，JSON 模式使用对应 JSON 指令，AI 总开关关闭时也可由用户显式测试。Mac 验证仍运行 Package 测试与两个 scheme 编译；真实服务兼容、费用和 Keychain 设备行为需另行验证。
 
@@ -778,7 +778,7 @@ Core 的 `ReadingRecapPlan` 要求输入为边界之前连续 1–3 章，正文
 
 取正文按批一次调用 `LocalRecapSource.load`：EPUB 的读取闭包每次调用都会重算整本 SHA-256 并重新解包，逐章调用会让本地解包串行排在网络请求前面。
 
-提取与落盘拆成 `extract` / `apply` 两步：并发时按批同时请求多章（1／2／3，默认 2），落盘仍严格按章序串行提交，检查点不会因为后完成的章节而跳过前面的失败章；批次内任一章失败则只提交它之前的章。请求额度用带锁的计数器在后台线程扣减，避免并发下超额。同名重复卡由 `CharacterLexiconStore.duplicates` 分组、用户在“校准重复人物”里确认合并，不自动合并。
+提取与落盘拆成 `extract` / `apply` 两步：并发时按批同时请求多章（1／2／3，默认 2），落盘仍严格按章序串行提交，检查点不会因为后完成的章节而跳过前面的失败章；每次返回结果后立即提交连续成功的前置章节，不等待整批结束；后章先完成时暂存，遇到失败章停止推进。请求额度用带锁的计数器在后台线程扣减，避免并发下超额。同名重复卡由 `CharacterLexiconStore.duplicates` 分组、用户在“校准重复人物”里确认合并，不自动合并。
 
 `CharacterLexiconStore.reset(scope:)` 重建本作品：删除人物、逐书检查点与图片，并把“已否决”整表清空，让用户删过的条目重新参与提取；`localChanges` 里否决记录改为整表赋值而非并集，否则它永远无法被撤销。提取缓存键以「作品ID|正文摘要」开头，重建时只清本作品的缓存。
 
@@ -792,7 +792,7 @@ Core 的 `ReadingRecapPlan` 要求输入为边界之前连续 1–3 章，正文
 
 `CharacterExtractionCache` 缓存已核验块的结构化响应，最多256项/2 MiB，不含密钥；键包含正文身份、卷、模型参数、提示词和请求上下文，命中仍复验证据。失败重试复用完整成功块，不自动重试网络。阶段性缓存可保留未完成章的成功分块，但不将其展示为已完成卡片。
 
-`CharacterVolumeLoader` 连接书库文件、分章与进度，使用只读副本，不调用会迁移位置的 `ReaderSettings.txtBook`，不激活另一套单书设置。界面预检仅保留版本与边界；生成时逐卷打开、逐章释放正文，不同时常驻整个系列。页面退出、切换范围或配置均取消生成并丢弃迟到结果。UI回归 `test_api_architecture_ui.py --only-testing TapTests/TapTests/testCharacterScopeChoiceAndUnreadSafety` 在独立验证App内使用合成TXT检查范围按钮和无已读章节保护，不调用真实AI；自动入库、增量更新与跨卷证据由Core合成测试覆盖。
+`CharacterVolumeLoader` 连接书库文件、分章与进度，使用只读副本，不调用会迁移位置的 `ReaderSettings.txtBook`，不激活另一套单书设置。界面预检仅保留版本与边界；生成时逐卷打开、逐章释放正文，不同时常驻整个系列。运行任务、令牌、进度和步骤记录由 ReaderSettings 持有的同一 CharacterLexiconStore 按作品管理；页面退出不取消，重进可观察和暂停已有任务，同一作品不重复启动扫描。切换范围、配置或显式暂停取消生成并丢弃迟到结果。UI回归 `test_api_architecture_ui.py --only-testing TapTests/TapTests/testCharacterScopeChoiceAndUnreadSafety` 在独立验证App内使用合成TXT检查范围按钮和无已读章节保护，不调用真实AI；自动入库、增量更新与跨卷证据由Core合成测试覆盖。
 
 `ReadingCharactersEntry` 负责阅读器到明确系列的导航适配，使用书库键或唯一文件哈希匹配，不按书名猜测。`ReaderRecapPresentation` 提供查询环境动作；原生选字菜单与 Readium 编辑动作传入人名，TXT 滚动使用普通菜单查询。查询不触发 AI。出处单独读取本地章节，核验版本和引文；安全同名章节回退仍检查当前进度，不导航主阅读器、不计阅读时长。
 
@@ -807,3 +807,5 @@ Core 的 `ReadingRecapPlan` 要求输入为边界之前连续 1–3 章，正文
 `CharacterLexiconStore.commit` 将资料、同步记录与检查点原子保存，旧归档缺sync字段迁移为逐事实记录并修复重复事实ID；损坏原档停止写入。网络期间的本机修改在applyCharacters时再次合并，不用请求开始时的快照覆盖实时状态。资料限20000条、同步事实（含墓碑）限40000条、远端状态限8 MiB、本机归档（含同步元数据）限16 MiB；达到上限明确失败，不截断墓碑。否决指纹跨设备合并，被否决的同版本证据不重新进入人物表。
 
 图片先上传，条件提交成功后才合并人物元数据；下载逐张校验大小/哈希，取消或失败清理无引用暂存图片。缺图不丢弃人物卡，手动同步核对并从本机副本补传；失效图片记录显示占位。元数据删除成功后尽力清理远端无引用图片，失败不复活记录。人物改动与检查点进入自动同步指纹并通过App适配触发延迟同步；扫描缓存不进入指纹。App使用同一人物Store，独立Debug验证App仅使用合成TXT/合成图片/内存凭据；新验证参数和种子代码必须在Release排除检查中拒绝。
+
+人物详情补充按最多三个来源卷章分卷执行，支持暂停；成功核验回复复用有界提取缓存，缓存命中仍重新核验。部分请求失败会明确报告错误，已经保存的事实保留，不把失败显示为没有新细节。

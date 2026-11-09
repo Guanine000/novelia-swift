@@ -20,19 +20,34 @@ struct CharacterSeriesView: View {
     @State private var currentBook = ""
     @State private var scanSeries = false
     @State private var requestLimit = 64
-    @State private var concurrency = 3
+    @State private var concurrency = 2
     @State private var query = ""
     @State private var ready = false
     @State private var identities: [String: String] = [:]
     @State private var boundaries: [String: Int] = [:]
     @State private var statuses: [String: String] = [:]
-    @State private var message: String?
-    @State private var progress: String?
-    @State private var generation: Task<Void, Never>?
-    @State private var token = UUID()
+    private var message: String? {
+        get { store.runs[workID]?.message }
+        nonmutating set { store.runs[workID, default: .init()].message = newValue }
+    }
+    private var progress: String? {
+        get { store.runs[workID]?.progress }
+        nonmutating set { store.runs[workID, default: .init()].progress = newValue }
+    }
+    private var generation: Task<Void, Never>? {
+        get { store.runningTasks[workID] }
+        nonmutating set { store.runningTasks[workID] = newValue }
+    }
+    private var token: UUID {
+        get { store.runs[workID]?.token ?? UUID() }
+        nonmutating set { store.runs[workID, default: .init()].token = newValue }
+    }
     @State private var confirmingReset = false
     @State private var showingAILog = false
-    @State private var aiLog: [String] = []
+    private var aiLog: [String] {
+        get { store.runs[workID]?.events ?? [] }
+        nonmutating set { store.runs[workID, default: .init()].events = newValue }
+    }
     private var confirmed: Bool { !order.isEmpty && store.order(work: workID) == order }
     private var eligibleBooks: [String] {
         guard let index = order.firstIndex(of: currentBook) else { return [] }
@@ -160,7 +175,7 @@ struct CharacterSeriesView: View {
             if let progress {
                 Section {
                     HStack { ProgressView(); Text(progress) }
-                    if ai.streamedCharacters > 0 { Text("本次回复已接收 \(ai.streamedCharacters) 字").font(.caption).foregroundStyle(.secondary) }
+                    if ai.streamedCharacters > 0 { Text("\(ai.requestProgress.count) 个请求进行中 · 合计已接收 \(ai.streamedCharacters) 字").font(.caption).foregroundStyle(.secondary) }
                     Button("查看 AI 输出") { showingAILog = true }
                     Button("暂停") { cancel(); message = "已暂停，完成的章节已保存。点击更新继续。" }
                 }
@@ -186,11 +201,12 @@ struct CharacterSeriesView: View {
         }
         // 进人物卡详情会让本页"消失"、返回时又会重跑 .task：这两处都不能顺手取消生成，
         // 否则点开一张卡就会把正在跑的扫描掐掉。只有显式暂停、改配置或换范围才取消。
-        .task(id: loadID) { await loadScope(cancelGeneration: generation == nil) }
+        .task(id: loadID) { if generation == nil || !ready { await loadScope(cancelGeneration: false) } }
         .onValueChange(of: scanSeries) { _, _ in cancel(); message = nil }
         .onValueChange(of: ai.configuration) { _, _ in cancel(); message = nil }
+        .onValueChange(of: settings.projectionRevision) { _, _ in cancel() }
     }
-    private func cancel() { token = UUID(); generation?.cancel(); generation = nil; progress = nil }
+    private func cancel() { store.pause(work: workID) }
     /// 每次运行清空上一次的步骤记录，避免把两轮混在一起看。
     private func resetAILog() { aiLog = [] }
     /// 重建后必须让检查点、进度与列表一起刷新，所以统一走一次 loadScope。
@@ -228,6 +244,7 @@ struct CharacterSeriesView: View {
         ready = true
     }
     private func generate() {
+        guard generation == nil else { return }
         cancel(); message = nil; progress = "准备生成…"; resetAILog()
         let snapshot = token, selection = selectedBooks, identity = actionID, config = ai.configuration, limit = requestLimit
         generation = Task {
@@ -280,11 +297,19 @@ private struct CharacterCardView: View {
     @State private var importing = false
     @State private var importTask: Task<Void, Never>?
     @State private var showingPortrait = false
-    @State private var updating = false
-    @State private var updateTask: Task<Void, Never>?
+    private var updating: Bool { store.runningTasks[initialScope.work] != nil }
+    private var updateTask: Task<Void, Never>? {
+        get { store.runningTasks[initialScope.work] }
+        nonmutating set { store.runningTasks[initialScope.work] = newValue }
+    }
+    private var enrichmentKey: String { initialScope.work + "|detail|" + id }
+    private var enrichmentTask: Task<Void, Never>? {
+        get { store.runningTasks[enrichmentKey] }
+        nonmutating set { store.runningTasks[enrichmentKey] = newValue }
+    }
     @State private var updateMessage: String?
     @State private var confirmingDelete = false
-    @State private var enriching = false
+    private var enriching: Bool { enrichmentTask != nil }
     @State private var updateStarted = Date()
     private var scope: CharacterScope { refreshedScope ?? initialScope }
     private var person: VisibleCharacter? { scope.visible(store.entities).first { $0.id == id } }
@@ -353,7 +378,7 @@ private struct CharacterCardView: View {
                         }.padding(.vertical, 8)
                     }
                 } else { Text("此人物在当前阅读范围不可见，或已被合并／移除。").padding(.vertical, 40) }
-                if let updateMessage { Text(updateMessage).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading) }
+                if let updateMessage = store.runs[enrichmentKey]?.progress ?? store.runs[enrichmentKey]?.message ?? updateMessage { Text(updateMessage).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading) }
                 if let error { Text(error).font(.footnote).foregroundStyle(NoveliaStyle.danger).frame(maxWidth: .infinity, alignment: .leading) }
             }.padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 18)
         }
@@ -371,7 +396,8 @@ private struct CharacterCardView: View {
                         }
                     }
                     Divider()
-                    Button("补充细节") { enrich() }.disabled(enriching || updating)
+                    Button("补充细节") { enrich() }.disabled(enriching || updating || !ai.isReadyForGeneration)
+                    if enriching { Button("暂停补充") { store.pause(work: enrichmentKey) } }
                     Button("删除此人物", role: .destructive) { confirmingDelete = true }
                 } label: { Image(systemName: "ellipsis").foregroundStyle(NoveliaStyle.brandGreen) }
             }
@@ -518,12 +544,12 @@ private struct CharacterCardView: View {
     private var updateBar: some View {
         VStack(spacing: 0) {
             if updating {
-                Button { updateTask?.cancel() } label: {
+                Button { store.pause(work: initialScope.work) } label: {
                     VStack(spacing: 3) {
                         HStack { ProgressView().tint(.white); Text("暂停更新") }
-                        // 一次高分块生成可能要几分钟，秒表能区分"在跑"和"真卡死"。
+                        // 等待时长只表示经过时间；是否收到数据由请求进度另行反馈。
                         TimelineView(.periodic(from: updateStarted, by: 1)) { context in
-                            Text((updateMessage ?? "正在处理新增章节…")
+                            Text((store.runs[initialScope.work]?.progress ?? updateMessage ?? "正在处理新增章节…")
                                 + (ai.streamedCharacters > 0 ? " · 已接收\(ai.streamedCharacters)字" : "")
                                 + " · 已等待\(Int(max(0, context.date.timeIntervalSince(updateStarted))))秒").font(.caption)
                         }
@@ -590,31 +616,61 @@ private struct CharacterCardView: View {
             if seen.insert("\(fact.book)#\(fact.chapter)").inserted { picks.append((fact.book, fact.chapter)) }
             if picks.count >= 3 { break }
         }
-        guard let first = picks.first, let book = books.first(where: { $0.key == first.book }) else {
+        guard !picks.isEmpty else {
             self.error = CharacterLexiconError.missing.localizedDescription; return
         }
-        enriching = true; error = nil; updateMessage = nil
-        Task {
-            defer { enriching = false }
-            do {
-                let volume = try await CharacterVolumeLoader.load(book, settings: settings)
-                var chapters = [RecapChapter]()
-                for pick in picks where pick.book == first.book {
-                    chapters += try await volume.source.load(pick.chapter..<(pick.chapter + 1))
+        error = nil; updateMessage = nil
+        store.runs[enrichmentKey] = .init(progress: "准备补充细节…")
+        let detailToken = store.runs[enrichmentKey]!.token
+        enrichmentTask = Task {
+            defer {
+                if store.runs[enrichmentKey]?.token == detailToken {
+                    enrichmentTask = nil; store.runs[enrichmentKey]?.progress = nil
                 }
-                guard !chapters.isEmpty else { throw CharacterLexiconError.changed }
-                let added = try await CharacterDetailUpdater.enrich(
-                    name: person.name, entityID: id, book: first.book, identity: volume.source.identity,
-                    chapters: chapters, scope: scope, store: store, ai: ai) { updateMessage = $0 }
-                updateMessage = added > 0 ? "已补充\(added)条细节。" : "这几章没有新的细节。"
+            }
+            do {
+                var added = 0, requested = 0
+                for key in Array(Set(picks.map(\.book))).sorted() {
+                    try Task.checkCancellation()
+                    guard let selectedBook = books.first(where: { $0.key == key }) else { throw CharacterLexiconError.missing }
+                    let volume = try await CharacterVolumeLoader.load(selectedBook, settings: settings)
+                    var chapters = [RecapChapter]()
+                    for pick in picks where pick.book == key {
+                        chapters += try await volume.source.load(pick.chapter..<(pick.chapter + 1))
+                    }
+                    guard !chapters.isEmpty else { throw CharacterLexiconError.changed }
+                    added += try await CharacterDetailUpdater.enrich(
+                        name: person.name, entityID: id, book: key, identity: volume.source.identity,
+                        chapters: chapters, scope: scope, store: store, ai: ai, beforeRequest: {
+                            guard requested < 6 else { throw CharacterLexiconError.requestBudget }
+                            requested += 1
+                        }) {
+                            if store.runs[enrichmentKey]?.token == detailToken { store.runs[enrichmentKey]?.progress = $0 }
+                        }
+                }
+                if store.runs[enrichmentKey]?.token == detailToken {
+                    store.runs[enrichmentKey]?.message = added > 0 ? "已补充\(added)条细节。" : "这几章没有新的细节。"
+                }
             } catch is CancellationError {
-            } catch { self.error = error.localizedDescription }
+            } catch {
+                if store.runs[enrichmentKey]?.token == detailToken {
+                    store.runs[enrichmentKey]?.message = error.localizedDescription + " 已保存的细节保留，可重试。"
+                }
+            }
         }
     }
     private func update() {
-        updateTask?.cancel(); updating = true; error = nil; updateStarted = Date(); updateMessage = nil
+        guard !updating else { return }
+        error = nil; updateStarted = Date(); updateMessage = nil
+        store.runs[initialScope.work] = .init(progress: "准备生成…")
+        let runToken = store.runs[initialScope.work]!.token
         updateTask = Task {
-            defer { updating = false }
+            defer {
+                if store.runs[initialScope.work]?.token == runToken {
+                    store.runningTasks[initialScope.work] = nil
+                    store.runs[initialScope.work]?.progress = nil
+                }
+            }
             do {
                 var identities = [String: String](), boundaries = [String: Int]()
                 for key in initialScope.booksForScan(series: true) {
@@ -627,10 +683,16 @@ private struct CharacterCardView: View {
                     currentChapter: boundaries[initialScope.currentBook] ?? 0, identities: identities, readBoundaries: boundaries)
                 try Task.checkCancellation(); refreshedScope = fresh
                 let result = try await CharacterBookUpdater.run(books: books, scope: fresh, selection: fresh.booksForScan(series: includeSeries),
-                    settings: settings, store: store, ai: ai, limit: requestLimit, concurrency: concurrency) { updateMessage = $0 }
+                    settings: settings, store: store, ai: ai, limit: requestLimit, concurrency: concurrency) {
+                        if store.runs[initialScope.work]?.token == runToken { store.runs[initialScope.work]?.progress = $0 }
+                    }
                 updateMessage = "完成\(result.completed)章，新增\(result.requests)次请求。缺书或无进度的卷未纳入。"
+                if store.runs[initialScope.work]?.token == runToken { store.runs[initialScope.work]?.message = updateMessage }
             } catch is CancellationError { updateMessage = "已暂停，完成章节已保存。" }
-            catch { self.error = error.localizedDescription + " 完成章节已保存，可继续更新。" }
+            catch {
+                self.error = error.localizedDescription + " 完成章节已保存，可继续更新。"
+                if store.runs[initialScope.work]?.token == runToken { store.runs[initialScope.work]?.message = self.error }
+            }
         }
     }
     @ViewBuilder private func factActions(_ fact: CharacterFact) -> some View {
@@ -720,32 +782,39 @@ private enum CharacterBookUpdater {
                 if let last = batch.last, batch.contains(where: { $0.plan != nil }) {
                     progress("《\(book.title)》第 \(chapter + 1)–\(last.chapter + 1) 章\(batch.count > 1 ? "并行" : "")处理中；本轮\(budget.used)次请求")
                 }
-                var extractions = [Int: CharacterAutomaticUpdater.Extraction]()
-                try await withThrowingTaskGroup(of: (Int, CharacterAutomaticUpdater.Extraction).self) { group in
-                    for item in batch {
-                        guard let plan = item.plan else { continue }
-                        group.addTask {
-                            let extraction = try await CharacterAutomaticUpdater.extract(plan: plan, store: store, ai: ai, beforeRequest: {
-                                try budget.reserve()
-                            }) { _, _ in }
-                            return (item.chapter, extraction)
-                        }
-                    }
-                    for try await (number, extraction) in group { extractions[number] = extraction }
-                }
-
-                // 提交阶段：按章序逐章落盘，遇到失败立即停止，后续章节不推进检查点。
-                for item in batch {
+                var results = CharacterOrderedResults<CharacterAutomaticUpdater.Extraction?>(order: batch.map(\.chapter))
+                for item in batch where item.plan == nil { results.receive(.success(nil), at: item.chapter) }
+                func commit(_ number: Int, _ extraction: CharacterAutomaticUpdater.Extraction?) throws {
                     try Task.checkCancellation()
-                    guard ai.configuration == config else { throw CancellationError() }
-                    if let plan = item.plan, let extraction = extractions[item.chapter] {
+                    guard ai.configuration == config,
+                          let item = batch.first(where: { $0.chapter == number }) else { throw CancellationError() }
+                    if let plan = item.plan, let extraction {
                         try CharacterAutomaticUpdater.apply(extraction, plan: plan, store: store)
                     } else {
                         try store.completeEmptyChapter(book: key, identity: expected, chapter: item.chapter, scope: scope, signature: signature)
                     }
                     completed += 1
-                    progress("《\(book.title)》第 \(item.chapter + 1) 章完成；本轮\(budget.used)次请求")
+                    progress("《\(book.title)》第 \(item.chapter + 1) 章已保存；本轮完成\(completed)章，\(budget.used)次请求")
                 }
+                try results.drain(commit)
+                try await withThrowingTaskGroup(of: (Int, Result<CharacterAutomaticUpdater.Extraction, Error>).self) { group in
+                    for item in batch {
+                        guard let plan = item.plan else { continue }
+                        group.addTask {
+                            do {
+                                let extraction = try await CharacterAutomaticUpdater.extract(plan: plan, store: store, ai: ai,
+                                    beforeRequest: { try budget.reserve() }) { _, _ in }
+                                return (item.chapter, .success(extraction))
+                            } catch { return (item.chapter, .failure(error)) }
+                        }
+                    }
+                    for try await (number, extraction) in group {
+                        results.receive(extraction.map { Optional($0) }, at: number)
+                        do { try results.drain(commit) }
+                        catch { group.cancelAll(); throw error }
+                    }
+                }
+
                 chapter = cursor
             }
         }
@@ -956,16 +1025,14 @@ private struct CharacterAILogView: View {
                     Text("已接收 \(ai.streamedCharacters) 字").font(.caption).foregroundStyle(.secondary)
                 } header: { Text("当前请求") }
                 Section {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            Text(ai.streamedPreview.isEmpty ? "（尚未收到内容）" : ai.streamedPreview)
+                    ForEach(ai.requestProgress.values.sorted { $0.id.uuidString < $1.id.uuidString }) { request in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("请求 " + String(request.id.uuidString.prefix(6)) + " · 已接收 \(request.characters) 字").font(.caption)
+                            Text(request.preview.isEmpty ? "等待模型回复…" : request.preview)
                                 .font(.system(.caption, design: .monospaced))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .id("tail")
                         }
-                        .frame(maxHeight: 240)
-                        .onValueChange(of: ai.streamedPreview) { _, _ in proxy.scrollTo("tail", anchor: .bottom) }
                     }
+                    if ai.requestProgress.isEmpty { Text("当前没有运行中的请求").font(.caption).foregroundStyle(.secondary) }
                 } header: { Text("模型输出（实时）") } footer: {
                     Text("显示的是模型的原始回复片段，包含 JSON 结构；写入人物卡前会逐条核验出处。")
                 }

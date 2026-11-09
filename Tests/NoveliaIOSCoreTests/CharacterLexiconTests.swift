@@ -3,6 +3,31 @@ import XCTest
 @testable import NoveliaIOSCore
 
 final class CharacterLexiconTests: XCTestCase {
+    func testOrderedResultsCommitPrefixBeforeLaterFailure() throws {
+        var values = CharacterOrderedResults<String>(order: [0, 1, 2])
+        var saved = [Int]()
+        values.receive(.success("later"), at: 2)
+        try values.drain { chapter, _ in saved.append(chapter) }
+        XCTAssertTrue(saved.isEmpty)
+        values.receive(.success("first"), at: 0)
+        try values.drain { chapter, _ in saved.append(chapter) }
+        XCTAssertEqual(saved, [0])
+        values.receive(.failure(CharacterLexiconError.changed), at: 1)
+        XCTAssertThrowsError(try values.drain { chapter, _ in saved.append(chapter) })
+        XCTAssertEqual(saved, [0])
+    }
+    func testOrderedResultsDrainAsSoonAsGapCloses() throws {
+        var values = CharacterOrderedResults<String>(order: [3, 4, 5])
+        var saved = [Int]()
+        values.receive(.success("last"), at: 5)
+        values.receive(.success("first"), at: 3)
+        try values.drain { chapter, _ in saved.append(chapter) }
+        XCTAssertEqual(saved, [3])
+        values.receive(.success("middle"), at: 4)
+        try values.drain { chapter, _ in saved.append(chapter) }
+        XCTAssertEqual(saved, [3, 4, 5])
+    }
+
     private let earlyQuote = "面具人将地图交给同伴，随后独自离开了村子。"
     private let lateQuote = "张三摘下面具，向同伴解释了事情的经过。"
     private func scope(chapter: Int = 2, book: String = "v2", identities: [String: String] = ["v1": "i1", "v2": "i2"]) -> CharacterScope {
@@ -321,6 +346,28 @@ final class CharacterLexiconTests: XCTestCase {
         XCTAssertEqual(added, 1)
         XCTAssertEqual(store.entities.count, 1)
         XCTAssertEqual(store.entities.first?.facts.count, 2)
+        var requestedAgain = false
+        let cached = try await CharacterDetailUpdater.enrich(name: "面具人", entityID: id, book: "v1", identity: "i1",
+            chapters: [chapter], scope: scope(), store: store, ai: ai, beforeRequest: { requestedAgain = true })
+        XCTAssertFalse(requestedAgain)
+        XCTAssertEqual(cached, 0)
+    }
+    @MainActor
+    func testDetailFailureDoesNotBecomeEmptySuccess() async throws {
+        let suite = "CharacterDetailFailure-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = CharacterLexiconStore(defaults: defaults)
+        try store.confirmOrder(work: scope().work, volumes: scope().volumes)
+        let id = try store.accept(.init(facts: [early()]), scope: scope())
+        let ai = ReadingAIStore(defaults: defaults, keys: MemoryReadingAIKeys(), client: CharacterFailingDetailAI())
+        var config = ReadingAIConfiguration(); config.isEnabled = true; config.baseURL = "https://test.example/v1"; config.model = "fixture"
+        try ai.save(config, newKey: "fake")
+        do {
+            _ = try await CharacterDetailUpdater.enrich(name: "面具人", entityID: id, book: "v1", identity: "i1",
+                chapters: [.init(index: 0, title: "一", text: earlyQuote)], scope: scope(), store: store, ai: ai)
+            XCTFail("请求失败必须明确报错")
+        } catch { XCTAssertEqual(error as? ReadingAIError, .transport) }
+        XCTAssertEqual(store.entities.first?.facts.count, 1)
     }
     @MainActor
     func testExplicitAppendPreservesAttributionAndOldArchiveCompatibility() throws {
@@ -796,5 +843,11 @@ private actor CharacterPausedAI: ReadingAICompleting {
     }
     func resolve(_ text: String) {
         pending?.resume(returning: .init(text: text, inputTokens: nil, outputTokens: nil)); pending = nil
+    }
+}
+
+private struct CharacterFailingDetailAI: ReadingAICompleting {
+    func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest) async throws -> ReadingAIResponse {
+        throw ReadingAIError.transport
     }
 }

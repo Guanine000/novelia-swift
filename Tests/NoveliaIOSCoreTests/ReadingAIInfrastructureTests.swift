@@ -3,6 +3,34 @@ import XCTest
 @testable import NoveliaIOSCore
 
 final class ReadingAIInfrastructureTests: XCTestCase {
+    @MainActor
+    func testConcurrentProgressIsIsolatedAndLateCallbacksAreIgnored() async throws {
+        let suite = "ReadingAIProgress-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let client = ControlledProgressAI()
+        let store = ReadingAIStore(defaults: defaults, keys: MemoryReadingAIKeys(), client: client)
+        try store.save(config(), newKey: "test-key")
+        let first = Task { try await store.generate(.init(instruction: "first", input: "test")) }
+        let second = Task { try await store.generate(.init(instruction: "second", input: "test")) }
+        for _ in 0..<1000 {
+            if await client.count == 2 { break }
+            await Task.yield()
+        }
+        await client.emit()
+        for _ in 0..<1000 {
+            if store.streamedCharacters == 30 { break }
+            await Task.yield()
+        }
+        XCTAssertEqual(Set(store.requestProgress.values.map(\.characters)), Set([10, 20]))
+        XCTAssertEqual(store.streamedCharacters, 30)
+        first.cancel(); second.cancel()
+        _ = await first.result; _ = await second.result
+        XCTAssertTrue(store.requestProgress.isEmpty)
+        await client.emit()
+        for _ in 0..<30 { await Task.yield() }
+        XCTAssertTrue(store.requestProgress.isEmpty)
+    }
+
     private func config(_ address: String = "https://ai.example.com/v1/") -> ReadingAIConfiguration {
         var value = ReadingAIConfiguration()
         value.isEnabled = true; value.baseURL = address; value.model = "test-model"
@@ -238,4 +266,19 @@ private final class ReadingAITestURLProtocol: URLProtocol {
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
+}
+
+private actor ControlledProgressAI: ReadingAICompleting {
+    private var callbacks: [String: @Sendable (Int, String) -> Void] = [:]
+    var count: Int { callbacks.count }
+    func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest) async throws -> ReadingAIResponse {
+        try await complete(configuration: configuration, apiKey: apiKey, request: request, onProgress: { _, _ in })
+    }
+    func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest,
+                  onProgress: @escaping @Sendable (Int, String) -> Void) async throws -> ReadingAIResponse {
+        callbacks[request.instruction] = onProgress
+        try await Task.sleep(nanoseconds: 10_000_000_000)
+        return .init(text: "done", inputTokens: nil, outputTokens: nil)
+    }
+    func emit() { callbacks["first"]?(10, "first"); callbacks["second"]?(20, "second") }
 }

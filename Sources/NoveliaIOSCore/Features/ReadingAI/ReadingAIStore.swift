@@ -9,9 +9,18 @@ final class ReadingAIStore: ObservableObject {
     @Published private(set) var configuration: ReadingAIConfiguration
     @Published private(set) var hasSavedKey = false
     /// 当前请求已收到的正文字数；长时间生成时界面据此显示实时进度，请求结束或取消后归零。
-    @Published private(set) var streamedCharacters = 0
+    struct RequestProgress: Identifiable {
+        let id: UUID
+        var characters = 0
+        var preview = ""
+        var lastReceived: Date? = nil
+    }
+    @Published private(set) var requestProgress: [UUID: RequestProgress] = [:]
+    var streamedCharacters: Int { requestProgress.values.reduce(0) { $0 + $1.characters } }
     /// 当前请求已收到的正文末尾片段，供"AI 运行记录"实时预览。
-    @Published private(set) var streamedPreview = ""
+    var streamedPreview: String {
+        requestProgress.values.sorted { ($0.lastReceived ?? .distantPast) > ($1.lastReceived ?? .distantPast) }.first?.preview ?? ""
+    }
     private let defaults: UserDefaults
     private let keys: any ReadingAIKeyStoring
     private let client: any ReadingAICompleting
@@ -68,7 +77,7 @@ final class ReadingAIStore: ObservableObject {
     private func cancelRunning() {
         revision = UUID()
         for task in tasks.values { task.cancel() }
-        tasks.removeAll()
+        tasks.removeAll(); requestProgress.removeAll()
     }
     func generate(_ request: ReadingAIRequest) async throws -> ReadingAIResponse {
         guard configuration.isEnabled else { throw ReadingAIError.disabled }
@@ -88,19 +97,21 @@ final class ReadingAIStore: ObservableObject {
         try request.validate()
         guard let key = try keys.read(scope: config.endpoint().absoluteString), !key.isEmpty else { throw ReadingAIError.missingKey }
         let id = UUID(), snapshot = revision, client = client
-        streamedCharacters = 0; streamedPreview = ""
+        requestProgress[id] = RequestProgress(id: id)
         let task = Task {
             try await client.complete(configuration: config, apiKey: key, request: request) { received, tail in
                 // 客户端在后台线程回调，回到主线程只写计数和末尾片段，避免高频刷新拖慢生成。
                 Task { @MainActor [weak self] in
-                    guard let self, self.revision == snapshot else { return }
-                    self.streamedCharacters = max(self.streamedCharacters, received)
-                    self.streamedPreview = tail
+                    guard let self, self.revision == snapshot, self.tasks[id]?.isCancelled == false,
+                          var value = self.requestProgress[id] else { return }
+                    value.characters = max(value.characters, received)
+                    value.preview = tail; value.lastReceived = Date()
+                    self.requestProgress[id] = value
                 }
             }
         }
         tasks[id] = task
-        defer { tasks.removeValue(forKey: id) }
+        defer { tasks.removeValue(forKey: id); requestProgress.removeValue(forKey: id) }
         do {
             let result = try await withTaskCancellationHandler(operation: { try await task.value }, onCancel: { task.cancel() })
             try Task.checkCancellation()

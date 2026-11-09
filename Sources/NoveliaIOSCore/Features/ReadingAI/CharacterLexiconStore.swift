@@ -15,6 +15,22 @@ final class CharacterLexiconStore: ObservableObject, CharacterSyncLocal {
         var sync: CharacterSyncState? = nil
     }
     @Published private(set) var entities: [CharacterEntity] = []
+    /// ReaderSettings 持有的同一 Store 管理运行状态，页面重建后仍能观察和暂停原任务。
+    struct RunState {
+        var token = UUID()
+        var progress: String? = nil
+        var message: String? = nil
+        var events: [String] = []
+    }
+    @Published var runs: [String: RunState] = [:]
+    var runningTasks: [String: Task<Void, Never>] = [:]
+    func pause(work: String) {
+        runningTasks.removeValue(forKey: work)?.cancel()
+        var state = runs[work] ?? RunState()
+        state.token = UUID(); state.progress = nil
+        state.message = "已暂停，完成的章节已保存。点击更新继续。"
+        runs[work] = state
+    }
     private var archive = Archive()
     private let defaults: UserDefaults
     private static let key = "reader.characters.archive.v1"
@@ -391,29 +407,48 @@ enum CharacterDetailUpdater {    static func enrich(name: String, entityID: Stri
         guard scope.identities[book] == identity else { throw CharacterLexiconError.changed }
         let configuration = ai.configuration
         var requests = 0, added = 0
+        var firstFailure: Error?
         for chapter in chapters {
             try Task.checkCancellation()
             let plan = try CharacterExtractionPlan(scope: scope, book: book, identity: identity, chapters: [chapter])
             for chunk in plan.chunks {
                 try Task.checkCancellation()
-                guard requests < maximumRequests else { return added }
                 guard ai.configuration == configuration else { throw CancellationError() }
                 progress("正在补充「\(name)」 · 第\(chapter.index + 1)章")
                 let request = try plan.detailRequest(chunk, name: name, outputTokens: configuration.maximumOutputTokens)
-                try beforeRequest(); requests += 1
+                let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+                let model = String(decoding: try encoder.encode(configuration), as: UTF8.self)
+                let cacheKey = scope.work + "|" + FileContentHash.sha256(Data(("detail-v1|" + book + "|" + identity + "|" + model + "|" + request.instruction + "|" + request.input).utf8))
+                let saved = store.extractionCache.read(cacheKey)
                 let output: String
-                do { output = try await ai.generate(request).text }
+                do {
+                    if let saved { output = saved }
+                    else {
+                        guard requests < maximumRequests else { throw CharacterLexiconError.requestBudget }
+                        try beforeRequest(); requests += 1; output = try await ai.generate(request).text
+                    }
+                }
                 catch is CancellationError { throw CancellationError() }
-                catch { continue }   // 单块失败不影响其他章节，用户可再点一次
-                guard let candidates = try? plan.validate(output, chunk: chunk) else { continue }
+                catch { if firstFailure == nil { firstFailure = error }; continue }
+                let candidates: [CharacterCandidate]
+                do { candidates = try plan.validate(output, chunk: chunk) }
+                catch {
+                    store.extractionCache.remove(cacheKey)
+                    if firstFailure == nil { firstFailure = error }; continue
+                }
+                try Task.checkCancellation()
+                guard ai.configuration == configuration else { throw CancellationError() }
+                if saved == nil { store.extractionCache.save(output, key: cacheKey) }
                 for candidate in candidates where candidate.name == name {
                     let fresh = candidate.facts.filter { CharacterLexiconStore.valid($0) }
                     guard !fresh.isEmpty else { continue }
+                    let before = store.entities.first { $0.id == entityID }?.facts.count ?? 0
                     try store.append(.init(id: candidate.id, facts: fresh), to: entityID, scope: scope)
-                    added += fresh.count
+                    added += max(0, (store.entities.first { $0.id == entityID }?.facts.count ?? 0) - before)
                 }
             }
         }
+        if let firstFailure { throw firstFailure }
         return added
     }
 }
@@ -461,5 +496,21 @@ enum CharacterAutomaticUpdater {
                        beforeRequest: () throws -> Void = {}, progress: (Int, Int) -> Void) async throws {
         let extraction = try await extract(plan: plan, store: store, ai: ai, beforeRequest: beforeRequest, progress: progress)
         try apply(extraction, plan: plan, store: store)
+    }
+}
+
+/// 并发结果按输入顺序交付；后项失败先缓存，前项成功可先提交，失败项不推进游标。
+struct CharacterOrderedResults<Value> {
+    private let order: [Int]
+    private var next = 0
+    private var pending: [Int: Result<Value, Error>] = [:]
+    init(order: [Int]) { self.order = order }
+    mutating func receive(_ result: Result<Value, Error>, at chapter: Int) { pending[chapter] = result }
+    mutating func drain(_ commit: (Int, Value) throws -> Void) throws {
+        while next < order.count, let result = pending[order[next]] {
+            let chapter = order[next]
+            try commit(chapter, result.get())
+            pending.removeValue(forKey: chapter); next += 1
+        }
     }
 }
