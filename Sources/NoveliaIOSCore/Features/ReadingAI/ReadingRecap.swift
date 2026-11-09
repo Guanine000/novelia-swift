@@ -25,7 +25,9 @@ struct RecapChunk: Sendable {
     let offset: Int
     let text: String
     var request: ReadingAIRequest {
-        let input = (try? JSONSerialization.data(withJSONObject: ["chapter": chapter, "text": text])) ?? Data()
+        // 固定键序：同一章节每次发送的字节必须一致，否则服务端前缀缓存无法命中，
+        // 依赖字符串比较的测试也会随机失败。
+        let input = (try? JSONSerialization.data(withJSONObject: ["chapter": chapter, "text": text], options: [.sortedKeys])) ?? Data()
         return .init(instruction: ReadingRecapPlan.instruction, input: String(decoding: input, as: UTF8.self))
     }
 }
