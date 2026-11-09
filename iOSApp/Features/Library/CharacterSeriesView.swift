@@ -564,7 +564,9 @@ private enum CharacterBookUpdater {
                 try Task.checkCancellation()
                 guard text.count == 1, text.first?.index == chapter else { throw CharacterLexiconError.changed }
                 guard ai.configuration == config else { throw CancellationError() }
-                if text.allSatisfy({ $0.text.isEmpty }) {
+                // 封面、版权页、作者简介和分卷标题页没有剧情，提前记检查点直接跳过：
+                // 送进模型只会把作者／译者当成角色，还占掉一次请求预算。
+                if text.allSatisfy({ $0.text.isEmpty }) || CharacterExtractionPlan.isNonContent(text) {
                     try store.completeEmptyChapter(book: key, identity: expected, chapter: chapter, scope: scope, signature: signature)
                 } else {
                     let plan = try CharacterExtractionPlan(scope: scope, book: key, identity: expected, chapters: text)

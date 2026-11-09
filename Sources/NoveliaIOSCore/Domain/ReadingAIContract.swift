@@ -23,7 +23,9 @@ struct ReadingAIConfiguration: Codable, Equatable, Sendable {
     /// API 基础地址（例如 https://api.example.com/v1），不是聊天网页地址。
     var baseURL = ""
     var model = ""
-    var maximumOutputTokens = 2_048
+    /// 人物卡每块要覆盖十余个角色的多条事实，2048 只能容下约 10 条，容易漏人；
+    /// 默认按每块 18 条事实留量，按量计费的接口（如 DeepSeek）可再调高到 8192。
+    var maximumOutputTokens = 4_096
     var tokenParameter: TokenParameter = .completion
     var requestsJSON = false
 

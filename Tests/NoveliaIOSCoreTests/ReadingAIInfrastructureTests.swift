@@ -23,7 +23,7 @@ final class ReadingAIInfrastructureTests: XCTestCase {
             request: .init(instruction: "Return JSON.", input: "已读章节，仅此文本。"))
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer isolated-test-key")
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
-        XCTAssertEqual(body["max_tokens"] as? Int, 2_048)
+        XCTAssertEqual(body["max_tokens"] as? Int, 4_096)
         XCTAssertNil(body["max_completion_tokens"])
         XCTAssertEqual((body["response_format"] as? [String: String])?["type"], "json_object")
         let messages = try XCTUnwrap(body["messages"] as? [[String: String]])
@@ -134,7 +134,7 @@ final class ReadingAIInfrastructureTests: XCTestCase {
         defaults.set(try JSONEncoder().encode(invalid), forKey: "reader.ai.configuration.v1")
         let repaired = ReadingAIStore(defaults: defaults, keys: MemoryReadingAIKeys(), client: RecordingReadingAI())
         XCTAssertFalse(repaired.configuration.isEnabled)
-        XCTAssertEqual(repaired.configuration.maximumOutputTokens, 2_048)
+        XCTAssertEqual(repaired.configuration.maximumOutputTokens, 4_096)
     }
     @MainActor
     func testAutomaticRecapRequiresConfiguredAPIModelAndReadableSavedKey() throws {

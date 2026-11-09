@@ -188,6 +188,64 @@ final class CharacterLexiconTests: XCTestCase {
         XCTAssertThrowsError(try plan.validate(extractionResponse(quote: quote, chapter: 1, id: "invented"), chunk: plan.chunks[1], known: known))
         XCTAssertThrowsError(try plan.validate(extractionResponse(name: "张三", quote: quote, chapter: 1, id: known[0].id), chunk: plan.chunks[1], known: known))
     }
+    func testRejectedSiblingCandidateDoesNotDiscardVerifiedOnes() throws {
+        let valid = "甲把信交给乙，随后离开了房间。"
+        let text = valid + "乙把信收进抽屉，然后关灯睡觉。"
+        let plan = try CharacterExtractionPlan(scope: scope(), book: "v1", identity: "i1", chapters: [.init(index: 0, title: "第一章", text: text)])
+        let response = String(decoding: try JSONSerialization.data(withJSONObject: ["candidates": [
+            ["name": "甲", "facts": [["chapter": 0, "text": "甲把信交给乙后离开。", "quote": valid]]],
+            ["name": "乙", "facts": [["chapter": 0, "text": "乙早已知道真相。", "quote": "乙其实早就知道这封信的全部真相。"]]]
+        ]]), as: UTF8.self)
+        // 乙的引文不在原文里，只丢弃这一条；甲的已核验事实必须保留，不能整块作废。
+        let candidates = try plan.validate(response, chunk: plan.chunks[0])
+        XCTAssertEqual(candidates.map(\.name), ["甲"])
+        XCTAssertEqual(candidates.first?.facts.count, 1)
+    }
+    func testFencedJSONResponseIsAcceptedAndStillVerified() throws {
+        let quote = "甲把信交给乙，随后离开了房间。"
+        let plan = try CharacterExtractionPlan(scope: scope(), book: "v1", identity: "i1", chapters: [.init(index: 0, title: "第一章", text: quote)])
+        let body = String(decoding: try JSONSerialization.data(withJSONObject: ["candidates": [
+            ["name": "甲", "facts": [["chapter": 0, "text": "甲交出信件后离开。", "quote": quote]]]
+        ]]), as: UTF8.self)
+        XCTAssertEqual(try plan.validate("```json\n" + body + "\n```", chunk: plan.chunks[0]).first?.name, "甲")
+        let fabricated = String(decoding: try JSONSerialization.data(withJSONObject: ["candidates": [
+            ["name": "甲", "facts": [["chapter": 0, "text": "甲交出信件后离开。", "quote": "甲交出的是伪造的信件原文。"]]]
+        ]]), as: UTF8.self)
+        XCTAssertThrowsError(try plan.validate(fabricated, chunk: plan.chunks[0]))
+        XCTAssertThrowsError(try plan.validate("这不是 JSON。", chunk: plan.chunks[0]))
+    }
+    func testNonContentFrontMatterPageIsNotSentForExtraction() throws {
+        let colophon = "死神广播 版权信息书名：死神广播作者：白井智之译者：佳辰出版社：某出版社出版时间：2024年8月"
+        XCTAssertTrue(CharacterExtractionPlan.isNonContent([.init(index: 0, title: "版权信息", text: colophon)]))
+        XCTAssertFalse(CharacterExtractionPlan.isNonContent([.init(index: 1, title: "第一章", text: String(repeating: "甲走进房间，看见了乙。", count: 60))]))
+    }
+    func testFactMissingAFieldIsSkippedWithoutLosingTheChunk() throws {
+        let quote = "甲把信交给乙，随后离开了房间。"
+        let plan = try CharacterExtractionPlan(scope: scope(), book: "v1", identity: "i1", chapters: [.init(index: 0, title: "第一章", text: quote)])
+        // 第一条缺 quote：只丢这一条，不能连累同一个人物的另一条，更不能让整块 JSON 解析失败。
+        let response = """
+        {"candidates":[{"name":"甲","facts":[{"chapter":0,"text":"缺少引文的事实。"},{"chapter":0,"text":"甲交出信件。","quote":"\(quote)"}]}]}
+        """
+        let candidates = try plan.validate(response, chunk: plan.chunks[0])
+        XCTAssertEqual(candidates.first?.name, "甲")
+        XCTAssertEqual(candidates.first?.facts.count, 1)
+        XCTAssertEqual(candidates.first?.facts.first?.quote, quote)
+    }
+    @MainActor
+    func testGeneratorRetriesOnceWhenModelOutputFailsVerification() async throws {
+        let suite = "CharacterRetry-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let client = CharacterRetryAI()
+        let ai = ReadingAIStore(defaults: defaults, keys: MemoryReadingAIKeys(), client: client)
+        var config = ReadingAIConfiguration(); config.isEnabled = true; config.baseURL = "https://test.example/v1"; config.model = "fixture"
+        try ai.save(config, newKey: "fake")
+        let plan = try CharacterExtractionPlan(scope: scope(), book: "v1", identity: "i1", chapters: [.init(index: 0, title: "一", text: earlyQuote)])
+        let values = try await CharacterGenerator.generate(plan: plan, ai: ai) { _, _ in }
+        XCTAssertEqual(values.count, 1)
+        XCTAssertEqual(values.first?.facts.count, 1)
+        let calls = await client.calls
+        XCTAssertEqual(calls, 2)
+    }
     @MainActor
     func testExplicitAppendPreservesAttributionAndOldArchiveCompatibility() throws {
         let suite = "CharacterAppend-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -600,6 +658,20 @@ final class CharacterLexiconTests: XCTestCase {
         XCTAssertThrowsError(try missing.validated())
     }
 
+}
+
+private actor CharacterRetryAI: ReadingAICompleting {
+    private(set) var calls = 0
+    func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest) async throws -> ReadingAIResponse {
+        calls += 1
+        // 第一次返回无法解析的说明文字，模拟真实模型偶发的非 JSON 回复。
+        if calls == 1 { return .init(text: "抱歉，我无法按要求提取人物。", inputTokens: nil, outputTokens: nil) }
+        let input = try JSONSerialization.jsonObject(with: Data(request.input.utf8)) as! [String: Any]
+        let chapter = input["chapter"] as! Int
+        let data = try JSONSerialization.data(withJSONObject: ["candidates": [[
+            "name": "面具人", "facts": [["chapter": chapter, "text": "交出物品。", "quote": input["text"] as! String]]]]])
+        return .init(text: String(decoding: data, as: UTF8.self), inputTokens: nil, outputTokens: nil)
+    }
 }
 
 private actor CharacterSequenceAI: ReadingAICompleting {
