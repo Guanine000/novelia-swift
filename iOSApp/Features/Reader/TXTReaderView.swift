@@ -172,7 +172,11 @@ struct DownloadedWebNovelTXTReader: View {
                                               guard let contentHash, point.bookKey == "txt:" + contentHash,
                                                     let chapters, chapters.indices.contains(point.chapterIndex), !isShowingAdjustment,
                                                     parsedBook?.rulesFingerprint == settings.txtReaderIdentities[contentHash] else { return }
-                                              settings.positions.recordTXT(hash: contentHash, position: TXTReadingPosition(chapter: point.chapterIndex))
+                                              let saved = settings.positions.txtPosition(hash: contentHash) ?? TXTReadingPosition(chapter: point.chapterIndex)
+                                              // 滚动听书只有逻辑章号。同一章沿用 movingToChapter，避免每次续听把分页单元和偏移清掉。
+                                              let position = saved.movingToChapter(point.chapterIndex)
+                                              guard position != saved || settings.positions.all()["txt:\(contentHash)"] == nil else { return }
+                                              settings.positions.recordTXT(hash: contentHash, position: position)
                                           }) {
                         let current = chapters ?? []
                         return SystemSpeechEngine(chapterCount: current.count, onReadingPosition: { position, preferences in
