@@ -164,6 +164,7 @@ private struct ReadiumEPUBReaderViewContent: View {
         }
         .onAppear {
             if speechHandoff?.openRequest == nil { speechHandoff?.release() }
+            model.speech.onProgressSave = { [weak model = model] point in model?.recordListeningProgress(point) }
             model.speech.bookRoute = bookRoute
             model.speech.bookTitle = model.bookTitle
             model.speech.bookKey = model.bookmarkKey ?? settings.activeBookID
@@ -286,6 +287,7 @@ private struct ReadiumEPUBReaderViewContent: View {
                 if model.readingReturnPoint != nil {
                     Button("回到刚才阅读处") { model.returnToReading() }
                 }
+                if model.localTimeSource != nil { ReaderRemainingTimeMenu(store: settings.remainingTime) }
                 ReaderKeepScreenOnMenuItem()
                 Button { isShowingBookPreferences = true } label: { Label("本书文字处理", systemImage: "slider.horizontal.3") }
                 Button {
@@ -323,7 +325,12 @@ private struct ReadiumEPUBReaderViewContent: View {
         ReaderBottomBarShell(
             showChrome: showChrome,
             batteryLevel: Double(batteryLevel),
-            hiddenPercentText: showChrome ? nil : FractionText.percent(model.overallProgress)
+            hiddenPercentText: showChrome ? nil : FractionText.percent(model.overallProgress),
+            readingTime: AnyView(ReaderRemainingTimeView(store: settings.remainingTime,
+                source: model.localTimeSource, point: model.readingTimePoint, mode: "paged|" + settings.projection.identity,
+                active: model.status == .ready && !isScrubbing && !model.speech.isActive
+                    && !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingSpeech
+                    && !isShowingBookPreferences && model.activeNote == nil, isListening: model.speech.isActive))
         ) {
             positionAndScrub
         }

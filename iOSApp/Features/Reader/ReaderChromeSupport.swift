@@ -177,6 +177,7 @@ struct ReaderBottomBarShell<Content: View>: View {
     let hiddenPercentText: String?
     /// 工具栏隐藏时的底色；nil 保持透明。
     var hiddenBackground: Color? = nil
+    var readingTime: AnyView? = nil
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -188,6 +189,7 @@ struct ReaderBottomBarShell<Content: View>: View {
             HStack {
                 Text(batteryLevel >= 0 ? "电量 \(Int((batteryLevel * 100).rounded()))%" : "电量 —")
                 Spacer()
+                if let readingTime { readingTime }
                 // 工具栏隐藏时也保留进度百分比，兼顾沉浸阅读与位置感知。
                 if !showChrome, let hiddenPercentText {
                     Text(hiddenPercentText)

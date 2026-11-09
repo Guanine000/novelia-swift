@@ -29,11 +29,16 @@ final class EPUBReaderModel: ObservableObject {
     /// 来源为 EPUB 时保存其容器；目录诊断与文件哈希阅读位置仅适用于 EPUB。
     var container: EPUBContainer? { source as? EPUBContainer }
     private(set) var pageBook: EPUBPageBook?
+    @Published private(set) var readingTimePoint = ReadingTimePoint.start
+    private var textTimeMetrics: (@Sendable (ReadingTextProjection) async throws -> ReadingTimeMetrics)?
     @Published private(set) var location = EPUBReadingLocation(spineIndex: 0, pageIndex: 0) {
         didSet {
             refreshSearchHighlight()
             trimPageCaches()
             logLocationChange(from: oldValue)
+            readingTimePoint = .init(resource: location.spineIndex,
+                fraction: currentPageRange?.range.lowerBound ?? 0,
+                reason: locationCause == "turnForward" && !isRestoringPosition && activeRelayouts == 0 ? .forward : .reset)
             guard !isRestoringPosition, activeRelayouts == 0, status == .ready else { return }
             if let positionHandler {
                 positionHandler(location.spineIndex, pageBook?.savedOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex))
@@ -55,6 +60,19 @@ final class EPUBReaderModel: ObservableObject {
             }
         }
     }
+    var localTimeSource: LocalReadingTimeSource? {
+        guard status == .ready, let source else { return nil }
+        let projection = settings.projection
+        if source is TextChapterSource, let metrics = textTimeMetrics, let key = textBookmarkKey, key.hasPrefix("txt:") {
+            let identity = (source as? TextChapterSource)?.layoutIdentity ?? key
+            return .init(id: identity + "|" + projection.identity, load: { try await metrics(projection) })
+        }
+        guard let container, let hash = openedBookHash else { return nil }
+        let starts = source.toc.compactMap(\.spineIndex)
+        return .epub(url: container.fileURL, hash: hash, spines: Array(container.spine.indices),
+                     starts: starts.isEmpty ? Array(container.spine.indices) : starts, projection: projection)
+    }
+
     private var openedBookHash: String?
     var onManualNavigation: (() -> Void)?
     private var isRestoringPosition = false
@@ -297,6 +315,7 @@ final class EPUBReaderModel: ObservableObject {
         guard status == .idle, openTask == nil else { return }
         if let id = textBook.preferenceKey ?? textBook.bookmarkKey { settings.activateBook(id) }
         reloadStoredStyle()
+        textTimeMetrics = textBook.localTimeMetrics
         textBookmarkKey = textBook.bookmarkKey
         textTOCWordCounts = textBook.tocWordCounts
         openTask = Task { [weak self] in
@@ -1185,6 +1204,29 @@ final class EPUBReaderModel: ObservableObject {
         try Task.checkCancellation()
         guard pageBook === book, let text = book.sourceText(spineIndex: index) else { throw CancellationError() }
         return text
+    }
+
+    /// 保存听书进度不驱动页面导航，因此关闭跟读也不会丢失书籍续读位置。
+    func recordListeningProgress(_ point: SpeechResumePoint) {
+        guard let source, (0..<source.chapterCount).contains(point.chapterIndex),
+              let book = pageBook else { return }
+        let unit = point.chapterIndex
+        guard let length = book.sourceLength(spineIndex: unit), length > 0 else { return }
+        let offset = min(max(0, point.sourceUTF16Offset ?? Int(point.progression * Double(length))), length)
+        let legacy = book.savedOffset(spineIndex: unit, sourceOffset: offset)
+        if let positionHandler {
+            guard point.bookKey == textBookmarkKey else { return }
+            positionHandler(unit, legacy)
+        } else if let hash = openedBookHash, point.bookKey == bookmarkKey {
+            let fraction = (Double(unit) + point.progression) / Double(max(1, source.chapterCount))
+            if webContext == nil {
+                settings.positions.recordEPUB(hash: hash, fraction: fraction, spineIndex: unit, chapterOffset: legacy,
+                    chapterProgression: point.progression, nativeChapterOffset: offset, nativeSourceHash: book.sourceHash(spineIndex: unit))
+            } else {
+                settings.recordEPUBPosition(hash: hash, fraction: fraction, spineIndex: unit, chapterOffset: legacy,
+                    chapterProgression: point.progression, context: webContext, paths: webChapterPaths)
+            }
+        }
     }
 
     func updateSpeechPosition(_ position: SpeechReadingPosition?, settings: SpeechSettings) {

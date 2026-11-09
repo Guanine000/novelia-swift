@@ -28,6 +28,8 @@ struct PagedTextBook {
     /// 目录字数（本地 TXT）；在线小说为 nil，不显示字数。
     var tocWordCounts: (@Sendable () async -> ReaderTOCWordCounts)? = nil
     var adjustTXTChapters: (() -> Void)? = nil
+    /// 仅本地 TXT 提供；在线文本不提供，避免为预测请求正文。
+    var localTimeMetrics: (@Sendable (ReadingTextProjection) async throws -> ReadingTimeMetrics)? = nil
 }
 
 #if !NOVELIA_READIUM_ONLY
@@ -233,7 +235,8 @@ private struct EPUBReaderViewContent: View {
                                   isReady: model.status == .ready,
                                   chapterTitle: { model.chapterTitle($0) },
                                   jumpToSpoken: { model.jumpToSpeechPosition() },
-                                  onResumeSaved: { point in resumeSpeech(at: point) }) {
+                                  onResumeSaved: { point in resumeSpeech(at: point) },
+                                  onProgressSave: { [weak model = model] point in model?.recordListeningProgress(point) }) {
                 SystemSpeechEngine(chapterCount: model.chapterCount,
                                    onReadingPosition: { position, settings in model.updateSpeechPosition(position, settings: settings) }) { index in
                     try await model.speechChapterText(index)
@@ -319,6 +322,7 @@ private struct EPUBReaderViewContent: View {
                 if model.readingReturnPoint != nil {
                     Button("回到刚才阅读处") { model.returnToReading() }
                 }
+                if model.localTimeSource != nil { ReaderRemainingTimeMenu(store: settings.remainingTime) }
                 ReaderKeepScreenOnMenuItem()
                 Button { isShowingBookPreferences = true } label: { Label("本书文字处理", systemImage: "slider.horizontal.3") }
                 Button {
@@ -350,7 +354,13 @@ private struct EPUBReaderViewContent: View {
             showChrome: showChrome,
             batteryLevel: Double(batteryLevel),
             hiddenPercentText: showChrome ? nil : FractionText.percent(model.overallProgress),
-            hiddenBackground: model.pageBackgroundColor
+            hiddenBackground: model.pageBackgroundColor,
+            readingTime: AnyView(ReaderRemainingTimeView(store: settings.remainingTime,
+                source: model.localTimeSource, point: model.readingTimePoint, mode: "paged|" + settings.projection.identity,
+                active: model.status == .ready && !model.isLayingOut && !isScrubbing && !speech.isActive
+                    && !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingSpeech
+                    && !isShowingBookPreferences && model.activeNote == nil && model.plainLinkMessage == nil,
+                isListening: speech.isActive))
         ) {
             positionAndScrub
         }

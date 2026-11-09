@@ -735,3 +735,12 @@ python3 scripts/check_architecture_release.py '<Release Novelia.app 内的 Novel
 原生分页在 `EPUBPageBook` 绘制显示列表时按同一近白阈值透明化填充色，保留边框、圆角、变换、彩色底与图片；跟随文字色的列表标记不处理。不改变源文档、排版缓存或源字符位置。背景规则由视图注入模型，新绘制代次保存规则快照，规则变化重建位图；选择其他规则保留原始填充。
 
 朗读只保留本地自动路由与Edge。`SpeechSettingsStore` 初始化时删除退役自备服务的旧地址/模型/音色键，并将旧引擎选择迁移为本地，保留语速、音量、Edge同意状态等其他偏好。生产组装通过 `RetiredSpeechServiceCleanup` 精确删除旧服务/账户的Keychain项，不读取密钥、不影响账号凭据；独立验证组装不操作真实Keychain。客户端与配置入口均已移除，不再实例化自备服务。
+
+
+## 本地剩余阅读时间
+
+`ReaderSettings` 持有唯一 `ReadingTimeEstimateStore`，使用注入的 UserDefaults 保存显示／学习／手动速度设置和有界速率窗口，不依赖统计 Store 或同步实现。Core 的 `ReadingTimeMetrics` 按实际资源顺序累计字数，TXT 使用与分页一致的 36000 UTF-8 字节切分并保留逻辑章边界；`ReadingSpeedSampler` 用单调时钟，只接受前台自然前进的合理区间，每次无效区间重新建锚。每档最多 31 个速度，至少 5 个后用中位数；单书优先、语言与模式通用档兜底，档位最多 128 个。不保存原文、轨迹或历史时间戳。
+
+`ReaderRemainingTime.swift` 是共享 iOS 15 展示层，底栏常驻采样视图不随顶栏显隐销毁。`LocalReadingTimeSource` 只接受本地 EPUB 容器或已有 TXT，后台任务取消向内传播；Readium readingOrder 必须唯一映射至 ZIP spine，不通过 Publication 额外请求正文。没有完整字数或可用速度时明确提示，不把缺失章节当零字。布局、文字规则、前后台、弹层与听书切换会重建锚点。
+
+`SpeechPlaybackController.onProgressSave` 随真实收听续听点节流通知宿主，强制补存沿用暂停／停止／退出／后台路径。该回调与跟读开关独立；各本地宿主把实际章号、偏移／比例映射至既有进度存储，TXT 仍经过目录身份检查。Readium 本地 Locator 同步写入本机恢复键，未提供 Locator 时由较新的通用位置恢复。听书暂停默读速度学习。`ReadingTimeEstimateTests` 覆盖逻辑章、无效位置、采样过滤、速率窗口与存储隔离；`scripts/test_speech_playback.py` 的真实控制器桩测试覆盖关闭跟读仍保存进度和重复补存去重。

@@ -303,6 +303,7 @@ struct ReaderSpeechPresentation: ViewModifier {
     var chapterTitle: ((Int) -> String?)? = nil
     var jumpToSpoken: (() -> Void)? = nil
     var onResumeSaved: ((SpeechResumePoint) -> Void)? = nil
+    var onProgressSave: ((SpeechResumePoint) -> Void)? = nil
     /// 必须排在带默认值的参数之后、并以尾闭包传入。
     let makeEngine: @MainActor () -> (any SpeechEngine)?
 
@@ -320,6 +321,7 @@ struct ReaderSpeechPresentation: ViewModifier {
         // 进入阅读器即回收遗留的跨页会话；这里的控制器随之成为唯一会话。
         .onAppear {
             if speechHandoff?.openRequest == nil { speechHandoff?.release() }
+            controller.onProgressSave = onProgressSave
             controller.bookRoute = bookRoute
             controller.bookKey = bookKey
             controller.onJumpToSpoken = jumpToSpoken
@@ -328,6 +330,7 @@ struct ReaderSpeechPresentation: ViewModifier {
         }
         .task(id: isReady ? bookKey : nil) {
             guard isReady, let bookKey else { return }
+            controller.onProgressSave = onProgressSave
             controller.bookKey = bookKey
             controller.bookRoute = bookRoute
             controller.refreshSavedResume()

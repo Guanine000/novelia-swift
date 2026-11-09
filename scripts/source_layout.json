@@ -131,5 +131,8 @@
   "speech_playback_harness.swift": "scripts/fixtures/speech_playback_harness.swift",
   "TXTChapterAdjustment.swift": "Sources/NoveliaIOSCore/Features/Reader/TXTChapterAdjustment.swift",
   "TXTChapterAdjustmentView.swift": "iOSApp/Features/Reader/TXTChapterAdjustmentView.swift",
-  "TXTAdjustmentMigration.swift": "iOSApp/Features/Reader/TXTAdjustmentMigration.swift"
+  "TXTAdjustmentMigration.swift": "iOSApp/Features/Reader/TXTAdjustmentMigration.swift",
+  "ReadingTimeEstimate.swift": "Sources/NoveliaIOSCore/Features/Reader/ReadingTimeEstimate.swift",
+  "ReadingTimeEstimateStore.swift": "Sources/NoveliaIOSCore/Features/Reader/ReadingTimeEstimateStore.swift",
+  "ReaderRemainingTime.swift": "iOSApp/Features/Reader/ReaderRemainingTime.swift"
 }

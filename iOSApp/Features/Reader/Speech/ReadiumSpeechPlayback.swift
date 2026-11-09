@@ -61,6 +61,8 @@ final class SpeechPlaybackController: ObservableObject {
     @Published private(set) var savedResume: SpeechResumePoint?
 
     private let store = SpeechSettingsStore()
+    /// 宿主将真实续听点承接到书籍进度；不依赖页面跟随，沿用续听写盘节流。
+    var onProgressSave: ((SpeechResumePoint) -> Void)?
     private let resumeStore: SpeechResumeStore
     private var hasPlaybackPosition = false
     private var lastResumeSave = Date.distantPast
@@ -173,6 +175,7 @@ final class SpeechPlaybackController: ObservableObject {
         lastResumeChapter = point.chapterIndex
         resumeStore.save(point)
         savedResume = point
+        onProgressSave?(point)
     }
     func flushResumePoint() { recordResumePoint(force: true) }
 

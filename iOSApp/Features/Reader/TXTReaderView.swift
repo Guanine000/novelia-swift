@@ -12,6 +12,8 @@ struct DownloadedWebNovelTXTReader: View {
     let title: String
     let rules: TXTChapterRuleConfiguration
     var statisticsID: String? = nil
+    @State private var readingTimePoint = ReadingTimePoint.start
+    @State private var lastManualScroll: TimeInterval = -1
     @State private var adjustmentRevision = 0
     @State private var isShowingAdjustment = false
     @State private var chapters: [TXTChapter]?
@@ -116,7 +118,7 @@ struct DownloadedWebNovelTXTReader: View {
                             proxy.scrollTo("txt-reader-top", anchor: .top)
                         }
                     }
-                    .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in speech.suspendFollow(true) })
+                    .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in speech.suspendFollow(true); lastManualScroll = ProcessInfo.processInfo.systemUptime })
                     .onPreferenceChange(ReaderScrollFrames.self) { visibleAnchor = ReaderScrollFrames.visible($0) }
                     .task(id: "\(selectedSearchHit?.id ?? "")|\(bodyChunksChapterIndex ?? -1)|\(returnAnchor ?? "")") {
                         guard bodyChunksChapterIndex == chapterIndex else { return }
@@ -130,7 +132,14 @@ struct DownloadedWebNovelTXTReader: View {
                     .onValueChange(of: speechPosition) { _, _ in scrollToSpeech(proxy) }
                     .onValueChange(of: bodyChunksChapterIndex) { _, _ in scrollToSpeech(proxy) }
                     .safeAreaInset(edge: .bottom) {
-                        chapterControls(count: chapters.count)
+                        VStack(spacing: 4) {
+                            ReaderRemainingTimeView(store: settings.remainingTime, source: scrollTimeSource,
+                                point: readingTimePoint, mode: "scroll|" + settings.projection.identity,
+                                active: !speech.isActive && !isShowingContents && !isShowingSearch && !isShowingSpeech
+                                    && !isShowingBookPreferences && !isShowingAdjustment && bodyChunksChapterIndex == chapterIndex,
+                                isListening: speech.isActive)
+                            chapterControls(count: chapters.count)
+                        }
                     }
                 }
             } else if let errorMessage {
@@ -159,6 +168,11 @@ struct DownloadedWebNovelTXTReader: View {
                                               guard let chapters, chapters.indices.contains(point.chapterIndex) else { return }
                                               chapterIndex = point.chapterIndex
                                               speech.start(from: point.anchor)
+                                          }, onProgressSave: { point in
+                                              guard let contentHash, point.bookKey == "txt:" + contentHash,
+                                                    let chapters, chapters.indices.contains(point.chapterIndex), !isShowingAdjustment,
+                                                    parsedBook?.rulesFingerprint == settings.txtReaderIdentities[contentHash] else { return }
+                                              settings.positions.recordTXT(hash: contentHash, position: TXTReadingPosition(chapter: point.chapterIndex))
                                           }) {
                         let current = chapters ?? []
                         return SystemSpeechEngine(chapterCount: current.count, onReadingPosition: { position, preferences in
@@ -191,6 +205,7 @@ struct DownloadedWebNovelTXTReader: View {
                 if let point = readingReturnPoint {
                     Button("回到刚才阅读处") { selectedSearchHit = nil; chapterIndex = point.chapter; returnAnchor = point.anchor; readingReturnPoint = nil }
                 }
+                ReaderRemainingTimeMenu(store: settings.remainingTime)
                 ReaderKeepScreenOnMenuItem()
                 Button("本书文字处理") { isShowingBookPreferences = true }
                 Button { settings.pagedTextReading = true } label: {
@@ -322,7 +337,20 @@ struct DownloadedWebNovelTXTReader: View {
                 errorMessage = error.localizedDescription
             }
         }
+        .task(id: "time|\(visibleAnchor ?? "")|\(bodyChunksChapterIndex ?? -1)|\(parsedBook?.rulesFingerprint ?? "")") {
+            do { try await Task.sleep(nanoseconds: 350_000_000) } catch { return }
+            guard let chapters, chapters.indices.contains(chapterIndex), bodyChunksChapterIndex == chapterIndex,
+                  let anchor = visibleAnchor, let index = Int(anchor.replacingOccurrences(of: "text-chunk-", with: "")),
+                  bodyChunks.indices.contains(index) else { return }
+            let text = settings.projection.apply(chapters[chapterIndex].body)
+            let ranges = ReaderTextRanges.sourceRanges(of: bodyChunks, in: text)
+            guard let range = ranges[index] else { return }
+            readingTimePoint = .init(resource: chapterIndex, fraction: Double(range.lowerBound) / Double(max(1, text.utf16.count)),
+                reason: ProcessInfo.processInfo.systemUptime - lastManualScroll < 2 ? .forward : .reset)
+        }
         .onValueChange(of: chapterIndex) { _, newIndex in
+            lastManualScroll = -1
+            readingTimePoint = .init(resource: newIndex, fraction: 0)
             if speechPosition?.chapterIndex != newIndex { speech.suspendFollow(true) }
             guard !isShowingAdjustment, let contentHash,
                   parsedBook?.rulesFingerprint == settings.txtReaderIdentities[contentHash] else { return }
@@ -339,6 +367,14 @@ struct DownloadedWebNovelTXTReader: View {
             guard !Task.isCancelled else { return }
             bodyChunks = chunks
             bodyChunksChapterIndex = chapterIndex
+        }
+    }
+
+    private var scrollTimeSource: LocalReadingTimeSource? {
+        guard let parsedBook else { return nil }
+        let projection = settings.projection
+        return .init(id: "txt:" + parsedBook.contentHash + "|" + parsedBook.rulesFingerprint + "|" + projection.identity) {
+            try await ReadingTimeMetrics.loadTXT(parsedBook, projection: projection, paged: false)
         }
     }
 
@@ -477,7 +513,10 @@ private struct TXTPagedReader: View {
                 positionUpdatedAt: settings.positions.all()["txt:\(hash)"]?.updatedAt,
                 bookmarkKey: "txt:\(hash)",
                 tocWordCounts: { await BookWordCounter.txtTOCCounts(parsed) },
-                adjustTXTChapters: onAdjust)
+                adjustTXTChapters: onAdjust,
+                localTimeMetrics: { projection in
+                    try await ReadingTimeMetrics.loadTXT(parsed, projection: projection, paged: true)
+                })
         } catch {
             guard !Task.isCancelled else { return }
             let nsError = error as NSError
