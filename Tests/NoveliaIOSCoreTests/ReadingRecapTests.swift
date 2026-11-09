@@ -112,3 +112,61 @@ private actor RecapTestAI: ReadingAICompleting {
         return .init(text: output, inputTokens: nil, outputTokens: nil)
     }
 }
+
+final class StorySummaryTests: XCTestCase {
+    private let chapter = "小明在旧宅里找到一把锈钥匙，钥匙上刻着祖父的名字。他把钥匙收好，决定第二天去仓库看看。"
+    func testPlanPacksConsecutiveChaptersAndRejectsEmptyInput() throws {
+        let chapters = (0..<5).map { RecapChapter(index: $0, title: "第\($0 + 1)章", text: chapter) }
+        let plan = try StorySummaryPlan(chapters: chapters)
+        XCTAssertEqual(plan.packs.count, 1)
+        XCTAssertEqual(plan.packs[0].firstChapter, 0)
+        XCTAssertEqual(plan.packs[0].lastChapter, 4)
+        XCTAssertThrowsError(try StorySummaryPlan(chapters: []))
+        XCTAssertThrowsError(try StorySummaryPlan(chapters: [.init(index: 0, title: "空", text: "   ")]))
+    }
+    func testPlanSplitsWhenPacksExceedTheByteBudget() throws {
+        let long = String(repeating: chapter, count: 120)
+        let chapters = (0..<4).map { RecapChapter(index: $0, title: "第\($0 + 1)章", text: long) }
+        let plan = try StorySummaryPlan(chapters: chapters)
+        XCTAssertGreaterThan(plan.packs.count, 1)
+        XCTAssertEqual(plan.packs.flatMap { $0.firstChapter...$0.lastChapter }.count, 4)
+    }
+    func testSummaryParsingRejectsProseAndOutOfRangeText() throws {
+        XCTAssertEqual(try StorySummaryPlan.parseSummary("{\"summary\":\"\(String(repeating: "事", count: 200))\"}", allowed: 120...1_600).count, 200)
+        XCTAssertThrowsError(try StorySummaryPlan.parseSummary("这是一个很长但没有 JSON 的回复。", allowed: 120...1_600))
+        XCTAssertThrowsError(try StorySummaryPlan.parseSummary("{\"summary\":\"太短\"}", allowed: 120...1_600))
+    }
+    @MainActor
+    func testGeneratorMapsEveryPackThenReducesOnce() async throws {
+        let suite = "StorySummary-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let client = StorySummaryAI()
+        let ai = ReadingAIStore(defaults: defaults, keys: MemoryReadingAIKeys(), client: client)
+        var config = ReadingAIConfiguration(); config.isEnabled = true; config.baseURL = "https://test.example/v1"; config.model = "fixture"
+        try ai.save(config, newKey: "fake")
+        // 每章约 3.8KB：两章塞得进一个 10KB 的包，三章塞不进，所以拆成 2 包。
+        let chapters = (0..<3).map { RecapChapter(index: $0, title: "第\($0 + 1)章", text: String(repeating: chapter, count: 30)) }
+        XCTAssertEqual(try StorySummaryPlan(chapters: chapters).packs.count, 2)
+        let text = try await StorySummaryGenerator.generate(chapters: chapters, previous: nil, ai: ai) { _ in }
+        XCTAssertTrue(text.contains("梗概"))
+        let calls = await client.calls
+        XCTAssertEqual(calls, 3)   // 2 次分段概括 + 1 次归并
+        // 装得下一包时只需概括一次再归并一次。
+        let small = (0..<3).map { RecapChapter(index: $0, title: "第\($0 + 1)章", text: String(repeating: chapter, count: 20)) }
+        XCTAssertEqual(try StorySummaryPlan(chapters: small).packs.count, 1)
+        let callsBefore = await client.calls
+        _ = try await StorySummaryGenerator.generate(chapters: small, previous: nil, ai: ai) { _ in }
+        let callsAfter = await client.calls
+        XCTAssertEqual(callsAfter - callsBefore, 2)   // 1 次概括 + 1 次归并
+    }
+}
+
+private actor StorySummaryAI: ReadingAICompleting {
+    private(set) var calls = 0
+    func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest) async throws -> ReadingAIResponse {
+        calls += 1
+        let body = String(repeating: "情节推进。", count: 60) + "梗概"
+        let data = try JSONSerialization.data(withJSONObject: ["summary": body])
+        return .init(text: String(decoding: data, as: UTF8.self), inputTokens: nil, outputTokens: nil)
+    }
+}

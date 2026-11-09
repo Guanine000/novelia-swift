@@ -184,6 +184,17 @@ private struct ReadingRecapSheet: View {
     @State private var progress: String?
     @State private var task: Task<Void, Never>?
     @State private var run = UUID()
+    /// 故事梗概的覆盖范围：整本已读部分，或只回看最近 30 章。
+    @State private var storyScope: StoryScope = .whole
+    @State private var story: BookStorySummary?
+    @State private var storyProgress: String?
+    @State private var storyTask: Task<Void, Never>?
+    @State private var storyError: String?
+    enum StoryScope: String, CaseIterable, Identifiable {
+        case whole, recent
+        var id: String { rawValue }
+        var title: String { self == .whole ? "全书已读部分" : "最近 30 章" }
+    }
     init(source: LocalRecapSource, store: ReadingRecapStore, ai: ReadingAIStore) {
         self.source = source; self.store = store; self.ai = ai
         _count = State(initialValue: max(1, min(3, source.currentChapter)))
@@ -199,11 +210,33 @@ private struct ReadingRecapSheet: View {
             List {
                 Section {
                     Text(source.title)
-                    Picker("回顾此前章节", selection: $count) {
-                        ForEach(1...max(1, min(3, source.currentChapter)), id: \.self) { Text("最近 \($0) 章").tag($0) }
-                    }.disabled(progress != nil)
+                    Picker("梗概覆盖范围", selection: $storyScope) {
+                        ForEach(StoryScope.allCases) { Text($0.title).tag($0) }
+                    }.disabled(storyProgress != nil)
                     Text("当前第 \(source.currentChapter + 1) 章不纳入回顾；不检查此前章节是否逐章读过。")
                         .font(.footnote).foregroundStyle(.secondary)
+                }
+                Section {
+                    if let story {
+                        Text(story.text)
+                        Text("已覆盖到第 \(story.coveredThrough) 章")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if storyProgress == nil {
+                        Text("还没有故事梗概。隔了很久回到这本书时，先看这里的整体梗概比逐章细节更有用。")
+                            .foregroundStyle(.secondary)
+                    }
+                    if let storyProgress {
+                        HStack { ProgressView(); Text(storyProgress) }
+                        Button("取消") { cancelStory() }
+                    } else {
+                        Button(story == nil ? "生成故事梗概" : "更新故事梗概") { generateStory() }
+                            .disabled(!ai.configuration.isEnabled || source.currentChapter == 0)
+                        Text(storyHint)
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if let storyError { Text(storyError).foregroundStyle(NoveliaStyle.danger) }
+                } header: { Text("故事梗概") } footer: {
+                    Text("封面、版权页与当前章不纳入；首次会分章压缩再归并，之后只处理新增章节。")
                 }
                 if let result {
                     Section {
@@ -228,27 +261,33 @@ private struct ReadingRecapSheet: View {
                     }
                 }
                 Section {
+                    Picker("回看章节数", selection: $count) {
+                        ForEach(1...max(1, min(3, source.currentChapter)), id: \.self) { Text("最近 \($0) 章").tag($0) }
+                    }.disabled(progress != nil)
                     if let progress {
                         HStack { ProgressView(); Text(progress) }
                         Button("取消并继续阅读") { cancel(); dismiss() }
                     } else if let plan {
-                        Text("将向 \((try? ai.configuration.endpoint().host) ?? "所配置接口") 发送此前 \(chapters.count) 章正文，共 \(plan.chunks.count) 个分块，可能产生模型费用。")
+                        Text("将向 \((try? ai.configuration.endpoint().host) ?? "所配置接口") 发送这 \(chapters.count) 章正文，共 \(plan.chunks.count) 个分块，可能产生模型费用。")
                             .font(.footnote)
                         Button(result == nil ? "发送并生成回顾" : "重新生成回顾") { generate(plan) }
                             .disabled(!ai.configuration.isEnabled)
                     }
                     if !ai.configuration.isEnabled { Text("请先在“我的 → 高级 → AI 阅读辅助”配置并启用 AI。已有匹配缓存仍可查看。").font(.footnote) }
                     if let error { Text(error).foregroundStyle(NoveliaStyle.danger) }
+                } header: { Text("最近几章细节") } footer: {
+                    Text("只覆盖最近几章的具体情节，用来接上“上次停在哪”。")
                 }
             }
             .navigationTitle("前情回顾")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("继续阅读") { dismiss() } } }
             .task(id: preparationID) { await prepare() }
-            .onDisappear { cancel() }
+            .onDisappear { cancel(); cancelStory() }
         }
     }
     private func prepare() async {
         cancel(); error = nil; result = nil; plan = nil; chapters = []
+        story = store.story(book: source.bookKey)
         let snapshot = run
         let selected = min(count, source.currentChapter)
         do {
@@ -258,6 +297,44 @@ private struct ReadingRecapSheet: View {
             let prepared = try ReadingRecapPlan(chapters: values, boundary: source.currentChapter, identity: source.identity, modelIdentity: modelIdentity)
             chapters = values; plan = prepared; result = store.cached(plan: prepared, book: source.bookKey)
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
+    }
+    /// 梗概从哪一章开始算：整本从第 1 章，最近范围从倒数第 30 章。
+    private var storyStart: Int { storyScope == .whole ? 0 : max(0, source.currentChapter - 30) }
+    private var storyHint: String {
+        guard source.currentChapter > 0 else { return "当前还没有可回顾的完整章节。" }
+        let identity = (try? StorySummaryGenerator.fingerprint(identity: source.identity, configuration: ai.configuration)) ?? ""
+        let reusable = story?.fingerprint == identity && (story?.coveredThrough ?? 0) > storyStart
+        let covered = reusable ? max(storyStart, story?.coveredThrough ?? storyStart) : storyStart
+        guard covered < source.currentChapter else { return "梗概已覆盖到最新位置；读到新章节后可再次更新。" }
+        return "将处理第 \(covered + 1)–\(source.currentChapter) 章正文（\(source.currentChapter - covered) 章），可能产生模型费用。"
+    }
+    private func cancelStory() { storyTask?.cancel(); storyTask = nil; storyProgress = nil }
+    private func generateStory() {
+        guard ai.configuration.isEnabled else { return }
+        guard let identity = try? StorySummaryGenerator.fingerprint(identity: source.identity, configuration: ai.configuration) else {
+            storyError = "当前 AI 配置无法用于生成，请检查模型与输出上限。"; return
+        }
+        let start = storyStart
+        let reusable = story.flatMap { $0.fingerprint == identity && $0.coveredThrough > start ? $0 : nil }
+        let from = max(start, reusable?.coveredThrough ?? start)
+        guard from < source.currentChapter else { storyError = "当前的梗概已经覆盖到最新章节。"; return }
+        cancelStory(); storyError = nil; storyProgress = "准备载入正文…"
+        let snapshot = run
+        storyTask = Task {
+            do {
+                let values = try await source.load(from..<source.currentChapter)
+                try Task.checkCancellation()
+                guard snapshot == run else { return }
+                let text = try await StorySummaryGenerator.generate(chapters: values, previous: from > start ? reusable : nil, ai: ai) { storyProgress = $0 }
+                guard !Task.isCancelled, snapshot == run else { return }
+                let value = BookStorySummary(coveredThrough: source.currentChapter, text: text, fingerprint: identity, updatedAt: Date())
+                store.saveStory(value, book: source.bookKey); story = value
+            } catch is CancellationError {} catch {
+                guard snapshot == run, !Task.isCancelled else { return }
+                storyError = error.localizedDescription
+            }
+            if snapshot == run { storyProgress = nil; storyTask = nil }
+        }
     }
     private func cancel() { run = UUID(); task?.cancel(); task = nil; progress = nil }
     private func generate(_ plan: ReadingRecapPlan) {

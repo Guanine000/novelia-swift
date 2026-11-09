@@ -12,8 +12,10 @@ final class ReadingRecapStore: ObservableObject {
     private static let daysKey = "reader.recap.promptDays.v1"
     private static let datesKey = "reader.recap.lastRead.v1"
     private static let cacheKey = "reader.recap.cache.v1"
+    private static let storiesKey = "reader.recap.stories.v1"
     private var dates: [String: Date]
     private var cache: [String: ReadingRecap]
+    private var stories: [String: BookStorySummary]
     private var recentPrompts: [String: Date] = [:]
     init(defaults: UserDefaults) {
         self.defaults = defaults
@@ -21,8 +23,10 @@ final class ReadingRecapStore: ObservableObject {
         promptAfterDays = [0, 3, 7, 14, 30].contains(days) ? days : 7
         dates = defaults.data(forKey: Self.datesKey).flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
         cache = defaults.data(forKey: Self.cacheKey).flatMap { try? JSONDecoder().decode([String: ReadingRecap].self, from: $0) } ?? [:]
+        stories = defaults.data(forKey: Self.storiesKey).flatMap { try? JSONDecoder().decode([String: BookStorySummary].self, from: $0) } ?? [:]
         if dates.count > 2_048 { dates = [:] }
         if cache.count > 32 { cache = [:] }
+        if stories.count > 64 { stories = [:] }
     }
     private func key(_ book: String) -> String { FileContentHash.sha256(Data(book.utf8)) }
     func shouldPrompt(book: String, boundary: Int, now: Date = Date()) -> Bool {
@@ -55,5 +59,14 @@ final class ReadingRecapStore: ObservableObject {
         if cache[id] == nil, cache.count >= 32, let removed = cache.keys.sorted().first { cache.removeValue(forKey: removed) }
         cache[id] = recap
         if let data = try? JSONEncoder().encode(cache) { defaults.set(data, forKey: Self.cacheKey) }
+    }
+    /// 全书梗概：每本书一份，随边界推进增量更新，比近期回顾缓存少得多。
+    func story(book: String) -> BookStorySummary? { stories[key(book)] }
+    func saveStory(_ value: BookStorySummary, book: String) {
+        guard value.coveredThrough > 0, !value.text.isEmpty, value.text.utf16.count <= 4_000 else { return }
+        let id = key(book)
+        if stories[id] == nil, stories.count >= 64, let removed = stories.keys.sorted().first { stories.removeValue(forKey: removed) }
+        stories[id] = value
+        if let data = try? JSONEncoder().encode(stories) { defaults.set(data, forKey: Self.storiesKey) }
     }
 }
