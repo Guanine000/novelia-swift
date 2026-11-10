@@ -62,6 +62,42 @@ final class ReadingRecapStore: ObservableObject {
     }
     /// 全书梗概：每本书一份，随边界推进增量更新，比近期回顾缓存少得多。
     func story(book: String) -> BookStorySummary? { stories[key(book)] }
+    /// 梗概生成归 Store 持有：关闭回顾面板、甚至退出去看别的书都不该打断它，
+    /// 结果直接落盘，下次打开直接看到。只有显式取消才停。
+    @Published private(set) var storyProgress: [String: String] = [:]
+    @Published private(set) var storyErrors: [String: String] = [:]
+    private var storyTasks: [String: Task<Void, Never>] = [:]
+    func isBuildingStory(book: String) -> Bool { storyTasks[key(book)] != nil }
+    func cancelStory(book: String) {
+        let id = key(book)
+        storyTasks[id]?.cancel(); storyTasks[id] = nil
+        storyProgress[id] = nil
+    }
+    func startStory(book: String, chapters: [RecapChapter], previous: BookStorySummary?,
+                    identity: String, coveredThrough: Int, ai: ReadingAIStore) {
+        let id = key(book)
+        guard storyTasks[id] == nil else { return }
+        storyErrors[id] = nil
+        storyProgress[id] = "准备载入正文…"
+        storyTasks[id] = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let text = try await StorySummaryGenerator.generate(chapters: chapters, previous: previous, ai: ai) { [weak self] text in
+                    self?.storyProgress[id] = text
+                }
+                try Task.checkCancellation()
+                if let fingerprint = try? StorySummaryGenerator.fingerprint(identity: identity, configuration: ai.configuration) {
+                    let value = BookStorySummary(coveredThrough: coveredThrough, text: text, fingerprint: fingerprint, updatedAt: Date())
+                    self.saveStory(value, book: book)
+                }
+            } catch is CancellationError {
+            } catch {
+                self.storyErrors[id] = error.localizedDescription
+            }
+            self.storyProgress[id] = nil
+            self.storyTasks[id] = nil
+        }
+    }
     func saveStory(_ value: BookStorySummary, book: String) {
         guard value.coveredThrough > 0, !value.text.isEmpty, value.text.utf16.count <= 4_000 else { return }
         let id = key(book)

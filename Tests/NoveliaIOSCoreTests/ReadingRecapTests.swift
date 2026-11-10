@@ -148,7 +148,10 @@ final class StorySummaryTests: XCTestCase {
         let chapters = (0..<3).map { RecapChapter(index: $0, title: "第\($0 + 1)章", text: String(repeating: chapter, count: 30)) }
         XCTAssertEqual(try StorySummaryPlan(chapters: chapters).packs.count, 2)
         let text = try await StorySummaryGenerator.generate(chapters: chapters, previous: nil, ai: ai) { _ in }
-        XCTAssertTrue(text.contains("梗概"))
+        XCTAssertTrue(text.contains("【一句话回顾】"))
+        XCTAssertTrue(text.contains("【主要人物】"))
+        XCTAssertTrue(text.contains("【主线进展】"))
+        XCTAssertTrue(text.contains("【当前处境与悬念】"))
         let calls = await client.calls
         XCTAssertEqual(calls, 3)   // 2 次分段概括 + 1 次归并
         // 装得下一包时只需概括一次再归并一次。
@@ -165,8 +168,38 @@ private actor StorySummaryAI: ReadingAICompleting {
     private(set) var calls = 0
     func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest) async throws -> ReadingAIResponse {
         calls += 1
-        let body = String(repeating: "情节推进。", count: 60) + "梗概"
-        let data = try JSONSerialization.data(withJSONObject: ["summary": body])
+        let data = try JSONSerialization.data(withJSONObject: [
+            "overview": String(repeating: "主角追查旧宅钥匙的来历，", count: 5),
+            "characters": ["小明：主角，持钥匙的人"],
+            "plot": ["在旧宅找到刻着祖父名字的钥匙", "决定次日去仓库查看"],
+            "open": ["钥匙能打开什么"]
+        ])
         return .init(text: String(decoding: data, as: UTF8.self), inputTokens: nil, outputTokens: nil)
+    }
+}
+
+final class FrontMatterFilterTests: XCTestCase {
+    private let body = "江南孝明冒雨赶到公寓，遇见了光明寺美琴，两人一起等待鹿谷门实。"
+    func testFrontMatterTitlesAreRecognised() {
+        for title in ["序言", "前言", "人物表", "主要人物", "目录", "版权信息", "译后记", "解说", "参考文献", "序", "出版说明"] {
+            XCTAssertTrue(CharacterExtractionPlan.isNonStoryTitle(title), title)
+        }
+        for title in ["序章", "楔子", "第一章 没有指针的钟塔", "“旧馆”其一", "尾声"] {
+            XCTAssertFalse(CharacterExtractionPlan.isNonStoryTitle(title), title)
+        }
+    }
+    func testStoryPlanSkipsFrontMatterAndKeepsPlotChapters() throws {
+        let chapters = [
+            RecapChapter(index: 0, title: "序言", text: String(repeating: body, count: 40)),
+            RecapChapter(index: 1, title: "人物表", text: String(repeating: body, count: 40)),
+            RecapChapter(index: 2, title: "第一章 没有指针的钟塔", text: body),
+            RecapChapter(index: 3, title: "第二章 迟来的二人", text: body)
+        ]
+        let plan = try StorySummaryPlan(chapters: chapters)
+        XCTAssertEqual(plan.packs.count, 1)
+        XCTAssertEqual(plan.packs[0].firstChapter, 2)
+        XCTAssertEqual(plan.packs[0].lastChapter, 3)
+        // 全部都是前置页时不能产出空梗概。
+        XCTAssertThrowsError(try StorySummaryPlan(chapters: Array(chapters.prefix(2))))
     }
 }

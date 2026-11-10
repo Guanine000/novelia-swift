@@ -366,6 +366,24 @@ struct CharacterExtractionPlan: Sendable {
     static func isNonContent(_ chapters: [RecapChapter]) -> Bool {
         chapters.reduce(0) { $0 + $1.text.trimmingCharacters(in: .whitespacesAndNewlines).count } < minimumContentCharacters
     }
+    /// 按标题识别前言、人物表、目录、后记这类非剧情页面。
+    /// 它们常常超过 350 字，单靠长度筛不掉，却会把"人物表"和"出版说明"送进摘要，
+    /// 生成的回顾就变成书评而不是剧情。目录 / 序章 / 楔子属于正文，不在此列。
+    static func isNonStoryTitle(_ title: String) -> Bool {
+        let text = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text.utf16.count <= 16 else { return false }
+        // 只去掉阿拉伯数字和常见标点：不能用 isNumber，中文数字异体（如“参”作“三”）会被误判。
+        let digits = Set("0123456789０１２３４５６７８９")
+        let punctuation = Set("，。、：:；;！!？?（）()【】[]　")
+        let normalized = text.filter { !digits.contains($0) && !punctuation.contains($0) }
+        guard !normalized.isEmpty else { return false }
+        if ["序章", "楔子", "引子", "终章", "尾声"].contains(where: { normalized.contains($0) }) { return false }
+        let markers = ["序言", "前言", "引言", "人物表", "主要人物", "人物介绍", "出场人物", "目录", "版权", "内容简介",
+                       "作者简介", "译者简介", "译后记", "后记", "解说", "参考文献", "献词", "扉页", "插图", "出版说明"]
+        if markers.contains(where: { normalized.contains($0) }) { return true }
+        // 单独的“序”“跋”标题；两个字的“序章”已在上面排除。
+        return normalized == "序" || normalized == "跋"
+    }
 }
 /// 只缓存已核验分块的原始结构化结果；命中后仍按本次正文/身份/边界重新验证。
 /// 缓存不含密钥，独立于正式人物档案；损坏可丢弃，正文/模型/上下文变化自动失效。
