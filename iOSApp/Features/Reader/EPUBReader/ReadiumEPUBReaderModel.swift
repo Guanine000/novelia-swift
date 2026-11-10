@@ -96,6 +96,19 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 #endif
 
     private(set) var navigator: EPUBNavigatorViewController?
+    /// 临时快照导航不发布位置、不记录统计或保存进度；只在明确落页后提交一次。
+    @Published private(set) var curlBusy = false
+    @Published var curlReady = false
+#if DEBUG
+    @Published var curlPreparationCount = 0
+    @Published var curlCompletedTurns = 0
+    @Published var curlCancelledTurns = 0
+#endif
+    @Published var curlError: String?
+    var onCurlTurn: ((Bool) -> Bool)?
+    var cancelCurl: (() async -> Void)?
+    private var curlPreview: (id: UUID, origin: Locator, navigator: EPUBNavigatorViewController, snapshot: EPUBNavigatorViewController)?
+
     private var publication: Publication?
     private var navigationIndex: ReadiumNavigationIndex?
     @Published private(set) var currentTOCIndex: Int?
@@ -186,6 +199,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     /// 失败页的「重新打开」：仅用于打开 EPUB 文件失败（文本章节失败走 retryTextLoad）。
     func retryOpening(url: URL) {
+        if afterCurlRestores({ [weak self] in self?.retryOpening(url: url) }) { return }
         guard case .failed = status, textBook == nil else { return }
         status = .idle
         Task { await open(url: url, systemIsDark: isDarkMode) }
@@ -226,6 +240,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     }
 
     func retryTextLoad() {
+        if afterCurlRestores({ [weak self] in self?.retryTextLoad() }) { return }
         guard textBook != nil else { return }
         textLoadFailure = nil
         if status != .ready, let book = textBook {
@@ -411,8 +426,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     // MARK: 导航器
 
-    private func makeNavigator(initialLocation: Locator?) throws {
-        guard let publication else { return }
+    private func navigatorConfiguration() -> EPUBNavigatorViewController.Configuration {
         var config = EPUBNavigatorViewController.Configuration(
             preferences: preferences(),
             fontFamilyDeclarations: Self.importedFontDeclarations()
@@ -429,6 +443,12 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         // 根背景透明：书籍未设背景时露出宿主绘制的阅读背景；书籍给 body 设的背景
         // （如 `<body bgcolor>`）按 CSS 规则延伸到整个页面。
         config.readiumCSSRSProperties.backgroundColor = TransparentCSSColor()
+        return config
+    }
+
+    private func makeNavigator(initialLocation: Locator?) throws {
+        guard let publication else { return }
+        let config = navigatorConfiguration()
         let navigator = try EPUBNavigatorViewController(
             publication: publication, initialLocation: initialLocation, config: config)
         navigator.delegate = self
@@ -441,8 +461,12 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
         // 先于翻页适配器注册且不消费事件：只记下点按，供位置日志区分用户翻页与 Readium 自行移动。
         gestureToken = navigator.addObserver(.tap { [weak self] event in
+
             // 同次 WebKit 点击先激活高亮，再上报普通点按；后者不能把刚恢复的朗读再次暂停。
             if let self, Date().timeIntervalSince(self.lastSpeechDecorationTap) < 0.3 { return true }
+            if let self, let view = self.navigator?.view,
+               event.location.x < view.bounds.width / 3 || event.location.x > view.bounds.width * 2 / 3,
+               self.onCurlTurn?(self.curlForward(atRightEdge: event.location.x > view.bounds.width / 2)) == true { return true }
             self?.noteGesture("tap")
             if let self, let view = self.navigator?.view,
                event.location.x < view.bounds.width / 3 || event.location.x > view.bounds.width * 2 / 3 { self.speech.suspendFollow(true); self.pendingWebPositionWrite = true }
@@ -470,6 +494,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     }
 
     func startSpeechFromVisiblePage() {
+        if afterCurlRestores({ [weak self] in self?.startSpeechFromVisiblePage() }) { return }
         speech.stop(); prepareSpeech()
         let cloud = speech.isCloud
         speech.startSelection { [weak self] in
@@ -517,6 +542,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     }
 
     func startSpeech(selection: Selection) {
+        if afterCurlRestores({ [weak self] in self?.startSpeech(selection: selection) }) { return }
         let selectedLocator = selection.locator
         let index = navigationIndex?.resourceIndex(for: selectedLocator.href) ?? currentPageRange?.chapter ?? 0
         speech.stop(); prepareSpeech()
@@ -584,6 +610,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     /// 用户翻页或滚动后回到正在朗读的段落。
     func jumpToSpoken() {
+        if afterCurlRestores({ [weak self] in self?.jumpToSpoken() }) { return }
         guard let spokenLocator else { return }
         markNavigation("speech")
         Task { _ = await navigator?.go(to: spokenLocator) }
@@ -662,6 +689,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     /// 续听先解析持久化 Locator（旧记录按章与比例恢复），等待导航完成再起播。
     func resumeSpeech(at point: SpeechResumePoint) {
+        if afterCurlRestores({ [weak self] in self?.resumeSpeech(at: point) }) { return }
         prepareSpeech()
         let usesLocator = speech.engineKind == .readium
         speech.startSelection { [weak self] in
@@ -747,6 +775,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     /// 样式中只有边距和导入字体需要重建导航器；其余偏好可直接提交。
     private func rebuildNavigator() {
+        if afterCurlRestores({ [weak self] in self?.rebuildNavigator() }) { return }
         markNavigation("rebuild")
         let location = navigator?.currentLocation ?? locator
         do {
@@ -792,6 +821,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     // MARK: 设置
 
     func synchronizeSharedSettings(systemIsDark: Bool) {
+        if afterCurlRestores({ [weak self] in self?.synchronizeSharedSettings(systemIsDark: systemIsDark) }) { return }
         let settings = self.settings
         let dark = settings.isDark(systemIsDark: systemIsDark)
         let font = CGFloat(settings.fontSize)
@@ -807,11 +837,13 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
     /// 自定义背景变化只更新外层颜色，不提交分页偏好或重写正文样式。
     func refreshBackground() {
+        if afterCurlRestores({ [weak self] in self?.refreshBackground() }) { return }
         reapplyPageBackgrounds()
     }
 
     /// 只有去白底规则变化时重算正文；位置/显示回报仍只消费缓存，避免刷新反馈。
     func refreshPageBackgroundRule() {
+        if afterCurlRestores({ [weak self] in self?.refreshPageBackgroundRule() }) { return }
         for case let page as WKWebView in pageLoadObservations.keyEnumerator().allObjects {
             guard !page.isLoading, page.url != nil else { continue }
             readPageBackground(of: page)
@@ -823,6 +855,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         style.fontSize = CGFloat(settings.fontSize)
     }
     func reloadBookPreferences(url: URL?) {
+        if afterCurlRestores({ [weak self] in self?.reloadBookPreferences(url: url) }) { return }
         readingReturnPoint = nil
         navigator?.apply(decorations: [], in: "book-search")
         speech.stop()
@@ -837,6 +870,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     }
 
     func applyStyle(_ requested: EPUBReaderStyle) {
+        if afterCurlRestores({ [weak self] in self?.applyStyle(requested) }) { return }
         var updated = requested
         updated.fontSize = min(36, max(12, requested.fontSize))
         updated.lineSpacing = min(24, max(0, requested.lineSpacing))
@@ -868,15 +902,18 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     // MARK: 导航
 
     func goForward() {
+        if onCurlTurn?(true) == true { return }
         markNavigation("turnForward")
         Task { if await navigator?.goForward(options: .animated) == false, isAtWebNovelEnd { pendingWebPositionWrite = false; onReachedEnd?() } }
     }
     func goBackward() {
+        if onCurlTurn?(false) == true { return }
         markNavigation("turnBackward")
         Task { _ = await navigator?.goBackward(options: .animated) }
     }
 
     func jump(to item: ReadiumTOCItem) {
+        if afterCurlRestores({ [weak self] in self?.jump(to: item) }) { return }
         rememberReadingPoint()
         markNavigation("navigate")
         Task { _ = await navigator?.go(to: item.link) }
@@ -1189,6 +1226,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     /// 跳到图片所在页：先打开所在章节，再在页面中找到该图片并用 Readium 的定位脚本翻到它所在的页；
     /// 章节内容可能尚未就绪，找不到时稍后重试，仍找不到则停在章首。
     func jump(toImage entry: EPUBImageEntry) {
+        if afterCurlRestores({ [weak self] in self?.jump(toImage: entry) }) { return }
         guard let spine = entry.spineIndex, let index = readingOrderIndex(forSpine: spine),
               let publication else { return }
         markNavigation("navigate")
@@ -1257,11 +1295,13 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published private(set) var readingReturnPoint: Locator?
     private func rememberReadingPoint() { if readingReturnPoint == nil { readingReturnPoint = locator } }
     func returnToReading() {
+        if afterCurlRestores({ [weak self] in self?.returnToReading() }) { return }
         guard let point = readingReturnPoint, let navigator else { return }
         markNavigation("navigate")
         Task { if await navigator.go(to: point) { readingReturnPoint = nil; navigator.apply(decorations: [], in: "book-search") } }
     }
     func showSearchHit(_ hit: BookTextSearch.Hit) {
+        if afterCurlRestores({ [weak self] in self?.showSearchHit(hit) }) { return }
         guard let publication, let navigator, publication.readingOrder.indices.contains(hit.chapterIndex) else { return }
         rememberReadingPoint(); markNavigation("navigate")
         Task {
@@ -1283,6 +1323,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     }
 
     func jump(toChapter index: Int, progression: Double) {
+        if afterCurlRestores({ [weak self] in self?.jump(toChapter: index, progression: progression) }) { return }
         rememberReadingPoint()
         guard let publication, publication.readingOrder.indices.contains(index) else { return }
         markNavigation("navigate")
@@ -1293,6 +1334,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     }
 
     func seek(to progression: Double) {
+        if afterCurlRestores({ [weak self] in self?.seek(to: progression) }) { return }
         guard let publication else { return }
         markNavigation("seek")
         Task {
@@ -1411,6 +1453,11 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
         guard (navigator as AnyObject) === self.navigator else { return }
+        if let preview = curlPreview, preview.snapshot === preview.navigator {
+            makeWebViewsTransparent()
+            reapplyPageBackgrounds()
+            return
+        }
         let previous = self.locator
         logLocationChange(from: previous, to: locator)
         let current = navigationIndex?.tocIndex(for: locator.href)
@@ -1442,6 +1489,7 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
 
     /// Readium 每次应用设置都会把根视图涂成背景色；清空以露出宿主绘制的阅读背景。
     func navigator(_ navigator: VisualNavigator, presentationDidChange presentation: VisualNavigatorPresentation) {
+        guard (navigator as AnyObject) === self.navigator else { return }
         readingTimePoint.reason = .reset
         (navigator as? UIViewController)?.view.backgroundColor = .clear
     }
@@ -1451,6 +1499,7 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     }
 
     func navigator(_ navigator: Navigator, didFailToLoadResourceAt href: RelativeURL, withError error: ReadError) {
+        guard (navigator as AnyObject) === self.navigator else { return }
         if textBook != nil {
             failedTextHref = href
             textLoadFailure = "章节加载失败：\(String(describing: error))"
@@ -1495,6 +1544,7 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     /// 新章节的 WebView 创建时触发（此时已开始加载，注入的脚本不保证作用于当页，
     /// 所以根背景透明改由 RS__backgroundColor 在 HTML 注入阶段完成，见 makeNavigator）。
     func navigator(_ navigator: EPUBNavigatorViewController, setupUserScripts userContentController: WKUserContentController) {
+        guard navigator === self.navigator else { return }
         // 此回调在新章节的 WebView 创建时触发；待其加入视图层级后再设为透明。
         createdWebViews += 1
         Self.shareable.notice(ReaderDiagnosticMessage.readiumWebViewCreated(count: createdWebViews))
@@ -1617,5 +1667,137 @@ private final class ReadiumGestureProbe: NSObject {
 
     @objc private func handle(_ recognizer: UIPanGestureRecognizer) {
         if recognizer.state == .began { onBegan(recognizer) }
+    }
+}
+
+// MARK: - 仿真翻页的独立预取与落页事务
+
+extension ReadiumEPUBReaderModel {
+    var curlRightToLeft: Bool { navigator?.settings.readingProgression == .rtl }
+    func curlForward(atRightEdge right: Bool) -> Bool { right != curlRightToLeft }
+    var curlPaperColor: UIColor {
+        UIColor(settings.backgrounds.color(dark: isDarkMode,
+            fallback: settings.appearance.background(system: isDarkMode ? .dark : .light)))
+    }
+    func curlPaperBackground(size: CGSize) -> UIImage? {
+        settings.backgrounds.image(dark: isDarkMode, landscape: size.width > size.height)
+    }
+    var curlAppearanceKey: String {
+        // 缓存键必须稳定；未排序的 JSON 会让同一份样式反复失效并阻塞用户翻页。
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return ((try? encoder.encode(style).base64EncodedString()) ?? "")
+            + "|\(isDarkMode)|\(settings.backgrounds.revision)|\(UserDefaults.standard.string(forKey: SettingsKey.readerBookBackgroundFollow) ?? "")"
+    }
+
+    private func afterCurlRestores(_ action: @escaping @MainActor () -> Void) -> Bool {
+        guard curlBusy, let cancelCurl else { return false }
+        Task { await cancelCurl(); action() }
+        return true
+    }
+
+    /// 预取导航器由卷页宿主持有，仅复用 Publication 与配置，不参与模型进度或正文交互。
+    func makeCurlSnapshotNavigator() throws -> EPUBNavigatorViewController? {
+        guard let publication, let locator else { return nil }
+        let snapshot = try EPUBNavigatorViewController(publication: publication, initialLocation: locator, config: navigatorConfiguration())
+        snapshot.delegate = self
+        return snapshot
+    }
+
+    func curlSnapshotBackground(_ web: WKWebView) async -> UIColor? {
+        let rule = ReaderBookBackgroundFollow(storedValue: UserDefaults.standard.string(forKey: SettingsKey.readerBookBackgroundFollow))
+        let script = EPUBReadiumPageBackground.script(ignoresNearWhite: rule == .ignoreNearWhite, threshold: ReaderBookBackgroundFollow.nearWhiteThreshold)
+        let result: String? = await withCheckedContinuation { continuation in
+            web.evaluateJavaScript(script) { value, _ in continuation.resume(returning: value as? String) }
+        }
+        guard let result, let color = Self.opaqueColor(fromCSS: result) else { return nil }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let bounds = navigator?.view.bounds ?? web.bounds
+        let hasImage = settings.backgrounds.image(dark: isDarkMode, landscape: bounds.width > bounds.height) != nil
+        return rule.follows(red: r, green: g, blue: b, hasBackgroundImage: hasImage) ? color : nil
+    }
+
+    func beginCurlPreview(snapshot: EPUBNavigatorViewController? = nil) -> UUID? {
+        guard curlPreview == nil, status == .ready, let navigator, let origin = locator else { return nil }
+        let id = UUID()
+        if snapshot == nil { textPositionTask?.cancel(); textProgressGeneration += 1 }
+        curlPreview = (id, origin, navigator, snapshot ?? navigator)
+        curlBusy = true
+        return id
+    }
+
+    // go 完成不等于排版位置已稳定。跨章向后时会先报告临时的 100%，
+    // 分页正文的真实首可见进度应小于 1；连续稳定采样后才能缓存或提交。
+    private func settledCurlLocation(in navigator: EPUBNavigatorViewController, matching destination: Locator? = nil, differentFrom previous: Locator? = nil) async -> Locator? {
+        var candidate: Locator?, stable = 0
+        for _ in 0..<60 {
+            if Task.isCancelled { return nil }
+            if let current = navigator.currentLocation {
+                let progression = current.locations.progression ?? 0
+                let canonical = publication?.metadata.layout == .fixed || progression < 1
+                let matches = destination.map { current.href == $0.href && abs(progression - ($0.locations.progression ?? 0)) < 0.0000001 } ?? true
+                let changed = previous.map { current.href != $0.href || abs(progression - ($0.locations.progression ?? 0)) > 0.0000001 } ?? true
+                if canonical && matches && changed {
+                    stable = candidate == current ? stable + 1 : 0
+                    candidate = current
+                    if stable >= 3 { return current }
+                } else { candidate = nil; stable = 0 }
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return nil
+    }
+
+    func previewCurlNeighbor(forward: Bool, transaction: UUID) async throws -> Locator? {
+        guard let preview = curlPreview, preview.id == transaction, self.navigator === preview.navigator else { return nil }
+        let navigator = preview.snapshot
+        let previous = navigator.currentLocation
+        let moved = forward ? await navigator.goForward(options: .none) : await navigator.goBackward(options: .none)
+        guard moved, curlPreview?.id == transaction else { return nil }
+        if let current = await settledCurlLocation(in: navigator, differentFrom: previous) { return current }
+        try Task.checkCancellation()
+        throw CurlNavigationError.locationUnavailable
+    }
+
+    private enum CurlNavigationError: Error { case locationUnavailable }
+
+    func restoreCurlPreview(_ transaction: UUID) async -> Bool {
+        guard let preview = curlPreview, preview.id == transaction,
+              await preview.snapshot.go(to: preview.origin, options: .none) else { return false }
+        return await settledCurlLocation(in: preview.snapshot, matching: preview.origin) != nil
+    }
+
+    /// 取消预取或手势只释放事务；真实导航器始终保留原页。只有明确落页才导航并发布一次位置。
+    func finishCurlPreview(_ transaction: UUID, target: Locator?, forward: Bool = true) async -> Bool {
+        guard let preview = curlPreview, preview.id == transaction else { return false }
+        let navigator = preview.navigator
+        var actual = preview.origin
+        var restored = true
+        if let target {
+            restored = await navigator.go(to: target, options: .none)
+            if restored, let settled = await settledCurlLocation(in: navigator, matching: target) {
+                actual = settled
+            } else { restored = false }
+        }
+        guard curlPreview?.id == transaction else { return false }
+        curlPreview = nil; curlBusy = false
+        guard self.navigator === navigator else { return false }
+        guard restored else {
+            status = .failed("仿真翻页无法恢复阅读位置，请重新打开阅读器。")
+            return false
+        }
+        if target != nil {
+#if DEBUG
+            curlCompletedTurns += 1
+#endif
+            markNavigation(forward ? "turnForward" : "turnBackward")
+            self.navigator(navigator, locationDidChange: actual)
+        }
+        return true
+    }
+
+    func curlReachedBoundary(forward: Bool) {
+        if forward, isAtWebNovelEnd { pendingWebPositionWrite = false; onReachedEnd?() }
     }
 }

@@ -318,6 +318,8 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		644385B483AFC07514AE8DFF /* ReadingCharactersEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D24038D26A5A1A5A34320D64 /* ReadingCharactersEntry.swift */; };
 		39466130E0D6E8F97106F7C2 /* CharacterSeriesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 384329C8926A69209ABA6008 /* CharacterSeriesView.swift */; };
 		AF2795795323F7D409C534FA /* CharacterSeriesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 384329C8926A69209ABA6008 /* CharacterSeriesView.swift */; };
+		D55000000000000000000001 /* ReadiumPageCurl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000003; };
+		D55000000000000000000002 /* ReadiumPageCurl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000003; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -476,6 +478,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 		94E854C22C4CAF76EC4619B8 /* CharacterVolumeLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/App/Integrations/CharacterVolumeLoader.swift; sourceTree = SOURCE_ROOT; };
 		D24038D26A5A1A5A34320D64 /* ReadingCharactersEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/App/Integrations/ReadingCharactersEntry.swift; sourceTree = SOURCE_ROOT; };
 		384329C8926A69209ABA6008 /* CharacterSeriesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Library/CharacterSeriesView.swift; sourceTree = SOURCE_ROOT; };
+		D55000000000000000000003 /* ReadiumPageCurl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumPageCurl.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -555,6 +558,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				B10000000000000000000300 /* ReadiumEPUBReaderModel.swift */,
 				B10000000000000000000310 /* ReadiumTextPublication.swift */,
 				B10000000000000000000301 /* ReadiumEPUBReaderView.swift */,
+				D55000000000000000000003 /* ReadiumPageCurl.swift */,
 			);
 			path = iOSApp/Features/Reader/EPUBReader;
 			sourceTree = "<group>";
@@ -1081,6 +1085,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A10000000000000000000300 /* ReadiumEPUBReaderModel.swift in Sources */,
 				A10000000000000000000310 /* ReadiumTextPublication.swift in Sources */,
 				A10000000000000000000301 /* ReadiumEPUBReaderView.swift in Sources */,
+				D55000000000000000000001 /* ReadiumPageCurl.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1230,6 +1235,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A15F00000000000000000060 /* ReadiumEPUBReaderModel.swift in Sources */,
 				A15F00000000000000000061 /* ReadiumTextPublication.swift in Sources */,
 				A15F00000000000000000062 /* ReadiumEPUBReaderView.swift in Sources */,
+				D55000000000000000000002 /* ReadiumPageCurl.swift in Sources */,
 				A15F0000000000000000006A /* WebNovelEPUBIdentity.swift in Sources */,
 				A15F0000000000000000006B /* WebNovelEPUBReading.swift in Sources */,
 			);

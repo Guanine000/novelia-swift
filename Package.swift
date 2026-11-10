@@ -45,6 +45,7 @@ let package = Package(
                 "DEPENDENCIES.md",
                 "EPUBPagerView.swift",
                 "EPUBReaderModel.swift",
+                "ReadiumPageCurl.swift",
                 "EPUBReaderView.swift",
                 "EPUBSampleBook.swift",
             ],

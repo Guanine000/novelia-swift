@@ -65,6 +65,10 @@ final class ReaderSettings: ObservableObject {
     @Published var nativePageCurlEnabled: Bool {
         didSet { defaults.set(nativePageCurlEnabled, forKey: SettingsKey.readerNativePageCurl) }
     }
+    /// Readium 独立的本机翻页偏好，不继承或改写原生引擎的选择。
+    @Published var readiumPageCurlEnabled: Bool {
+        didSet { defaults.set(readiumPageCurlEnabled, forKey: SettingsKey.readerReadiumPageCurl) }
+    }
     @Published private var storedFontSize: Double
     @Published private var storedAppearance: String
     @Published private var storedPagedText: Bool
@@ -85,6 +89,7 @@ final class ReaderSettings: ObservableObject {
         self.bookmarks = bookmarks ?? ReaderBookmarkStore()
         self.defaults = defaults
         nativePageCurlEnabled = defaults.bool(forKey: SettingsKey.readerNativePageCurl)
+        readiumPageCurlEnabled = defaults.bool(forKey: SettingsKey.readerReadiumPageCurl)
         bookPreferences = defaults.data(forKey: Self.bookPreferencesKey).flatMap { try? JSONDecoder().decode([String: BookReadingPreferences].self, from: $0) } ?? [:]
         self.webEPUBMaps = WebNovelEPUBMapStore(defaults: defaults)
         let epubStyle = defaults.data(forKey: Self.epubStyleKey)

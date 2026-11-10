@@ -3,6 +3,24 @@ import XCTest
 
 final class ReaderSettingsTests: XCTestCase {
     @MainActor
+    func testReadiumCurlPreferenceIsIndependentAndDoesNotMigrateLayout() throws {
+        let suite = "ReadiumCurl-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let layout = Data(#"{"fontSize":22,"leftMargin":31}"#.utf8)
+        defaults.set(layout, forKey: ReaderSettings.epubStyleKey)
+        let settings = ReaderSettings(defaults: defaults)
+        XCTAssertFalse(settings.readiumPageCurlEnabled)
+        XCTAssertNil(defaults.object(forKey: SettingsKey.readerReadiumPageCurl))
+        settings.readiumPageCurlEnabled = true
+        let restored = ReaderSettings(defaults: defaults)
+        XCTAssertTrue(restored.readiumPageCurlEnabled)
+        XCTAssertFalse(restored.nativePageCurlEnabled)
+        XCTAssertEqual(defaults.data(forKey: ReaderSettings.epubStyleKey), layout)
+        XCTAssertNil(defaults.object(forKey: SettingsKey.readerEPUBReadium))
+    }
+
+    @MainActor
     func testNativeCurlPreferenceDoesNotChangeLayoutOrReadium() throws {
         let suite = "NativeCurl-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

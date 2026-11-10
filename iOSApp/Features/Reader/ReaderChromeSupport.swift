@@ -385,6 +385,7 @@ struct ReaderStyleSheet: View {
     let onDeletedFont: (String) -> Void
     let onMarkIssue: () -> Void
     var supportsNativePageTurn = false
+    var supportsReadiumPageTurn = false
 
     var body: some View {
         CompatNavigationStack {
@@ -416,6 +417,15 @@ struct ReaderStyleSheet: View {
                         }
                         .accessibilityIdentifier("reader-native-page-turn")
                         Text("即时生效，仅用于原生分页。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if supportsReadiumPageTurn {
+                        Picker("翻页动画", selection: $settings.readiumPageCurlEnabled) {
+                            Text("跟手平移").tag(false)
+                            Text("仿真翻页").tag(true)
+                        }
+                        .accessibilityIdentifier("reader-readium-page-turn")
+                        Text("即时生效。朗读会话期间保持实时滑动，停止朗读后恢复仿真翻页。")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Toggle("双页模式", isOn: Binding(get: { draftStyle.doublePage == true }, set: { draftStyle.doublePage = $0 }))

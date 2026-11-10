@@ -5,7 +5,7 @@ import UIKit
 // MARK: - Readium EPUB 阅读界面（实验）
 //
 // 外观与 EPUBReaderView 一致：全屏正文、覆盖式顶栏与底栏、点击中部显隐工具栏、
-// 左右边缘点击或横向滑动翻页（Readium 自带水平滑动动画）。
+// 左右边缘点击或横向滑动翻页，可选 Readium 自带平移或系统仿真卷页。
 
 struct ReadiumEPUBReaderView: View {
     @EnvironmentObject private var settings: ReaderSettings
@@ -91,10 +91,10 @@ private struct ReadiumEPUBReaderViewContent: View {
                         Button("关闭阅读器") { dismiss() }
                     }
                 case .ready:
-                    ReadiumNavigatorHost(model: model)
+                    ReadiumNavigatorHost(model: model, curlEnabled: settings.readiumPageCurlEnabled)
                         .id(model.navigatorRevision)
                         // 只延伸到上下边缘；横屏时左右仍避开刘海。
-                        .ignoresSafeArea(edges: .vertical)
+                        .ignoresSafeArea(edges: settings.readiumPageCurlEnabled ? .all : .vertical)
                         // 底栏不再放上一页／下一页按钮，保留 VoiceOver 的翻页动作。
                         .accessibilityAdjustableAction { direction in
                             switch direction {
@@ -138,6 +138,11 @@ private struct ReadiumEPUBReaderViewContent: View {
 #if DEBUG
         .overlay(alignment: .topLeading) {
             if model.validatesPagination {
+                Text(model.curlReady ? "ready" : (model.curlBusy ? "busy" : "idle"))
+                    .font(.system(size: 1)).opacity(0.01)
+                    .accessibilityIdentifier("readium-validation-curl-state")
+                    .allowsHitTesting(false)
+                Text("\(model.curlPreparationCount),\(model.curlCompletedTurns),\(model.curlCancelledTurns)").accessibilityIdentifier("readium-validation-curl-counts").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
                 Text(model.validationVisibleParagraphs)
                     .font(.system(size: 1)).opacity(0.01)
                     .accessibilityIdentifier("readium-validation-visible-paragraphs")
@@ -150,7 +155,7 @@ private struct ReadiumEPUBReaderViewContent: View {
         .statusBarHidden(true)
         .trackReadingTime(statisticsBook ?? ReadingBook(id: "epub:\(bookURL?.lastPathComponent ?? "text")",
                                                        title: bookURL?.deletingPathExtension().lastPathComponent ?? "阅读", kind: .epub),
-                          ready: model.status == .ready)
+                          ready: model.status == .ready && !model.curlBusy)
         .onAppear {
             wasBatteryMonitoringEnabled = UIDevice.current.isBatteryMonitoringEnabled
             UIDevice.current.isBatteryMonitoringEnabled = true
@@ -200,6 +205,9 @@ private struct ReadiumEPUBReaderViewContent: View {
             if phase != .active { model.speech.flushResumePoint() }
             if phase != .background { model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         }
+        .alert("无法准备仿真翻页", isPresented: Binding(get: { model.curlError != nil }, set: { if !$0 { model.curlError = nil } })) {
+            Button("好") { model.curlError = nil }
+        } message: { Text(model.curlError ?? "") }
         .onValueChange(of: settings.fontSize) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         .sheet(isPresented: $isShowingBookPreferences) { ReaderBookPreferencesView() }
         .onValueChange(of: settings.projectionRevision) { _, _ in model.reloadBookPreferences(url: bookURL) }
@@ -337,9 +345,10 @@ private struct ReadiumEPUBReaderViewContent: View {
             showChrome: showChrome,
             batteryLevel: Double(batteryLevel),
             hiddenPercentText: showChrome ? nil : FractionText.percent(model.overallProgress),
+            coversBottomSafeArea: settings.readiumPageCurlEnabled,
             readingTime: AnyView(ReaderRemainingTimeView(store: settings.remainingTime,
                 source: model.localTimeSource, point: model.readingTimePoint, mode: "paged|" + settings.projection.identity,
-                active: model.status == .ready && !isScrubbing && !model.speech.isActive
+                active: model.status == .ready && !model.curlBusy && !isScrubbing && !model.speech.isActive
                     && !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingSpeech
                     && !isShowingBookPreferences && model.activeNote == nil, isListening: model.speech.isActive))
         ) {
@@ -482,7 +491,7 @@ private struct ReadiumEPUBReaderViewContent: View {
 
     private var styleSheet: some View {
         ReaderStyleSheet(draftStyle: $draftStyle,
-                         canApply: model.status == .ready,
+                         canApply: model.status == .ready && !model.curlBusy,
                          onApply: {
                              model.applyStyle(draftStyle)
                              isShowingStyle = false
@@ -495,7 +504,7 @@ private struct ReadiumEPUBReaderViewContent: View {
                                  model.applyStyle(fallback)
                              }
                          },
-                         onMarkIssue: { model.markIssue() })
+                         onMarkIssue: { model.markIssue() }, supportsReadiumPageTurn: true)
     }
 
     // MARK: 注脚
@@ -528,13 +537,15 @@ private struct ReadiumEPUBReaderViewContent: View {
 /// 把模型当前的 EPUBNavigatorViewController 作为子控制器嵌入；重建导航器时由 `.id` 换新宿主。
 private struct ReadiumNavigatorHost: UIViewControllerRepresentable {
     @Environment(\.characterLookup) private var characterLookup
-    let model: ReadiumEPUBReaderModel
+    @ObservedObject var model: ReadiumEPUBReaderModel
+    let curlEnabled: Bool
 
     func makeUIViewController(context: Context) -> ReadiumNavigatorContainer {
         let container = ReadiumNavigatorContainer()
         container.onCharacterLookup = characterLookup
         container.onSpeakSelection = { [weak model] selection in model?.startSpeech(selection: selection) }
         if let navigator = model.navigator { container.embed(navigator) }
+        container.configureCurl(model: model, enabled: curlEnabled)
         return container
     }
 
@@ -543,10 +554,26 @@ private struct ReadiumNavigatorHost: UIViewControllerRepresentable {
         if let navigator = model.navigator, container.embedded !== navigator {
             container.embed(navigator)
         }
+        container.configureCurl(model: model, enabled: curlEnabled)
     }
 }
 
 final class ReadiumNavigatorContainer: UIViewController {
+    private var curlController: ReadiumPageCurlController?
+    private var curlEnabled = false
+    func configureCurl(model: ReadiumEPUBReaderModel, enabled: Bool) {
+        curlEnabled = enabled
+        if enabled, curlController == nil, let navigator = embedded as? EPUBNavigatorViewController {
+            let controller = ReadiumPageCurlController(model: model, host: self, navigator: navigator)
+            addChild(controller); view.addSubview(controller.view); controller.didMove(toParent: self)
+            controller.view.frame = view.bounds
+            controller.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            curlController = controller
+        }
+        curlController?.configure(enabled: enabled)
+        view.setNeedsLayout()
+    }
+
     var onCharacterLookup: ((String) -> Void)?
     @objc func lookupCharacterSelection() {
         guard let selection = (embedded as? EPUBNavigatorViewController)?.currentSelection,
@@ -570,6 +597,11 @@ final class ReadiumNavigatorContainer: UIViewController {
     }
 
     func embed(_ child: UIViewController) {
+        if let curlController {
+            curlController.detach()
+            curlController.willMove(toParent: nil); curlController.view.removeFromSuperview(); curlController.removeFromParent()
+            self.curlController = nil
+        }
         if let embedded {
             embedded.willMove(toParent: nil)
             embedded.view.removeFromSuperview()
@@ -590,5 +622,9 @@ final class ReadiumNavigatorContainer: UIViewController {
         super.viewDidLayoutSubviews()
         // Readium 在加载与应用设置时会把根视图涂成背景色；保持透明以显示阅读背景图。
         embedded?.view.backgroundColor = .clear
+        let safe = view.safeAreaInsets
+        embedded?.view.frame = curlEnabled
+            ? view.bounds.inset(by: UIEdgeInsets(top: 0, left: safe.left, bottom: 0, right: safe.right)) : view.bounds
+        curlController?.view.frame = view.bounds
     }
 }

@@ -13,6 +13,7 @@ enum SettingsKey {
     static let readerPagedText = "readerPagedText"
     /// 原生分页的仿真翻页偏好，仅存本机；默认保留跟手平移。
     static let readerNativePageCurl = "reader.nativePageCurl.v1"
+    static let readerReadiumPageCurl = "reader.readiumPageCurl.v1"
     /// EPUB 使用实验性的 Readium（WKWebView）阅读器代替 YueduCoreText。
     static let readerEPUBReadium = "readerEPUBReadium"
     /// Readium 打开 EPUB 时去掉书内脚本（默认关闭，照常执行）；YueduCoreText 始终不执行书内脚本。
