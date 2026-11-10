@@ -625,7 +625,7 @@ private struct ThirdPartyLicensesView: View {
     private var packages: [(name: String, version: String, license: String, file: String)] {
         let all: [(name: String, version: String, license: String, file: String)] = [
             ("SwiftSoup", "2.13.7", "MIT", "SwiftSoup-LICENSE.txt"),
-            ("YueduCoreText", "0.8.0", "MPL-2.0", "YueduCoreText-LICENSE.txt"),
+            ("YueduCoreText", "0.18.1", "MPL-2.0", "YueduCoreText-LICENSE.txt"),
             ("ZIPFoundation", "3.0.1", "MIT", "ZIPFoundation-LICENSE.txt"),
             ("Readium swift-toolkit", "3.11.0", "BSD-3-Clause", "swift-toolkit-LICENSE.txt"),
             ("CryptoSwift", "1.10.0", "CryptoSwift License", "CryptoSwift-LICENSE.txt"),
@@ -634,7 +634,8 @@ private struct ThirdPartyLicensesView: View {
             ("GCDWebServer", "4.0.1", "BSD-3-Clause", "GCDWebServer-LICENSE.txt"),
             ("SQLite.swift", "0.16.0", "MIT", "SQLite.swift-LICENSE.txt"),
             ("Zip", "2.1.2", "MIT", "Zip-LICENSE.txt"),
-            ("libmobi", "0.12", "LGPL-3.0-or-later", "libmobi-LICENSE.txt")
+            ("libmobi", "0.12", "LGPL-3.0-or-later", "libmobi-LICENSE.txt"),
+            ("OpenCC 繁体词组表（派生）", "ver.1.4.2", "Apache-2.0", "OpenCC-LICENSE.txt")
         ]
         #if NOVELIA_READIUM_ONLY
         return all.filter { $0.name != "YueduCoreText" && $0.name != "libmobi" }
@@ -663,9 +664,9 @@ private struct ThirdPartyLicensesView: View {
             }
             Section {
                 #if NOVELIA_READIUM_ONLY
-                Text("本应用使用的第三方软件及其原始许可文本。此 iOS 15 版本使用 Readium 分页，不包含 YueduCoreText，也不包含用于 AZW3／MOBI 转换的 libmobi。")
+                Text("本应用使用的第三方软件、数据及其原始许可文本。此 iOS 15 版本使用 Readium 分页，不包含 YueduCoreText，也不包含用于 AZW3／MOBI 转换的 libmobi。简繁词表为 OpenCC 词典的修改版本。")
                 #else
-                Text("本应用使用的第三方软件及其原始许可文本。YueduCoreText 的 NOTICE 包含 Unicode License v3。")
+                Text("本应用使用的第三方软件、数据及其原始许可文本。YueduCoreText 的 NOTICE 包含 Unicode License v3；简繁词表为 OpenCC 词典的修改版本。")
                 #endif
             }
             Section("依赖") {
@@ -690,7 +691,7 @@ private struct ThirdPartyLicensesView: View {
                 NavigationLink("YueduCoreText NOTICE / Unicode License v3") {
                     licenseText("YueduCoreText-NOTICE.txt", title: "附加声明")
                 }
-                Link("YueduCoreText 0.8.0 对应源码", destination: URL(string: "https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/783ce903d5faf4ff5d15c546e32a107537ba5efe")!)
+                Link("YueduCoreText 0.18.1 对应源码", destination: URL(string: "https://github.com/CHANG-JUI-LIN/YueduCoreText/tree/5cc346abddd5801fd82d10509bf7f78af5ec0d49")!)
                 #endif
                 Text("CryptoSwift 许可要求的致谢")
                     .font(.caption)

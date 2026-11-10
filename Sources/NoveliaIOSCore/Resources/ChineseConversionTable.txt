@@ -1,5 +1,6 @@
 # 由 scripts/update_chinese_conversion_table.swift 生成，请勿手工编辑。
 # 来源：OpenCC ver.1.4.2 data/dictionary 的 STPhrases.txt 与 TWPhrases.txt（Apache-2.0）。
+# 这是上游词典的修改版本：按白名单筛选、归一异体字并合成台湾常用词；未修改上游仓库源码。
 # 每行是「ICU 简体转繁体的输出 <TAB> 修正结果」：繁体显示已合成一简对多繁选字与台湾常用词。
 # 未命中的文本保持 ICU 输出。
 㓦划	㓦劃

@@ -126,6 +126,15 @@ def main() -> None:
     libmobi_revision = "85dcfe803fc2a21020ddcf15c3eb66b93d388add"
     assert libmobi_revision in index, "Exact libmobi source revision is missing"
     assert libmobi_revision in (ROOT / "Vendor/CLibMobi/README.md").read_text(), "libmobi README revision differs"
+    # 随包的 OpenCC 派生词表：许可原文、修改说明与 App 内许可页都要有对应条目。
+    conversion = ROOT / "Sources/NoveliaIOSCore/Resources/ChineseConversionTable.txt"
+    assert conversion.is_file(), "Missing OpenCC derived conversion table"
+    opencc_text = (NOTICES / "OpenCC-LICENSE.txt").read_text()
+    assert "Apache License" in opencc_text and "END OF TERMS AND CONDITIONS" in opencc_text, "Incomplete Apache-2.0 text"
+    assert "](OpenCC-LICENSE.txt)" in index, "OpenCC license not listed in INDEX.md"
+    derived_header = conversion.read_text()[:800]
+    assert "Apache-2.0" in derived_header and "修改版本" in derived_header, "Derived table must state its source license and modification"
+    assert "OpenCC-LICENSE.txt" in (ROOT / "iOSApp/Features/Settings/SettingsViews.swift").read_text(), "In-app license list must include OpenCC"
     yuedu_pin = pins["yueducoretext"]
     assert yuedu_pin["state"]["revision"] in index, "Exact YueduCoreText source revision is missing"
     assert (NOTICES / "YueduCoreText-NOTICE.txt").is_file()

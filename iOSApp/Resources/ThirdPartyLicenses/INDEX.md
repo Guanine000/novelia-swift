@@ -27,7 +27,7 @@ This product includes software developed by the "Marcin Krzyzanowski" (http://kr
 | --- | --- | --- | --- | --- |
 | OpenCC 繁体词组表（派生） | ver.1.4.2 | Apache-2.0 | https://github.com/BYVoid/OpenCC | [OpenCC-LICENSE.txt](OpenCC-LICENSE.txt) |
 
-`Sources/NoveliaIOSCore/Resources/ChineseConversionTable.txt` 由 `scripts/update_chinese_conversion_table.swift` 从上游 `data/dictionary/STPhrases.txt` 与 `TWPhrases.txt` 派生，只保留系统 ICU 需要修正的“一简对多繁”词组和白名单内的台湾常用词，未修改上游源码，也不包含 OpenCC 的代码或二进制。
+`Sources/NoveliaIOSCore/Resources/ChineseConversionTable.txt` 由 `scripts/update_chinese_conversion_table.swift` 从上游 `data/dictionary/STPhrases.txt` 与 `TWPhrases.txt` 派生，这是上游词典的修改版本：只保留系统 ICU 需要修正的“一简对多繁”词组和白名单内的台湾常用词，并统一异体字；未修改上游仓库源码，也不包含 OpenCC 的代码或二进制。随包许可文件为 Apache-2.0 官方全文（上游 `LICENSE` 省略了其中的说明性附录）。
 
 ## C 库
 
