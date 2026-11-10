@@ -1769,8 +1769,10 @@ extension ReadiumEPUBReaderModel {
     }
 
     /// 取消预取或手势只释放事务；真实导航器始终保留原页。只有明确落页才导航并发布一次位置。
-    func finishCurlPreview(_ transaction: UUID, target: Locator?, forward: Bool = true) async -> Bool {
-        guard let preview = curlPreview, preview.id == transaction else { return false }
+    /// 成功时返回落页后稳定的 Locator，取消或失败返回 nil。
+    @discardableResult
+    func finishCurlPreview(_ transaction: UUID, target: Locator?, forward: Bool = true) async -> Locator? {
+        guard let preview = curlPreview, preview.id == transaction else { return nil }
         let navigator = preview.navigator
         var actual = preview.origin
         var restored = true
@@ -1780,12 +1782,12 @@ extension ReadiumEPUBReaderModel {
                 actual = settled
             } else { restored = false }
         }
-        guard curlPreview?.id == transaction else { return false }
+        guard curlPreview?.id == transaction else { return nil }
         curlPreview = nil; curlBusy = false
-        guard self.navigator === navigator else { return false }
+        guard self.navigator === navigator else { return nil }
         guard restored else {
             status = .failed("仿真翻页无法恢复阅读位置，请重新打开阅读器。")
-            return false
+            return nil
         }
         if target != nil {
 #if DEBUG
@@ -1794,7 +1796,7 @@ extension ReadiumEPUBReaderModel {
             markNavigation(forward ? "turnForward" : "turnBackward")
             self.navigator(navigator, locationDidChange: actual)
         }
-        return true
+        return actual
     }
 
     func curlReachedBoundary(forward: Bool) {
