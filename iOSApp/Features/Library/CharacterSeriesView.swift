@@ -61,9 +61,26 @@ struct CharacterSeriesView: View {
     }
     private var selectedBooks: [String] { scope?.booksForScan(series: scanSeries) ?? [] }
     private var scope: CharacterScope? {
+        // 只读模式只看已有卡片，不依赖阅读位置与卷序确认：
+        // 否则 identities 尚未加载时 scope 为 nil，整块人物卡分区直接不渲染。
+        if readOnly { return readOnlyScope }
         guard confirmed, ready else { return nil }
         return .init(work: workID, volumes: order, currentBook: currentBook, currentChapter: boundaries[currentBook] ?? 0,
             identities: identities, readBoundaries: boundaries)
+    }
+    /// 用已存事实自身推断可见范围：书、版本身份和章号都来自存档，不读取阅读进度。
+    private var readOnlyScope: CharacterScope? {
+        let entities = store.entities.filter { $0.work == workID }
+        let facts = entities.flatMap(\.facts)
+        guard let firstFact = facts.first else {
+            // 一条事实都没有时不构造 scope，由空状态文案说明。
+            return nil
+        }
+        var seen = [String: String]()
+        for fact in facts where seen[fact.book] == nil { seen[fact.book] = fact.identity }
+        let chapter = (facts.map(\.chapter).max() ?? 0) + 1
+        return .init(work: workID, volumes: [firstFact.book], currentBook: firstFact.book,
+                     currentChapter: chapter, identities: seen, readBoundaries: nil)
     }
     private var visible: [VisibleCharacter] { scope.map { $0.visible(store.entities, query: query) } ?? [] }
     private var duplicateGroups: [CharacterDuplicateGroup] { scope.map { store.duplicates(scope: $0) } ?? [] }
@@ -183,7 +200,10 @@ struct CharacterSeriesView: View {
                                 }
                             }
                         }
-                        if visible.isEmpty { Text("当前阅读范围内暂无人物卡，点击生成即可建立。").foregroundStyle(.secondary) }
+                        if visible.isEmpty {
+                            Text(readOnly ? "这本书还没有人物卡。回到阅读菜单用“更新人物卡”生成后再来查看。" : "当前阅读范围内暂无人物卡，点击生成即可建立。")
+                                .foregroundStyle(.secondary)
+                        }
                     } header: { Text("人物卡") }
                     if !readOnly, !duplicateGroups.isEmpty {
                         Section {
