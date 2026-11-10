@@ -176,6 +176,31 @@ final class TapTests: XCTestCase {
   XCTAssertFalse(app.buttons["移除角色形象"].exists)
   zeroExternalRequests(app)
  }
+ func testReaderCharacterCardsAllowEditing() {
+  continueAfterFailure = false
+  let app = XCUIApplication(bundleIdentifier: bundle)
+  app.launchArguments = ["-architectureValidation", "-resetArchitectureValidation", "-architectureTXT",
+                         "-architectureCharacterPortrait", "-architectureCharacterStandalone"]
+  app.launch(); defer { app.terminate() }
+  app.buttons["书库"].firstMatch.tap()
+  let more = app.buttons["更多操作：架构验证TXT"]
+  XCTAssertTrue(more.waitForExistence(timeout: 20)); more.tap()
+  app.buttons["阅读"].firstMatch.tap()
+  let menu = app.buttons["阅读菜单"]
+  XCTAssertTrue(menu.waitForExistence(timeout: 30)); menu.tap()
+  app.buttons["AI 阅读辅助"].tap()
+  let cards = app.buttons["查看人物卡"]
+  XCTAssertTrue(cards.waitForExistence(timeout: 10)); cards.tap()
+  let person = app.staticTexts["林舟"].firstMatch
+  XCTAssertTrue(person.waitForExistence(timeout: 20))
+  XCTAssertFalse(app.buttons["确认以上卷序"].exists)
+  person.tap()
+  XCTAssertTrue(app.staticTexts["人物档案"].waitForExistence(timeout: 20))
+  XCTAssertTrue(app.buttons["编辑角色形象"].exists)
+  app.buttons["编辑角色形象"].tap()
+  XCTAssertTrue(app.buttons["从文件选择角色图片"].waitForExistence(timeout: 10))
+  zeroExternalRequests(app)
+ }
  func testCharacterAgentConversation() {
   continueAfterFailure = false
   let app = XCUIApplication(bundleIdentifier: bundle)

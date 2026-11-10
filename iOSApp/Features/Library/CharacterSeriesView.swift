@@ -14,7 +14,7 @@ struct CharacterSeriesView: View {
     var readingBoundary: Int? = nil
     var readingIdentity: String? = nil
     var initialQuery = ""
-    /// 只读：从阅读菜单“查看人物卡”进入，只展示已有卡片，隐藏卷序、生成、校准等操作。
+    /// 浏览入口：隐藏卷序、生成、校准等列表操作，人物详情仍可编辑已有资料。
     var readOnly = false
     @EnvironmentObject private var settings: ReaderSettings
     @EnvironmentObject private var library: LibraryStateStore
@@ -72,16 +72,15 @@ struct CharacterSeriesView: View {
     private var readOnlyScope: CharacterScope? {
         let entities = store.entities.filter { $0.work == workID }
         let facts = entities.flatMap(\.facts)
-        guard let firstFact = facts.first else {
-            // 一条事实都没有时不构造 scope，由空状态文案说明。
-            return nil
-        }
         var seen = [String: String]()
         for fact in facts where seen[fact.book] == nil { seen[fact.book] = fact.identity }
-        let chapter = (facts.map(\.chapter).max() ?? 0) + 1
-        return .init(work: workID, volumes: [firstFact.book], currentBook: firstFact.book,
-                     currentChapter: chapter, identities: seen, readBoundaries: nil)
+        let storedBooks = Set(facts.map(\.book))
+        let volumes = order + storedBooks.subtracting(order).sorted()
+        guard let lastBook = volumes.last else { return nil }
+        return .init(work: workID, volumes: volumes, currentBook: lastBook,
+                     currentChapter: Int.max, identities: seen, readBoundaries: nil)
     }
+
     private var visible: [VisibleCharacter] { scope.map { $0.visible(store.entities, query: query) } ?? [] }
     private var duplicateGroups: [CharacterDuplicateGroup] { scope.map { store.duplicates(scope: $0) } ?? [] }
     private var loadID: String { currentBook + "|" + order.joined(separator: ",") + "|\(settings.projectionRevision)|\(confirmed)" }
@@ -179,45 +178,50 @@ struct CharacterSeriesView: View {
                 } header: { Text("自动生成人物卡") } footer: {
                     Text("点击后按卷序分批处理并自动保存人物卡，不自动下载缺失书籍。完成的章节保存检查点，取消或失败后点击更新可继续；当前未完成章节不保存半成品。同名不直接合并，身份关联和疑点标为待核实。")
                 }
-                if let scope {
-                    Section {
-                        TextField("按当前可见人名／别名查找", text: $query)
-                        ForEach(visible) { person in
-                            NavigationLink {
-                                CharacterCardView(id: person.id, initialScope: scope, books: books,
-                                    workTitle: library.series.series[workID]?.name ?? "", includeSeries: scanSeries, requestLimit: requestLimit,
-                                    concurrency: concurrency, store: store, ai: ai)
-                            } label: {
-                                HStack(spacing: 12) {
-                                    CharacterPortraitImage(store: store, id: person.id, scope: scope, name: person.name, compact: true)
-                                        .frame(width: 48, height: 60).clipShape(RoundedRectangle(cornerRadius: 9))
-                                    VStack(alignment: .leading, spacing: 4) {
-                                    Text(person.name)
-                                    if !person.aliases.isEmpty { Text(person.aliases.joined(separator: "、")).font(.caption) }
-                                    let count = person.facts.filter { $0.needsReview == true }.count
-                                    if count > 0 { Text("\(count)条待核实").font(.caption).foregroundStyle(.secondary) }
-                                    }
-                                }
-                            }
-                        }
-                        if visible.isEmpty {
-                            Text(readOnly ? "这本书还没有人物卡。回到阅读菜单用“更新人物卡”生成后再来查看。" : "当前阅读范围内暂无人物卡，点击生成即可建立。")
-                                .foregroundStyle(.secondary)
-                        }
-                    } header: { Text("人物卡") }
-                    if !readOnly, !duplicateGroups.isEmpty {
-                        Section {
-                            NavigationLink {
-                                CharacterDuplicateReviewView(scope: scope, store: store)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Label("校准重复人物（\(duplicateGroups.count) 组）", systemImage: "rectangle.stack.badge.minus")
-                                    Text("并发提取后同一人物可能在不同章节各建一张卡；这里逐组确认合并。")
-                                        .font(.caption).foregroundStyle(.secondary)
+            }
+            if let scope {
+                Section {
+                    TextField("按当前可见人名／别名查找", text: $query)
+                    ForEach(visible) { person in
+                        NavigationLink {
+                            CharacterCardView(id: person.id, initialScope: scope, books: books,
+                                workTitle: library.series.series[workID]?.name ?? "", includeSeries: scanSeries, requestLimit: requestLimit,
+                                concurrency: concurrency, store: store, ai: ai)
+                        } label: {
+                            HStack(spacing: 12) {
+                                CharacterPortraitImage(store: store, id: person.id, scope: scope, name: person.name, compact: true)
+                                    .frame(width: 48, height: 60).clipShape(RoundedRectangle(cornerRadius: 9))
+                                VStack(alignment: .leading, spacing: 4) {
+                                Text(person.name)
+                                if !person.aliases.isEmpty { Text(person.aliases.joined(separator: "、")).font(.caption) }
+                                let count = person.facts.filter { $0.needsReview == true }.count
+                                if count > 0 { Text("\(count)条待核实").font(.caption).foregroundStyle(.secondary) }
                                 }
                             }
                         }
                     }
+                    if visible.isEmpty {
+                        Text(readOnly ? "这本书还没有人物卡。回到阅读菜单用“更新人物卡”生成后再来查看。" : "当前阅读范围内暂无人物卡，点击生成即可建立。")
+                            .foregroundStyle(.secondary)
+                    }
+                } header: { Text("人物卡") }
+                if !readOnly, !duplicateGroups.isEmpty {
+                    Section {
+                        NavigationLink {
+                            CharacterDuplicateReviewView(scope: scope, store: store)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Label("校准重复人物（\(duplicateGroups.count) 组）", systemImage: "rectangle.stack.badge.minus")
+                                Text("并发提取后同一人物可能在不同章节各建一张卡；这里逐组确认合并。")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            } else if readOnly {
+                Section("人物卡") {
+                    Text("这本书还没有人物卡。回到阅读菜单用“更新人物卡”生成后再来查看。")
+                        .foregroundStyle(.secondary)
                 }
             }
         }

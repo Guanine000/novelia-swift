@@ -80,7 +80,7 @@ extension EnvironmentValues {
         get { self[CharacterCardsKey.self] }
         set { self[CharacterCardsKey.self] = newValue }
     }
-    /// 只读人物卡：从阅读菜单“查看人物卡”进入，只展示内容，不提供生成与绑定菜单。
+    /// 浏览人物卡：隐藏生成与绑定菜单，人物详情仍可修改。
     var characterCardsReadOnly: (() -> Void)? {
         get { self[CharacterCardsReadOnlyKey.self] }
         set { self[CharacterCardsReadOnlyKey.self] = newValue }

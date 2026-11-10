@@ -36,7 +36,7 @@ struct ReadingCharactersEntry: View {
 @MainActor
 struct ReadingCharacterCardsEntry: View {
     let libraryBookKey: String?
-    /// 只读模式：从阅读菜单“查看人物卡”进入，只展示已有内容，不提供卷序确认、生成、校准等菜单。
+    /// 浏览模式：从阅读菜单“查看人物卡”进入，隐藏卷序确认、生成、校准菜单，详情仍可编辑。
     var readOnly = false
     @EnvironmentObject private var readerSettings: ReaderSettings
     @EnvironmentObject private var services: AppServices
