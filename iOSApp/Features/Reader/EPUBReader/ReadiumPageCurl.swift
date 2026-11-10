@@ -7,7 +7,7 @@ import WebKit
 
 /// Readium 宿主拥有的卷页适配器。真实 WebView 保留正文交互，系统卷页只展示有限快照。
 /// 宿主另持一个复用同一 Publication 与配置的预取导航器；真实导航器不参与预取。
-/// 只缓存当前与相邻两页，取消不移动正文，完成后等待正式 Locator 再提交位置。
+/// 基础三页之外沿阅读方向预热一页，取消不移动正文，完成后等待正式 Locator 再提交位置。
 @MainActor
 final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDataSource, UIPageViewControllerDelegate, UIGestureRecognizerDelegate {
     private weak var model: ReadiumEPUBReaderModel?
@@ -30,6 +30,25 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
     private var failedKey: String?
     /// 上一次翻页已截好的「落页」和「原当前页」；重建三页时直接复用，少拍两张。
     private var carried: (current: ReadiumCurlSheet, other: ReadiumCurlSheet, otherSlot: Int)?
+#if DEBUG
+    private var turnStartedAt: CFTimeInterval?
+#endif
+    private func recordReadyLatency() {
+#if DEBUG
+        if let start = turnStartedAt {
+            model?.curlTurnReadyMilliseconds = Int((CACurrentMediaTime() - start) * 1000)
+            turnStartedAt = nil
+        }
+#endif
+    }
+    private enum AheadResult { case page(ReadiumCurlSheet), boundary }
+    /// 三张基础纸面之外，沿阅读方向预热一张；独立任务不锁住正文或发布进度。
+    private var ahead: (key: String, forward: Bool, configuration: String, task: Task<AheadResult?, Never>)?
+    private var preferredForward = true
+    private var renderingConfiguration: String? {
+        guard let model, let navigator else { return nil }
+        return "\(model.navigatorRevision)|\(model.curlAppearanceKey)|\(navigator.view.bounds.size)|\(view.safeAreaInsets)"
+    }
     private var turning = false
     private var transaction: UUID?
     private var queuedDirection: Bool?
@@ -92,6 +111,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         isDisappeared = true
+        ahead?.task.cancel()
         setPansReady(false)
         if !turning { work?.cancel() }
         else if work == nil { finishTurn(completed: false) }
@@ -120,7 +140,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
     }
     private var key: String? {
         guard let model, let location = model.locator, view.bounds.width > 0, view.bounds.height > 0 else { return nil }
-        return "\(model.navigatorRevision)|\((try? location.jsonString()) ?? "")|\(model.curlAppearanceKey)|\(view.bounds.size)|\(view.safeAreaInsets)"
+        return "\(model.navigatorRevision)|\((try? location.jsonString()) ?? "")|\(model.curlAppearanceKey)|\(view.bounds.size)|\(view.safeAreaInsets)|\(navigator?.view.bounds.size ?? .zero)"
     }
     private func refresh() {
         guard isViewLoaded, cancellationDepth == 0 else { return }
@@ -137,6 +157,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         if preparedKey == key {
             if model?.curlReady == false { model?.curlReady = true }
             setPansReady(true)
+            startLookahead(forward: preferredForward)
             return
         }
         guard failedKey != key else { setPansReady(false); return }
@@ -144,7 +165,6 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         work = Task { [weak self] in await self?.prepare(key: key) }
     }
     private func setPansReady(_ ready: Bool) {
-        let pans = pager.gestureRecognizers.compactMap { $0 as? UIPanGestureRecognizer }
         for gesture in pager.gestureRecognizers where gesture is UIPanGestureRecognizer { gesture.isEnabled = ready && available }
         coldPan.isEnabled = available && !ready
     }
@@ -169,8 +189,17 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
 #if DEBUG
         model.curlPreparationCount += 1
 #endif
-        let configuration = "\(model.navigatorRevision)|\(model.curlAppearanceKey)|\(real.view.bounds.size)|\(view.safeAreaInsets)"
-        if snapshotConfiguration != configuration { discardSnapshot() }
+        let previousAhead = ahead?.task
+        ahead = nil
+        previousAhead?.cancel()
+        if let previousAhead { _ = await previousAhead.value }
+        guard !Task.isCancelled, available, model.navigator === real, key == self.key,
+              let configuration = renderingConfiguration else {
+            work = nil; discardSnapshot()
+            if !Task.isCancelled, model.navigator === real { refresh() }
+            return
+        }
+        if snapshotConfiguration != configuration { carried = nil; discardSnapshot() }
         let reused = snapshotNavigator != nil
         let snapshotNav: EPUBNavigatorViewController
         do {
@@ -193,6 +222,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         canvas.blocksTouches = true; spinner.startAnimating()
         let carry = carried
         carried = nil
+        var phase = "origin"
         var result: [Int: ReadiumCurlSheet] = [:]
         if let carry {
             result[0] = ReadiumCurlSheet(slot: 0, image: carry.current.image, location: carry.current.location)
@@ -202,12 +232,13 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         let gaps = [true, false].filter { result[$0 ? 1 : -1] == nil }
         do {
             // 上次准备结束时刻意把预取导航器留在相邻页；若它已经在当前页，省一次导航。
-            let alreadyAtOrigin = reused && snapshotNav.currentLocation.map { origin in
+            let alreadyAtOrigin = previousAhead == nil && reused && snapshotNav.currentLocation.map { origin in
                 model.locator.map { Self.samePage(origin, $0) } ?? false
             } ?? false
             if (reused || carry != nil), !alreadyAtOrigin {
                 guard await model.restoreCurlPreview(token) else { throw CurlError.restore }
             }
+            phase = "current"
             if carry != nil {
                 if let current = result[0] { cover.image = current.image; cover.isHidden = false }
             } else {
@@ -222,11 +253,13 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             for forward in gaps {
                 try Task.checkCancellation()
                 guard key == self.key else { throw CancellationError() }
+                phase = forward ? "next" : "previous"
                 if let location = try await model.previewCurlNeighbor(forward: forward, transaction: token) {
                     try await waitForPage()
                     result[forward ? 1 : -1] = ReadiumCurlSheet(slot: forward ? 1 : -1, image: try await snapshot(), location: location)
                 }
                 // 增量准备只补一侧时把预取导航器留在该侧，下一次同向翻页就无需再导航回来。
+                phase = "restore"
                 if carry == nil || forward != gaps.last {
                     guard await model.restoreCurlPreview(token) else { throw CurlError.restore }
                     try await waitForPage()
@@ -240,6 +273,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
 
             sheets = result; preparedKey = key; failedKey = nil
             model.curlReady = key == self.key
+            if model.curlReady { recordReadyLatency() }
             if let current = result[0] { pager.setViewControllers([current], direction: .forward, animated: false) }
         } catch {
             let cleanup = Task { @MainActor in await model.finishCurlPreview(token, target: nil) }
@@ -248,6 +282,9 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             model.curlReady = false
             discardSnapshot()
             if !(error is CancellationError), !Task.isCancelled, key == self.key {
+#if DEBUG
+                model.curlPreparationFailure = "\(phase): \(error)"
+#endif
                 failedKey = key
                 model.curlError = "暂时无法准备仿真翻页，请重试或切换为跟手平移。"
             }
@@ -257,14 +294,15 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         setPansReady(preparedKey == self.key)
 
         guard !Task.isCancelled else { return }
+        if model.curlReady { startLookahead(forward: preferredForward) }
         if let direction = queuedDirection, available, preparedKey == self.key {
             queuedDirection = nil
             _ = requestTurn(forward: direction)
         } else if available, self.key != key { refresh() }
     }
 
-    private func visibleWebViews() -> [WKWebView] {
-        guard let root = (snapshotNavigator ?? navigator)?.view else { return [] }
+    private func visibleWebViews(in source: EPUBNavigatorViewController? = nil) -> [WKWebView] {
+        guard let root = (source ?? snapshotNavigator ?? navigator)?.view else { return [] }
         var result: [WKWebView] = []
         func walk(_ candidate: UIView) {
             guard !candidate.isHidden, candidate.alpha > 0.01 else { return }
@@ -275,11 +313,11 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         }
         walk(root); return result
     }
-    private func waitForPage() async throws {
+    private func waitForPage(in source: EPUBNavigatorViewController? = nil) async throws {
         var previous = "", stable = 0
         for _ in 0..<60 {
             try Task.checkCancellation()
-            let webs = visibleWebViews()
+            let webs = visibleWebViews(in: source)
             var loaded = !webs.isEmpty && webs.allSatisfy { !$0.isLoading && $0.url != nil && $0.scrollView.alpha > 0.01 && !$0.scrollView.isDecelerating }
             if loaded {
                 for web in webs {
@@ -299,9 +337,9 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         }
         throw CurlError.notReady
     }
-    private func snapshot() async throws -> UIImage {
+    private func snapshot(in source: EPUBNavigatorViewController? = nil) async throws -> UIImage {
         guard let model else { throw CurlError.notReady }
-        let webs = visibleWebViews()
+        let webs = visibleWebViews(in: source)
         guard !webs.isEmpty else { throw CurlError.notReady }
         var captures: [(CGRect, UIImage)] = []
         for web in webs {
@@ -318,7 +356,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             captures.append((web.convert(web.bounds, to: view), image))
         }
         let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale; format.opaque = true
-        return UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
+        let image = UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
             let bookColor = webs.first?.superview?.backgroundColor
             let followsBook = (bookColor?.cgColor.alpha ?? 0) > 0
             (followsBook ? bookColor! : model.curlPaperColor).setFill(); context.fill(view.bounds)
@@ -329,6 +367,10 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             }
             for (rect, image) in captures { image.draw(in: rect) }
         }
+#if DEBUG
+        model.curlSnapshotCount += 1
+#endif
+        return image
     }
 
     private func requestTurn(forward: Bool) -> Bool {
@@ -338,25 +380,59 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             queuedDirection = forward; failedKey = nil; refresh(); return true
         }
         guard let target = sheets[forward ? 1 : -1] else { model?.curlReachedBoundary(forward: forward); return true }
-        beginTurn()
+        beginTurn(forward: forward)
         guard turning else { return true }
         let direction: UIPageViewController.NavigationDirection = forward != (model?.curlRightToLeft ?? false) ? .forward : .reverse
         pager.setViewControllers([target], direction: direction, animated: true) { [weak self] finished in self?.finishTurn(completed: finished) }
         return true
     }
-    private func beginTurn() {
+    private func beginTurn(forward: Bool) {
         guard !turning, let token = model?.beginCurlPreview() else { return }
         transaction = token; turning = true
+        preferredForward = forward
+        startLookahead(forward: forward)
+#if DEBUG
+        turnStartedAt = CACurrentMediaTime()
+#endif
         model?.curlReady = false
         canvas.blocksTouches = true; pager.view.layer.mask = nil
     }
+    private func startLookahead(forward: Bool) {
+        guard available, let originKey = preparedKey, originKey == key,
+              let configuration = renderingConfiguration, let snapshotNav = snapshotNavigator,
+              let target = sheets[forward ? 1 : -1], let model else { return }
+        if let ahead, ahead.key == originKey, ahead.forward == forward, ahead.configuration == configuration, !ahead.task.isCancelled { return }
+        let previous = ahead?.task
+        previous?.cancel()
+        let task = Task { @MainActor [weak self] () -> AheadResult? in
+            guard let self else { return nil }
+            if let previous { _ = await previous.value }
+            do {
+                try Task.checkCancellation()
+                guard self.renderingConfiguration == configuration else { return nil }
+                guard let location = try await model.prefetchCurlNeighbor(in: snapshotNav, from: target.location, forward: forward, resetOrigin: previous != nil) else {
+                    try Task.checkCancellation()
+                    return .boundary
+                }
+                try await self.waitForPage(in: snapshotNav)
+                let image = try await self.snapshot(in: snapshotNav)
+                try Task.checkCancellation()
+                guard self.renderingConfiguration == configuration else { return nil }
+                return .page(ReadiumCurlSheet(slot: forward ? 1 : -1, image: image, location: location))
+            } catch { return nil }
+        }
+        ahead = (originKey, forward, configuration, task)
+    }
+
     private func finishTurn(completed: Bool) {
         guard turning, work == nil, let token = transaction, let model else { return }
         let sheet = pager.viewControllers?.first as? ReadiumCurlSheet
         let target = completed && sheet?.slot != 0 ? sheet?.location : nil
-
+        let warming = ahead
         work = Task { [weak self] in
             guard let self else { return }
+            // 正常阅读时已提前完成；快速连续翻页时让预热与卷页动画重叠，避免落页后再串行补拍。
+            let extra = target != nil ? await warming?.task.value : nil
             let actual = await model.finishCurlPreview(token, target: target, forward: (sheet?.slot ?? 0) > 0)
 #if DEBUG
             if actual != nil, target == nil { model.curlCancelledTurns += 1 }
@@ -364,18 +440,33 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             self.transaction = nil; self.turning = false
             self.pager.view.layer.mask = paperMask; self.canvas.blocksTouches = false
             self.work = nil
-            if let sheet, sheet.slot != 0, let actual, Self.samePage(actual, sheet.location),
-               let previous = self.sheets[0] {
-                // 落页和原当前页都已经有截图；下一次重建三页时复用它们，只补拍另一侧。
-                self.carried = (sheet, previous, sheet.slot > 0 ? -1 : 1)
-                self.preparedKey = nil
-                self.cover.image = sheet.image; self.cover.isHidden = false
-                model.curlReady = false
+            if let sheet, sheet.slot != 0, let actual, Self.samePage(actual, sheet.location), let previous = self.sheets[0] {
+                let direction = sheet.slot > 0 ? 1 : -1
+                if let warming, let extra, warming.key == self.preparedKey,
+                   warming.forward == (direction > 0), warming.configuration == self.renderingConfiguration {
+                    var pages = [0: ReadiumCurlSheet(slot: 0, image: sheet.image, location: actual),
+                                 -direction: ReadiumCurlSheet(slot: -direction, image: previous.image, location: previous.location)]
+                    if case .page(let page) = extra { pages[direction] = page }
+                    self.ahead = nil; self.carried = nil
+                    self.sheets = pages; self.preparedKey = self.key; self.failedKey = nil
+                    self.cover.isHidden = true
+                    model.curlReady = true
+                    if let current = pages[0] { self.pager.setViewControllers([current], direction: .forward, animated: false) }
+                    self.recordReadyLatency()
+                } else {
+                    // 预热失败只回退到原有的一侧补拍；布局已变时连带丢弃旧截图。
+                    self.ahead = nil
+                    self.carried = self.snapshotConfiguration == self.renderingConfiguration ? (sheet, previous, -direction) : nil
+                    self.preparedKey = nil
+                    self.cover.image = sheet.image; self.cover.isHidden = false
+                    model.curlReady = false
+                }
             } else if target != nil {
                 self.preparedKey = nil; model.curlReady = false
             } else {
                 model.curlReady = true
                 if let current = self.sheets[0] { self.pager.setViewControllers([current], direction: .forward, animated: false) }
+                self.recordReadyLatency()
             }
             self.refresh()
         }
@@ -384,6 +475,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         lhs.href == rhs.href && abs((lhs.locations.progression ?? 0) - (rhs.locations.progression ?? 0)) < 0.0000001
     }
     private func discardSnapshot() {
+        ahead?.task.cancel(); ahead = nil
         if let snapshotNavigator {
             snapshotNavigator.willMove(toParent: nil)
             snapshotNavigator.view.removeFromSuperview()
@@ -400,11 +492,14 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         }
         setPansReady(false)
         queuedDirection = nil
+        let background = ahead?.task
+        ahead = nil; background?.cancel()
         if let work { if !turning { work.cancel() }; await work.value }
         if turning, let transaction, let model {
             _ = await model.finishCurlPreview(transaction, target: nil)
             self.transaction = nil; turning = false
         }
+        if let background { _ = await background.value }
         preparedKey = nil
         carried = nil
         if model?.curlReady == true { model?.curlReady = false }
@@ -420,7 +515,10 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
     }
     func pageViewController(_ pageViewController: UIPageViewController, viewControllerBefore viewController: UIViewController) -> UIViewController? { neighbor(viewController, after: false) }
     func pageViewController(_ pageViewController: UIPageViewController, viewControllerAfter viewController: UIViewController) -> UIViewController? { neighbor(viewController, after: true) }
-    func pageViewController(_ pageViewController: UIPageViewController, willTransitionTo pendingViewControllers: [UIViewController]) { beginTurn() }
+    func pageViewController(_ pageViewController: UIPageViewController, willTransitionTo pendingViewControllers: [UIViewController]) {
+        guard let target = pendingViewControllers.first as? ReadiumCurlSheet else { return }
+        beginTurn(forward: target.slot > 0)
+    }
     func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool, previousViewControllers: [UIViewController], transitionCompleted completed: Bool) { finishTurn(completed: completed) }
 
     @objc private func coldSwipe(_ pan: UIPanGestureRecognizer) {

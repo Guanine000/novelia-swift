@@ -103,6 +103,9 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published var curlPreparationCount = 0
     @Published var curlCompletedTurns = 0
     @Published var curlCancelledTurns = 0
+    @Published var curlTurnReadyMilliseconds = 0
+    @Published var curlSnapshotCount = 0
+    var curlPreparationFailure = ""
 #endif
     @Published var curlError: String?
     var onCurlTurn: ((Bool) -> Bool)?
@@ -1749,15 +1752,33 @@ extension ReadiumEPUBReaderModel {
         return nil
     }
 
-    func previewCurlNeighbor(forward: Bool, transaction: UUID) async throws -> Locator? {
-        guard let preview = curlPreview, preview.id == transaction, self.navigator === preview.navigator else { return nil }
-        let navigator = preview.snapshot
+    private func curlNeighbor(in navigator: EPUBNavigatorViewController, forward: Bool) async throws -> Locator? {
         let previous = navigator.currentLocation
         let moved = forward ? await navigator.goForward(options: .none) : await navigator.goBackward(options: .none)
-        guard moved, curlPreview?.id == transaction else { return nil }
+        try Task.checkCancellation()
+        guard moved else { return nil }
         if let current = await settledCurlLocation(in: navigator, differentFrom: previous) { return current }
         try Task.checkCancellation()
         throw CurlNavigationError.locationUnavailable
+    }
+
+    func previewCurlNeighbor(forward: Bool, transaction: UUID) async throws -> Locator? {
+        guard let preview = curlPreview, preview.id == transaction, self.navigator === preview.navigator else { return nil }
+        return try await curlNeighbor(in: preview.snapshot, forward: forward)
+    }
+
+    /// 只移动独立预取导航器。后台预热不占用真实阅读事务，也不改变 curlBusy、正文或持久化位置。
+    func prefetchCurlNeighbor(in snapshot: EPUBNavigatorViewController, from origin: Locator, forward: Bool, resetOrigin: Bool) async throws -> Locator? {
+        let current = snapshot.currentLocation
+        if resetOrigin || current?.href != origin.href || abs((current?.locations.progression ?? 0) - (origin.locations.progression ?? 0)) > 0.0000001 {
+            guard await snapshot.go(to: origin, options: .none),
+                  await settledCurlLocation(in: snapshot, matching: origin) != nil else {
+                try Task.checkCancellation()
+                throw CurlNavigationError.locationUnavailable
+            }
+        }
+        try Task.checkCancellation()
+        return try await curlNeighbor(in: snapshot, forward: forward)
     }
 
     private enum CurlNavigationError: Error { case locationUnavailable }

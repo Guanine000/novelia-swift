@@ -109,6 +109,25 @@ methods = r'''
       XCTAssertEqual(curlVisible(app),saved);XCTAssertEqual(curlCounts(app)[1],0)
       sleep(2);XCTAssertEqual(curlVisible(app),saved)
      }
+     func testReadiumCurlTurnReadinessTiming() {
+      let app=openCurlBook();defer{app.terminate()}
+      let initial=curlVisible(app)
+      var previous=initial
+      let preparations=curlCounts(app)[0]
+      for backwards in [false,true] {
+       for _ in 0..<4 {
+        sleep(1)
+        app.coordinate(withNormalizedOffset:CGVector(dx:backwards ? 0.15:0.85,dy:0.5)).tap()
+        let changed=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlVisible(app) != previous },object:nil)
+        XCTAssertEqual(XCTWaiter.wait(for:[changed],timeout:20),.completed)
+        waitForCurl(app)
+        previous=curlVisible(app)
+        XCTAssertEqual(curlCounts(app)[0],preparations,"Warm turns must reuse prepared pages without foreground preparation")
+        print("CURL_TIMING backwards=\(backwards) metric=\(app.staticTexts["readium-validation-curl-performance"].label) preparations=\(self.curlCounts(app)[0])")
+       }
+      }
+      XCTAssertEqual(previous,initial)
+     }
      func testReadiumCurlContinuityAndReturn() {
       let app=openCurlBook();defer{app.terminate()}
       var previous=curlVisible(app);XCTAssertEqual(previous.first,1)
@@ -147,7 +166,8 @@ if '--only-testing' not in sys.argv:
                  '--only-testing','TapTests/TapTests/testReadiumCurlCancellationAndRotation',
                  '--only-testing','TapTests/TapTests/testReadiumCurlStyleToggleAndSelection',
                  '--only-testing','TapTests/TapTests/testReadiumCurlReopensCommittedPosition',
-                 '--only-testing','TapTests/TapTests/testReadiumCurlCancelsPreparationOnRotation']
+                 '--only-testing','TapTests/TapTests/testReadiumCurlCancelsPreparationOnRotation',
+                 '--only-testing','TapTests/TapTests/testReadiumCurlTurnReadinessTiming']
 namespace={'__name__':'__main__','__file__':str(base)}
 exec(compile(source,str(base),'exec'),namespace)
 # 只执行准备场景时，验证当前夹具没有新增任何精确或共享阅读位置。
