@@ -27,7 +27,7 @@ methods = r'''
       let state=app.staticTexts["readium-validation-curl-state"]
       XCTAssertTrue(state.waitForExistence(timeout:20))
       let ready=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in state.label == "ready" },object:nil)
-      XCTAssertEqual(XCTWaiter.wait(for:[ready],timeout:30),.completed, "Curl preparation must settle: \(state.label)\n\(app.debugDescription)")
+      XCTAssertEqual(XCTWaiter.wait(for:[ready],timeout:30),.completed, "Curl preparation must settle: \(state.label) trace=\(app.staticTexts["readium-validation-curl-input"].label)\n\(app.debugDescription)")
       XCTAssertFalse(app.alerts["无法准备仿真翻页"].exists)
      }
      func curlVisible(_ app: XCUIApplication) -> [Int] {
@@ -37,6 +37,141 @@ methods = r'''
      }
      func curlCounts(_ app: XCUIApplication) -> [Int] {
       app.staticTexts["readium-validation-curl-counts"].label.split(separator:",").compactMap { Int($0) }
+     }
+     func measureCurlOpening(requireDeferred: Bool) {
+      for sample in 0..<3 {
+       let app=openCurlBook()
+       let probe=app.staticTexts["readium-validation-curl-opening"]
+       let measured=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in !probe.label.contains("-1") },object:nil)
+       XCTAssertEqual(XCTWaiter.wait(for:[measured],timeout:20),.completed)
+       let times=probe.label.split(separator:",").compactMap{Int($0)}
+       XCTAssertEqual(times.count,4)
+       print("CURL_OPENING sample=\(sample) live_shadow_first_both_ms=\(probe.label)")
+       if requireDeferred {
+        XCTAssertLessThanOrEqual(times[0],times[1],"Prewarming must start after the real first page is presented")
+        XCTAssertEqual(app.staticTexts["readium-validation-diagnostics"].label,"idle")
+        XCTAssertLessThan(times[2],times[3],"First direction must become ready before both sides")
+        XCTAssertEqual(Int(app.staticTexts["readium-validation-curl-live-snapshots"].label),1,"The current sheet must be captured from the live navigator only once")
+       }
+       app.terminate()
+      }
+     }
+     func testReadiumCurlDirectionalAB() {
+      for pair in 0..<3 {
+       for serial in (pair % 2 == 0 ? [true,false] : [false,true]) {
+        let app=XCUIApplication(bundleIdentifier:"cc.novelia.ios.architecture-validation")
+        app.launchArguments=["-architectureValidation","-architectureReadium","-architecturePagination","-reader.readiumPageCurl.v1","YES"]
+        if serial {app.launchArguments += ["-architectureCurlSerialBaseline"]}
+        app.launch();let book=app.staticTexts["分页连续性"].firstMatch
+        XCTAssertTrue(book.waitForExistence(timeout:20));book.tap();waitForCurl(app)
+        let probe=app.staticTexts["readium-validation-curl-opening"]
+        let measured=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in !probe.label.contains("-1") },object:nil)
+        XCTAssertEqual(XCTWaiter.wait(for:[measured],timeout:20),.completed)
+        let times=probe.label.split(separator:",").compactMap{Int($0)}
+        XCTAssertEqual(times.count,4)
+        XCTAssertLessThanOrEqual(times[0],times[1])
+        if !serial {
+         XCTAssertLessThan(times[2],times[3])
+         XCTAssertEqual(Int(app.staticTexts["readium-validation-curl-live-snapshots"].label),1)
+        }
+        print("DIRECTIONAL_AB pair=\(pair) serial=\(serial) metrics=\(probe.label)")
+        app.terminate()
+       }
+      }
+     }
+     func testReadiumDiagnosticsWaitsForTOC() {
+      let app=XCUIApplication(bundleIdentifier:"cc.novelia.ios.architecture-validation")
+      defer{app.terminate()}
+      app.launchArguments=["-architectureValidation","-architectureReadium","-architecturePagination","-reader.readiumPageCurl.v1","YES","-reader.showTOCDiagnostics","YES"]
+      app.launch();let book=app.staticTexts["分页连续性"].firstMatch
+      XCTAssertTrue(book.waitForExistence(timeout:20));book.tap();waitForCurl(app)
+      XCTAssertEqual(app.staticTexts["readium-validation-diagnostics"].label,"idle","Opening must not scan every resource")
+      app.buttons["阅读菜单"].firstMatch.tap();app.buttons["目录"].firstMatch.tap()
+      let probe=app.staticTexts["readium-validation-toc-diagnostics"]
+      XCTAssertTrue(probe.waitForExistence(timeout:10))
+      let done=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in probe.label == "done" },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[done],timeout:20),.completed,"Requested resource diagnostics must still run")
+     }
+     func testReadiumCurlOpeningTimingBaseline() {measureCurlOpening(requireDeferred:false)}
+     func testReadiumCurlPrioritizesFirstPage() {measureCurlOpening(requireDeferred:true)}
+     func testReadiumCurlTurnDuringOppositePreparation() {
+      let app=XCUIApplication(bundleIdentifier:"cc.novelia.ios.architecture-validation")
+      defer{app.terminate()}
+      app.launchArguments=["-architectureValidation","-architectureReadium","-architecturePagination","-reader.readiumPageCurl.v1","YES","-architectureCurlSlowOpposite"]
+      app.launch();let book=app.staticTexts["分页连续性"].firstMatch
+      XCTAssertTrue(book.waitForExistence(timeout:20));book.tap();waitForCurl(app)
+      XCTAssertEqual(app.staticTexts["readium-validation-curl-directions"].label,"1")
+      app.coordinate(withNormalizedOffset:CGVector(dx:0.85,dy:0.5)).tap()
+      let moved=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == 1 },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[moved],timeout:20),.completed);waitForCurl(app)
+      let latency=Int(app.staticTexts["readium-validation-curl-performance"].label.split(separator:",")[0]) ?? 99999
+      XCTAssertLessThan(latency,3000,"A turn toward the ready page must not wait for the injected 3-second opposite preparation")
+      app.coordinate(withNormalizedOffset:CGVector(dx:0.15,dy:0.5)).tap()
+      let returned=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == 2 },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[returned],timeout:20),.completed);waitForCurl(app)
+     }
+     func testReadiumCurlMissingReverseDirection() {
+      let app=openCurlBook();defer{app.terminate()}
+      app.coordinate(withNormalizedOffset:CGVector(dx:0.85,dy:0.5)).tap()
+      let moved=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == 1 },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[moved],timeout:20),.completed);waitForCurl(app)
+      XCTAssertGreaterThan(curlVisible(app).first ?? 0,1)
+      app.terminate();app.launchArguments += ["-architectureCurlSlowOpposite"];app.launch()
+      let book=app.staticTexts["分页连续性"].firstMatch
+      XCTAssertTrue(book.waitForExistence(timeout:20));book.tap();waitForCurl(app)
+      XCTAssertEqual(app.staticTexts["readium-validation-curl-directions"].label,"1","Fixture must exercise an unprepared reverse direction")
+      app.coordinate(withNormalizedOffset:CGVector(dx:0.15,dy:0.5)).tap()
+      let returned=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == 1 && self.curlVisible(app).first == 1 },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[returned],timeout:20),.completed,"First reverse tap must prepare and turn rather than report a boundary")
+      waitForCurl(app)
+     }
+     func testReadiumCurlFirstInputDuringPreparation() {
+      continueAfterFailure = false
+      let app=XCUIApplication(bundleIdentifier:"cc.novelia.ios.architecture-validation")
+      defer{app.terminate()}
+      app.launchArguments=["-architectureValidation","-architectureReadium","-architecturePagination","-reader.readiumPageCurl.v1","YES"]
+      app.launch();let book=app.staticTexts["分页连续性"].firstMatch
+      XCTAssertTrue(book.waitForExistence(timeout:20));book.tap()
+      XCTAssertTrue(app.staticTexts["readium-validation-curl-state"].waitForExistence(timeout:20))
+      // 不等待快照ready，第一次中心点按就应隐藏控件；再次点按应恢复。
+      let center=app.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5))
+      center.tap()
+      let menu=app.buttons["阅读菜单"].firstMatch
+      let hidden=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in !menu.exists },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[hidden],timeout:5),.completed)
+      center.tap();XCTAssertTrue(menu.waitForExistence(timeout:5))
+      let count=curlCounts(app)[1]
+      app.coordinate(withNormalizedOffset:CGVector(dx:0.85,dy:0.5)).tap()
+      let turned=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == count+1 },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[turned],timeout:20),.completed)
+      waitForCurl(app)
+      app.coordinate(withNormalizedOffset:CGVector(dx:0.15,dy:0.5)).tap()
+      let returned=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == count+2 },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[returned],timeout:20),.completed);waitForCurl(app)
+     }
+     func testReadiumCurlFirstSwipeDuringPreparation() {
+      continueAfterFailure = false
+      let app=XCUIApplication(bundleIdentifier:"cc.novelia.ios.architecture-validation")
+      defer{app.terminate()}
+      app.launchArguments=["-architectureValidation","-architectureReadium","-architecturePagination","-reader.readiumPageCurl.v1","YES"]
+      app.launch();let book=app.staticTexts["分页连续性"].firstMatch
+      XCTAssertTrue(book.waitForExistence(timeout:20));book.tap()
+      XCTAssertTrue(app.staticTexts["readium-validation-curl-state"].waitForExistence(timeout:20))
+      app.swipeLeft(velocity:.slow)
+      let turned=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == 1 },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[turned],timeout:20),.completed,"trace=\(app.staticTexts["readium-validation-curl-input"].label) counts=\(curlCounts(app)) visible=\(curlVisible(app)) state=\(app.staticTexts["readium-validation-curl-state"].label)\n\(app.debugDescription)");waitForCurl(app)
+      app.swipeRight(velocity:.slow)
+      let returned=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == 2 },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[returned],timeout:20),.completed);waitForCurl(app)
+     }
+     func testReadiumCurlQueuesNextInput() {
+      let app=openCurlBook();defer{app.terminate()}
+      let count=curlCounts(app)[1]
+      let edge=app.coordinate(withNormalizedOffset:CGVector(dx:0.85,dy:0.5))
+      edge.tap();edge.tap()
+      let twice=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == count+2 },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[twice],timeout:20),.completed,"Both single taps must be honored")
+      waitForCurl(app)
      }
      func testReadiumCurlPreparationDoesNotSaveProgress() {
       let app=openCurlBook();defer{app.terminate()}
@@ -65,6 +200,8 @@ methods = r'''
      }
      func testReadiumCurlCancellationAndRotation() {
       let app=openCurlBook();defer{XCUIDevice.shared.orientation = .portrait;app.terminate()}
+      let both=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in app.staticTexts["readium-validation-curl-directions"].label == "3" },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[both],timeout:20),.completed)
       let initial=curlVisible(app), count=curlCounts(app)[1],cancelled=curlCounts(app)[2]
       let start=app.coordinate(withNormalizedOffset:CGVector(dx:0.9,dy:0.5))
       let end=app.coordinate(withNormalizedOffset:CGVector(dx:0.82,dy:0.5))
@@ -167,7 +304,14 @@ if '--only-testing' not in sys.argv:
                  '--only-testing','TapTests/TapTests/testReadiumCurlStyleToggleAndSelection',
                  '--only-testing','TapTests/TapTests/testReadiumCurlReopensCommittedPosition',
                  '--only-testing','TapTests/TapTests/testReadiumCurlCancelsPreparationOnRotation',
-                 '--only-testing','TapTests/TapTests/testReadiumCurlTurnReadinessTiming']
+                 '--only-testing','TapTests/TapTests/testReadiumCurlTurnReadinessTiming',
+                 '--only-testing','TapTests/TapTests/testReadiumCurlFirstInputDuringPreparation',
+                 '--only-testing','TapTests/TapTests/testReadiumCurlFirstSwipeDuringPreparation',
+                 '--only-testing','TapTests/TapTests/testReadiumCurlQueuesNextInput',
+                 '--only-testing','TapTests/TapTests/testReadiumCurlPrioritizesFirstPage',
+                 '--only-testing','TapTests/TapTests/testReadiumDiagnosticsWaitsForTOC',
+                 '--only-testing','TapTests/TapTests/testReadiumCurlMissingReverseDirection',
+                 '--only-testing','TapTests/TapTests/testReadiumCurlTurnDuringOppositePreparation']
 namespace={'__name__':'__main__','__file__':str(base)}
 exec(compile(source,str(base),'exec'),namespace)
 # 只执行准备场景时，验证当前夹具没有新增任何精确或共享阅读位置。

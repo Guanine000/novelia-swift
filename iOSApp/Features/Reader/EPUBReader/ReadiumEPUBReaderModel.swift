@@ -105,7 +105,16 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published var curlCancelledTurns = 0
     @Published var curlTurnReadyMilliseconds = 0
     @Published var curlSnapshotCount = 0
+    @Published var curlLiveSnapshotCount = 0
+    @Published var curlPreparedDirections = 0
     var curlPreparationFailure = ""
+    @Published var curlInputTrace = ""
+    @Published var curlOpeningMilliseconds = [-1, -1, -1, -1]
+    private var curlOpeningStartedAt = ProcessInfo.processInfo.systemUptime
+    func recordCurlOpeningStage(_ index: Int) {
+        guard curlOpeningMilliseconds[index] < 0 else { return }
+        curlOpeningMilliseconds[index] = Int((ProcessInfo.processInfo.systemUptime - curlOpeningStartedAt) * 1000)
+    }
 #endif
     @Published var curlError: String?
     var onCurlTurn: ((Bool) -> Bool)?
@@ -154,6 +163,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     func open(url: URL, systemIsDark: Bool) async {
         guard status == .idle else { return }
         status = .opening
+#if DEBUG
+        curlOpeningStartedAt = ProcessInfo.processInfo.systemUptime
+        curlOpeningMilliseconds = [-1, -1, -1, -1]
+#endif
         isDarkMode = settings.isDark(systemIsDark: systemIsDark)
         do {
             // 打开前先走原生容器：空 spine 会让 Readium streamer 崩溃，
@@ -212,6 +225,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     func open(textBook: PagedTextBook, systemIsDark: Bool) async {
         guard status == .idle, let source = textBook.source as? TextChapterSource else { return }
         status = .opening
+#if DEBUG
+        curlOpeningStartedAt = ProcessInfo.processInfo.systemUptime
+        curlOpeningMilliseconds = [-1, -1, -1, -1]
+#endif
         self.textBook = textBook
         isDarkMode = settings.isDark(systemIsDark: systemIsDark)
         do {
@@ -1702,7 +1719,11 @@ extension ReadiumEPUBReaderModel {
     /// 预取导航器由卷页宿主持有，仅复用 Publication 与配置，不参与模型进度或正文交互。
     func makeCurlSnapshotNavigator() throws -> EPUBNavigatorViewController? {
         guard let publication, let locator else { return nil }
-        let snapshot = try EPUBNavigatorViewController(publication: publication, initialLocation: locator, config: navigatorConfiguration())
+        // 影子导航只保留跨章定位必需的前/后各1个位置；其余页面由宿主限量预热，避免复制默认的前2/后6预加载。
+        var config = navigatorConfiguration()
+        config.preloadPreviousPositionCount = 1
+        config.preloadNextPositionCount = 1
+        let snapshot = try EPUBNavigatorViewController(publication: publication, initialLocation: locator, config: config)
         snapshot.delegate = self
         return snapshot
     }

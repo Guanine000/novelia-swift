@@ -144,6 +144,11 @@ private struct ReadiumEPUBReaderViewContent: View {
                     .allowsHitTesting(false)
                 Text("\(model.curlPreparationCount),\(model.curlCompletedTurns),\(model.curlCancelledTurns)").accessibilityIdentifier("readium-validation-curl-counts").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
                 Text(verbatim: "\(model.curlTurnReadyMilliseconds),\(model.curlSnapshotCount)").accessibilityIdentifier("readium-validation-curl-performance").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
+                Text(model.curlOpeningMilliseconds.map(String.init).joined(separator: ",")).accessibilityIdentifier("readium-validation-curl-opening").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
+                Text(model.diagnosticsComplete ? "done" : (model.isScanningDiagnostics ? "scanning" : "idle")).accessibilityIdentifier("readium-validation-diagnostics").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
+                Text("\(model.curlLiveSnapshotCount)").accessibilityIdentifier("readium-validation-curl-live-snapshots").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
+                Text("\(model.curlPreparedDirections)").accessibilityIdentifier("readium-validation-curl-directions").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
+                Text(model.curlInputTrace).accessibilityIdentifier("readium-validation-curl-input").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
                 Text(model.curlPreparationFailure).accessibilityIdentifier("readium-validation-curl-failure").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
                 Text(model.validationVisibleParagraphs)
                     .font(.system(size: 1)).opacity(0.01)
@@ -230,6 +235,10 @@ private struct ReadiumEPUBReaderViewContent: View {
                     model.speech.start(from: playback.anchor, readiumLocator: playback.locator)
                 }
             }
+        }
+        // 全书资源诊断只在用户实际查看诊断目录时运行，不能与首屏 WebKit 排版竞争。
+        .task(id: model.status == .ready && showsTOCDiagnostics && isShowingTOC) {
+            guard model.status == .ready, showsTOCDiagnostics, isShowingTOC else { return }
             await model.scanBookDiagnostics()
         }
         .sheet(isPresented: $isShowingTOC) { tocSheet }
@@ -427,6 +436,13 @@ private struct ReadiumEPUBReaderViewContent: View {
     private var tocList: some View {
         ScrollViewReader { proxy in
             List {
+#if DEBUG
+                if model.validatesPagination {
+                    Text(model.diagnosticsComplete ? "done" : (model.isScanningDiagnostics ? "scanning" : "idle"))
+                        .accessibilityIdentifier("readium-validation-toc-diagnostics")
+                        .font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
+                }
+#endif
                 if showsTOCDiagnostics, !model.tocDiagnosticMessages.isEmpty {
                 Section {
                     DisclosureGroup(isExpanded: $model.isTOCDiagnosticsExpanded) {
