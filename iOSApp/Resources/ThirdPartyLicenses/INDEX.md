@@ -21,6 +21,14 @@ YueduCoreText 另附 [NOTICE](YueduCoreText-NOTICE.txt)。swift-toolkit（Readiu
 
 This product includes software developed by the "Marcin Krzyzanowski" (http://krzyzanowskim.com/).（CryptoSwift 许可要求的致谢）
 
+## 简繁转换词表
+
+| 数据 | 版本 | 许可证 | 来源 | 许可文件 |
+| --- | --- | --- | --- | --- |
+| OpenCC 繁体词组表（派生） | ver.1.4.2 | Apache-2.0 | https://github.com/BYVoid/OpenCC | [OpenCC-LICENSE.txt](OpenCC-LICENSE.txt) |
+
+`Sources/NoveliaIOSCore/Resources/ChineseConversionTable.txt` 由 `scripts/update_chinese_conversion_table.swift` 从上游 `data/dictionary/STPhrases.txt` 与 `TWPhrases.txt` 派生，只保留系统 ICU 需要修正的“一简对多繁”词组和白名单内的台湾常用词，未修改上游源码，也不包含 OpenCC 的代码或二进制。
+
 ## C 库
 
 | 软件 | 版本 | 许可证 | 源码 | 许可文件 |

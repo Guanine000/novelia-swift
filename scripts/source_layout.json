@@ -104,6 +104,7 @@
   "WebNovelEPUBIdentity.swift": "Sources/NoveliaIOSCore/Features/Reader/WebNovelEPUBIdentity.swift",
   "WebNovelEPUBReading.swift": "iOSApp/App/Integrations/WebNovelEPUBReading.swift",
   "ReadingPreferences.swift": "Sources/NoveliaIOSCore/Features/Reader/ReadingPreferences.swift",
+  "ChineseConversionTable.swift": "Sources/NoveliaIOSCore/Features/Reader/ChineseConversionTable.swift",
   "OnlineChapterOfflineStore.swift": "Sources/NoveliaIOSCore/Features/Reader/OnlineChapterOfflineStore.swift",
   "ReaderBookPreferencesView.swift": "iOSApp/Features/Reader/ReaderBookPreferencesView.swift",
   "OfflineChapterManagementView.swift": "iOSApp/Features/Reader/OfflineChapterManagementView.swift",

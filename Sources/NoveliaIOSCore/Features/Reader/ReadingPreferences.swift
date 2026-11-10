@@ -25,18 +25,11 @@ public struct ReadingTextProjection: Codable, Equatable, Sendable {
         switch chinese {
         case .original: converted = text
         case .simplified: converted = text.applyingTransform(StringTransform("Traditional-Simplified"), reverse: false) ?? text
-        case .traditional: converted = text.applyingTransform(StringTransform("Simplified-Traditional"), reverse: false) ?? text
+        case .traditional: converted = ChineseConversionTable.apply(text.applyingTransform(StringTransform("Simplified-Traditional"), reverse: false) ?? text)
         }
-        let rules = normalized.replacements
-        guard enabled, !rules.isEmpty else { return converted }
-        let keys = rules.keys.sorted { $0.count == $1.count ? $0 < $1 : $0.count > $1.count }
-        var result = "", cursor = converted.startIndex
-        while cursor < converted.endIndex {
-            if let key = keys.first(where: { converted[cursor...].hasPrefix($0) }) {
-                result += rules[key] ?? ""; cursor = converted.index(cursor, offsetBy: key.count)
-            } else { result.append(converted[cursor]); cursor = converted.index(after: cursor) }
-        }
-        return result
+        let rules = normalized
+        guard rules.enabled, !rules.replacements.isEmpty else { return converted }
+        return ReplacementTrie.cached(for: rules).apply(converted)
     }
     /// HTML只处理文本节点，不改链接、属性、脚本、样式或资源路径。
     public func applyHTML(_ html: String) -> String {
@@ -57,6 +50,61 @@ public struct ReadingTextProjection: Codable, Equatable, Sendable {
     }
     private func escape(_ text: String) -> String {
         text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+    }
+}
+
+/// 替换规则的编译结果：前缀树一次扫描取最长命中，语义与逐键比较一致（最长优先、不递归）。
+/// 编译后只读并可跨线程共享；按投影内容缓存，避免每次重排都重新排序和扫描全部规则。
+final class ReplacementTrie: @unchecked Sendable {
+    private final class Node {
+        var children: [Character: Node] = [:]
+        var value: String?
+        func child(_ character: Character) -> Node {
+            if let next = children[character] { return next }
+            let next = Node(); children[character] = next; return next
+        }
+    }
+    private static let lock = NSLock()
+    private static var cached: [String: ReplacementTrie] = [:]
+    private static var order: [String] = []
+    /// 同一本书通常只有一套规则；保留少量版本即可，超出按先入先出丢弃。
+    private static let cacheLimit = 8
+
+    static func cached(for projection: ReadingTextProjection) -> ReplacementTrie {
+        let key = projection.identity
+        lock.lock(); defer { lock.unlock() }
+        if let trie = cached[key] { return trie }
+        let trie = ReplacementTrie(projection.replacements)
+        cached[key] = trie
+        order.append(key)
+        if order.count > cacheLimit { cached[order.removeFirst()] = nil }
+        return trie
+    }
+
+    private let root = Node()
+    init(_ rules: [String: String]) {
+        for (key, value) in rules {
+            var node = root
+            for character in key { node = node.child(character) }
+            node.value = value
+        }
+    }
+    func apply(_ text: String) -> String {
+        let characters = Array(text)
+        var result = ""
+        result.reserveCapacity(characters.count)
+        var index = 0
+        while index < characters.count {
+            var node = root, cursor = index, end = -1
+            var matched: String?
+            while cursor < characters.count, let next = node.children[characters[cursor]] {
+                node = next; cursor += 1
+                if let value = node.value { end = cursor; matched = value }
+            }
+            if let matched { result += matched; index = end }
+            else { result.append(characters[index]); index += 1 }
+        }
+        return result
     }
 }
 

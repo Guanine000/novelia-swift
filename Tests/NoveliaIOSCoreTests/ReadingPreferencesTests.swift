@@ -9,6 +9,47 @@ final class ReadingPreferencesTests: XCTestCase {
         projection.enabled = false
         XCTAssertEqual(projection.apply("小明"), "小明")
     }
+    func testReplacementLongestMatchAndDeletion() {
+        var projection = ReadingTextProjection()
+        projection.replacements = ["ABC": "2", "AB": "1", "BC": "3", "bad": ""]
+        XCTAssertEqual(projection.apply("ABCBC"), "23")
+        XCTAssertEqual(projection.apply("a bad word"), "a  word")
+        XCTAssertEqual(projection.apply("AB"), "1")
+        XCTAssertEqual(projection.apply(""), "")
+    }
+    func testReplacementCacheFollowsRuleContent() {
+        var projection = ReadingTextProjection()
+        projection.replacements = ["旧名": "甲"]
+        XCTAssertEqual(projection.apply("旧名"), "甲")
+        XCTAssertEqual(projection.apply("旧名旧名"), "甲甲")
+        projection.replacements = ["旧名": "乙"]
+        XCTAssertEqual(projection.apply("旧名"), "乙")
+        projection.chinese = .traditional
+        XCTAssertEqual(projection.apply("旧名"), "舊名")
+        projection.chinese = .simplified
+        XCTAssertEqual(projection.apply("舊名"), "乙")
+    }
+    func testTraditionalConversionCorrectsAmbiguousWords() {
+        var projection = ReadingTextProjection(); projection.chinese = .traditional
+        XCTAssertEqual(projection.apply("一干二净"), "一乾二淨")
+        XCTAssertEqual(projection.apply("你干嘛呢"), "你幹嘛呢")
+        XCTAssertEqual(projection.apply("诗云"), "詩云")
+        XCTAssertEqual(projection.apply("头发很长"), "頭髮很長")
+        // 不引入 OpenCC 的古体用字，保持现有 ICU 用字习惯。
+        XCTAssertEqual(projection.apply("吃饭"), "吃飯")
+        XCTAssertEqual(projection.apply("刚才"), "剛才")
+        XCTAssertEqual(projection.apply("面条"), "麵條")
+        XCTAssertEqual(projection.apply("台湾"), "台灣")
+        // 繁体默认采用台湾常用词，但只限脱离软件语境也成立的词。
+        XCTAssertEqual(projection.apply("软件"), "軟體")
+        XCTAssertEqual(projection.apply("网络"), "網路")
+        XCTAssertEqual(projection.apply("信息"), "資訊")
+        XCTAssertEqual(projection.apply("法律程序"), "法律程序")
+    }
+    func testSimplifiedConversionIgnoresTraditionalTable() {
+        var projection = ReadingTextProjection(); projection.chinese = .simplified
+        XCTAssertEqual(projection.apply("頭髮與麵條"), "头发与面条")
+    }
     func testChineseAndHTMLPreserveAttributesResourcesAndAnnotation() {
         var projection = ReadingTextProjection(); projection.chinese = .simplified
         XCTAssertEqual(projection.apply("閱讀書籍"), "阅读书籍")

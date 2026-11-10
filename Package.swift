@@ -24,6 +24,8 @@ let package = Package(
         .target(
             name: "NoveliaIOSCore",
             path: "Sources/NoveliaIOSCore",
+            // 简繁修正表由 scripts/update_chinese_conversion_table.swift 生成，随包分发。
+            resources: [.copy("Resources/ChineseConversionTable.txt")],
             // App 目标按 Xcode 默认设置编译这些文件，启用裸 `/regex/` 字面量。
             swiftSettings: [.enableUpcomingFeature("BareSlashRegexLiterals")]
         ),

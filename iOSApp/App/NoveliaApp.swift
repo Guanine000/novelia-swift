@@ -21,6 +21,8 @@ struct NoveliaApp: App {
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
         // 同时写入跨启动诊断记录，导出时以此分隔各次启动。
         ShareableLogger(category: "lifecycle").notice("Application launched, version \(version) (\(build))")
+        // 简繁修正表约 77 KB，在后台解析一次，避免打开第一章时同步读取资源。
+        DispatchQueue.global(qos: .utility).async { ChineseConversionTable.warmUp() }
     }
 
     var body: some Scene {
