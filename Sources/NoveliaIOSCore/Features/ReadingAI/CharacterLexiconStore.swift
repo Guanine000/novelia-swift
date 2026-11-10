@@ -222,7 +222,13 @@ final class CharacterLexiconStore: ObservableObject, CharacterSyncLocal {
         try commit(next); return id
     }
     nonisolated static func valid(_ fact: CharacterFact) -> Bool {
-        (fact.relatedName.map { !$0.isEmpty && $0.utf16.count <= 100 && fact.quote.range(of: $0, options: .literal) != nil } ?? true)
+        // 用户手工添加的条目没有逐字引文，只要求名字与描述成立；来源仍标记 manual。
+        if fact.manual {
+            return fact.chapter >= 0 && fact.offset >= 0
+                && !fact.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && fact.name.utf16.count <= 100
+                && !fact.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && fact.text.utf16.count <= 300
+        }
+        return (fact.relatedName.map { !$0.isEmpty && $0.utf16.count <= 100 && fact.quote.range(of: $0, options: .literal) != nil } ?? true)
             && fact.chapter >= 0 && fact.offset >= 0 && !fact.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && fact.name.utf16.count <= 100
             && !fact.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && fact.text.utf16.count <= 300
             && (10...600).contains(fact.quote.utf16.count) && (fact.quote.range(of: fact.name, options: .literal) != nil || fact.attribution.map {
@@ -331,6 +337,25 @@ final class CharacterLexiconStore: ObservableObject, CharacterSyncLocal {
             if next.rejected?.contains(key) != true { next.rejected?.append(key) }
         }
         next.entities.removeAll { $0.id == id }
+        try commit(next)
+    }
+    /// 手工新增一条事实：用户自己写的内容不需要原文引文，标记 manual 以便日后区分来源。
+    func addManualFact(to entity: String, text: String, category: String, scope: CharacterScope) throws {
+        guard let index = archive.entities.firstIndex(where: { $0.id == entity && $0.work == scope.work }) else {
+            throw CharacterLexiconError.scope
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.utf16.count <= 300 else { throw CharacterLexiconError.evidence }
+        let entityFacts = archive.entities[index].facts
+        let chapter = entityFacts.map(\.chapter).min() ?? max(0, scope.currentChapter - 1)
+        let identity = entityFacts.first?.identity ?? scope.identities[scope.currentBook] ?? ""
+        let name = entityFacts.first?.name ?? ""
+        let value = CharacterFact(book: entityFacts.first?.book ?? scope.currentBook, identity: identity,
+            chapter: max(0, chapter), offset: 0, name: name, text: trimmed, quote: "", manual: true,
+            category: ["身份", "外貌", "性格", "能力", "目标", "关系", "经历"].contains(category) ? category : "经历")
+        guard Self.valid(value) else { throw CharacterLexiconError.evidence }
+        var next = archive
+        next.entities[index].facts.append(value)
         try commit(next)
     }
     func confirm(fact: String, entity: String, scope: CharacterScope) throws {

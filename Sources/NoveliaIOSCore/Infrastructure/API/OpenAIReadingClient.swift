@@ -74,6 +74,8 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
             "messages": [["role": "system", "content": request.instruction], ["role": "user", "content": request.input]],
             config.tokenParameter.rawValue: config.maximumOutputTokens]
         if config.requestsJSON { body["response_format"] = ["type": "json_object"] }
+        // 只在用户显式选择时发送：不支持的接口会直接拒绝未知参数。
+        if let effort = config.reasoningEffort { body["reasoning_effort"] = effort.rawValue }
         var result = URLRequest(url: try config.endpoint())
         result.httpMethod = "POST"; result.setValue("application/json", forHTTPHeaderField: "Content-Type")
         result.setValue("application/json", forHTTPHeaderField: "Accept")

@@ -66,6 +66,7 @@ struct LocalRecapSource {
 private struct CharacterLookupKey: EnvironmentKey { static let defaultValue: ((String) -> Void)? = nil }
 private struct ReadingRecapActionKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
 private struct CharacterCardsKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
+private struct CharacterCardsReadOnlyKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
 extension EnvironmentValues {
     var characterLookup: ((String) -> Void)? {
         get { self[CharacterLookupKey.self] }
@@ -79,17 +80,22 @@ extension EnvironmentValues {
         get { self[CharacterCardsKey.self] }
         set { self[CharacterCardsKey.self] = newValue }
     }
+    /// 只读人物卡：从阅读菜单“查看人物卡”进入，只展示内容，不提供生成与绑定菜单。
+    var characterCardsReadOnly: (() -> Void)? {
+        get { self[CharacterCardsReadOnlyKey.self] }
+        set { self[CharacterCardsReadOnlyKey.self] = newValue }
+    }
 }
 @MainActor
 struct ReaderRecapMenu: View {
     @ObservedObject var store: ReadingRecapStore
     @Environment(\.readingRecapAction) private var open
-    @Environment(\.characterLookup) private var characters
     @Environment(\.characterCards) private var cards
+    @Environment(\.characterCardsReadOnly) private var readOnlyCards
     var body: some View {
         Menu {
-            Button("查看角色卡") { cards?() }.disabled(cards == nil)
-            Button("查询人物词条") { characters?("") }.disabled(characters == nil)
+            Button("更新人物卡") { cards?() }.disabled(cards == nil)
+            Button("查看人物卡") { readOnlyCards?() }.disabled(readOnlyCards == nil)
             Button("生成 AI 前情回顾") { open?() }.disabled(open == nil)
             Picker("久未阅读时询问", selection: $store.promptAfterDays) {
                 Text("不自动询问").tag(0)
@@ -113,6 +119,7 @@ struct ReaderRecapPresentation: ViewModifier {
     @State private var showing = false
     @State private var showingCharacters = false
     @State private var showingCards = false
+    @State private var showingCardsReadOnly = false
     @State private var characterQuery = ""
     private var activityID: String { active && scenePhase == .active && !prompts && !showing && !showingCharacters ? source?.bookKey ?? "none" : "inactive" }
     private var openAction: (() -> Void)? {
@@ -124,6 +131,7 @@ struct ReaderRecapPresentation: ViewModifier {
             .environment(\.readingRecapAction, openAction)
             .environment(\.characterLookup, source == nil ? nil : { text in characterQuery = text; showingCharacters = true })
             .environment(\.characterCards, libraryBookKey == nil ? nil : { showingCards = true })
+            .environment(\.characterCardsReadOnly, libraryBookKey == nil ? nil : { showingCardsReadOnly = true })
             .task(id: source?.bookKey) {
                 guard let source, visitedBook != source.bookKey else { return }
                 visitedBook = source.bookKey
@@ -153,6 +161,14 @@ struct ReaderRecapPresentation: ViewModifier {
                     if let source {
                         ReadingCharactersEntry(libraryBook: libraryBookKey, source: source, query: characterQuery)
                             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("返回阅读") { showingCharacters = false } } }
+                    }
+                }
+            }
+            .sheet(isPresented: $showingCardsReadOnly) {
+                NavigationView {
+                    if let libraryBookKey {
+                        ReadingCharacterCardsEntry(libraryBookKey: libraryBookKey, readOnly: true)
+                            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("返回阅读") { showingCardsReadOnly = false } } }
                     }
                 }
             }
@@ -186,7 +202,8 @@ private struct ReadingRecapSheet: View {
     @State private var run = UUID()
     /// 故事梗概的覆盖范围：整本已读部分，或只回看最近 30 章。
     @State private var storyScope: StoryScope = .whole
-    @State private var story: BookStorySummary?
+    /// 直接读 Store，保存后界面立即刷新；不再用本地快照。
+    private var story: BookStorySummary? { store.story(book: source.bookKey) }
     /// 生成任务由 store 持有，关闭面板不会中断；这里只读它的进度与错误。
     private var storyProgress: String? { store.storyProgress[storyKey] }
     private var storyError: String? { store.storyErrors[storyKey] }
@@ -288,16 +305,16 @@ private struct ReadingRecapSheet: View {
     }
     private func prepare() async {
         cancel(); error = nil; result = nil; plan = nil; chapters = []
-        story = store.story(book: source.bookKey)
         let snapshot = run
         let selected = min(count, source.currentChapter)
         do {
             let values = try await source.load((source.currentChapter - selected)..<source.currentChapter)
             try Task.checkCancellation()
             guard snapshot == run else { return }
-            // 前言、人物表、目录、后记不是剧情，混进去只会让回顾变成书评。
-            let story = values.filter { !CharacterExtractionPlan.isNonStoryTitle($0.title) }
-            guard !story.isEmpty else { throw ReadingRecapError.invalidScope }
+            // 前言、人物表、目录、后记不是剧情，混进去只会让回顾变成书评；
+            // 但这几章之外没有内容时仍要能用，所以过滤后为空就退回原样。
+            let filtered = values.filter { !CharacterExtractionPlan.isNonStoryTitle($0.title) }
+            let story = filtered.isEmpty ? values : filtered
             let prepared = try ReadingRecapPlan(chapters: story, boundary: source.currentChapter, identity: source.identity, modelIdentity: modelIdentity)
             chapters = story; plan = prepared; result = store.cached(plan: prepared, book: source.bookKey)
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
@@ -314,23 +331,35 @@ private struct ReadingRecapSheet: View {
     }
     /// 只负责挑出要处理的章节并把任务交给 Store；中断由 Store 管理。
     private func generateStory() {
-        guard ai.configuration.isEnabled, !store.isBuildingStory(book: source.bookKey) else { return }
-        guard let identity = try? StorySummaryGenerator.fingerprint(identity: source.identity, configuration: ai.configuration) else {
+        let boundary = max(0, source.currentChapter)
+        guard ai.configuration.isEnabled else {
+            store.reportStoryError("请先在“我的 → 高级 → AI 阅读辅助”配置并启用 AI。", book: source.bookKey)
             return
         }
-        let start = storyStart
+        guard !store.isBuildingStory(book: source.bookKey) else { return }
+        guard let identity = try? StorySummaryGenerator.fingerprint(identity: source.identity, configuration: ai.configuration) else {
+            store.reportStoryError("当前 AI 配置无法用于生成，请检查模型与输出上限。", book: source.bookKey)
+            return
+        }
+        let start = storyScope == .whole ? 0 : max(0, boundary - 30)
         let reusable = story.flatMap { $0.fingerprint == identity && $0.coveredThrough > start ? $0 : nil }
         let from = max(start, reusable?.coveredThrough ?? start)
-        guard from < source.currentChapter else { return }
-        let snapshot = run
+        guard from < boundary else {
+            store.reportStoryError("梗概已经覆盖到当前阅读位置；读到新章节后再更新。", book: source.bookKey)
+            return
+        }
         Task {
             do {
-                let values = try await source.load(from..<source.currentChapter)
-                guard snapshot == run, !Task.isCancelled else { return }
+                let values = try await source.load(from..<boundary)
+                guard !values.isEmpty else {
+                    store.reportStoryError("这一范围内没有可取用的正文。", book: source.bookKey)
+                    return
+                }
+                // 生成任务交给 Store 持有：关闭面板、离开阅读器都不会中断。
                 store.startStory(book: source.bookKey, chapters: values, previous: from > start ? reusable : nil,
-                                 identity: source.identity, coveredThrough: source.currentChapter, ai: ai)
+                                 identity: source.identity, coveredThrough: boundary, ai: ai)
             } catch {
-                // 载入失败（多半是位置已变化）时不动已有梗概。
+                store.reportStoryError(error.localizedDescription, book: source.bookKey)
             }
         }
     }

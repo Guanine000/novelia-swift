@@ -37,8 +37,14 @@ struct ReadingAISettingsView: View {
                 }
                 Stepper("输出上限：\(draft.maximumOutputTokens) tokens", value: $draft.maximumOutputTokens, in: 128...8_192, step: 128)
                 Toggle("请求 JSON 格式", isOn: $draft.requestsJSON)
+                Picker("思考强度", selection: $draft.reasoningEffort) {
+                    Text("不发送").tag(ReadingAIConfiguration.ReasoningEffort?.none)
+                    ForEach(ReadingAIConfiguration.ReasoningEffort.allCases) { effort in
+                        Text(effort.title).tag(ReadingAIConfiguration.ReasoningEffort?.some(effort))
+                    }
+                }
             } header: { Text("模型兼容参数") } footer: {
-                Text("参数需由模型支持。JSON 格式只约束返回格式，不能代替剧情与出处校验；单次输入上限为 128 KiB，输出 tokens 仍可能产生费用。")
+                Text("参数需由模型支持。思考强度只对 o 系列、Gemini 等支持的模型有效，不支持时会直接报错，所以默认不发送；调低能明显变快，但人物与情节判断会更粗。JSON 格式只约束返回格式，不能代替剧情与出处校验；单次输入上限为 128 KiB，输出 tokens 仍可能产生费用。")
             }
             Section {
                 Button("保存配置") { save() }

@@ -14,6 +14,8 @@ struct CharacterSeriesView: View {
     var readingBoundary: Int? = nil
     var readingIdentity: String? = nil
     var initialQuery = ""
+    /// 只读：从阅读菜单“查看人物卡”进入，只展示已有卡片，隐藏卷序、生成、校准等操作。
+    var readOnly = false
     @EnvironmentObject private var settings: ReaderSettings
     @EnvironmentObject private var library: LibraryStateStore
     @State private var order = [String]()
@@ -48,7 +50,11 @@ struct CharacterSeriesView: View {
         get { store.runs[workID]?.events ?? [] }
         nonmutating set { store.runs[workID, default: .init()].events = newValue }
     }
-    private var confirmed: Bool { !order.isEmpty && store.order(work: workID) == order }
+    private var confirmed: Bool {
+        guard !order.isEmpty else { return false }
+        // 只读模式不要求先确认卷序：直接用已保存的卷序推断可见范围。
+        return readOnly || store.order(work: workID) == order
+    }
     private var eligibleBooks: [String] {
         guard let index = order.firstIndex(of: currentBook) else { return [] }
         return Array(order.prefix(index + 1))
@@ -74,7 +80,7 @@ struct CharacterSeriesView: View {
 
     var body: some View {
         List {
-            if progress != nil || message != nil || !aiLog.isEmpty {
+            if !readOnly, progress != nil || message != nil || !aiLog.isEmpty {
                 Section {
                     Button { showingAILog = true } label: {
                         HStack(alignment: .top, spacing: 12) {
@@ -91,17 +97,19 @@ struct CharacterSeriesView: View {
                     if progress != nil { Button("暂停整理") { cancel() } }
                 } header: { Text("阅读助手") }
             }
-            Section {
-                ForEach(order, id: \.self) { key in Text(title(key)) }
-                    .onMove { offsets, destination in cancel(); order.move(fromOffsets: offsets, toOffset: destination) }
-                Button(confirmed ? "卷序已确认" : "确认以上卷序") {
-                    do { try store.confirmOrder(work: workID, volumes: order) }
-                    catch { message = error.localizedDescription }
-                }.disabled(confirmed || progress != nil)
-            } header: { Text("系列卷序") } footer: {
-                Text("卷序决定前后关系；各卷仅使用自己的保存位置之前的完整章节。无进度不扫描，当前章与后卷排除，跳读过的章节无法逐章识别。")
+            if !readOnly {
+                Section {
+                    ForEach(order, id: \.self) { key in Text(title(key)) }
+                        .onMove { offsets, destination in cancel(); order.move(fromOffsets: offsets, toOffset: destination) }
+                    Button(confirmed ? "卷序已确认" : "确认以上卷序") {
+                        do { try store.confirmOrder(work: workID, volumes: order) }
+                        catch { message = error.localizedDescription }
+                    }.disabled(confirmed || progress != nil)
+                } header: { Text("系列卷序") } footer: {
+                    Text("卷序决定前后关系；各卷仅使用自己的保存位置之前的完整章节。无进度不扫描，当前章与后卷排除，跳读过的章节无法逐章识别。")
+                }
             }
-            if confirmed {
+            if confirmed, !readOnly {
                 Section {
                     Picker("当前阅读书籍", selection: $currentBook) {
                         ForEach(order, id: \.self) { Text(title($0)).tag($0) }
@@ -177,7 +185,7 @@ struct CharacterSeriesView: View {
                         }
                         if visible.isEmpty { Text("当前阅读范围内暂无人物卡，点击生成即可建立。").foregroundStyle(.secondary) }
                     } header: { Text("人物卡") }
-                    if !duplicateGroups.isEmpty {
+                    if !readOnly, !duplicateGroups.isEmpty {
                         Section {
                             NavigationLink {
                                 CharacterDuplicateReviewView(scope: scope, store: store)
@@ -194,7 +202,11 @@ struct CharacterSeriesView: View {
             }
         }
         .navigationTitle("跨卷人物词条")
-        .toolbar { ToolbarItem(placement: .compatTopBarTrailing) { EditButton().disabled(progress != nil) } }
+        .toolbar {
+            ToolbarItem(placement: .compatTopBarTrailing) {
+                if !readOnly { EditButton().disabled(progress != nil) }
+            }
+        }
         .sheet(isPresented: $showingAILog) {
             CharacterAILogView(workID: workID, store: store, ai: ai,
                 canContinue: ready && confirmed && ai.isReadyForGeneration,
@@ -336,6 +348,7 @@ private struct CharacterCardView: View {
     @State private var showingConversation = false
     @State private var conversationIsDetail = true
     @State private var confirmingDelete = false
+    @State private var addingFact = false
     private var enriching: Bool { enrichmentTask != nil }
     @State private var updateStarted = Date()
     private var scope: CharacterScope { refreshedScope ?? initialScope }
@@ -423,6 +436,7 @@ private struct CharacterCardView: View {
                         }
                     }
                     Divider()
+                    Button("新增一条事实") { addingFact = true }
                     Button("补充细节") { enrich() }.disabled(enriching || updating || !ai.isReadyForGeneration)
                     if enriching { Button("暂停补充") { store.pause(work: enrichmentKey) } }
                     if store.runs[enrichmentKey] != nil {
@@ -445,6 +459,11 @@ private struct CharacterCardView: View {
                 onContinue: { if conversationIsDetail { enrich() } else { update() } })
         }
         .sheet(isPresented: $managingPortrait) { portraitEditor }
+        .sheet(isPresented: $addingFact) {
+            CharacterFactCreator { text, category in
+                try store.addManualFact(to: id, text: text, category: category, scope: scope)
+            }
+        }
         .alert("删除「\(person?.name ?? "")」？", isPresented: $confirmingDelete) {
             Button("删除", role: .destructive) {
                 if (try? store.removeEntity(id, scope: scope)) != nil { dismiss() }
@@ -1237,5 +1256,46 @@ private struct CharacterAILogView: View {
                 .clipShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
             if !user { Spacer(minLength: 16) }
         }.accessibilityElement(children: .combine)
+    }
+}
+
+/// 手工新增事实：用户自己写的内容不需要原文引文，保存后标为手工条目。
+@MainActor
+private struct CharacterFactCreator: View {
+    let save: (String, String) throws -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @State private var category = "身份"
+    @State private var error: String?
+    private let categories = ["身份", "外貌", "性格", "能力", "目标", "关系", "经历"]
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("事实描述") {
+                    TextEditor(text: $text).frame(minHeight: 100)
+                }
+                Section("类别") {
+                    Picker("类别", selection: $category) {
+                        ForEach(categories, id: \.self) { Text($0) }
+                    }.pickerStyle(.segmented)
+                }
+                Section {
+                    Text("手工条目没有原文引文，出处会留空；AI 再次补充细节时不会覆盖它。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                if let error { Text(error).foregroundStyle(NoveliaStyle.danger) }
+            }
+            .navigationTitle("新增人物事实")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        do { try save(text, category); dismiss() }
+                        catch { self.error = error.localizedDescription }
+                    }.disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
     }
 }

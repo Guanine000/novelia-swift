@@ -41,6 +41,21 @@ struct ReadingAIConfiguration: Codable, Equatable, Sendable {
     var maximumOutputTokens = 4_096
     var tokenParameter: TokenParameter = .completion
     var requestsJSON = false
+    /// 思考强度（OpenAI o 系列、Gemini 等支持）。为空表示不发送该参数：
+    /// 多数兼容接口不认识它，乱发会被判 400。旧配置缺这个键时按空处理。
+    var reasoningEffort: ReasoningEffort? = nil
+
+    enum ReasoningEffort: String, Codable, CaseIterable, Identifiable, Sendable {
+        case low, medium, high
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .low: "低（最快）"
+            case .medium: "中"
+            case .high: "高（最慢）"
+            }
+        }
+    }
 
     func endpoint() throws -> URL {
         let input = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)

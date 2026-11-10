@@ -36,6 +36,8 @@ struct ReadingCharactersEntry: View {
 @MainActor
 struct ReadingCharacterCardsEntry: View {
     let libraryBookKey: String?
+    /// 只读模式：从阅读菜单“查看人物卡”进入，只展示已有内容，不提供卷序确认、生成、校准等菜单。
+    var readOnly = false
     @EnvironmentObject private var readerSettings: ReaderSettings
     @EnvironmentObject private var services: AppServices
     @EnvironmentObject private var state: LibraryStateStore
@@ -49,10 +51,10 @@ struct ReadingCharacterCardsEntry: View {
         if let current, let series = state.series.seriesID(forBook: current.key) {
             let keys = state.series.bookKeys(inSeries: series)
             CharacterSeriesView(workID: series, books: books.filter { keys.contains($0.key) }, store: readerSettings.characters,
-                ai: services.readingAI, initialBook: current.key)
+                ai: services.readingAI, initialBook: current.key, readOnly: readOnly)
         } else if let current {
             CharacterSeriesView(workID: current.key, books: [current], store: readerSettings.characters,
-                ai: services.readingAI, initialBook: current.key)
+                ai: services.readingAI, initialBook: current.key, readOnly: readOnly)
         } else {
             Text("暂未找到对应的本地书籍，从书库重新打开本书后即可查看人物卡。").padding()
         }

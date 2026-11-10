@@ -15,7 +15,8 @@ final class ReadingRecapStore: ObservableObject {
     private static let storiesKey = "reader.recap.stories.v1"
     private var dates: [String: Date]
     private var cache: [String: ReadingRecap]
-    private var stories: [String: BookStorySummary]
+    /// 梗概要能驱动界面刷新：保存后直接反映到面板，不必重开。
+    @Published private(set) var stories: [String: BookStorySummary]
     private var recentPrompts: [String: Date] = [:]
     init(defaults: UserDefaults) {
         self.defaults = defaults
@@ -68,6 +69,8 @@ final class ReadingRecapStore: ObservableObject {
     @Published private(set) var storyErrors: [String: String] = [:]
     private var storyTasks: [String: Task<Void, Never>] = [:]
     func isBuildingStory(book: String) -> Bool { storyTasks[key(book)] != nil }
+    /// 界面侧准备阶段失败（多半是阅读位置已变化）也要让用户看到，不能静默什么都不发生。
+    func reportStoryError(_ text: String, book: String) { storyErrors[key(book)] = text }
     func cancelStory(book: String) {
         let id = key(book)
         storyTasks[id]?.cancel(); storyTasks[id] = nil

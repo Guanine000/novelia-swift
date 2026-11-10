@@ -235,26 +235,42 @@ struct StorySummaryPlan: Sendable {
     init(chapters: [RecapChapter]) throws {
         guard !chapters.isEmpty, chapters.count <= 2_000 else { throw ReadingRecapError.invalidScope }
         guard chapters.reduce(0, { $0 + $1.text.utf8.count }) <= 512 * 1_024 else { throw ReadingRecapError.tooLarge }
-        var result = [Pack](), text = "", bytes = 0, first = -1, last = -1
-        func flush() {
-            guard !text.isEmpty, first >= 0 else { return }
-            result.append(.init(firstChapter: first, lastChapter: last, text: text))
-            text = ""; bytes = 0; first = -1; last = -1
+        var result = [Pack]()
+        func build(_ source: [RecapChapter]) throws {
+            result.removeAll()
+            var text = "", bytes = 0, first = -1, last = -1
+            func flush() {
+                guard !text.isEmpty, first >= 0 else { return }
+                result.append(.init(firstChapter: first, lastChapter: last, text: text))
+                text = ""; bytes = 0; first = -1; last = -1
+            }
+            for chapter in source {
+                // 前言、人物表、目录、后记不是剧情，混进去只会让梗概变成书评。
+                // 短章不按长度排除：梗概只关心有没有剧情，几行字也可能推进主线。
+                guard !CharacterExtractionPlan.isNonStoryTitle(chapter.title) else { continue }
+                let value = chapter.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !value.isEmpty else { continue }
+                if !text.isEmpty, bytes + value.utf8.count + 1 > Self.maximumPackBytes { flush() }
+                if text.isEmpty { first = chapter.index }
+                text += (text.isEmpty ? "" : "\n") + value
+                bytes += value.utf8.count + (bytes > 0 ? 1 : 0)
+                last = chapter.index
+                if result.count >= Self.maximumPacks { throw ReadingRecapError.tooLarge }
+            }
+            flush()
         }
-        for chapter in chapters {
-            // 前言、人物表、目录、后记不是剧情，混进去只会让梗概变成书评。
-            // 短章不按长度排除：梗概只关心有没有剧情，几行字也可能推进主线。
-            guard !CharacterExtractionPlan.isNonStoryTitle(chapter.title) else { continue }
-            let value = chapter.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !value.isEmpty else { continue }
-            if !text.isEmpty, bytes + value.utf8.count + 1 > Self.maximumPackBytes { flush() }
-            if text.isEmpty { first = chapter.index }
-            text += (text.isEmpty ? "" : "\n") + value
-            bytes += value.utf8.count + (bytes > 0 ? 1 : 0)
-            last = chapter.index
-            if result.count >= Self.maximumPacks { throw ReadingRecapError.tooLarge }
+        try build(chapters)
+        // 已读部分只有前言、人物表这类页面时，过滤后什么都不剩；
+        // 此时退回不过滤，至少给出可用的内容，而不是让按钮点了没反应。
+        if result.isEmpty {
+            var unfiltered = [RecapChapter]()
+            for chapter in chapters {
+                let value = chapter.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !value.isEmpty else { continue }
+                unfiltered.append(RecapChapter(index: chapter.index, title: "", text: value))
+            }
+            try build(unfiltered)
         }
-        flush()
         guard !result.isEmpty else { throw ReadingRecapError.invalidScope }
         packs = result
     }

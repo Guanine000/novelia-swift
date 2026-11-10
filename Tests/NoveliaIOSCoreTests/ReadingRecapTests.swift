@@ -199,7 +199,48 @@ final class FrontMatterFilterTests: XCTestCase {
         XCTAssertEqual(plan.packs.count, 1)
         XCTAssertEqual(plan.packs[0].firstChapter, 2)
         XCTAssertEqual(plan.packs[0].lastChapter, 3)
-        // 全部都是前置页时不能产出空梗概。
-        XCTAssertThrowsError(try StorySummaryPlan(chapters: Array(chapters.prefix(2))))
+        // 全部是前置页时退回不过滤，避免“生成”按钮点了毫无反应。
+        let fallback = try StorySummaryPlan(chapters: Array(chapters.prefix(2)))
+        XCTAssertEqual(fallback.packs.count, 1)
+        XCTAssertEqual(fallback.packs[0].firstChapter, 0)
+    }
+}
+
+final class FrontMatterFallbackTests: XCTestCase {
+    func testPlanFallsBackWhenOnlyFrontMatterWasRead() throws {
+        let preface = String(repeating: "本书收录作者历年短篇，并附译后记。", count: 30)
+        let chapters = [RecapChapter(index: 0, title: "序言", text: preface),
+                        RecapChapter(index: 1, title: "人物表", text: preface)]
+        // 全是前置页时不能抛错，否则“生成故事梗概”按钮点了没有任何反应。
+        let plan = try StorySummaryPlan(chapters: chapters)
+        XCTAssertEqual(plan.packs.count, 1)
+        XCTAssertEqual(plan.packs[0].firstChapter, 0)
+        XCTAssertEqual(plan.packs[0].lastChapter, 1)
+    }
+}
+
+final class StoryStoreFlowTests: XCTestCase {
+    @MainActor
+    func testStoreGeneratesAndPersistsAFirstSummary() async throws {
+        let suite = "StoryStore-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ReadingRecapStore(defaults: defaults)
+        let ai = ReadingAIStore(defaults: defaults, keys: MemoryReadingAIKeys(), client: StorySummaryAI())
+        var config = ReadingAIConfiguration(); config.isEnabled = true; config.baseURL = "https://test.example/v1"; config.model = "fixture"
+        try ai.save(config, newKey: "fake")
+        let chapters = (0..<3).map { RecapChapter(index: $0, title: "第\($0 + 1)章",
+            text: String(repeating: "江南冒雨赶到公寓，遇见了光明寺美琴。", count: 60)) }
+        store.startStory(book: "epub:test", chapters: chapters, previous: nil,
+                         identity: "identity", coveredThrough: 3, ai: ai)
+        XCTAssertTrue(store.isBuildingStory(book: "epub:test"))
+        for _ in 0..<200 {
+            if !store.isBuildingStory(book: "epub:test") { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertFalse(store.isBuildingStory(book: "epub:test"))
+        let saved = try XCTUnwrap(store.story(book: "epub:test"), "生成完成却没有保存")
+        XCTAssertEqual(saved.coveredThrough, 3)
+        XCTAssertTrue(saved.text.contains("【一句话回顾】"))
+        XCTAssertNil(store.storyErrors[FileContentHash.sha256(Data("epub:test".utf8))])
     }
 }
