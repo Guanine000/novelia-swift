@@ -300,3 +300,34 @@ private actor ControlledProgressAI: ReadingAICompleting {
     }
     func emit() { callbacks["first"]?(10, "first"); callbacks["second"]?(20, "second") }
 }
+
+final class ReasoningEffortRequestTests: XCTestCase {
+    func testThinkingOffUsesTheThinkingToggleInsteadOfEffort() throws {
+        var config = ReadingAIConfiguration()
+        config.isEnabled = true; config.baseURL = "https://ai.example.com/v1"; config.model = "test-model"
+        config.reasoningEffort = .off
+        let request = try OpenAIReadingClient.urlRequest(configuration: config, apiKey: "k", request: .connectionTest)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+        XCTAssertEqual((body["thinking"] as? [String: String])?["type"], "disabled")
+        XCTAssertNil(body["reasoning_effort"])
+    }
+    func testEffortLevelsAreSentAsReasoningEffort() throws {
+        for effort in [ReadingAIConfiguration.ReasoningEffort.low, .medium, .high, .max] {
+            var config = ReadingAIConfiguration()
+            config.isEnabled = true; config.baseURL = "https://ai.example.com/v1"; config.model = "test-model"
+            config.reasoningEffort = effort
+            let request = try OpenAIReadingClient.urlRequest(configuration: config, apiKey: "k", request: .connectionTest)
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+            XCTAssertEqual(body["reasoning_effort"] as? String, effort.rawValue)
+            XCTAssertNil(body["thinking"])
+        }
+    }
+    func testNoSelectionSendsNeitherParameter() throws {
+        var config = ReadingAIConfiguration()
+        config.isEnabled = true; config.baseURL = "https://ai.example.com/v1"; config.model = "test-model"
+        config.reasoningEffort = nil
+        let request = try OpenAIReadingClient.urlRequest(configuration: config, apiKey: "k", request: .connectionTest)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+        XCTAssertNil(body["reasoning_effort"]); XCTAssertNil(body["thinking"])
+    }
+}

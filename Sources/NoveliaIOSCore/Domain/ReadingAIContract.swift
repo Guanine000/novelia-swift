@@ -45,16 +45,21 @@ struct ReadingAIConfiguration: Codable, Equatable, Sendable {
     /// 多数兼容接口不认识它，乱发会被判 400。旧配置缺这个键时按空处理。
     var reasoningEffort: ReasoningEffort? = nil
 
+    /// 思考强度。`off` 不是强度，而是"关闭思考"，发送的是不同的参数（thinking）。
     enum ReasoningEffort: String, Codable, CaseIterable, Identifiable, Sendable {
-        case low, medium, high
+        case off, low, medium, high, max
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .low: "低（最快）"
+            case .off: "关闭思考（最快）"
+            case .low: "低"
             case .medium: "中"
-            case .high: "高（最慢）"
+            case .high: "高"
+            case .max: "最高（最慢）"
             }
         }
+        /// 关闭思考用 thinking 参数，其余用 reasoning_effort。
+        var sendsThinkingToggle: Bool { self == .off }
     }
 
     func endpoint() throws -> URL {

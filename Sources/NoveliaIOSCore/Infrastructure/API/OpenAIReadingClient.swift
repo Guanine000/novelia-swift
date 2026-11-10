@@ -75,7 +75,11 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
             config.tokenParameter.rawValue: config.maximumOutputTokens]
         if config.requestsJSON { body["response_format"] = ["type": "json_object"] }
         // 只在用户显式选择时发送：不支持的接口会直接拒绝未知参数。
-        if let effort = config.reasoningEffort { body["reasoning_effort"] = effort.rawValue }
+        // DeepSeek 一类把"关闭思考"做成 thinking 开关，而不是 effort 取值。
+        if let effort = config.reasoningEffort {
+            if effort.sendsThinkingToggle { body["thinking"] = ["type": "disabled"] }
+            else { body["reasoning_effort"] = effort.rawValue }
+        }
         var result = URLRequest(url: try config.endpoint())
         result.httpMethod = "POST"; result.setValue("application/json", forHTTPHeaderField: "Content-Type")
         result.setValue("application/json", forHTTPHeaderField: "Accept")
