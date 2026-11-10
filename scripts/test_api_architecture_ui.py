@@ -196,6 +196,8 @@ final class TapTests: XCTestCase {
   XCTAssertFalse(app.buttons["确认以上卷序"].exists)
   person.tap()
   XCTAssertTrue(app.staticTexts["人物档案"].waitForExistence(timeout: 20))
+  XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "9,223,372")).firstMatch.exists)
+  XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "9223372036854775807")).firstMatch.exists)
   XCTAssertTrue(app.buttons["编辑角色形象"].exists)
   app.buttons["编辑角色形象"].tap()
   XCTAssertTrue(app.buttons["从文件选择角色图片"].waitForExistence(timeout: 10))

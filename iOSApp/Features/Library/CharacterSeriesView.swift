@@ -76,9 +76,12 @@ struct CharacterSeriesView: View {
         for fact in facts where seen[fact.book] == nil { seen[fact.book] = fact.identity }
         let storedBooks = Set(facts.map(\.book))
         let volumes = order + storedBooks.subtracting(order).sorted()
-        guard let lastBook = volumes.last else { return nil }
+        guard let lastBook = volumes.last(where: { storedBooks.contains($0) }) else { return nil }
+        // 章号是从零开始的索引，过滤上界不包含自身；使用最后一卷已存资料的实际上界，
+        // 避免把“无限制”的 Int.max 传给详情页并显示成章号。
+        let boundary = (facts.filter { $0.book == lastBook }.map(\.chapter).max() ?? -1) + 1
         return .init(work: workID, volumes: volumes, currentBook: lastBook,
-                     currentChapter: Int.max, identities: seen, readBoundaries: nil)
+                     currentChapter: boundary, identities: seen, readBoundaries: nil)
     }
 
     private var visible: [VisibleCharacter] { scope.map { $0.visible(store.entities, query: query) } ?? [] }
