@@ -107,6 +107,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published var curlSnapshotCount = 0
     @Published var curlLiveSnapshotCount = 0
     @Published var curlPreparedDirections = 0
+    @Published var curlInputLost = 0
+    @Published var curlBetweenTurnsMilliseconds = 0
     var curlPreparationFailure = ""
     @Published var curlInputTrace = ""
     @Published var curlOpeningMilliseconds = [-1, -1, -1, -1]
@@ -1753,7 +1755,9 @@ extension ReadiumEPUBReaderModel {
 
     // go 完成不等于排版位置已稳定。跨章向后时会先报告临时的 100%，
     // 分页正文的真实首可见进度应小于 1；连续稳定采样后才能缓存或提交。
-    private func settledCurlLocation(in navigator: EPUBNavigatorViewController, matching destination: Locator? = nil, differentFrom previous: Locator? = nil) async -> Locator? {
+    // `minimumStable` 是首个样本之后仍需一致的次数：落页提交只接受精确目标，可用 2；
+    // 邻页与回位仍用 3，避免把跨章重排的中间位置当成最终页。
+    private func settledCurlLocation(in navigator: EPUBNavigatorViewController, matching destination: Locator? = nil, differentFrom previous: Locator? = nil, minimumStable: Int = 3) async -> Locator? {
         var candidate: Locator?, stable = 0
         for _ in 0..<60 {
             if Task.isCancelled { return nil }
@@ -1765,7 +1769,7 @@ extension ReadiumEPUBReaderModel {
                 if canonical && matches && changed {
                     stable = candidate == current ? stable + 1 : 0
                     candidate = current
-                    if stable >= 3 { return current }
+                    if stable >= minimumStable { return current }
                 } else { candidate = nil; stable = 0 }
             }
             try? await Task.sleep(nanoseconds: 50_000_000)
@@ -1820,7 +1824,7 @@ extension ReadiumEPUBReaderModel {
         var restored = true
         if let target {
             restored = await navigator.go(to: target, options: .none)
-            if restored, let settled = await settledCurlLocation(in: navigator, matching: target) {
+            if restored, let settled = await settledCurlLocation(in: navigator, matching: target, minimumStable: 2) {
                 actual = settled
             } else { restored = false }
         }

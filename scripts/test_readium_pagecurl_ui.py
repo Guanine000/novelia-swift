@@ -168,10 +168,21 @@ methods = r'''
       let app=openCurlBook();defer{app.terminate()}
       let count=curlCounts(app)[1]
       let edge=app.coordinate(withNormalizedOffset:CGVector(dx:0.85,dy:0.5))
-      edge.tap();edge.tap()
-      let twice=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == count+2 },object:nil)
-      XCTAssertEqual(XCTWaiter.wait(for:[twice],timeout:20),.completed,"Both single taps must be honored")
+      edge.tap();edge.tap();edge.tap()
+      let three=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == count+3 },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[three],timeout:30),.completed,"All three rapid taps must be honored")
       waitForCurl(app)
+     }
+     func testReadiumCurlRapidSwipes() {
+      let app=openCurlBook();defer{app.terminate()}
+      let count=curlCounts(app)[1]
+      app.swipeLeft(velocity:.fast)
+      app.swipeLeft(velocity:.fast)
+      app.swipeLeft(velocity:.fast)
+      let three=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == count+3 },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[three],timeout:30),.completed,"Three rapid swipes must all be honored; burst=\(app.staticTexts["readium-validation-curl-burst"].label) trace=\(app.staticTexts["readium-validation-curl-input"].label)")
+      waitForCurl(app)
+      XCTAssertEqual(app.staticTexts["readium-validation-curl-burst"].label.split(separator:",").last.map(String.init),"0","Animation-window input must not be dropped")
      }
      func testReadiumCurlPreparationDoesNotSaveProgress() {
       let app=openCurlBook();defer{app.terminate()}
@@ -308,6 +319,7 @@ if '--only-testing' not in sys.argv:
                  '--only-testing','TapTests/TapTests/testReadiumCurlFirstInputDuringPreparation',
                  '--only-testing','TapTests/TapTests/testReadiumCurlFirstSwipeDuringPreparation',
                  '--only-testing','TapTests/TapTests/testReadiumCurlQueuesNextInput',
+                 '--only-testing','TapTests/TapTests/testReadiumCurlRapidSwipes',
                  '--only-testing','TapTests/TapTests/testReadiumCurlPrioritizesFirstPage',
                  '--only-testing','TapTests/TapTests/testReadiumDiagnosticsWaitsForTOC',
                  '--only-testing','TapTests/TapTests/testReadiumCurlMissingReverseDirection',

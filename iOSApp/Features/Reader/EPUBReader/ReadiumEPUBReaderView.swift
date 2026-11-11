@@ -148,6 +148,7 @@ private struct ReadiumEPUBReaderViewContent: View {
                 Text(model.diagnosticsComplete ? "done" : (model.isScanningDiagnostics ? "scanning" : "idle")).accessibilityIdentifier("readium-validation-diagnostics").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
                 Text("\(model.curlLiveSnapshotCount)").accessibilityIdentifier("readium-validation-curl-live-snapshots").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
                 Text("\(model.curlPreparedDirections)").accessibilityIdentifier("readium-validation-curl-directions").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
+                Text(verbatim: "\(model.curlBetweenTurnsMilliseconds),\(model.curlInputLost)").accessibilityIdentifier("readium-validation-curl-burst").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
                 Text(model.curlInputTrace).accessibilityIdentifier("readium-validation-curl-input").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
                 Text(model.curlPreparationFailure).accessibilityIdentifier("readium-validation-curl-failure").font(.system(size: 1)).opacity(0.01).allowsHitTesting(false)
                 Text(model.validationVisibleParagraphs)
