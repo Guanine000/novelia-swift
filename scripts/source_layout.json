@@ -78,6 +78,7 @@
   "EPUBReaderModel.swift": "iOSApp/Features/Reader/EPUBReader/EPUBReaderModel.swift",
   "EPUBSharedTypes.swift": "iOSApp/Features/Reader/EPUBReader/EPUBSharedTypes.swift",
   "EPUBChapterSource.swift": "iOSApp/Features/Reader/EPUBReader/EPUBChapterSource.swift",
+  "TXTEPUBExport.swift": "iOSApp/Features/Reader/EPUBReader/TXTEPUBExport.swift",
   "EPUBPageBook.swift": "iOSApp/Features/Reader/EPUBReader/EPUBPageBook.swift",
   "ReadiumPageCurl.swift": "iOSApp/Features/Reader/EPUBReader/ReadiumPageCurl.swift",
   "ReadiumEPUBReaderView.swift": "iOSApp/Features/Reader/EPUBReader/ReadiumEPUBReaderView.swift",

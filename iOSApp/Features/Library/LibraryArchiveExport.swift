@@ -61,8 +61,8 @@ enum LibraryArchiveExporter {
         }
     }
 
-    /// 去掉路径分隔符与文件名保留字符，避免压缩条目或 zip 文件名非法。
-    private static func sanitized(_ raw: String) -> String {
+    /// 去掉路径分隔符与文件名保留字符，避免压缩条目或导出文件名非法。
+    static func sanitized(_ raw: String) -> String {
         let forbidden = CharacterSet(charactersIn: "/\\:?%*|\"<>\n\r\t")
         let cleaned = raw.components(separatedBy: forbidden).joined(separator: "-")
         let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)

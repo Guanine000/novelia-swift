@@ -43,6 +43,10 @@
 		F7A000000000000000000003 /* EPUBWordCount.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7A000000000000000000004 /* EPUBWordCount.swift */; };
 		A10000000000000000000020 /* EPUBPageBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000017 /* EPUBPageBook.swift */; };
 		A10000000000000000000090 /* EPUBChapterSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000090 /* EPUBChapterSource.swift */; };
+		A100000000000000000000F0 /* TXTEPUBExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F0 /* TXTEPUBExport.swift */; };
+		A15F000000000000000000F0 /* TXTEPUBExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F0 /* TXTEPUBExport.swift */; };
+		A100000000000000000000F1 /* TXTEPUBExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F1 /* TXTEPUBExportService.swift */; };
+		A15F000000000000000000F1 /* TXTEPUBExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F1 /* TXTEPUBExportService.swift */; };
 		A10000000000000000000021 /* EPUBPagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000018 /* EPUBPagerView.swift */; };
 		A10000000000000000000022 /* EPUBReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* EPUBReaderModel.swift */; };
 		A10000000000000000000023 /* EPUBReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* EPUBReaderView.swift */; };
@@ -358,6 +362,8 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		F7A000000000000000000004 /* EPUBWordCount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBWordCount.swift; sourceTree = "<group>"; };
 		B10000000000000000000017 /* EPUBPageBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBPageBook.swift; sourceTree = "<group>"; };
 		B10000000000000000000090 /* EPUBChapterSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBChapterSource.swift; sourceTree = "<group>"; };
+		B100000000000000000000F0 /* TXTEPUBExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TXTEPUBExport.swift; sourceTree = "<group>"; };
+		B100000000000000000000F1 /* TXTEPUBExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Library/TXTEPUBExportService.swift; sourceTree = SOURCE_ROOT; };
 		B10000000000000000000018 /* EPUBPagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBPagerView.swift; sourceTree = "<group>"; };
 		B10000000000000000000019 /* EPUBReaderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBReaderModel.swift; sourceTree = "<group>"; };
 		B10000000000000000000020 /* EPUBReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBReaderView.swift; sourceTree = "<group>"; };
@@ -556,6 +562,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				B10000000000000000000017 /* EPUBPageBook.swift */,
 				C30000000000000000000006 /* EPUBLayoutCoordinator.swift */,
 				B10000000000000000000090 /* EPUBChapterSource.swift */,
+				B100000000000000000000F0 /* TXTEPUBExport.swift */,
 				B10000000000000000000018 /* EPUBPagerView.swift */,
 				B10000000000000000000019 /* EPUBReaderModel.swift */,
 				B15C00000000000000000002 /* EPUBSharedTypes.swift */,
@@ -630,6 +637,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				AA10000000000000000000C2 /* ChineseConversionTable.txt */,
 				E51000000000000000000003 /* LibraryViews.swift */,
 				E51000000000000000000012 /* LibraryArchiveExport.swift */,
+				B100000000000000000000F1 /* TXTEPUBExportService.swift */,
 				F7A000000000000000000008 /* LibraryWordCounts.swift */,
 				E81000000000000000000001 /* KindleEPUBConverter.swift */,
 				E81000000000000000000002 /* KindleCSSMediaFlattener.swift */,
@@ -1089,6 +1097,8 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				F7A000000000000000000003 /* EPUBWordCount.swift in Sources */,
 				A10000000000000000000020 /* EPUBPageBook.swift in Sources */,
 				A10000000000000000000090 /* EPUBChapterSource.swift in Sources */,
+				A100000000000000000000F0 /* TXTEPUBExport.swift in Sources */,
+				A100000000000000000000F1 /* TXTEPUBExportService.swift in Sources */,
 				A10000000000000000000021 /* EPUBPagerView.swift in Sources */,
 				A10000000000000000000022 /* EPUBReaderModel.swift in Sources */,
 				A10000000000000000000023 /* EPUBReaderView.swift in Sources */,
@@ -1242,6 +1252,8 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A15F0000000000000000005B /* EPUBContainer.swift in Sources */,
 				A15F0000000000000000005C /* EPUBWordCount.swift in Sources */,
 				A15F0000000000000000005D /* EPUBChapterSource.swift in Sources */,
+				A15F000000000000000000F0 /* TXTEPUBExport.swift in Sources */,
+				A15F000000000000000000F1 /* TXTEPUBExportService.swift in Sources */,
 				A15F0000000000000000005E /* EPUBReaderView.swift in Sources */,
 				A15F0000000000000000005F /* EPUBSampleBook.swift in Sources */,
 				A15F00000000000000000060 /* ReadiumEPUBReaderModel.swift in Sources */,
@@ -1369,7 +1381,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.5.0;
-				CURRENT_PROJECT_VERSION = 207;
+				CURRENT_PROJECT_VERSION = 206;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1393,7 +1405,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.5.0;
-				CURRENT_PROJECT_VERSION = 207;
+				CURRENT_PROJECT_VERSION = 206;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1418,7 +1430,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				INFOPLIST_KEY_CFBundleDisplayName = "Novelia 15";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.5.0;
-				CURRENT_PROJECT_VERSION = 207;
+				CURRENT_PROJECT_VERSION = 206;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port.ios15;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1444,7 +1456,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				INFOPLIST_KEY_CFBundleDisplayName = "Novelia 15";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.5.0;
-				CURRENT_PROJECT_VERSION = 207;
+				CURRENT_PROJECT_VERSION = 206;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port.ios15;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;

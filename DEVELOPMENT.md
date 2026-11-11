@@ -273,6 +273,8 @@ Readium 的 HTML 根背景设为透明，阅读背景由宿主绘制在导航器
 
 对应 Core 行为与持久化回归位于 `TXTChapterAdjustmentTests`；分页/滚动迁移与 UIKit 选区仍需 App 编译、UI 及真机验证。架构检查不能替代上述验证。
 
+TXT 导出为 EPUB 由 `TXTEPUBExportService` 解析书库文件与阅读设置：复用 `TXTChapterAdjustmentStore.session` 的已保存手工边界，按 `ReaderSettings.bookPreferences["txt:" + 文件哈希]` 读取本书文字投影，再交给 `TXTEPUBExporter` 生成最小 EPUB 3（mimetype、container、OPF、nav、NCX、CSS 和每章 XHTML，卷名嵌套在 nav/NCX 中）。导出只读源文件，不写进度、书签或源文件；临时文件在分享面板关闭后删除。没有手工快照或文件已变化时回退到自动分章。`NoveliaEPUBTests` 的 `TXTEPUBExportTests` 覆盖手工标题、卷名、转义、文字投影和 mimetype 顺序。
+
 ### 文本分页与按需加载
 
 `TextChapterSource` 将 TXT 或在线内容转为经过转义的 XHTML 段落，供章节接口消费。TXT 长章节拆为分页单元，仅章节起始单元进入目录；不要把 XHTML 标签长度当成源文本偏移。拆分和定位同时涉及 UTF-8、UTF-16 与章节索引，修改时验证 emoji、组合字符、卷标题、无标题全文和分章规则变化。

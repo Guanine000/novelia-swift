@@ -791,8 +791,13 @@ final class LibraryBookActions: ObservableObject {
     @Published var shareArchive: LibraryArchiveShare?
     /// 正在打包压缩包；批量分享时用于禁用重复点击与显示进度。
     @Published private(set) var isPreparingArchive = false
+    /// 已生成的 TXT→EPUB 导出文件；非 nil 时弹出系统分享面板。
+    @Published var shareExport: LibraryFileShare?
+    /// 正在导出 TXT 为 EPUB；用于禁用重复点击与显示进度。
+    @Published private(set) var isExportingTXTAsEPUB = false
 
     private var archiveTask: Task<Void, Never>?
+    private var exportTask: Task<Void, Never>?
 
     /// 顶部“选择”按钮进入多选，开始时未选中任何书。
     func beginSelection() {
@@ -840,6 +845,38 @@ final class LibraryBookActions: ObservableObject {
                 actionError = error.localizedDescription
             }
         }
+    }
+
+    /// 把 TXT 按当前手工目录导出为 EPUB 后打开系统分享；不写回源文件或阅读状态。
+    func exportTXTAsEPUB(_ book: LibraryBook, settings: ReaderSettings) {
+        guard !isExportingTXTAsEPUB else { return }
+        exportTask?.cancel()
+        isExportingTXTAsEPUB = true
+        exportTask = Task {
+            defer { isExportingTXTAsEPUB = false }
+            do {
+                let share = try await TXTEPUBExportService.makeEPUB(book: book, settings: settings)
+                guard !Task.isCancelled else {
+                    if let directory = share.cleanupDirectory {
+                        try? FileManager.default.removeItem(at: directory)
+                    }
+                    return
+                }
+                shareExport = share
+            } catch is CancellationError {
+                // 用户离开页面或重新发起，忽略。
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+    }
+
+    /// 分享面板关闭后删除本次导出的临时目录。
+    func dismissExportShare() {
+        if let directory = shareExport?.cleanupDirectory {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        shareExport = nil
     }
 }
 
@@ -1012,6 +1049,10 @@ struct LibraryBookActionDialogs: ViewModifier {
                 LibraryArchiveShareSheet(url: archive.url)
                     .ignoresSafeArea()
             }
+            .sheet(item: $actions.shareExport, onDismiss: { actions.dismissExportShare() }) { export in
+                LibraryArchiveShareSheet(url: export.url)
+                    .ignoresSafeArea()
+            }
             .confirmationDialog("《\(actions.missingCloudBook?.title ?? "")》的云端文件缺失",
                                 isPresented: .init(get: { actions.missingCloudBook != nil },
                                                    set: { if !$0 { actions.missingCloudBook = nil } }),
@@ -1043,6 +1084,15 @@ struct LibraryBookActionDialogs: ViewModifier {
                         ProgressView()
                             .tint(NoveliaStyle.brandGreen)
                         Text("正在压缩书籍…").font(.subheadline)
+                    }
+                    .padding(20)
+                    .frame(maxWidth: 240)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge))
+                } else if actions.isExportingTXTAsEPUB {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .tint(NoveliaStyle.brandGreen)
+                        Text("正在导出 EPUB…").font(.subheadline)
                     }
                     .padding(20)
                     .frame(maxWidth: 240)
@@ -1521,6 +1571,14 @@ struct LibraryBookMenuItems: View {
             } label: {
                 Label("同步与更新", systemImage: "arrow.triangle.2.circlepath")
             }
+        }
+        if book.format == .txt {
+            Button {
+                actions.exportTXTAsEPUB(book, settings: readerSettings)
+            } label: {
+                Label("导出为 EPUB", systemImage: "doc.badge.plus")
+            }
+            .disabled(actions.isExportingTXTAsEPUB)
         }
         Divider()
         CompatShareLink(item: book.fileURL) {

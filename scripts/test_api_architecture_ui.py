@@ -1260,6 +1260,17 @@ final class TapTests: XCTestCase {
   let segment = app.segmentedControls.buttons.matching(NSPredicate(format: "label CONTAINS %@", "未分组")).firstMatch
   XCTAssertTrue(segment.waitForExistence(timeout: 20)); segment.tap()
  }
+ func testTXTLibraryExportsEPUB() {
+  let app = start()
+  library(app)
+  let more = app.buttons["更多操作：架构验证TXT"]
+  XCTAssertTrue(more.waitForExistence(timeout: 20)); more.tap()
+  let export = app.buttons["导出为 EPUB"]
+  XCTAssertTrue(export.waitForExistence(timeout: 10), "TXT 书应提供导出为 EPUB")
+  export.tap()
+  XCTAssertTrue(waitForShareSheet(app), "导出后应打开系统分享面板")
+  shot("txt-epub-share-sheet")
+ }
  func testLibraryBatchArchiveAndSeries() {
   var app = start()
   library(app)
