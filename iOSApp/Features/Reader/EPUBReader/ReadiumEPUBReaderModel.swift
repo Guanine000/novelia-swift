@@ -121,7 +121,16 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     @Published var curlError: String?
     var onCurlTurn: ((Bool) -> Bool)?
     var cancelCurl: (() async -> Void)?
-    private var curlPreview: (id: UUID, origin: Locator, navigator: EPUBNavigatorViewController, snapshot: EPUBNavigatorViewController)?
+    /// 一次卷页会话可以覆盖多段动画；会话打开期间真实导航器按提交队列逐页追赶，
+    /// `committing` 允许提交结果通过位置回调发布，其余预览期位置事件仍被忽略。
+    private struct CurlPreviewSession {
+        let id: UUID
+        let origin: Locator
+        let navigator: EPUBNavigatorViewController
+        let snapshot: EPUBNavigatorViewController
+        var committing = false
+    }
+    private var curlPreview: CurlPreviewSession?
 
     private var publication: Publication?
     private var navigationIndex: ReadiumNavigationIndex?
@@ -1475,7 +1484,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
         guard (navigator as AnyObject) === self.navigator else { return }
-        if let preview = curlPreview, preview.snapshot === preview.navigator {
+        if let preview = curlPreview, preview.snapshot === preview.navigator, !preview.committing {
             makeWebViewsTransparent()
             reapplyPageBackgrounds()
             return
@@ -1748,7 +1757,7 @@ extension ReadiumEPUBReaderModel {
         guard curlPreview == nil, status == .ready, let navigator, let origin = locator else { return nil }
         let id = UUID()
         if snapshot == nil { textPositionTask?.cancel(); textProgressGeneration += 1 }
-        curlPreview = (id, origin, navigator, snapshot ?? navigator)
+        curlPreview = CurlPreviewSession(id: id, origin: origin, navigator: navigator, snapshot: snapshot ?? navigator)
         curlBusy = true
         return id
     }
@@ -1847,5 +1856,30 @@ extension ReadiumEPUBReaderModel {
 
     func curlReachedBoundary(forward: Bool) {
         if forward, isAtWebNovelEnd { pendingWebPositionWrite = false; onReachedEnd?() }
+    }
+
+    /// 当前会话 id；控制器在连续翻页时复用它，而不是每页新开事务。
+    var activeCurlPreview: UUID? { curlPreview?.id }
+
+    /// 只提交一页，不关闭会话。真实导航器按顺序追赶显示游标时使用。
+    @discardableResult
+    func commitCurlPreview(_ transaction: UUID, target: Locator, forward: Bool) async -> Locator? {
+        guard let preview = curlPreview, preview.id == transaction, self.navigator === preview.navigator else { return nil }
+        guard await preview.navigator.go(to: target, options: .none),
+              let settled = await settledCurlLocation(in: preview.navigator, matching: target, minimumStable: 2),
+              curlPreview?.id == transaction, self.navigator === preview.navigator else { return nil }
+        curlPreview?.committing = true
+        markNavigation(forward ? "turnForward" : "turnBackward")
+        self.navigator(preview.navigator, locationDidChange: settled)
+        curlPreview?.committing = false
+#if DEBUG
+        curlCompletedTurns += 1
+#endif
+        return settled
+    }
+
+    func endCurlPreview(_ transaction: UUID) {
+        guard curlPreview?.id == transaction else { return }
+        curlPreview = nil; curlBusy = false
     }
 }

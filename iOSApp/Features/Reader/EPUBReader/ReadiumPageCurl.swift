@@ -83,6 +83,12 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
     /// 超过上限时丢弃最早意图，避免用户停止后仍长时间回放。
     private static let maximumQueuedTurns = 3
     private var queuedDirections: [Bool] = []
+    /// 提交队列上限：显示最多领先已提交位置两页；达到上限时暂停新的卷页动画。
+    private static let maximumPendingCommits = 2
+    private var pendingCommits: [(target: Locator, forward: Bool)] = []
+    private var commitTask: Task<Void, Never>?
+    private var lastCommitted: Locator?
+    private var cancelling = false
     /// 卷页动画期间的第二次触摸由被动观察器接管，避免系统 pager 吞掉滑动；
     /// 这段时间 pager pan 与 coldPan 都必须保持关闭，否则同一次手势会被两套识别器重复处理。
     private var burstGestureActive = false
@@ -244,8 +250,8 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
     private func refresh() {
         guard isViewLoaded, cancellationDepth == 0 else { return }
         // 目录、书签或外部导航改变已提交位置时，显示游标必须跟回真实位置；
-        // 卷页动画或准备期间不动，避免把正在展示的页误当成新位置。
-        if !turning, work == nil, displayLocation != model?.locator {
+        // 卷页动画、准备或后台提交期间不动，否则会把屏幕上的页误当成新位置。
+        if !turning, work == nil, commitTask == nil, pendingCommits.isEmpty, displayLocation != model?.locator {
             displayLocation = model?.locator
             preparedKey = nil; failedKey = nil; carried = nil; resolvedDirections = []
             discardSnapshot()
@@ -310,6 +316,17 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
 
     private func prepare(key: String) async {
         guard let model, let host, let real = navigator else { work = nil; return }
+        // 显示可能领先于真实导航器；准备会截取真实当前页，必须先收敛到屏幕上的页。
+        guard await drainCurlCommits() else {
+            work = nil
+            if let session = transaction { model.endCurlPreview(session) }
+            transaction = nil
+            displayLocation = model.locator
+            preparedKey = nil; failedKey = nil; carried = nil; resolvedDirections = []
+            model.curlReady = false
+            refresh()
+            return
+        }
 #if DEBUG
         model.curlPreparationCount += 1
 #endif
@@ -558,6 +575,8 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             refresh()
             return true
         }
+        // 提交管道已满时不再开始新动画，避免显示无限领先、退出时回退过多。
+        guard pendingCommits.count < Self.maximumPendingCommits else { enqueueTurn(forward); return true }
         guard let target = sheets[forward ? 1 : -1] else { model?.curlReachedBoundary(forward: forward); return true }
         beginTurn(forward: forward)
         guard turning else { return true }
@@ -566,7 +585,17 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         return true
     }
     private func beginTurn(forward: Bool) {
-        guard !turning, let token = model?.beginCurlPreview() else { traceInput("begin rejected busy=\(model?.curlBusy ?? false)"); return }
+        guard !turning else { traceInput("begin rejected busy=\(model?.curlBusy ?? false)"); return }
+        // 连续翻页复用同一会话：提交在后台逐页追赶，动画不再等上一页 go + settle。
+        let token: UUID
+        if let active = model?.activeCurlPreview {
+            token = active
+        } else if let created = model?.beginCurlPreview() {
+            token = created
+        } else {
+            traceInput("begin rejected busy=\(model?.curlBusy ?? false)")
+            return
+        }
         transaction = token; turning = true
         preferredForward = forward
 #if DEBUG
@@ -648,7 +677,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
     }
 
     private func finishTurn(completed: Bool) {
-        guard turning, work == nil, let token = transaction, let model else { return }
+        guard turning, work == nil, transaction != nil, let model else { return }
         let sheet = pager.viewControllers?.first as? ReadiumCurlSheet
         let target = completed && sheet?.slot != 0 ? sheet?.location : nil
         let warming = ahead
@@ -658,54 +687,113 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             guard let self else { return }
             // 正常阅读时已提前完成；快速连续翻页时让预热与卷页动画重叠，避免落页后再串行补拍。
             let extra = target != nil ? await warming?.task.value : nil
-            let actual = await model.finishCurlPreview(token, target: target, forward: (sheet?.slot ?? 0) > 0)
-#if DEBUG
-            if actual != nil, target == nil { model.curlCancelledTurns += 1 }
-#endif
-            self.transaction = nil; self.turning = false
+            if self.cancelling {
+                self.turning = false; self.work = nil
+                self.pager.view.layer.mask = paperMask; self.canvas.blocksTouches = false
+                if let current = self.sheets[0] { self.pager.setViewControllers([current], direction: .forward, animated: false) }
+                return
+            }
+            self.turning = false
             self.pager.view.layer.mask = paperMask; self.canvas.blocksTouches = false
             self.work = nil
-            if let sheet, sheet.slot != 0, let actual, Self.samePage(actual, sheet.location), let previous = self.sheets[0] {
-                let direction = sheet.slot > 0 ? 1 : -1
-                if let warming, let extra, warming.key == self.preparedKey,
-                   warming.forward == (direction > 0), warming.configuration == self.renderingConfiguration {
-                    var pages = [0: ReadiumCurlSheet(slot: 0, image: sheet.image, location: actual),
-                                 -direction: ReadiumCurlSheet(slot: -direction, image: previous.image, location: previous.location)]
-                    if case .page(let page) = extra { pages[direction] = page }
-                    self.ahead = nil; self.carried = nil
-                    self.sheets = pages; self.resolvedDirections = [true, false]
-                    self.displayLocation = actual
-                    self.preparedKey = self.key; self.failedKey = nil
-                    self.cover.isHidden = true
-                    model.curlReady = true
-                    if let current = pages[0] { self.pager.setViewControllers([current], direction: .forward, animated: false) }
-                    self.recordReadyLatency()
-                } else {
-                    // 预热失败只回退到原有的一侧补拍；布局已变时连带丢弃旧截图。
-                    self.ahead = nil
-                    self.carried = self.snapshotConfiguration == self.renderingConfiguration ? (sheet, previous, -direction) : nil
-                    self.resolvedDirections = [direction < 0]
-                    self.displayLocation = actual
-                    self.preparedKey = nil
-                    self.cover.image = sheet.image; self.cover.isHidden = false
-                    model.curlReady = false
-                }
-            } else if target != nil {
-                if let actual { self.displayLocation = actual }
-                self.preparedKey = nil; model.curlReady = false
-            } else {
+            guard let sheet, let target, sheet.slot != 0 else {
+                // 取消：不提交，纸面回到当前页。
+#if DEBUG
+                model.curlCancelledTurns += 1
+#endif
                 model.curlReady = true
                 if let current = self.sheets[0] { self.pager.setViewControllers([current], direction: .forward, animated: false) }
                 self.recordReadyLatency()
+                self.refresh(); self.performQueuedTurn(); self.endSessionIfIdle()
+                return
             }
+            let direction = sheet.slot > 0 ? 1 : -1
+            let previous = self.sheets[0]
+            self.displayLocation = target
+            var pages = [0: ReadiumCurlSheet(slot: 0, image: sheet.image, location: target)]
+            if let previous {
+                pages[-direction] = ReadiumCurlSheet(slot: -direction, image: previous.image, location: previous.location)
+            }
+            var resolved: Set<Bool> = [direction < 0]
+            switch extra {
+            case .page(let page)?:
+                pages[direction] = page; resolved.insert(direction > 0)
+            case .boundary?:
+                resolved.insert(direction > 0)
+            case nil:
+                break
+            }
+            self.ahead = nil; self.carried = nil
+            self.sheets = pages; self.resolvedDirections = resolved
+            self.preparedKey = self.key; self.failedKey = nil
+            self.cover.isHidden = true
+            model.curlReady = true
+            if let current = pages[0] { self.pager.setViewControllers([current], direction: .forward, animated: false) }
+            self.recordReadyLatency()
+            // 视觉立即前移；真实导航器在后台按顺序追赶。提交失败时再回退。
+            self.pendingCommits.append((target, direction > 0))
+            self.startCommitWorker()
             self.refresh()
             self.performQueuedTurn()
         }
     }
+    /// 串行提交真实导航器；提交期间不阻塞下一段卷页动画。
+    private func startCommitWorker() {
+        guard commitTask == nil, let session = transaction, let model else { return }
+        commitTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while let item = self.pendingCommits.first {
+                if self.cancelling { break }
+                guard let actual = await model.commitCurlPreview(session, target: item.target, forward: item.forward) else {
+                    self.commitTask = nil
+                    self.failCommit()
+                    return
+                }
+                self.pendingCommits.removeFirst()
+                self.lastCommitted = actual
+                self.performQueuedTurn()
+            }
+            self.commitTask = nil
+            self.endSessionIfIdle()
+        }
+    }
+    private func endSessionIfIdle() {
+        guard !turning, work == nil, commitTask == nil,
+              pendingCommits.isEmpty, queuedDirections.isEmpty,
+              let session = transaction else { return }
+        model?.endCurlPreview(session)
+        transaction = nil
+    }
+    /// 提交失败：停掉流水线，回到最后一个已提交页并重新准备，不让阅读器进入 failed。
+    private func failCommit() {
+        pendingCommits.removeAll()
+        clearQueuedTurns()
+        if let session = transaction { model?.endCurlPreview(session) }
+        transaction = nil
+        displayLocation = model?.locator
+        preparedKey = nil; carried = nil; resolvedDirections = []
+        discardSnapshot()
+        model?.curlError = "暂时无法提交翻页位置，请稍后重试。"
+        refresh()
+    }
+    /// 准备或取消前把显示页提交到真实导航器；提交失败时返回 false，由调用方回退。
+    @discardableResult
+    private func drainCurlCommits() async -> Bool {
+        if let commitTask { await commitTask.value }
+        guard let session = transaction, let model else { return true }
+        if let target = displayLocation, model.locator == nil || !Self.samePage(target, model.locator!) {
+            guard await model.commitCurlPreview(session, target: target, forward: true) != nil else { return false }
+        }
+        model.endCurlPreview(session)
+        transaction = nil
+        pendingCommits.removeAll()
+        return true
+    }
     /// 每次落页只消费一个方向，剩余请求留到下一次落页；返回是否真的发起了翻页。
     @discardableResult
     private func performQueuedTurn() -> Bool {
-        guard let direction = queuedDirections.first, let key, available, !turning, work == nil, preparedKey == key else { return false }
+        guard let direction = queuedDirections.first, let key, available, !turning, work == nil,
+              pendingCommits.count < Self.maximumPendingCommits, preparedKey == key else { return false }
         queuedDirections.removeFirst()
         _ = requestTurn(forward: direction)
         return true
@@ -733,7 +821,9 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
 
     func cancelAndWait() async {
         cancellationDepth += 1
+        cancelling = true
         defer {
+            cancelling = false
             cancellationDepth -= 1
             if cancellationDepth == 0 { DispatchQueue.main.async { [weak self] in self?.refresh() } }
         }
@@ -744,10 +834,16 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         let background = ahead?.task
         ahead = nil; background?.cancel()
         if let work { if !turning { work.cancel() }; await work.value }
-        if turning, let transaction, let model {
-            _ = await model.finishCurlPreview(transaction, target: nil)
-            self.transaction = nil; turning = false
+        if let commitTask { await commitTask.value }
+        // 取消时以屏幕上的页为准提交，避免回退到上一页；失败则保留最后一次已提交位置。
+        if let session = transaction, let model, let target = displayLocation {
+            if model.locator == nil || !Self.samePage(target, model.locator!) {
+                _ = await model.commitCurlPreview(session, target: target, forward: true)
+            }
+            model.endCurlPreview(session)
         }
+        self.transaction = nil; turning = false
+        pendingCommits.removeAll()
         if let background { _ = await background.value }
         preparedKey = nil
         displayLocation = nil

@@ -182,7 +182,25 @@ methods = r'''
       let three=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == count+3 },object:nil)
       XCTAssertEqual(XCTWaiter.wait(for:[three],timeout:30),.completed,"Three rapid swipes must all be honored; burst=\(app.staticTexts["readium-validation-curl-burst"].label) trace=\(app.staticTexts["readium-validation-curl-input"].label)")
       waitForCurl(app)
-      XCTAssertEqual(app.staticTexts["readium-validation-curl-burst"].label.split(separator:",").last.map(String.init),"0","Animation-window input must not be dropped")
+      let burst=app.staticTexts["readium-validation-curl-burst"].label.split(separator:",").compactMap{Int($0)}
+      XCTAssertEqual(burst.last,0,"Animation-window input must not be dropped")
+      if burst.count == 2 {
+       print("CURL_BURST between_turns_ms=\(burst[0])")
+       XCTAssertLessThan(burst[0],200,"Queued turns must start without waiting for the commit")
+      }
+     }
+     func testReadiumCurlBurstRotation() {
+      continueAfterFailure=false
+      let app=openCurlBook();defer{XCUIDevice.shared.orientation = .portrait;app.terminate()}
+      let count=curlCounts(app)[1]
+      app.swipeLeft(velocity:.fast);app.swipeLeft(velocity:.fast);app.swipeLeft(velocity:.fast)
+      XCUIDevice.shared.orientation = .landscapeLeft
+      sleep(2);waitForCurl(app)
+      XCUIDevice.shared.orientation = .portrait
+      sleep(2);waitForCurl(app)
+      let committed=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] >= count+1 },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[committed],timeout:10),.completed,"Burst rotation must commit the shown page")
+      XCTAssertNotEqual(app.staticTexts["readium-validation-curl-state"].label,"busy")
      }
      func testReadiumCurlPreparationDoesNotSaveProgress() {
       let app=openCurlBook();defer{app.terminate()}
@@ -250,7 +268,9 @@ methods = r'''
       let changed=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlVisible(app) != initial },object:nil)
       XCTAssertEqual(XCTWaiter.wait(for:[changed],timeout:20),.completed)
       waitForCurl(app)
-      let saved=curlVisible(app);XCTAssertNotEqual(saved,initial);XCTAssertEqual(curlCounts(app)[1],1)
+      let saved=curlVisible(app);XCTAssertNotEqual(saved,initial)
+      let committed=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == 1 },object:nil)
+      XCTAssertEqual(XCTWaiter.wait(for:[committed],timeout:5),.completed,"Landed page must commit before reopening")
       app.terminate();app.launch()
       let book=app.staticTexts["分页连续性"].firstMatch
       XCTAssertTrue(book.waitForExistence(timeout:20));book.tap();waitForCurl(app)
@@ -294,7 +314,8 @@ methods = r'''
         if backwards {XCTAssertGreaterThanOrEqual(last,oldFirst-1);XCTAssertLessThan(first,oldFirst)}
         else {XCTAssertLessThanOrEqual(first,oldLast+1);XCTAssertGreaterThan(last,oldLast)}
         previous=current;count += 1
-        XCTAssertEqual(curlCounts(app)[1],count,"Each tap and swipe must complete the curl adapter")
+        let committed=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == count },object:nil)
+        XCTAssertEqual(XCTWaiter.wait(for:[committed],timeout:5),.completed,"Each tap and swipe must commit the curl adapter")
        }
        XCTAssertEqual(backwards ? previous.first:previous.last,backwards ? 1:60)
       }
@@ -320,6 +341,7 @@ if '--only-testing' not in sys.argv:
                  '--only-testing','TapTests/TapTests/testReadiumCurlFirstSwipeDuringPreparation',
                  '--only-testing','TapTests/TapTests/testReadiumCurlQueuesNextInput',
                  '--only-testing','TapTests/TapTests/testReadiumCurlRapidSwipes',
+                 '--only-testing','TapTests/TapTests/testReadiumCurlBurstRotation',
                  '--only-testing','TapTests/TapTests/testReadiumCurlPrioritizesFirstPage',
                  '--only-testing','TapTests/TapTests/testReadiumDiagnosticsWaitsForTOC',
                  '--only-testing','TapTests/TapTests/testReadiumCurlMissingReverseDirection',
