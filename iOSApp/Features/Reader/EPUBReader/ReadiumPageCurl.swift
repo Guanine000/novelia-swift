@@ -81,7 +81,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
     private var transaction: UUID?
     /// 繁忙期保留的翻页方向。卷页动画与落页提交必须串行，队列只保证不吞输入；
     /// 超过上限时丢弃最早意图，避免用户停止后仍长时间回放。
-    private static let maximumQueuedTurns = 3
+    private static let maximumQueuedTurns = 2
     private var queuedDirections: [Bool] = []
     /// 提交队列上限：显示最多领先已提交位置两页；达到上限时暂停新的卷页动画。
     private static let maximumPendingCommits = 2
@@ -89,6 +89,10 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
     private var commitTask: Task<Void, Never>?
     private var lastCommitted: Locator?
     private var cancelling = false
+    /// 最近一次用户翻页输入与当前动画开始时刻。只有动画期间仍有新输入才继续消费队列，
+    /// 用户停手后不再把之前存下的方向逐页播完。
+    private var lastInputAt: CFTimeInterval?
+    private var turnBeganAt: CFTimeInterval = 0
     /// 卷页动画期间的第二次触摸由被动观察器接管，避免系统 pager 吞掉滑动；
     /// 这段时间 pager pan 与 coldPan 都必须保持关闭，否则同一次手势会被两套识别器重复处理。
     private var burstGestureActive = false
@@ -256,6 +260,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             preparedKey = nil; failedKey = nil; carried = nil; resolvedDirections = []
             discardSnapshot()
         }
+        updatePaperVisibility()
         bindScrollGestures()
         guard available, view.window != nil, let key else {
             if model?.curlReady == true { model?.curlReady = false }
@@ -287,6 +292,19 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         let usePaper = ready && resolvedDirections.count == 2 && !finishingColdGesture && !burstGestureActive
         for gesture in pager.gestureRecognizers where gesture is UIPanGestureRecognizer { gesture.isEnabled = usePaper && available }
         coldPan.isEnabled = available && !usePaper && !burstGestureActive
+    }
+    /// 只有屏幕页与已提交页一致时才揭开纸面、露出真实 WebView；提交落后时保持纸面，
+    /// 否则会先闪回上一页再跳到目标页。
+    private func updatePaperVisibility() {
+        guard isViewLoaded else { return }
+        let aligned: Bool
+        if let display = displayLocation, let committed = model?.locator {
+            aligned = Self.samePage(display, committed)
+        } else {
+            aligned = true
+        }
+        let settled = !turning && aligned && pendingCommits.isEmpty && commitTask == nil
+        pager.view.layer.mask = settled ? paperMask : nil
     }
     /// 动画期间第二次触摸由被动观察器独占；不启用 coldPan，避免同一次手势被重复翻页。
     private func setBurstCapture(_ active: Bool) {
@@ -475,6 +493,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         work = nil; spinner.stopAnimating(); cover.isHidden = true; canvas.blocksTouches = false
         if !available { discardSnapshot() }
         setPansReady(preparedKey == self.key)
+        updatePaperVisibility()
 
         // 布局键短暂变化后可能又回到原值；取消的准备也必须重新检查当前缓存，不能丢失最后一次唤醒。
         guard !Task.isCancelled else {
@@ -558,9 +577,11 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         return image
     }
 
-    private func requestTurn(forward: Bool) -> Bool {
+    private func requestTurn(forward: Bool, isReplay: Bool = false) -> Bool {
         traceInput("turn f=\(forward) available=\(available) turning=\(turning) match=\(preparedKey == key) work=\(work != nil) sheets=\(sheets.keys.sorted())")
         guard available, navigator?.currentSelection == nil else { return false }
+        // 回放排队方向不算新的用户输入，否则停手后的队列会被自己续命。
+        if !isReplay { lastInputAt = CACurrentMediaTime() }
         guard !turning else { enqueueTurn(forward); return true }
         // 首个真实 Locator 尚未到达时两个键都为 nil，不代表已经准备好，必须保留首次操作。
         guard let key, preparedKey == key, work == nil else {
@@ -597,6 +618,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             return
         }
         transaction = token; turning = true
+        turnBeganAt = CACurrentMediaTime()
         preferredForward = forward
 #if DEBUG
         if let previous = lastTurnFinishedAt {
@@ -689,12 +711,13 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             let extra = target != nil ? await warming?.task.value : nil
             if self.cancelling {
                 self.turning = false; self.work = nil
-                self.pager.view.layer.mask = paperMask; self.canvas.blocksTouches = false
+                self.canvas.blocksTouches = false
                 if let current = self.sheets[0] { self.pager.setViewControllers([current], direction: .forward, animated: false) }
+                self.updatePaperVisibility()
                 return
             }
             self.turning = false
-            self.pager.view.layer.mask = paperMask; self.canvas.blocksTouches = false
+            self.canvas.blocksTouches = false
             self.work = nil
             guard let sheet, let target, sheet.slot != 0 else {
                 // 取消：不提交，纸面回到当前页。
@@ -751,9 +774,15 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
                 }
                 self.pendingCommits.removeFirst()
                 self.lastCommitted = actual
+                self.updatePaperVisibility()
                 self.performQueuedTurn()
             }
             self.commitTask = nil
+            // 揭开纸面前确认真实页已绘制，避免露出尚未完成渲染的中间帧。
+            if !self.turning, self.pendingCommits.isEmpty, let navigator = self.navigator {
+                try? await self.waitForPage(in: navigator, maximumAttempts: 20)
+            }
+            self.updatePaperVisibility()
             self.endSessionIfIdle()
         }
     }
@@ -763,6 +792,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
               let session = transaction else { return }
         model?.endCurlPreview(session)
         transaction = nil
+        updatePaperVisibility()
     }
     /// 提交失败：停掉流水线，回到最后一个已提交页并重新准备，不让阅读器进入 failed。
     private func failCommit() {
@@ -792,10 +822,13 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
     /// 每次落页只消费一个方向，剩余请求留到下一次落页；返回是否真的发起了翻页。
     @discardableResult
     private func performQueuedTurn() -> Bool {
+        guard !queuedDirections.isEmpty else { return false }
+        // 用户停手后不再回放旧方向：只有当前动画期间仍收到新输入才继续。
+        guard let lastInputAt, lastInputAt > turnBeganAt else { clearQueuedTurns(); return false }
         guard let direction = queuedDirections.first, let key, available, !turning, work == nil,
               pendingCommits.count < Self.maximumPendingCommits, preparedKey == key else { return false }
         queuedDirections.removeFirst()
-        _ = requestTurn(forward: direction)
+        _ = requestTurn(forward: direction, isReplay: true)
         return true
     }
     // 纸面只在动画与落页期间接管触摸，此时也必须保留用户的下一次操作。
@@ -835,13 +868,13 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         ahead = nil; background?.cancel()
         if let work { if !turning { work.cancel() }; await work.value }
         if let commitTask { await commitTask.value }
-        // 取消时以屏幕上的页为准提交，避免回退到上一页；失败则保留最后一次已提交位置。
-        if let session = transaction, let model, let target = displayLocation {
-            if model.locator == nil || !Self.samePage(target, model.locator!) {
-                _ = await model.commitCurlPreview(session, target: target, forward: true)
-            }
-            model.endCurlPreview(session)
+        // 只有显示领先时才在取消前补提交；显示与已提交一致时保持真实导航器原状，
+        // 由 Readium 自己处理旋转/重排，避免把逻辑位置重新解析成另一方向的分页起点。
+        if let session = transaction, let model, let target = displayLocation,
+           !pendingCommits.isEmpty || model.locator == nil || !Self.samePage(target, model.locator!) {
+            _ = await model.commitCurlPreview(session, target: target, forward: true)
         }
+        if let session = transaction { model?.endCurlPreview(session) }
         self.transaction = nil; turning = false
         pendingCommits.removeAll()
         if let background { _ = await background.value }
@@ -851,6 +884,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         if model?.curlReady == true { model?.curlReady = false }
         discardSnapshot()
         pager.view.layer.mask = paperMask; cover.isHidden = true; spinner.stopAnimating(); canvas.blocksTouches = false
+        updatePaperVisibility()
         setPansReady(false)
     }
 

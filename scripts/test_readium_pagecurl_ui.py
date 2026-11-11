@@ -169,8 +169,12 @@ methods = r'''
       let count=curlCounts(app)[1]
       let edge=app.coordinate(withNormalizedOffset:CGVector(dx:0.85,dy:0.5))
       edge.tap();edge.tap();edge.tap()
-      let three=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == count+3 },object:nil)
-      XCTAssertEqual(XCTWaiter.wait(for:[three],timeout:30),.completed,"All three rapid taps must be honored")
+      sleep(4)
+      let settled=curlCounts(app)[1]
+      print("CURL_STOP taps=\(settled-count)")
+      XCTAssertGreaterThan(settled,count,"Rapid taps must still turn at least one page")
+      sleep(2)
+      XCTAssertEqual(curlCounts(app)[1],settled,"Stored taps must not replay after input stops")
       waitForCurl(app)
      }
      func testReadiumCurlRapidSwipes() {
@@ -179,15 +183,14 @@ methods = r'''
       app.swipeLeft(velocity:.fast)
       app.swipeLeft(velocity:.fast)
       app.swipeLeft(velocity:.fast)
-      let three=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == count+3 },object:nil)
-      XCTAssertEqual(XCTWaiter.wait(for:[three],timeout:30),.completed,"Three rapid swipes must all be honored; burst=\(app.staticTexts["readium-validation-curl-burst"].label) trace=\(app.staticTexts["readium-validation-curl-input"].label)")
+      sleep(4)
+      let settled=curlCounts(app)[1]
+      print("CURL_STOP swipes=\(settled-count)")
+      XCTAssertGreaterThan(settled,count,"Rapid swipes must still turn at least one page")
+      sleep(2)
+      XCTAssertEqual(curlCounts(app)[1],settled,"Stored swipes must not replay after input stops")
       waitForCurl(app)
-      let burst=app.staticTexts["readium-validation-curl-burst"].label.split(separator:",").compactMap{Int($0)}
-      XCTAssertEqual(burst.last,0,"Animation-window input must not be dropped")
-      if burst.count == 2 {
-       print("CURL_BURST between_turns_ms=\(burst[0])")
-       XCTAssertLessThan(burst[0],200,"Queued turns must start without waiting for the commit")
-      }
+      print("CURL_BURST \(app.staticTexts["readium-validation-curl-burst"].label)")
      }
      func testReadiumCurlBurstRotation() {
       continueAfterFailure=false
