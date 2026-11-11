@@ -22,6 +22,7 @@ struct LibraryView: View {
     @EnvironmentObject private var cloudBooks: CloudBookStore
     @EnvironmentObject private var state: LibraryStateStore
     @EnvironmentObject private var services: AppServices
+    @EnvironmentObject private var incomingDocuments: IncomingDocumentCoordinator
     @StateObject private var importer = LibraryImportModel()
     @StateObject private var bookActions = LibraryBookActions()
     @State private var segment = Segment.all
@@ -43,6 +44,14 @@ struct LibraryView: View {
         guard webDownloads.isReady, wenkuDownloads.isReady else { return [] }
         return state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks)
     }
+    /// 系统“用 Novelia 打开”的文件先进入书库导入队列；导入期间到达的文件保留到本轮结束。
+    private func handleIncomingDocuments() {
+        guard !importer.isImporting, !incomingDocuments.pending.isEmpty else { return }
+        let urls = incomingDocuments.take()
+        importer.attach(wenkuDownloads)
+        Task { await importer.handlePickedFiles(urls) }
+    }
+
     /// 请求在书库加载完成前保留；导航键不再与文件哈希或在线位置键混用。
     private func openSpeechBook(_ request: SpeechHandoffStore.OpenRequest?) {
         guard let request else { return }
@@ -203,7 +212,14 @@ struct LibraryView: View {
         .onValueChange(of: webDAVSync.isEnabled) { _, isEnabled in
             if !isEnabled { syncTask?.cancel() }
         }
-        .onAppear { state.reloadPositions() }
+        .onAppear {
+            state.reloadPositions()
+            handleIncomingDocuments()
+        }
+        .onValueChange(of: incomingDocuments.pending) { _, _ in handleIncomingDocuments() }
+        .onValueChange(of: importer.isImporting) { _, importing in
+            if !importing { handleIncomingDocuments() }
+        }
         .task { importer.attach(wenkuDownloads) }
         .task { await wenkuDownloads.refreshMissingMetadata() }
         .task(id: sourceBooks) {

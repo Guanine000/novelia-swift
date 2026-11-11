@@ -21,6 +21,7 @@
 		A10000000000000000000303 /* ReadiumStreamer in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000303 /* ReadiumStreamer */; };
 		A10000000000000000000304 /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000304 /* ReadiumNavigator */; };
 		A10000000000000000000001 /* NoveliaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* NoveliaApp.swift */; };
+		A100000000000000000000F4 /* IncomingDocuments.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F4 /* IncomingDocuments.swift */; };
 		A10000000000000000000002 /* ShelfViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000002 /* ShelfViews.swift */; };
 		A10000000000000000000003 /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000003 /* ReaderView.swift */; };
 		FA0000000000000000000001 /* ReaderTextHighlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA1000000000000000000001 /* ReaderTextHighlight.swift */; };
@@ -167,6 +168,7 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		A15F00000000000000000013 /* APIServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B000000000000000000002 /* APIServices.swift */; };
 		A15F00000000000000000014 /* APIConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B000000000000000000001 /* APIConfiguration.swift */; };
 		A15F00000000000000000015 /* NoveliaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000001 /* NoveliaApp.swift */; };
+		A15F000000000000000000F4 /* IncomingDocuments.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F4 /* IncomingDocuments.swift */; };
 		A15F00000000000000000016 /* ShelfViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000002 /* ShelfViews.swift */; };
 		A15F00000000000000000017 /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000003 /* ReaderView.swift */; };
 		A15F00000000000000000018 /* LocalLibraryIndexWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000000000000000000004 /* LocalLibraryIndexWriter.swift */; };
@@ -337,6 +339,7 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		B10000000000000000000310 /* ReadiumTextPublication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumTextPublication.swift; sourceTree = "<group>"; };
 		B10000000000000000000301 /* ReadiumEPUBReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumEPUBReaderView.swift; sourceTree = "<group>"; };
 		B10000000000000000000001 /* NoveliaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/NoveliaApp.swift; sourceTree = "<group>"; };
+		B100000000000000000000F4 /* IncomingDocuments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/IncomingDocuments.swift; sourceTree = "<group>"; };
 		B10000000000000000000002 /* ShelfViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/ShelfViews.swift; sourceTree = "<group>"; };
 		B10000000000000000000003 /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderView.swift; sourceTree = "<group>"; };
 		FA1000000000000000000001 /* ReaderTextHighlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderTextHighlight.swift; sourceTree = "<group>"; };
@@ -587,6 +590,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				FAB000000000000000000001 /* WenkuLocalLibraryStore.swift */,
 				F8B000000000000000000003 /* AppServices.swift */,
 				B10000000000000000000001 /* NoveliaApp.swift */,
+				B100000000000000000000F4 /* IncomingDocuments.swift */,
 				B10000000000000000000002 /* ShelfViews.swift */,
 				B10000000000000000000003 /* ReaderView.swift */,
 				FA1000000000000000000001 /* ReaderTextHighlight.swift */,
@@ -992,6 +996,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				F8A000000000000000000002 /* APIServices.swift in Sources */,
 				F8A000000000000000000001 /* APIConfiguration.swift in Sources */,
 				A10000000000000000000001 /* NoveliaApp.swift in Sources */,
+				A100000000000000000000F4 /* IncomingDocuments.swift in Sources */,
 				A10000000000000000000002 /* ShelfViews.swift in Sources */,
 				A10000000000000000000003 /* ReaderView.swift in Sources */,
 				FA0000000000000000000001 /* ReaderTextHighlight.swift in Sources */,
@@ -1154,6 +1159,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A15F00000000000000000013 /* APIServices.swift in Sources */,
 				A15F00000000000000000014 /* APIConfiguration.swift in Sources */,
 				A15F00000000000000000015 /* NoveliaApp.swift in Sources */,
+				A15F000000000000000000F4 /* IncomingDocuments.swift in Sources */,
 				A15F00000000000000000016 /* ShelfViews.swift in Sources */,
 				A15F00000000000000000017 /* ReaderView.swift in Sources */,
 				FA0000000000000000000002 /* ReaderTextHighlight.swift in Sources */,

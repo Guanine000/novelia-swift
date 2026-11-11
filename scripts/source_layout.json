@@ -1,5 +1,6 @@
 {
   "NoveliaApp.swift": "iOSApp/App/NoveliaApp.swift",
+  "IncomingDocuments.swift": "iOSApp/App/IncomingDocuments.swift",
   "AppServices.swift": "iOSApp/App/AppServices.swift",
   "AccountAuth.swift": "iOSApp/Features/Account/AccountAuth.swift",
   "DiscoverStore.swift": "iOSApp/Features/Discover/DiscoverStore.swift",

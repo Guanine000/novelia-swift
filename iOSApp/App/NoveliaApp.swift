@@ -226,6 +226,7 @@ struct RootView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage(NoveliaUpdateStore.enabledKey) private var checksUpdates = true
     @StateObject private var updates = NoveliaUpdateStore()
+    @StateObject private var incomingDocuments = IncomingDocumentCoordinator()
     @StateObject private var auth: AccountAuthStore
     @StateObject private var forumAuth: ForumAuthStore
     @StateObject private var favorites: FavoritesStore
@@ -297,6 +298,12 @@ struct RootView: View {
         .onReceive(services.speechHandoff.$openRequest) { request in
             if request != nil { selectedTab = .library }
         }
+        // “用 Novelia 打开”/文件分享：先切到书库，再由书库的导入模型消费。
+        .onOpenURL { url in
+            guard url.isFileURL else { return }
+            incomingDocuments.receive(url)
+            selectedTab = .library
+        }
         .tint(AppThemeColor.color(for: appThemeColorRaw, customHex: appThemeCustomHex))
         .background(NoveliaStyle.paper)
         // 纸面/卡片的动态色提供器只在视图重新求值时重新解析；换底色预设时用行身份
@@ -320,6 +327,7 @@ struct RootView: View {
         .environmentObject(webDAVSync)
         .environmentObject(libraryWordCounts)
         .environmentObject(updates)
+        .environmentObject(incomingDocuments)
         .environment(\.speechHandoff, services.speechHandoff)
         .modifier(WebDAVAutoSyncTriggers(sync: webDAVSync, web: webNovelDownloads, wenku: wenkuDownloads,
                                          library: services.local.library, blockedTags: services.local.blockedTags,
