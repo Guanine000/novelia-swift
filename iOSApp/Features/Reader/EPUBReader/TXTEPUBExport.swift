@@ -27,65 +27,68 @@ enum TXTEPUBExportError: LocalizedError {
 
 /// 生成最小 EPUB 3。输入章节来自 TXT 的手工目录快照，导出过程不再识别章节，
 /// 因此用户修改过的标题、分章边界和卷名原样进入目录与正文。
+/// 章节正文逐章投影、生成 XHTML 并写入压缩包，不在内存中保留全书页面。
 enum TXTEPUBExporter {
     struct Entry: Sendable {
         let path: String
         let text: String
     }
 
-    static func export(title: String, author: String, chapters: [TXTEPUBChapter],
-                       projection: ReadingTextProjection, destination: URL) async throws {
-        let entries = try makeEntries(title: title, author: author, chapters: chapters, projection: projection)
-        try await write(entries, to: destination)
+    private enum NavGroup {
+        case chapter(Int)
+        case volume(String, [Int])
     }
 
+    private struct Headings {
+        let titles: [String]
+        let volumes: [String?]
+        let groups: [NavGroup]
+        let volumeStarts: Set<Int>
+    }
+
+    static func export(title: String, author: String, chapters: [TXTEPUBChapter],
+                       projection: ReadingTextProjection, destination: URL) async throws {
+        guard !chapters.isEmpty else { throw TXTEPUBExportError.emptyBook }
+        let identifier = "urn:uuid:" + UUID().uuidString
+        let modified = Date()
+        let headings = makeHeadings(chapters: chapters, projection: projection)
+        let fixed = fixedEntries(title: title, author: author, identifier: identifier, modified: modified,
+                                 chapterCount: chapters.count, headings: headings)
+        try await write(chapters: chapters, headings: headings, projection: projection,
+                        fixed: fixed, to: destination)
+    }
+
+    /// 测试与检查用：一次性返回全部条目；正式导出走逐章写入，避免整书 XHTML 常驻内存。
     static func makeEntries(title: String, author: String, chapters: [TXTEPUBChapter],
                             projection: ReadingTextProjection,
                             identifier: String = "urn:uuid:" + UUID().uuidString,
                             modified: Date = Date()) throws -> [Entry] {
         guard !chapters.isEmpty else { throw TXTEPUBExportError.emptyBook }
-        let display = chapters.map {
-            TXTEPUBChapter(title: projection.apply($0.title),
-                           volumeTitle: $0.volumeTitle.map(projection.apply),
-                           body: projection.apply($0.body))
-        }
-        let groups = navGroups(chapters: display)
-        let volumeStarts = Set(groups.compactMap { group -> Int? in
-            if case .volume(_, let indices) = group { return indices.first }
-            return nil
-        })
-
-        var chapterFiles: [String] = []
-        for (index, chapter) in display.enumerated() {
-            let name = String(format: "%04d.xhtml", index + 1)
-            chapterFiles.append("text/" + name)
-        }
-
-        var entries: [Entry] = [
-            Entry(path: "mimetype", text: "application/epub+zip"),
-            Entry(path: "META-INF/container.xml", text: containerXML),
-            Entry(path: "OEBPS/content.opf", text: contentOPF(title: title, author: author, identifier: identifier,
-                                                              modified: modified, chapters: display)),
-            Entry(path: "OEBPS/nav.xhtml", text: navigationDocument(title: title, chapters: display, groups: groups)),
-            Entry(path: "OEBPS/toc.ncx", text: ncxDocument(title: title, identifier: identifier,
-                                                           chapters: display, groups: groups)),
-            Entry(path: "OEBPS/style.css", text: stylesheet)
-        ]
-        for (index, chapter) in display.enumerated() {
-            entries.append(Entry(path: "OEBPS/" + chapterFiles[index],
-                                 text: chapterDocument(chapter, startsVolume: volumeStarts.contains(index))))
+        let headings = makeHeadings(chapters: chapters, projection: projection)
+        var entries = fixedEntries(title: title, author: author, identifier: identifier, modified: modified,
+                                   chapterCount: chapters.count, headings: headings)
+        for index in chapters.indices {
+            entries.append(chapterEntry(index: index, chapter: chapters[index], headings: headings,
+                                        projection: projection))
         }
         return entries
     }
 
     // MARK: - 目录与章节
 
-    private enum NavGroup {
-        case chapter(Int)
-        case volume(String, [Int])
+    /// 只投影标题和卷名；正文在写入时逐章处理。连续且卷名相同的章节归入同一个卷。
+    private static func makeHeadings(chapters: [TXTEPUBChapter], projection: ReadingTextProjection) -> Headings {
+        let titles = chapters.map { projection.apply($0.title) }
+        let volumes = chapters.map { $0.volumeTitle.map(projection.apply) }
+        let display = chapters.indices.map { TXTEPUBChapter(title: titles[$0], volumeTitle: volumes[$0], body: "") }
+        let groups = navGroups(chapters: display)
+        let starts = Set(groups.compactMap { group -> Int? in
+            if case .volume(_, let indices) = group { return indices.first }
+            return nil
+        })
+        return Headings(titles: titles, volumes: volumes, groups: groups, volumeStarts: starts)
     }
 
-    /// 连续且卷名相同的章节归入同一个卷；没有卷名的章保持平铺。
     private static func navGroups(chapters: [TXTEPUBChapter]) -> [NavGroup] {
         var groups: [NavGroup] = []
         var volume: String?
@@ -108,31 +111,52 @@ enum TXTEPUBExporter {
         return groups
     }
 
-    private static func chapterDocument(_ chapter: TXTEPUBChapter, startsVolume: Bool) -> String {
-        var body: [String] = []
-        if startsVolume, let volume = chapter.volumeTitle, !volume.isEmpty {
-            body.append("<p class=\"volume\">\(TextChapterXHTML.escape(volume))</p>")
+    private static func chapterEntry(index: Int, chapter: TXTEPUBChapter, headings: Headings,
+                                     projection: ReadingTextProjection) -> Entry {
+        Entry(path: "OEBPS/text/\(fileName(index)).xhtml",
+              text: chapterDocument(title: headings.titles[index], volume: headings.volumes[index],
+                                    body: projection.apply(chapter.body),
+                                    startsVolume: headings.volumeStarts.contains(index)))
+    }
+
+    private static func chapterDocument(title: String, volume: String?, body: String, startsVolume: Bool) -> String {
+        var lines: [String] = []
+        if startsVolume, let volume, !volume.isEmpty {
+            lines.append("<p class=\"volume\">\(TextChapterXHTML.escape(volume))</p>")
         }
-        body.append("<h1>\(TextChapterXHTML.escape(chapter.title))</h1>")
-        for paragraph in TextChapterXHTML.paragraphs(fromLines: chapter.body) where !paragraph.text.isEmpty {
-            body.append("<p>\(TextChapterXHTML.escape(paragraph.text))</p>")
+        lines.append("<h1>\(TextChapterXHTML.escape(title))</h1>")
+        for paragraph in TextChapterXHTML.paragraphs(fromLines: body) where !paragraph.text.isEmpty {
+            lines.append("<p>\(TextChapterXHTML.escape(paragraph.text))</p>")
         }
         return """
         <?xml version="1.0" encoding="UTF-8"?>
         <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh">
-        <head><title>\(TextChapterXHTML.escape(chapter.title))</title><link rel="stylesheet" type="text/css" href="../style.css"/></head>
+        <head><title>\(TextChapterXHTML.escape(title))</title><link rel="stylesheet" type="text/css" href="../style.css"/></head>
         <body>
-        \(body.joined(separator: "\n"))
+        \(lines.joined(separator: "\n"))
         </body>
         </html>
         """
     }
 
-    private static func navigationDocument(title: String, chapters: [TXTEPUBChapter], groups: [NavGroup]) -> String {
+    private static func fixedEntries(title: String, author: String, identifier: String, modified: Date,
+                                     chapterCount: Int, headings: Headings) -> [Entry] {
+        [
+            Entry(path: "mimetype", text: "application/epub+zip"),
+            Entry(path: "META-INF/container.xml", text: containerXML),
+            Entry(path: "OEBPS/content.opf", text: contentOPF(title: title, author: author, identifier: identifier,
+                                                              modified: modified, chapterCount: chapterCount)),
+            Entry(path: "OEBPS/nav.xhtml", text: navigationDocument(title: title, headings: headings)),
+            Entry(path: "OEBPS/toc.ncx", text: ncxDocument(title: title, identifier: identifier, headings: headings)),
+            Entry(path: "OEBPS/style.css", text: stylesheet)
+        ]
+    }
+
+    private static func navigationDocument(title: String, headings: Headings) -> String {
         func item(_ index: Int) -> String {
-            "<li><a href=\"text/\(fileName(index)).xhtml\">\(TextChapterXHTML.escape(chapters[index].title))</a></li>"
+            "<li><a href=\"text/\(fileName(index)).xhtml\">\(TextChapterXHTML.escape(headings.titles[index]))</a></li>"
         }
-        let items: [String] = groups.map { group in
+        let items: [String] = headings.groups.map { group in
             switch group {
             case .chapter(let index): return item(index)
             case .volume(let title, let indices):
@@ -153,8 +177,7 @@ enum TXTEPUBExporter {
         """
     }
 
-    private static func ncxDocument(title: String, identifier: String,
-                                    chapters: [TXTEPUBChapter], groups: [NavGroup]) -> String {
+    private static func ncxDocument(title: String, identifier: String, headings: Headings) -> String {
         var points: [String] = []
         var order = 1
         var volumeNumber = 0, chapterNumber = 0
@@ -162,14 +185,14 @@ enum TXTEPUBExporter {
             chapterNumber += 1
             let point = """
             \(indent)<navPoint id="c\(chapterNumber)" playOrder="\(order)">
-            \(indent)  <navLabel><text>\(TextChapterXHTML.escape(chapters[index].title))</text></navLabel>
+            \(indent)  <navLabel><text>\(TextChapterXHTML.escape(headings.titles[index]))</text></navLabel>
             \(indent)  <content src="text/\(fileName(index)).xhtml"/>
             \(indent)</navPoint>
             """
             order += 1
             return point
         }
-        for group in groups {
+        for group in headings.groups {
             switch group {
             case .chapter(let index):
                 points.append(chapterPoint(index))
@@ -188,7 +211,7 @@ enum TXTEPUBExporter {
                 """)
             }
         }
-        let depth = groups.contains { group in
+        let depth = headings.groups.contains { group in
             if case .volume(_, _) = group { return true }
             return false
         } ? 2 : 1
@@ -212,11 +235,11 @@ enum TXTEPUBExporter {
     // MARK: - 包文档与写入
 
     private static func contentOPF(title: String, author: String, identifier: String,
-                                   modified: Date, chapters: [TXTEPUBChapter]) -> String {
-        let manifest = chapters.indices.map {
+                                   modified: Date, chapterCount: Int) -> String {
+        let manifest = (0..<chapterCount).map {
             "<item id=\"c\($0 + 1)\" href=\"text/\(fileName($0)).xhtml\" media-type=\"application/xhtml+xml\"/>"
         }.joined(separator: "\n")
-        let spine = chapters.indices.map { "<itemref idref=\"c\($0 + 1)\"/>" }.joined(separator: "\n")
+        let spine = (0..<chapterCount).map { "<itemref idref=\"c\($0 + 1)\"/>" }.joined(separator: "\n")
         let creator = author.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "" : "\n    <dc:creator>\(TextChapterXHTML.escape(author))</dc:creator>"
         let formatter = ISO8601DateFormatter()
@@ -260,7 +283,10 @@ enum TXTEPUBExporter {
     p.volume { font-size: 0.8em; color: #3C8F68; text-indent: 0; margin: 0 0 1em 0; }
     """
 
-    static func write(_ entries: [Entry], to destination: URL) async throws {
+    /// 逐章生成并写入；单章 XHTML 在追加后即可释放，峰值内存不再随章节数线性增长。
+    private static func write(chapters: [TXTEPUBChapter], headings: Headings,
+                              projection: ReadingTextProjection, fixed: [Entry],
+                              to destination: URL) async throws {
         let fileManager = FileManager.default
         let directory = destination.deletingLastPathComponent()
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -268,20 +294,28 @@ enum TXTEPUBExporter {
         defer { try? fileManager.removeItem(at: temporary) }
         do {
             let archive = try await Archive(url: temporary, accessMode: .create)
-            let date = Date()
-            for entry in entries {
-                let data = Data(entry.text.utf8)
-                // EPUB 要求 mimetype 为首个且不压缩的条目。
-                try await archive.addEntry(with: entry.path, type: .file, uncompressedSize: Int64(data.count),
-                                           modificationDate: date,
-                                           compressionMethod: entry.path == "mimetype" ? .none : .deflate) { position, size in
-                    data.subdata(in: Int(position)..<(Int(position) + size))
-                }
+            for entry in fixed {
+                try await append(entry, to: archive)
+            }
+            for index in chapters.indices {
+                let entry = chapterEntry(index: index, chapter: chapters[index],
+                                         headings: headings, projection: projection)
+                try await append(entry, to: archive)
             }
         } catch {
             throw TXTEPUBExportError.writeFailed(error.localizedDescription)
         }
         if fileManager.fileExists(atPath: destination.path) { try fileManager.removeItem(at: destination) }
         try fileManager.moveItem(at: temporary, to: destination)
+    }
+
+    private static func append(_ entry: Entry, to archive: Archive) async throws {
+        let data = Data(entry.text.utf8)
+        // EPUB 要求 mimetype 为首个且不压缩的条目。
+        try await archive.addEntry(with: entry.path, type: .file, uncompressedSize: Int64(data.count),
+                                   modificationDate: Date(),
+                                   compressionMethod: entry.path == "mimetype" ? .none : .deflate) { position, size in
+            data.subdata(in: Int(position)..<(Int(position) + size))
+        }
     }
 }
