@@ -58,11 +58,14 @@ actor Backend: NovelCatalogService, NovelContentService, WenkuCatalogService,
     FavoritesService, ReadingHistoryService, NovelDownloadService, BookCommentsService, ForumService {
     var calls: [String: Int] = [:]
     var slowHistory = false
+    var lastFilter: NovelCatalogFilter?
     func count(_ name: String) -> Int { calls[name, default: 0] }
     func mark(_ name: String) { calls[name, default: 0] += 1 }
     func configureSlowHistory() { slowHistory = true }
-    func searchNovels(query: String, page: Int, exactTag: Bool) async throws -> NoveliaRankPage {
+    func searchNovels(query: String, page: Int, exactTag: Bool,
+                      filter: NovelCatalogFilter) async throws -> NoveliaRankPage {
         mark("search")
+        lastFilter = filter
         if query == "slow" { try await Task.sleep(for: .milliseconds(150)) }
         return NoveliaRankPage(novels: query == "fallback" ? [] : [book(query + String(page))], pageCount: 3)
     }
@@ -134,6 +137,11 @@ actor Backend: NovelCatalogService, NovelContentService, WenkuCatalogService,
         await discover.goTo(page: 2)
         precondition(discover.page == 2 && discover.pageCount == 3)
         precondition(discover.wenkuNovels.isEmpty, "Fallback is only for the first page")
+        let filtered = NovelCatalogFilter(kind: .completed, rating: .all, sort: .popular)
+        await discover.search(query: "latest", filter: filtered)
+        let sentFilter = await backend.lastFilter
+        precondition(sentFilter == filtered, "Discovery filters must reach the catalog service")
+        precondition(discover.page == 1, "Changing filters must return to the first page")
         let old = Task { await discover.search(query: "slow") }
         try await Task.sleep(for: .milliseconds(370))
         await discover.search(query: "latest")

@@ -221,6 +221,7 @@ struct DiscoverView: View {
 private struct DiscoverContentView: View {
     @EnvironmentObject private var blocked: BlockedTagsStore
     @State private var query = ""
+    @State private var filter = NovelCatalogFilter.standard
     @StateObject private var store: DiscoverStore
     private let showsNavigationBar: Bool
     /// 嵌入“发现”页的“网络小说”分段时，不显示自己的大标题，也不改动导航栏。
@@ -231,6 +232,16 @@ private struct DiscoverContentView: View {
         _query = State(initialValue: initialQuery)
         self.showsNavigationBar = showsNavigationBar
         self.embedded = embedded
+    }
+
+    /// 切换筛选或搜索词都从第 1 页重新加载；返回详情页时同一组合不会重复请求。
+    private var requestKey: String {
+        "\(query)|\(filter.kind.rawValue)|\(filter.rating.rawValue)|\(filter.sort.rawValue)"
+    }
+
+    private var listTitle: String {
+        guard query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "搜索结果" }
+        return filter.sort == .popular ? "热门作品" : "最近更新"
     }
 
     var body: some View {
@@ -271,6 +282,48 @@ private struct DiscoverContentView: View {
                 .padding(14)
                 .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
 
+                // 与网页端一致的列表筛选：类型、分级和排序；默认组合保持原有“全部/一般向/更新”。
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        Menu {
+                            Picker("类型", selection: $filter.kind) {
+                                ForEach(NovelCatalogFilter.Kind.allCases, id: \.self) { kind in
+                                    Text(kind.title).tag(kind)
+                                }
+                            }
+                        } label: {
+                            DiscoverFilterChip(category: "类型", value: filter.kind.title,
+                                               isDefault: filter.kind == .all)
+                        }
+                        Menu {
+                            Picker("分级", selection: $filter.rating) {
+                                ForEach(NovelCatalogFilter.Rating.allCases, id: \.self) { rating in
+                                    Text(rating.title).tag(rating)
+                                }
+                            }
+                        } label: {
+                            DiscoverFilterChip(category: "分级", value: filter.rating.title,
+                                               isDefault: filter.rating == .general)
+                        }
+                        Menu {
+                            Picker("排序", selection: $filter.sort) {
+                                ForEach(NovelCatalogFilter.Sort.allCases, id: \.self) { sort in
+                                    Text(sort.title).tag(sort)
+                                }
+                            }
+                        } label: {
+                            DiscoverFilterChip(category: "排序", value: filter.sort.title,
+                                               isDefault: filter.sort == .updated)
+                        }
+                    }
+                }
+
+                if filter.rating != .general {
+                    Text("“全部”和“R18”分级需要已登录且具备 R18 权限的账号。")
+                        .font(NoveliaStyle.fontMicro)
+                        .foregroundStyle(NoveliaStyle.muted)
+                }
+
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         NavigationLink { RankingView() } label: {
@@ -287,7 +340,7 @@ private struct DiscoverContentView: View {
                 }
 
                 HStack(alignment: .firstTextBaseline) {
-                    Text(query.isEmpty ? "热门作品" : "搜索结果")
+                    Text(listTitle)
                         .font(.system(size: 21, weight: .bold, design: .rounded))
                     Spacer()
                     if store.isLoading {
@@ -362,10 +415,70 @@ private struct DiscoverContentView: View {
         // 翻页后回到顶部，像网页端一样从新一页的第一部作品开始看。
         .onValueChange(of: store.page) { _, _ in proxy.scrollTo(Self.topAnchor, anchor: .top) }
         }
-        .task(id: query) { await store.searchIfNeeded(query: query) }
+        .task(id: requestKey) { await store.searchIfNeeded(query: query, filter: filter) }
     }
 
     private static let topAnchor = "discover-top"
+}
+
+/// 筛选菜单的收起状态标签：显示类别、当前选项与下拉箭头，非默认选项用品牌色强调。
+private struct DiscoverFilterChip: View {
+    let category: String
+    let value: String
+    let isDefault: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(category)
+                .foregroundStyle(NoveliaStyle.muted)
+            Text(value)
+                .foregroundStyle(isDefault ? NoveliaStyle.ink : NoveliaStyle.brandGreen)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(NoveliaStyle.muted)
+        }
+        .font(.system(size: 13, weight: .semibold))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(minHeight: 44)
+        .background(NoveliaStyle.card, in: Capsule())
+        .overlay(Capsule().stroke(NoveliaStyle.muted.opacity(0.18), lineWidth: 1))
+        .contentShape(Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(category)：\(value)")
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+private extension NovelCatalogFilter.Kind {
+    var title: String {
+        switch self {
+        case .all: return "全部"
+        case .ongoing: return "连载中"
+        case .completed: return "已完结"
+        case .shortStory: return "短篇"
+        }
+    }
+}
+
+private extension NovelCatalogFilter.Rating {
+    var title: String {
+        switch self {
+        case .all: return "全部"
+        case .general: return "一般向"
+        case .r18: return "R18"
+        }
+    }
+}
+
+private extension NovelCatalogFilter.Sort {
+    var title: String {
+        switch self {
+        case .updated: return "更新"
+        case .popular: return "点击"
+        case .relevant: return "相关"
+        }
+    }
 }
 
 private struct RankingView: View {

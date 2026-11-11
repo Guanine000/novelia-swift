@@ -22,37 +22,42 @@ final class DiscoverStore: ObservableObject {
     }
     private var activeQuery: String?
     private var activeExactTag = false
+    private var activeFilter = NovelCatalogFilter.standard
     private var requestGeneration = 0
     /// 最近一次成功加载的查询；从详情页返回时 `.task` 会重新触发，命中则不清空列表，保留滚动位置。
     private var loadedKey: String?
 
-    /// 供 `.task` 调用：同一查询已经成功加载过时直接返回，否则从第 1 页开始搜索。
-    func searchIfNeeded(query: String, exactTag: Bool = false) async {
-        guard loadedKey != Self.key(query, exactTag) else { return }
-        await search(query: query, exactTag: exactTag)
+    /// 供 `.task` 调用：同一查询与筛选已经成功加载过时直接返回，否则从第 1 页开始搜索。
+    func searchIfNeeded(query: String, exactTag: Bool = false,
+                        filter: NovelCatalogFilter = .standard) async {
+        guard loadedKey != Self.key(query, exactTag, filter) else { return }
+        await search(query: query, exactTag: exactTag, filter: filter)
     }
 
-    func search(query: String, exactTag: Bool = false) async {
-        await load(query: query, exactTag: exactTag, page: 1)
+    func search(query: String, exactTag: Bool = false,
+                filter: NovelCatalogFilter = .standard) async {
+        await load(query: query, exactTag: exactTag, page: 1, filter: filter)
     }
 
     /// 翻到当前查询的指定页；出错后重试也走这里。
     func goTo(page target: Int) async {
-        await load(query: activeQuery ?? "", exactTag: activeExactTag, page: target)
+        await load(query: activeQuery ?? "", exactTag: activeExactTag, page: target, filter: activeFilter)
     }
 
-    private static func key(_ query: String, _ exactTag: Bool) -> String {
-        "\(exactTag ? 1 : 0)|\(query)"
+    private static func key(_ query: String, _ exactTag: Bool, _ filter: NovelCatalogFilter) -> String {
+        "\(exactTag ? 1 : 0)|\(filter.kind.rawValue)|\(filter.rating.rawValue)|\(filter.sort.rawValue)|\(query)"
     }
 
-    private func load(query: String, exactTag: Bool, page target: Int) async {
+    private func load(query: String, exactTag: Bool, page target: Int,
+                      filter: NovelCatalogFilter) async {
         requestGeneration += 1
         let generation = requestGeneration
-        // 只有输入搜索词时防抖；翻页立即请求。
+        // 只有输入搜索词时防抖；翻页和切换筛选立即请求。
         let debounce = query != activeQuery || exactTag != activeExactTag
         loadedKey = nil
         activeQuery = query
         activeExactTag = exactTag
+        activeFilter = filter
         page = max(1, target)
         if debounce { pageCount = 1 }
         novels = []
@@ -68,12 +73,12 @@ final class DiscoverStore: ObservableObject {
                 try await Task.sleep(nanoseconds: 350_000_000)
                 try Task.checkCancellation()
             }
-            let result = try await api.searchNovels(query: query, page: page, exactTag: exactTag)
+            let result = try await api.searchNovels(query: query, page: page, exactTag: exactTag, filter: filter)
             try Task.checkCancellation()
             guard generation == requestGeneration else { return }
             novels = result.novels
             pageCount = max(1, result.pageCount)
-            loadedKey = Self.key(query, exactTag)
+            loadedKey = Self.key(query, exactTag, filter)
             if page == 1, result.novels.isEmpty,
                !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 // 网络小说书源只按片段匹配标题/关键词，整本书名或中文译名常常搜不到；

@@ -4,9 +4,38 @@ import Foundation
 // 页面、Store 和章节缓存只依赖业务协议；具体实现由 App 组装并持有。
 // 保留现有模型与分页语义，请求编码和后端字段转换由 API 适配层负责。
 
+/// 网络小说列表的筛选条件；查询码与 Novelia 网站保持一致，由 API 适配层原样传递。
+/// 分级「全部」和「R18」需要已登录且有 R18 权限的账号，默认保留一般向。
+public struct NovelCatalogFilter: Hashable, Sendable {
+    public enum Kind: Int, CaseIterable, Sendable {
+        case all = 0, ongoing = 1, completed = 2, shortStory = 3
+    }
+
+    public enum Rating: Int, CaseIterable, Sendable {
+        case all = 0, general = 1, r18 = 2
+    }
+
+    public enum Sort: Int, CaseIterable, Sendable {
+        case updated = 0, popular = 1, relevant = 2
+    }
+
+    public var kind: Kind
+    public var rating: Rating
+    public var sort: Sort
+
+    public init(kind: Kind = .all, rating: Rating = .general, sort: Sort = .updated) {
+        self.kind = kind
+        self.rating = rating
+        self.sort = sort
+    }
+
+    /// 与加入筛选前相同的查询：全部类型、一般向、按更新排序。
+    public static let standard = NovelCatalogFilter()
+}
+
 /// 网络小说搜索、排行与详情；消费方无需知道具体客户端或请求地址。
 public protocol NovelCatalogService: Sendable {
-    func searchNovels(query: String, page: Int, exactTag: Bool) async throws -> NoveliaRankPage
+    func searchNovels(query: String, page: Int, exactTag: Bool, filter: NovelCatalogFilter) async throws -> NoveliaRankPage
     func siteRankedNovels(page: Int) async throws -> NoveliaRankPage
     func novel(providerId: String, novelId: String) async throws -> Novel
 }

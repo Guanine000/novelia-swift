@@ -12,7 +12,8 @@ final class ArchitectureReplacementTests: XCTestCase {
         try bytes.write(to: sample)
         let backend = ArchitectureFixtureBackend { sample }
         let api = backend.services()
-        let found = try await api.catalog.searchNovels(query: "test", page: 1, exactTag: false)
+        let found = try await api.catalog.searchNovels(query: "test", page: 1, exactTag: false,
+                                                       filter: .standard)
         XCTAssertEqual(found.novels.first?.title, "架构验证小说")
         _ = try await api.catalog.siteRankedNovels(page: 1)
         let detail = try await api.catalog.novel(providerId: "fixture", novelId: "one")

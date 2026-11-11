@@ -57,8 +57,21 @@ final class APIServiceTests: XCTestCase {
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer novel-test")
             return Data(#"{"pageNumber":3,"items":[]}"#.utf8)
         }
-        let result = try await services().catalog.searchNovels(query: "book", page: 1, exactTag: false)
+        let result = try await services().catalog.searchNovels(query: "book", page: 1, exactTag: false,
+                                                              filter: .standard)
         XCTAssertEqual(result.pageCount, 3)
+    }
+
+    func testCatalogFilterValuesMapToQueryCodes() async throws {
+        ServiceHTTPMock.handler = { request in
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+            XCTAssertEqual(query.first { $0.name == "type" }?.value, "2")
+            XCTAssertEqual(query.first { $0.name == "level" }?.value, "2")
+            XCTAssertEqual(query.first { $0.name == "sort" }?.value, "1")
+            return Data(#"{"pageNumber":1,"items":[]}"#.utf8)
+        }
+        let filter = NovelCatalogFilter(kind: .completed, rating: .r18, sort: .popular)
+        _ = try await services().catalog.searchNovels(query: "", page: 1, exactTag: false, filter: filter)
     }
 
     func testCatalogRetainsBothTitlesInOneDirectoryRequest() async throws {

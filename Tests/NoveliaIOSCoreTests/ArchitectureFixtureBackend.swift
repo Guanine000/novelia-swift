@@ -72,7 +72,8 @@ actor ArchitectureFixtureBackend: NovelCatalogService, NovelContentService, Wenk
         APIServiceCollection(catalog: self, content: self, wenku: self, favorites: self,
                              history: self, downloads: self, bookComments: self, forum: self)
     }
-    func searchNovels(query: String, page: Int, exactTag: Bool) async throws -> NoveliaRankPage {
+    func searchNovels(query: String, page: Int, exactTag: Bool,
+                      filter: NovelCatalogFilter) async throws -> NoveliaRankPage {
         try mark("searchNovels"); return NoveliaRankPage(novels: page == 1 ? [novel()] : [], pageCount: 2)
     }
     func siteRankedNovels(page: Int) async throws -> NoveliaRankPage {

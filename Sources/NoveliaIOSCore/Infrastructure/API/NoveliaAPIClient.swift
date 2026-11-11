@@ -24,7 +24,8 @@ public struct NoveliaAPIClient: Sendable {
         self.tokenProvider = tokenProvider
     }
 
-    public func searchNovels(query: String, page: Int = 1, exactTag: Bool = false) async throws -> NoveliaRankPage {
+    public func searchNovels(query: String, page: Int = 1, exactTag: Bool = false,
+                             filter: NovelCatalogFilter = .standard) async throws -> NoveliaRankPage {
         let searchQuery = exactTag ? "\(query)$" : query
         // 应用页码从 1 开始，小说搜索 API 的页码从 0 开始。
         let apiPage = max(page - 1, 0)
@@ -35,10 +36,10 @@ public struct NoveliaAPIClient: Sendable {
                 URLQueryItem(name: "pageSize", value: "20"),
                 URLQueryItem(name: "query", value: searchQuery),
                 URLQueryItem(name: "provider", value: Self.providers.joined(separator: ",")),
-                URLQueryItem(name: "type", value: "0"),
-                URLQueryItem(name: "level", value: "1"),
+                URLQueryItem(name: "type", value: String(filter.kind.rawValue)),
+                URLQueryItem(name: "level", value: String(filter.rating.rawValue)),
                 URLQueryItem(name: "translate", value: "0"),
-                URLQueryItem(name: "sort", value: "0")
+                URLQueryItem(name: "sort", value: String(filter.sort.rawValue))
             ]
         )
 

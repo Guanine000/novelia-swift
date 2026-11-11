@@ -1157,6 +1157,37 @@ final class TapTests: XCTestCase {
   XCTAssertTrue(body.waitForExistence(timeout: 30))
   zeroExternalRequests(app)
  }
+ func testDiscoverFilters() {
+  let app = start(); defer { app.terminate() }
+  app.buttons["\u{53d1}\u{73b0}"].firstMatch.tap()
+  func chip(_ prefix: String) -> XCUIElement {
+   app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", prefix)).firstMatch
+  }
+  func choose(_ label: String) {
+   let button = app.buttons[label].firstMatch
+   if button.waitForExistence(timeout: 5) { button.tap(); return }
+   let item = app.menuItems[label].firstMatch
+   XCTAssertTrue(item.waitForExistence(timeout: 5), "Menu option missing: \(label)")
+   item.tap()
+  }
+  let kind = chip("\u{7c7b}\u{578b}")
+  XCTAssertTrue(kind.waitForExistence(timeout: 15)); kind.tap()
+  choose("\u{8fde}\u{8f7d}\u{4e2d}")
+  XCTAssertTrue(chip("\u{7c7b}\u{578b}\u{ff1a}\u{8fde}\u{8f7d}\u{4e2d}").waitForExistence(timeout: 5))
+  let rating = chip("\u{5206}\u{7ea7}")
+  rating.tap()
+  choose("\u{5168}\u{90e8}")
+  XCTAssertTrue(chip("\u{5206}\u{7ea7}\u{ff1a}\u{5168}\u{90e8}").waitForExistence(timeout: 5))
+  XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "R18")).firstMatch.waitForExistence(timeout: 5))
+  rating.tap()
+  choose("\u{4e00}\u{822c}\u{5411}")
+  let sort = chip("\u{6392}\u{5e8f}")
+  sort.tap()
+  choose("\u{70b9}\u{51fb}")
+  XCTAssertTrue(chip("\u{6392}\u{5e8f}\u{ff1a}\u{70b9}\u{51fb}").waitForExistence(timeout: 5))
+  XCTAssertTrue(app.staticTexts["\u{70ed}\u{95e8}\u{4f5c}\u{54c1}"].waitForExistence(timeout: 5))
+  zeroExternalRequests(app)
+ }
 }
 ''', encoding='utf-8')
 if args.library_archive or args.library_delete:
