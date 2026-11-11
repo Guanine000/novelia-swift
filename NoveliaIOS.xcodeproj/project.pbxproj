@@ -51,6 +51,8 @@
 		A10000000000000000000021 /* EPUBPagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000018 /* EPUBPagerView.swift */; };
 		A10000000000000000000022 /* EPUBReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* EPUBReaderModel.swift */; };
 		A10000000000000000000023 /* EPUBReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* EPUBReaderView.swift */; };
+		A100000000000000000001A0 /* AnnotationEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000001A0 /* AnnotationEditor.swift */; };
+		A100000000000000000001A1 /* ReaderAnnotationsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000001A1 /* ReaderAnnotationsSheet.swift */; };
 		A10000000000000000000024 /* EPUBSampleBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000021 /* EPUBSampleBook.swift */; };
 		A10000000000000000000025 /* ThirdPartyLicenses in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000022 /* ThirdPartyLicenses */; };
 		A10000000000000000000026 /* WebDAVSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000023 /* WebDAVSync.swift */; };
@@ -83,6 +85,10 @@
 		C2A00000000000000000000A /* SerialAsyncGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A00000000000000000000B /* SerialAsyncGate.swift */; };
 		C2A000000000000000000010 /* ReaderBookmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A000000000000000000011 /* ReaderBookmark.swift */; };
 		C2A000000000000000000012 /* ReaderBookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A000000000000000000013 /* ReaderBookmarkStore.swift */; };
+		A100000000000000000000F5 /* ReaderAnnotation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F5 /* ReaderAnnotation.swift */; };
+		A100000000000000000000F6 /* ReaderAnnotationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F6 /* ReaderAnnotationStore.swift */; };
+		A15F000000000000000000F5 /* ReaderAnnotation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F5 /* ReaderAnnotation.swift */; };
+		A15F000000000000000000F6 /* ReaderAnnotationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000000F6 /* ReaderAnnotationStore.swift */; };
 		FDC000000000000000000011 /* CloudSpeechContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000001 /* CloudSpeechContract.swift */; };
 		FDC000000000000000000012 /* SpeechPlaybackContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000002 /* SpeechPlaybackContract.swift */; };
 		FDC000000000000000000013 /* CloudSpeechText.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC000000000000000000003 /* CloudSpeechText.swift */; };
@@ -257,6 +263,8 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		A15F0000000000000000005C /* EPUBWordCount.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7A000000000000000000004 /* EPUBWordCount.swift */; };
 		A15F0000000000000000005D /* EPUBChapterSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000090 /* EPUBChapterSource.swift */; };
 		A15F0000000000000000005E /* EPUBReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* EPUBReaderView.swift */; };
+		A15F000000000000000001A0 /* AnnotationEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000001A0 /* AnnotationEditor.swift */; };
+		A15F000000000000000001A1 /* ReaderAnnotationsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = B100000000000000000001A1 /* ReaderAnnotationsSheet.swift */; };
 		A15F0000000000000000005F /* EPUBSampleBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000021 /* EPUBSampleBook.swift */; };
 		A15F00000000000000000060 /* ReadiumEPUBReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000300 /* ReadiumEPUBReaderModel.swift */; };
 		A15F00000000000000000061 /* ReadiumTextPublication.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000310 /* ReadiumTextPublication.swift */; };
@@ -370,6 +378,7 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		B10000000000000000000018 /* EPUBPagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBPagerView.swift; sourceTree = "<group>"; };
 		B10000000000000000000019 /* EPUBReaderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBReaderModel.swift; sourceTree = "<group>"; };
 		B10000000000000000000020 /* EPUBReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBReaderView.swift; sourceTree = "<group>"; };
+		B100000000000000000001A0 /* AnnotationEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "../AnnotationEditor.swift"; sourceTree = "<group>"; };
 		B10000000000000000000021 /* EPUBSampleBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBSampleBook.swift; sourceTree = "<group>"; };
 		B10000000000000000000022 /* ThirdPartyLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; path = iOSApp/Resources/ThirdPartyLicenses; sourceTree = "<group>"; };
 		B10000000000000000000023 /* WebDAVSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Sync/WebDAVSync.swift; sourceTree = "<group>"; };
@@ -380,6 +389,7 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		B10000000000000000000033 /* BlockedTagsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Settings/BlockedTagsViews.swift; sourceTree = "<group>"; };
 		B10000000000000000000034 /* ReaderBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderBackground.swift; sourceTree = "<group>"; };
 		C2A000000000000000000017 /* ReaderBookmarksSearchSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderBookmarksSearchSheet.swift; sourceTree = "<group>"; };
+		B100000000000000000001A1 /* ReaderAnnotationsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderAnnotationsSheet.swift; sourceTree = "<group>"; };
 		C2A00000000000000000001B /* ReaderImageViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderImageViewer.swift; sourceTree = "<group>"; };
 		F7A000000000000000000006 /* BookWordCounter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/BookWordCounter.swift; sourceTree = "<group>"; };
 		C2A000000000000000000019 /* LibraryBookInfoEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/LibraryBookInfoEditor.swift; sourceTree = "<group>"; };
@@ -402,6 +412,8 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		C2A00000000000000000000B /* SerialAsyncGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/SerialAsyncGate.swift; sourceTree = "<group>"; };
 		C2A000000000000000000011 /* ReaderBookmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/ReaderBookmark.swift; sourceTree = "<group>"; };
 		C2A000000000000000000013 /* ReaderBookmarkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderBookmarkStore.swift; sourceTree = "<group>"; };
+		B100000000000000000000F5 /* ReaderAnnotation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderAnnotation.swift; sourceTree = "<group>"; };
+		B100000000000000000000F6 /* ReaderAnnotationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReaderAnnotationStore.swift; sourceTree = "<group>"; };
 		C2A000000000000000000015 /* BookTextSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/BookTextSearch.swift; sourceTree = "<group>"; };
 		F7A000000000000000000002 /* BookWordCount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/BookWordCount.swift; sourceTree = "<group>"; };
 		C2A00000000000000000000D /* ReadiumLocatorKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/ReadiumLocatorKeys.swift; sourceTree = "<group>"; };
@@ -570,6 +582,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				B10000000000000000000019 /* EPUBReaderModel.swift */,
 				B15C00000000000000000002 /* EPUBSharedTypes.swift */,
 				B10000000000000000000020 /* EPUBReaderView.swift */,
+				B100000000000000000001A0 /* AnnotationEditor.swift */,
 				B10000000000000000000021 /* EPUBSampleBook.swift */,
 				B10000000000000000000300 /* ReadiumEPUBReaderModel.swift */,
 				B10000000000000000000310 /* ReadiumTextPublication.swift */,
@@ -617,6 +630,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				B10000000000000000000033 /* BlockedTagsViews.swift */,
 				B10000000000000000000034 /* ReaderBackground.swift */,
 				C2A000000000000000000017 /* ReaderBookmarksSearchSheet.swift */,
+				B100000000000000000001A1 /* ReaderAnnotationsSheet.swift */,
 				C2A00000000000000000001B /* ReaderImageViewer.swift */,
 				F7A000000000000000000006 /* BookWordCounter.swift */,
 				C2A000000000000000000019 /* LibraryBookInfoEditor.swift */,
@@ -693,6 +707,8 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				C2A00000000000000000000B /* SerialAsyncGate.swift */,
 				C2A000000000000000000011 /* ReaderBookmark.swift */,
 				C2A000000000000000000013 /* ReaderBookmarkStore.swift */,
+				B100000000000000000000F5 /* ReaderAnnotation.swift */,
+				B100000000000000000000F6 /* ReaderAnnotationStore.swift */,
 				C2A000000000000000000015 /* BookTextSearch.swift */,
 				F7A000000000000000000002 /* BookWordCount.swift */,
 				C2A00000000000000000000D /* ReadiumLocatorKeys.swift */,
@@ -1019,6 +1035,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A10000000000000000000036 /* BlockedTagsViews.swift in Sources */,
 				A10000000000000000000037 /* ReaderBackground.swift in Sources */,
 				C2A000000000000000000016 /* ReaderBookmarksSearchSheet.swift in Sources */,
+				A100000000000000000001A1 /* ReaderAnnotationsSheet.swift in Sources */,
 				C2A00000000000000000001A /* ReaderImageViewer.swift in Sources */,
 				F7A000000000000000000005 /* BookWordCounter.swift in Sources */,
 				C2A000000000000000000018 /* LibraryBookInfoEditor.swift in Sources */,
@@ -1075,6 +1092,8 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				C2A00000000000000000000A /* SerialAsyncGate.swift in Sources */,
 				C2A000000000000000000010 /* ReaderBookmark.swift in Sources */,
 				C2A000000000000000000012 /* ReaderBookmarkStore.swift in Sources */,
+				A100000000000000000000F5 /* ReaderAnnotation.swift in Sources */,
+				A100000000000000000000F6 /* ReaderAnnotationStore.swift in Sources */,
 				FDC000000000000000000011 /* CloudSpeechContract.swift in Sources */,
 				FDC000000000000000000012 /* SpeechPlaybackContract.swift in Sources */,
 				FDC000000000000000000013 /* CloudSpeechText.swift in Sources */,
@@ -1107,6 +1126,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A10000000000000000000021 /* EPUBPagerView.swift in Sources */,
 				A10000000000000000000022 /* EPUBReaderModel.swift in Sources */,
 				A10000000000000000000023 /* EPUBReaderView.swift in Sources */,
+				A100000000000000000001A0 /* AnnotationEditor.swift in Sources */,
 				A10000000000000000000024 /* EPUBSampleBook.swift in Sources */,
 				A10000000000000000000300 /* ReadiumEPUBReaderModel.swift in Sources */,
 				A10000000000000000000310 /* ReadiumTextPublication.swift in Sources */,
@@ -1182,6 +1202,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A15F00000000000000000027 /* BlockedTagsViews.swift in Sources */,
 				A15F00000000000000000028 /* ReaderBackground.swift in Sources */,
 				A15F00000000000000000029 /* ReaderBookmarksSearchSheet.swift in Sources */,
+				A15F000000000000000001A1 /* ReaderAnnotationsSheet.swift in Sources */,
 				A15F0000000000000000002A /* ReaderImageViewer.swift in Sources */,
 				A15F0000000000000000002B /* BookWordCounter.swift in Sources */,
 				A15F0000000000000000002C /* LibraryBookInfoEditor.swift in Sources */,
@@ -1233,6 +1254,8 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A15F00000000000000000051 /* SerialAsyncGate.swift in Sources */,
 				A15F00000000000000000052 /* ReaderBookmark.swift in Sources */,
 				A15F00000000000000000053 /* ReaderBookmarkStore.swift in Sources */,
+				A15F000000000000000000F5 /* ReaderAnnotation.swift in Sources */,
+				A15F000000000000000000F6 /* ReaderAnnotationStore.swift in Sources */,
 				FDC000000000000000000021 /* CloudSpeechContract.swift in Sources */,
 				FDC000000000000000000022 /* SpeechPlaybackContract.swift in Sources */,
 				FDC000000000000000000023 /* CloudSpeechText.swift in Sources */,
@@ -1261,6 +1284,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A15F000000000000000000F0 /* TXTEPUBExport.swift in Sources */,
 				A15F000000000000000000F1 /* TXTEPUBExportService.swift in Sources */,
 				A15F0000000000000000005E /* EPUBReaderView.swift in Sources */,
+				A15F000000000000000001A0 /* AnnotationEditor.swift in Sources */,
 				A15F0000000000000000005F /* EPUBSampleBook.swift in Sources */,
 				A15F00000000000000000060 /* ReadiumEPUBReaderModel.swift in Sources */,
 				A15F00000000000000000061 /* ReadiumTextPublication.swift in Sources */,

@@ -43,6 +43,7 @@ private struct ReadiumEPUBReaderViewContent: View {
     @State private var isShowingStyle = false
     @State private var isShowingSpeech = false
     @State private var isShowingBookmarks = false
+    @State private var isShowingAnnotations = false
     @State private var bookmarksTab = ReaderBookmarksSearchSheet.Tab.bookmarks
     @State private var isScrubbing = false
     @State private var scrubProgress = 0.0
@@ -156,6 +157,10 @@ private struct ReadiumEPUBReaderViewContent: View {
                     .accessibilityIdentifier("readium-validation-visible-paragraphs")
                     .allowsHitTesting(false)
             }
+            Text("\(model.appliedAnnotationDecorationCount)")
+                .font(.system(size: 1)).opacity(0.01)
+                .accessibilityIdentifier("readium-annotation-count")
+                .allowsHitTesting(false)
         }
 #endif
         .compatToolbar(.hidden, for: .navigationBar)
@@ -177,7 +182,7 @@ private struct ReadiumEPUBReaderViewContent: View {
         }
         .modifier(ReaderRecapPresentation(store: settings.recaps, source: model.localRecapSource,
             active: model.status == .ready && !model.speech.isActive && !isShowingTOC && !isShowingStyle
-                && !isShowingBookmarks && !isShowingSpeech && !isShowingBookPreferences && model.activeNote == nil,
+                && !isShowingBookmarks && !isShowingAnnotations && !isShowingSpeech && !isShowingBookPreferences && model.activeNote == nil,
             libraryBookKey: statisticsBook?.id))
         .onAppear {
             if speechHandoff?.openRequest == nil { speechHandoff?.release() }
@@ -218,6 +223,17 @@ private struct ReadiumEPUBReaderViewContent: View {
         } message: { Text(model.curlError ?? "") }
         .onValueChange(of: settings.fontSize) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         .sheet(isPresented: $isShowingBookPreferences) { ReaderBookPreferencesView() }
+        .sheet(isPresented: $isShowingAnnotations) {
+            if let key = model.bookmarkKey ?? settings.activeBookID {
+                ReaderAnnotationsSheet(store: settings.annotations, bookKey: key,
+                                       bookTitle: model.bookTitle.isEmpty ? "阅读" : model.bookTitle,
+                                       chapterTitle: { model.chapterTitle($0) },
+                                       onJump: { annotation in
+                                           isShowingAnnotations = false
+                                           model.jump(to: annotation)
+                                       })
+            }
+        }
         .onValueChange(of: settings.projectionRevision) { _, _ in model.reloadBookPreferences(url: bookURL) }
         .onValueChange(of: settings.appearanceRaw) { _, _ in model.synchronizeSharedSettings(systemIsDark: colorScheme == .dark) }
         .onValueChange(of: backgrounds.revision) { _, _ in model.refreshBackground() }
@@ -257,6 +273,19 @@ private struct ReadiumEPUBReaderViewContent: View {
             }
         }
         .sheet(isPresented: $isShowingStyle) { styleSheet }
+        .sheet(item: $model.activeAnnotation) { annotation in
+            AnnotationEditorSheet(
+                target: AnnotationEditorTarget(range: nil, quote: annotation.quote, annotation: annotation),
+                onSave: { color, note in model.updateAnnotation(annotation, color: color, note: note) },
+                onDelete: { model.deleteAnnotation(annotation) })
+        }
+        .alert("无法添加标注", isPresented: Binding(
+            get: { model.annotationError != nil },
+            set: { if !$0 { model.annotationError = nil } })) {
+            Button("好") { model.annotationError = nil }
+        } message: {
+            Text(model.annotationError ?? "")
+        }
         .overlay(alignment: .bottom) {
             ReaderSpeechBar(controller: model.speech, openPanel: { isShowingSpeech = true })
         }
@@ -305,6 +334,12 @@ private struct ReadiumEPUBReaderViewContent: View {
                         Label("书签与搜索", systemImage: "magnifyingglass")
                     }
                     .accessibilityLabel("书签与搜索")
+                    Button {
+                        isShowingAnnotations = true
+                    } label: {
+                        Label("摘录与笔记", systemImage: "highlighter")
+                    }
+                    .accessibilityLabel("摘录与笔记")
                 }
                 Button {
                     model.isTOCDiagnosticsExpanded = false
@@ -361,7 +396,7 @@ private struct ReadiumEPUBReaderViewContent: View {
             readingTime: AnyView(ReaderRemainingTimeView(store: settings.remainingTime,
                 source: model.localTimeSource, point: model.readingTimePoint, mode: "paged|" + settings.projection.identity,
                 active: model.status == .ready && !model.curlBusy && !isScrubbing && !model.speech.isActive
-                    && !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingSpeech
+                    && !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingAnnotations && !isShowingSpeech
                     && !isShowingBookPreferences && model.activeNote == nil, isListening: model.speech.isActive))
         ) {
             positionAndScrub
@@ -563,15 +598,28 @@ private struct ReadiumNavigatorHost: UIViewControllerRepresentable {
         let container = ReadiumNavigatorContainer()
         container.onCharacterLookup = characterLookup
         container.onSpeakSelection = { [weak model] selection in model?.startSpeech(selection: selection) }
-        if let navigator = model.navigator { container.embed(navigator) }
+        container.onHighlightSelection = { [weak model] selection in model?.addAnnotation(selection: selection) }
+        container.onNoteSelection = { [weak model] selection in
+            model?.addAnnotation(selection: selection, editAfter: true)
+        }
+        if let navigator = model.navigator {
+            container.embed(navigator)
+            // 导航器位置可能在宿主嵌入前就已回报；视图真正挂上后再套一次标注装饰。
+            model.refreshAnnotationDecorations(force: true)
+        }
         container.configureCurl(model: model, enabled: curlEnabled)
         return container
     }
 
     func updateUIViewController(_ container: ReadiumNavigatorContainer, context: Context) {
         container.onCharacterLookup = characterLookup
+        container.onHighlightSelection = { [weak model] selection in model?.addAnnotation(selection: selection) }
+        container.onNoteSelection = { [weak model] selection in
+            model?.addAnnotation(selection: selection, editAfter: true)
+        }
         if let navigator = model.navigator, container.embedded !== navigator {
             container.embed(navigator)
+            model.refreshAnnotationDecorations(force: true)
         }
         container.configureCurl(model: model, enabled: curlEnabled)
     }
@@ -601,12 +649,24 @@ final class ReadiumNavigatorContainer: UIViewController {
     }
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(lookupCharacterSelection) { return onCharacterLookup != nil }
+        if action == #selector(highlightSelection) { return onHighlightSelection != nil }
+        if action == #selector(noteSelection) { return onNoteSelection != nil }
         return super.canPerformAction(action, withSender: sender)
     }
     var onSpeakSelection: ((Selection) -> Void)?
     @objc func speakSelection() {
         guard let selection = (embedded as? EPUBNavigatorViewController)?.currentSelection else { return }
         onSpeakSelection?(selection)
+    }
+    var onHighlightSelection: ((Selection) -> Void)?
+    var onNoteSelection: ((Selection) -> Void)?
+    @objc func highlightSelection() {
+        guard let selection = (embedded as? EPUBNavigatorViewController)?.currentSelection else { return }
+        onHighlightSelection?(selection)
+    }
+    @objc func noteSelection() {
+        guard let selection = (embedded as? EPUBNavigatorViewController)?.currentSelection else { return }
+        onNoteSelection?(selection)
     }
     private(set) weak var embedded: UIViewController?
 

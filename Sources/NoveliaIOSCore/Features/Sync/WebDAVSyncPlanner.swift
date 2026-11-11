@@ -116,6 +116,22 @@ enum WebDAVSyncPlanner {
         return bookmarks.filter { keys.contains($0.value.bookKey) }
     }
 
+    /// 单书文字处理只同步清单中本机 EPUB/TXT 的记录；在线与网络小说 EPUB 的键暂不映射。
+    static func textProjectionsToSync(_ records: [String: ReaderTextProjectionRecord],
+                                      in manifest: WebDAVManifest) -> [String: ReaderTextProjectionRecord] {
+        let hashes = (manifest.webBooks.flatMap(\.assets) + manifest.wenkuBooks.flatMap(\.assets)).map(\.hash)
+        let keys = Set(hashes.map { "epub:\($0)" } + hashes.map { "txt:\($0)" })
+        return records.filter { keys.contains($0.key) && $0.value.isValid }
+    }
+
+    /// 摘录与笔记随书籍同步，只保留清单中仍有文件的 EPUB/TXT 书。
+    static func annotationsToSync(_ annotations: [String: ReaderAnnotation],
+                                  in manifest: WebDAVManifest) -> [String: ReaderAnnotation] {
+        let hashes = (manifest.webBooks.flatMap(\.assets) + manifest.wenkuBooks.flatMap(\.assets)).map(\.hash)
+        let keys = Set(hashes.map { "epub:\($0)" } + hashes.map { "txt:\($0)" })
+        return annotations.filter { keys.contains($0.value.bookKey) && $0.value.isValidSyncRecord }
+    }
+
 
     /// 浅色、深色背景各自比较：远端严格较新才采用远端。
     static func planBackground(local: SyncedReaderBackground, remote: SyncedReaderBackground?) -> BackgroundSyncDecision {

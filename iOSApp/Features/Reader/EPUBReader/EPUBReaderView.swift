@@ -67,6 +67,7 @@ private struct EPUBReaderViewContent: View {
     @StateObject private var speech = SpeechPlaybackController()
     @State private var isShowingSpeech = false
     @State private var isShowingBookmarks = false
+    @State private var isShowingAnnotations = false
     @State private var bookmarksTab = ReaderBookmarksSearchSheet.Tab.bookmarks
     @State private var didCopyDiagnostics = false
     /// 目录诊断说明与 spine 编号默认隐藏，在设置里打开调试选项后才显示。
@@ -123,7 +124,8 @@ private struct EPUBReaderViewContent: View {
                 case .ready:
                     EPUBReaderPageSurface(model: model, speech: speech, showChrome: $showChrome, size: geometry.size,
                                           pageInsets: geometry.safeAreaInsets, curlEnabled: settings.nativePageCurlEnabled,
-                                          speechRects: model.speechHighlightRects, searchRects: model.searchHighlightRects)
+                                          speechRects: model.speechHighlightRects, searchRects: model.searchHighlightRects,
+                                          annotationHighlights: model.annotationHighlights)
                         .equatable()
                         // 底栏不再放上一页／下一页按钮，保留 VoiceOver 的翻页动作。
                         .accessibilityAdjustableAction { direction in
@@ -232,7 +234,7 @@ private struct EPUBReaderViewContent: View {
                           ready: model.status == .ready)
         .modifier(ReaderRecapPresentation(store: settings.recaps, source: model.localRecapSource,
             active: model.status == .ready && !model.isLayingOut && !speech.isActive
-                && !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingSpeech
+                && !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingAnnotations && !isShowingSpeech
                 && !isShowingBookPreferences && model.activeNote == nil && model.plainLinkMessage == nil,
             libraryBookKey: statisticsBook?.id))
         .modifier(ReaderSpeechPresentation(controller: speech, isPresented: $isShowingSpeech,
@@ -266,6 +268,17 @@ private struct EPUBReaderViewContent: View {
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NoveliaImportedFontsChanged"))) { _ in model.refreshBackground() }
         .onValueChange(of: settings.fontSize) { _, _ in synchronizeSettings(systemIsDark: colorScheme == .dark) }
         .sheet(isPresented: $isShowingBookPreferences) { ReaderBookPreferencesView() }
+        .sheet(isPresented: $isShowingAnnotations) {
+            if let key = model.bookmarkKey ?? settings.activeBookID {
+                ReaderAnnotationsSheet(store: settings.annotations, bookKey: key,
+                                       bookTitle: model.source?.bookTitle ?? "阅读",
+                                       chapterTitle: { model.chapterTitle($0) },
+                                       onJump: { annotation in
+                                           isShowingAnnotations = false
+                                           model.jump(to: annotation)
+                                       })
+            }
+        }
         .onValueChange(of: settings.projectionRevision) { _, _ in speech.stop(); model.reloadBookPreferences() }
         .onValueChange(of: settings.appearanceRaw) { _, _ in synchronizeSettings(systemIsDark: colorScheme == .dark) }
         .onValueChange(of: model.isAnimating) { _, active in
@@ -325,6 +338,12 @@ private struct EPUBReaderViewContent: View {
                         Label("书签与搜索", systemImage: "magnifyingglass")
                     }
                     .accessibilityLabel("书签与搜索")
+                    Button {
+                        isShowingAnnotations = true
+                    } label: {
+                        Label("摘录与笔记", systemImage: "highlighter")
+                    }
+                    .accessibilityLabel("摘录与笔记")
                 }
                 Button {
                     isShowingTOC = true
@@ -373,7 +392,7 @@ private struct EPUBReaderViewContent: View {
             readingTime: AnyView(ReaderRemainingTimeView(store: settings.remainingTime,
                 source: model.localTimeSource, point: model.readingTimePoint, mode: "paged|" + settings.projection.identity,
                 active: model.status == .ready && !model.isLayingOut && !isScrubbing && !speech.isActive
-                    && !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingSpeech
+                    && !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingAnnotations && !isShowingSpeech
                     && !isShowingBookPreferences && model.activeNote == nil && model.plainLinkMessage == nil,
                 isListening: speech.isActive))
         ) {
@@ -896,13 +915,15 @@ private struct EPUBReaderPageSurface: View, Equatable {
     let curlEnabled: Bool
     let speechRects: [CGRect]
     let searchRects: [CGRect]
+    let annotationHighlights: [EPUBReaderModel.AnnotationHighlight]
     @Environment(\.readerSpeechActions) private var speechActions
     @Environment(\.characterLookup) private var characterLookup
     @State private var translateText: String?
     @State private var showsTranslate = false
+    @State private var annotationEditor: AnnotationEditorTarget?
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.model === rhs.model && lhs.size == rhs.size && lhs.pageInsets == rhs.pageInsets && lhs.curlEnabled == rhs.curlEnabled && lhs.speechRects == rhs.speechRects && lhs.searchRects == rhs.searchRects
+        lhs.model === rhs.model && lhs.size == rhs.size && lhs.pageInsets == rhs.pageInsets && lhs.curlEnabled == rhs.curlEnabled && lhs.speechRects == rhs.speechRects && lhs.searchRects == rhs.searchRects && lhs.annotationHighlights == rhs.annotationHighlights
     }
 
     var body: some View {
@@ -941,6 +962,18 @@ private struct EPUBReaderPageSurface: View, Equatable {
                 translateText = text
                 showsTranslate = true
             },
+            annotationHitTest: { point in model.annotationID(at: point) },
+            onAnnotationTap: { id in
+                if let annotation = settings.annotations.annotation(id: id) {
+                    annotationEditor = .init(range: nil, quote: annotation.quote, annotation: annotation)
+                }
+            },
+            onHighlightSelection: { range, quote in
+                _ = model.addAnnotation(range: range, quote: quote)
+            },
+            onNoteSelection: { range, quote in
+                annotationEditor = .init(range: range, quote: quote, annotation: nil)
+            },
             curlEnabled: curlEnabled,
             paperInsets: UIEdgeInsets(top: pageInsets.top, left: pageInsets.leading, bottom: pageInsets.bottom, right: pageInsets.trailing),
             paperColor: UIColor(model.pageBackgroundColor),
@@ -948,12 +981,47 @@ private struct EPUBReaderPageSurface: View, Equatable {
             images: model.pagerImages()
         )
         .overlay {
+            ForEach(ReaderAnnotation.Color.allCases, id: \.self) { color in
+                Path { path in
+                    for highlight in annotationHighlights where highlight.color == color {
+                        path.addRect(highlight.rect)
+                    }
+                }
+                .fill(color.swiftUIColor.opacity(0.35))
+                .offset(x: curlEnabled ? pageInsets.leading : 0, y: curlEnabled ? pageInsets.top : 0)
+                // 卷页纸面已画入标注；覆盖层再画一次会叠加变深，动画中也会悬在卷起的页面上。
+                .opacity(curlEnabled || model.isAnimating ? 0 : 1)
+                .allowsHitTesting(false).accessibilityHidden(true)
+            }
+        }
+        .overlay {
             Path { path in for rect in searchRects { path.addRect(rect) } }
                 .fill(Color.yellow.opacity(0.35))
                 .offset(x: curlEnabled ? pageInsets.leading : 0, y: curlEnabled ? pageInsets.top : 0)
                 .opacity(model.isAnimating ? 0 : 1)
                 .allowsHitTesting(false).accessibilityHidden(true)
         }
+        .sheet(item: $annotationEditor) { target in
+            AnnotationEditorSheet(target: target,
+                                  onSave: { color, note in
+                                      if let annotation = target.annotation {
+                                          try? settings.annotations.update(annotation.id, color: color, note: note)
+                                      } else if let range = target.range {
+                                          _ = model.addAnnotation(range: range, quote: target.quote, color: color, note: note)
+                                      }
+                                  },
+                                  onDelete: target.annotation.map { annotation in
+                                      { try? settings.annotations.remove(annotation.id) }
+                                  })
+        }
+        #if DEBUG
+        .overlay(alignment: .topLeading) {
+            Text("\(annotationHighlights.count)")
+                .font(.system(size: 1)).opacity(0.01)
+                .accessibilityIdentifier("native-annotation-count")
+                .allowsHitTesting(false)
+        }
+        #endif
         .compatTranslationPresentation(isPresented: $showsTranslate, text: translateText)
         .ignoresSafeArea(edges: curlEnabled ? .all : [])
     }

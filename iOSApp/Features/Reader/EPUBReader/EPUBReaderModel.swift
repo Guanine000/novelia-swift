@@ -1,6 +1,7 @@
 import OSLog
 import SwiftUI
 import UIKit
+import Combine
 import YueduCoreText
 #if canImport(NoveliaIOSCore)
 import NoveliaIOSCore
@@ -24,17 +25,30 @@ final class EPUBReaderModel: ObservableObject {
         case failed(String)
     }
 
-    @Published private(set) var status: Status = .idle
+    @Published private(set) var status: Status = .idle {
+        // 打开时 pageBook/location 先于 ready 变化，高亮计算会被状态守卫跳过；就绪后再补算一次。
+        didSet { if status == .ready { refreshAnnotationHighlights() } }
+    }
     @Published private(set) var source: (any EPUBChapterSource)?
     /// 来源为 EPUB 时保存其容器；目录诊断与文件哈希阅读位置仅适用于 EPUB。
     var container: EPUBContainer? { source as? EPUBContainer }
-    private(set) var pageBook: EPUBPageBook?
+    private(set) var pageBook: EPUBPageBook? {
+        didSet { refreshAnnotationHighlights() }
+    }
+    struct AnnotationHighlight: Identifiable, Equatable {
+        let id: UUID
+        let rect: CGRect
+        let color: ReaderAnnotation.Color
+    }
+    @Published private(set) var annotationHighlights: [AnnotationHighlight] = []
+    @Published var annotationError: String?
     @Published private(set) var readingTimePoint = ReadingTimePoint.start
     private var recapTXT: TXTParsedBook?
     private var textTimeMetrics: (@Sendable (ReadingTextProjection) async throws -> ReadingTimeMetrics)?
     @Published private(set) var location = EPUBReadingLocation(spineIndex: 0, pageIndex: 0) {
         didSet {
             refreshSearchHighlight()
+            refreshAnnotationHighlights()
             trimPageCaches()
             logLocationChange(from: oldValue)
             readingTimePoint = .init(resource: location.spineIndex,
@@ -171,6 +185,9 @@ final class EPUBReaderModel: ObservableObject {
         self.settings = settings
         self.webContext = webContext; self.onReachedEnd = onReachedEnd
         self.layoutCoordinator = layoutCoordinator
+        annotationObservation = settings.annotations.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor in self?.refreshAnnotationHighlights() }
+        }
         EPUBLocalFonts.registerSavedFonts()
         if let data = settings.defaults.data(forKey: settings.styleStorageKey),
            let saved = try? JSONDecoder().decode(EPUBReaderStyle.self, from: data) {
@@ -186,9 +203,11 @@ final class EPUBReaderModel: ObservableObject {
 
     deinit {
         if let memoryWarningObserver { NotificationCenter.default.removeObserver(memoryWarningObserver) }
+        annotationObservation?.cancel()
     }
 
     private var memoryWarningObserver: NSObjectProtocol?
+    private var annotationObservation: AnyCancellable?
 
     /// 在 3× 分辨率下，每页位图约占 14 MB。保留可见页面和两侧各 `radius`
     /// 页（可跨越相邻章节）；其他页面再次进入可视范围时，
@@ -931,9 +950,16 @@ final class EPUBReaderModel: ObservableObject {
     func pagerImages() -> EPUBPagerView.PageImages {
         guard let pageBook else { return .init(previous: nil, current: nil, next: nil) }
         if usesDoublePage {
-            return .init(previous: spreadImage(at: turnLocation(forward: false)),
-                         current: spreadImage(at: location),
-                         next: spreadImage(at: turnLocation(forward: true)), size: viewportSize)
+            var result = EPUBPagerView.PageImages(previous: spreadImage(at: turnLocation(forward: false)),
+                                                  current: spreadImage(at: location),
+                                                  next: spreadImage(at: turnLocation(forward: true)), size: viewportSize)
+            if settings.nativePageCurlEnabled {
+                result.currentHighlights = pageHighlights(spineIndex: location.spineIndex,
+                                                         pageIndex: location.pageIndex, leafCount: 2)
+                result.previousHighlights = neighborHighlights(forward: false)
+                result.nextHighlights = neighborHighlights(forward: true)
+            }
+            return result
         }
         let size = viewportSize
         guard size.width > 0 else { return .init(previous: nil, current: nil, next: nil) }
@@ -956,8 +982,40 @@ final class EPUBReaderModel: ObservableObject {
         if result.next == nil, let source, location.spineIndex + 1 < source.chapterCount {
             result.next = cachedImage(location.spineIndex + 1, 0, background: background)
         }
+        if settings.nativePageCurlEnabled {
+            result.currentHighlights = pageHighlights(spineIndex: location.spineIndex,
+                                                     pageIndex: location.pageIndex, leafCount: usesDoublePage ? 2 : 1)
+            result.previousHighlights = neighborHighlights(forward: false)
+            result.nextHighlights = neighborHighlights(forward: true)
+        }
         schedulePrerender(around: location.spineIndex, pageIndex: location.pageIndex)
         return result
+    }
+
+    /// 仿真卷页纸面需要当前/相邻页的标注矩形；矩形坐标与分页页一致，由纸面合成时加安全区偏移。
+    private func pageHighlights(spineIndex: Int, pageIndex: Int, leafCount: Int) -> [EPUBPagerView.PageHighlight] {
+        guard let bookKey = bookmarkKey, let pageBook,
+              let text = pageBook.sourceText(spineIndex: spineIndex),
+              spineIndex >= 0, pageIndex >= 0 else { return [] }
+        let annotations = settings.annotations.annotations(for: bookKey, chapter: spineIndex)
+        guard !annotations.isEmpty else { return [] }
+        var result: [EPUBPagerView.PageHighlight] = []
+        for annotation in annotations {
+            guard let range = ReaderAnnotationResolver.resolve(annotation, in: text) else { continue }
+            for leaf in 0..<leafCount {
+                for rect in pageBook.selectionRects(for: range, on: pageID(spineIndex, pageIndex + leaf)) {
+                    result.append(.init(rect: rect.offsetBy(dx: CGFloat(leaf) * leafWidth, dy: 0),
+                                        color: annotation.color))
+                }
+            }
+        }
+        return result
+    }
+
+    private func neighborHighlights(forward: Bool) -> [EPUBPagerView.PageHighlight] {
+        guard let target = turnLocation(forward: forward) else { return [] }
+        return pageHighlights(spineIndex: target.spineIndex, pageIndex: target.pageIndex,
+                              leafCount: usesDoublePage ? 2 : 1)
     }
 
     private func spreadImage(at target: EPUBReadingLocation?) -> CGImage? {
@@ -1006,6 +1064,59 @@ final class EPUBReaderModel: ObservableObject {
 
     func selectedText(for range: NSRange) -> String? {
         pageBook?.selectedText(for: range, on: pageID(location.spineIndex, location.pageIndex + selectionLeaf))
+    }
+
+    /// 把当前选中的章内范围保存为标注；位置以引文和 UTF-16 范围持久化，不保存页面坐标。
+    @discardableResult
+    func addAnnotation(range: NSRange, quote: String, color: ReaderAnnotation.Color = .yellow,
+                       note: String = "") -> ReaderAnnotation? {
+        guard let bookKey = bookmarkKey,
+              let text = pageBook?.sourceText(spineIndex: location.spineIndex),
+              NSMaxRange(range) <= (text as NSString).length else { return nil }
+        do {
+            let annotation = try settings.annotations.add(
+                bookKey: bookKey, chapterIndex: location.spineIndex,
+                chapterID: webChapterID(location.spineIndex),
+                resourceHref: container.flatMap {
+                    $0.spine.indices.contains(location.spineIndex) ? $0.spine[location.spineIndex].href : nil
+                },
+                progression: min(1, max(0, Double(range.location) / Double(max(1, text.utf16.count)))),
+                range: range, quote: quote, chapterText: text,
+                projectionIdentity: settings.projection.identity, color: color, note: note
+            )
+            refreshAnnotationHighlights()
+            return annotation
+        } catch {
+            annotationError = error.localizedDescription
+            return nil
+        }
+    }
+
+    func annotationID(at point: CGPoint) -> UUID? {
+        annotationHighlights.last(where: { $0.rect.contains(point) })?.id
+    }
+
+    func jump(to annotation: ReaderAnnotation) {
+        jump(toChapter: annotation.chapterIndex, progression: annotation.progression ?? 0,
+             exactOffset: annotation.startUTF16)
+    }
+
+    /// 当前页的标注矩形。只从持久化引文计算，不写回页面位图；翻页、重排或标注变化后重算。
+    func refreshAnnotationHighlights() {
+        guard status == .ready, let bookKey = bookmarkKey, let pageBook,
+              let text = pageBook.sourceText(spineIndex: location.spineIndex) else {
+            if !annotationHighlights.isEmpty { annotationHighlights = [] }
+            return
+        }
+        let annotations = settings.annotations.annotations(for: bookKey, chapter: location.spineIndex)
+        var next: [AnnotationHighlight] = []
+        for annotation in annotations {
+            guard let range = ReaderAnnotationResolver.resolve(annotation, in: text) else { continue }
+            next.append(contentsOf: selectionRects(for: range).map {
+                AnnotationHighlight(id: annotation.id, rect: $0, color: annotation.color)
+            })
+        }
+        if next != annotationHighlights { annotationHighlights = next }
     }
 
     private func turnLocation(forward: Bool) -> EPUBReadingLocation? {
@@ -1402,6 +1513,7 @@ final class EPUBReaderModel: ObservableObject {
     }
     func reloadBookPreferences() {
         searchHit = nil; searchHighlightRects = []; readingReturnPoint = nil
+        annotationHighlights = []
         reloadStoredStyle()
         (source as? EPUBContainer)?.displayProjection = settings.projection
         (source as? TextChapterSource)?.displayProjection = settings.projection

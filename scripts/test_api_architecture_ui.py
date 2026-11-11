@@ -27,6 +27,7 @@ parser.add_argument('--epub-failure', choices=['archive', 'chapter', 'spine'], h
 parser.add_argument('--library-delete', action='store_true', help='Verify deletion of collapsed duplicates and nonblocking cloud failure')
 parser.add_argument('--epub-pagination', action='store_true', help='Check actual visible paragraph continuity with Readium in a synthetic EPUB')
 parser.add_argument('--library-archive', action='store_true', help='Exercise library/series multi-select archive sharing in the dedicated App only')
+parser.add_argument('--native-annotation', action='store_true', help='Verify text selection persists a highlight annotation (native or Readium test)')
 args = parser.parse_args()
 if args.library_delete and (args.library_archive or args.epub_pagination or args.epub_failure or args.performance):
     parser.error('--library-delete must run independently')
@@ -47,7 +48,7 @@ subprocess.run(['xcrun','simctl','install',args.device,args.app], check=True)
 (r/'TapTests.swift').write_text(r'''import XCTest
 final class TapTests: XCTestCase {
  let bundle = "cc.novelia.ios.architecture-validation"
- func start(readium: Bool = false, failSearch: Bool = false, txt: Bool = false, webUpdate: Bool = false, ambiguous: Bool = false, large: Bool = false, speechAudio: Bool = false) -> XCUIApplication {
+ func start(readium: Bool = false, failSearch: Bool = false, txt: Bool = false, webUpdate: Bool = false, ambiguous: Bool = false, large: Bool = false, speechAudio: Bool = false, nativeCurl: Bool = false) -> XCUIApplication {
   continueAfterFailure = false
   let app = XCUIApplication(bundleIdentifier: bundle)
   app.launchArguments = ["-architectureValidation", "-resetArchitectureValidation"]
@@ -58,6 +59,7 @@ final class TapTests: XCTestCase {
   if large { app.launchArguments.append("-architectureLargeWebEPUB") }
   if failSearch { app.launchArguments.append("-architectureFailFirstSearch") }
   if readium { app.launchArguments.append("-architectureReadium") }
+  if nativeCurl { app.launchArguments.append(contentsOf: ["-reader.nativePageCurl.v1", "YES"]) }
   app.launch()
   XCTAssertTrue(app.staticTexts["architecture-validation-status"].waitForExistence(timeout: 15))
   return app
@@ -94,8 +96,8 @@ final class TapTests: XCTestCase {
   }
   XCTAssertTrue(element.waitForExistence(timeout: 5)); return element
  }
- func openDownloadedNetworkBook(readium: Bool, ambiguous: Bool = false, large: Bool = false, speechAudio: Bool = false) -> XCUIApplication {
-  let app = start(readium: readium, webUpdate: true, ambiguous: ambiguous, large: large, speechAudio: speechAudio)
+ func openDownloadedNetworkBook(readium: Bool, ambiguous: Bool = false, large: Bool = false, speechAudio: Bool = false, nativeCurl: Bool = false) -> XCUIApplication {
+  let app = start(readium: readium, webUpdate: true, ambiguous: ambiguous, large: large, speechAudio: speechAudio, nativeCurl: nativeCurl)
   app.buttons["发现"].firstMatch.tap()
   let novel = app.staticTexts["架构验证小说"].firstMatch
   XCTAssertTrue(novel.waitForExistence(timeout: 15)); novel.tap()
@@ -539,7 +541,7 @@ final class TapTests: XCTestCase {
   zeroExternalRequests(app)
  }
  func testSpeechNativeSelectionAndHighlightTap() {
-  let app = openDownloadedNetworkBook(readium: false); defer { app.terminate() }
+  let app = openDownloadedNetworkBook(readium: false, nativeCurl: true); defer { app.terminate() }
   let point = app.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.27))
   point.press(forDuration: 1)
   let from = app.descendants(matching: .any).matching(identifier: "从此句朗读").firstMatch
@@ -548,6 +550,72 @@ final class TapTests: XCTestCase {
   point.tap()
   XCTAssertTrue(app.buttons["快捷暂停朗读"].waitForExistence(timeout: 5), "Tapping the highlighted sentence must resume")
   zeroExternalRequests(app)
+ }
+ func testNativeAnnotationHighlight() {
+  let app = openDownloadedNetworkBook(readium: false, nativeCurl: true); defer { app.terminate() }
+  let point = app.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.27))
+  point.press(forDuration: 1)
+  let highlight = app.descendants(matching: .any).matching(identifier: "高亮").firstMatch
+  XCTAssertTrue(highlight.waitForExistence(timeout: 5), "Selection menu must offer highlight")
+  highlight.tap()
+  sleep(2)
+  let created = XCTAttachment(screenshot: app.screenshot())
+  created.name = "原生新建标注"; created.lifetime = .keepAlways; add(created)
+  let menu = app.buttons["阅读菜单"].firstMatch
+  XCTAssertTrue(menu.waitForExistence(timeout: 10)); menu.tap()
+  let list = app.buttons["摘录与笔记"].firstMatch
+  XCTAssertTrue(list.waitForExistence(timeout: 5)); list.tap()
+  XCTAssertTrue(app.navigationBars["摘录与笔记"].waitForExistence(timeout: 10))
+  app.buttons["完成"].firstMatch.tap()
+  let count = app.staticTexts["native-annotation-count"].firstMatch
+  XCTAssertTrue(count.waitForExistence(timeout: 5))
+  XCTAssertNotEqual(count.label, "0", "Highlight must render after returning from the list")
+  app.buttons["返回"].firstMatch.tap()
+  let book = app.staticTexts["架构验证小说"].firstMatch
+  XCTAssertTrue(book.waitForExistence(timeout: 15)); book.tap()
+  XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 30))
+  XCTAssertTrue(count.waitForExistence(timeout: 10))
+  XCTAssertNotEqual(count.label, "0", "Highlight must render again after reopening the book")
+  sleep(2)
+  let reopened = XCTAttachment(screenshot: app.screenshot())
+  reopened.name = "原生重开标注"; reopened.lifetime = .keepAlways; add(reopened)
+ }
+ func testReadiumAnnotationHighlight() {
+  let app = openDownloadedNetworkBook(readium: true); defer { app.terminate() }
+  let web = app.webViews.firstMatch
+  XCTAssertTrue(web.waitForExistence(timeout: 30))
+  let point = web.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.27))
+  point.press(forDuration: 1.2)
+  let highlight = app.descendants(matching: .any).matching(identifier: "高亮").firstMatch
+  XCTAssertTrue(highlight.waitForExistence(timeout: 5), "Readium selection menu must offer highlight")
+  highlight.tap()
+  sleep(2)
+  let created = XCTAttachment(screenshot: app.screenshot())
+  created.name = "Readium新建标注"; created.lifetime = .keepAlways; add(created)
+  let menu = app.buttons["阅读菜单"].firstMatch
+  XCTAssertTrue(menu.waitForExistence(timeout: 10)); menu.tap()
+  let list = app.buttons["摘录与笔记"].firstMatch
+  XCTAssertTrue(list.waitForExistence(timeout: 5)); list.tap()
+  XCTAssertTrue(app.navigationBars["摘录与笔记"].waitForExistence(timeout: 10))
+  app.buttons["完成"].firstMatch.tap()
+  let count = app.staticTexts["readium-annotation-count"].firstMatch
+  XCTAssertTrue(count.waitForExistence(timeout: 10))
+  XCTAssertNotEqual(count.label, "0", "Decoration must be applied after returning from the list")
+  app.buttons["返回"].firstMatch.tap()
+  let book = app.staticTexts["架构验证小说"].firstMatch
+  XCTAssertTrue(book.waitForExistence(timeout: 15)); book.tap()
+  XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 30))
+  XCTAssertTrue(count.waitForExistence(timeout: 10))
+  XCTAssertNotEqual(count.label, "0", "Decoration must be reapplied after reopening the book")
+  sleep(6)
+  let shot = XCTAttachment(screenshot: app.screenshot())
+  shot.name = "Readium重开标注"; shot.lifetime = .keepAlways; add(shot)
+  app.swipeLeft()
+  sleep(1)
+  app.swipeRight()
+  sleep(2)
+  let turned = XCTAttachment(screenshot: app.screenshot())
+  turned.name = "Readium翻页返回标注"; turned.lifetime = .keepAlways; add(turned)
  }
  func testSpeechReadiumSelectionStart() {
   let app = start(readium: true, txt: true); defer { app.terminate() }
@@ -1747,6 +1815,19 @@ if args.library_archive:
             assert all(not name.startswith('/') and '..' not in name.split('/') for name in names), f'Unsafe entry in {archive_path}: {names}'
             assert all(archive.getinfo(name).file_size > 0 for name in names), f'Empty entry in {archive_path}: {names}'
             print(f'archive {archive_path.name}: ' + ', '.join(names), flush=True)
+if args.native_annotation:
+    data_root = Path(subprocess.check_output(['xcrun','simctl','get_app_container',args.device,
+                                            'cc.novelia.ios.architecture-validation','data'], text=True).strip())
+    path = data_root/'Library/Application Support/Annotations/annotations.json'
+    if not path.exists():
+        raise SystemExit(f'Native highlight did not write {path}')
+    records = json.loads(path.read_text())
+    live = [item for item in records.values() if not item.get('deleted')]
+    if not live:
+        raise SystemExit('Native highlight left no live annotation')
+    if not all(item.get('quote') and item.get('bookKey') for item in live):
+        raise SystemExit('Native annotation is missing its text anchor')
+    print(f'annotations: {len(live)}', flush=True)
 if args.performance:
     metrics = subprocess.run(['xcrun','xcresulttool','get','test-results','metrics','--path',
                               str(next((r/'DerivedData/Logs/Test').glob('*.xcresult'))), '--compact'],

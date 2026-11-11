@@ -117,6 +117,14 @@ struct BookReadingPreferences: Codable, Equatable {
     /// 旧记录缺字段时仍按原单书样式解释；新建文字规则不自动开启样式覆盖。
     var styleOverride: Bool? = nil
     var projection: ReadingTextProjection = .init()
+    /// 最近一次设置本书文字处理的时间；旧记录缺字段时不参与同步更新时间比较。
+    var projectionUpdatedAt: Date? = nil
+}
+
+/// 单书文字处理记录；`updatedAt` 用于本机与同步的较新者胜出。
+struct ReaderTextProjectionRecord: Codable, Equatable {
+    var projection: ReadingTextProjection
+    var updatedAt: Date
 }
 
 /// 连续拖选保留起点前的选择快照，反向拖动自动还原退出区间的原选择。

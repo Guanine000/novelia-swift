@@ -94,7 +94,7 @@ Core 功能逻辑 → Domain 与通用 Support
 
 实例所有权分为两类：
 
-- `AppServices` 持有配置、API 集合、小说账号、论坛账号和 `LocalAppServices`；后者持有进度、书签、阅读设置、统计、计时控制器、书库状态、标签、背景、云端书目与同步。
+- `AppServices` 持有配置、API 集合、小说账号、论坛账号和 `LocalAppServices`；后者持有进度、书签、摘录与笔记、阅读设置、统计、计时控制器、书库状态、标签、背景、云端书目与同步。
 - `RootView` 持有并注入收藏、历史、远端文库、网络小说下载和本地文库/导入书库 Store。需要 API 的 Store 在初始化时接收对应服务。
 
 Root 还连接账号恢复、续期注册、账号变化后的收藏刷新、前台恢复与更新检查。把新的启动行为放在正确生命周期中，防止视图重建重复启动任务。页面内的查询状态由页面自己的状态对象持有；共享持久化状态不能随页面销毁而重新创建。
@@ -189,7 +189,7 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 
 ## 本地状态与跨功能连接
 
-`LocalAppServices` 组装并持有进度、书签、阅读设置、阅读统计、计时控制器、书库状态、标签、背景、云端书目和 WebDAV 同步实例。Root 注入观察对象，阅读器、书库和同步必须使用同一套实例。
+`LocalAppServices` 组装并持有进度、书签、摘录与笔记、阅读设置、阅读统计、计时控制器、书库状态、标签、背景、云端书目和 WebDAV 同步实例。Root 注入观察对象，阅读器、书库和同步必须使用同一套实例。
 
 `LocalAppServices()` 是生产入口；替代组装使用显式初始化器，必须提供偏好存储、书签、统计、标签、背景、云端书目和 `WebDAVPasswordStore`。不能仅传入隔离 defaults 就假定文件或 Keychain 已隔离。生产继续沿用旧目录、偏好键和 Keychain 服务。Root 向 Feature 注入同一标签／背景对象，页面不得再自行查找它们的共享实例。平台字体注册仍由 `EPUBLocalFonts` 管理，不属于这个容器的隔离契约。
 
@@ -294,6 +294,14 @@ Resource 每次请求重新创建，避免将一次加载失败固化为缓存�
 ### 书签与书内搜索
 
 文库与普通导入书籍的书签（`ReaderBookmark`，Domain）以阅读位置身份 `epub:<哈希>`／`txt:<哈希>` 归属书籍，位置为章节加章内比例，两种引擎都用 `jump(toChapter:progression:)` 跳转；在线小说没有书签身份（`bookmarkKey` 为 nil），沿用在线阅读器的章节书签。`currentPageRange` 给出当前页在章内的比例范围：Yuedu 取页首与下一页的源文本偏移，Readium 按该章位置数估计页宽。书内搜索由 Core 的 `BookTextSearch` 逐章提取纯文本完成，提取规则与 `EPUBChapterProgress.textLength` 一致，使比例与阅读位置同一口径；只搜索本机内容，最多 500 条。两种引擎共用 `ReaderBookmarksSearchSheet` 与 `ReaderBookmarkButton`。已核对的网络小说 EPUB 使用稳定小说及章节身份，见[章节同步与更新](#网络小说-epub-章节同步与更新)。
+
+### 摘录与笔记
+
+摘录与笔记由 Core 的 `ReaderAnnotation`、`ReaderAnnotationStore` 与 `ReaderAnnotationResolver`（`Features/Reader/`）实现，`ReaderSettings` 持有唯一 Store 并注入两种分页引擎。标注保存书籍键、章节序号、稳定章节 ID（网络小说）、资源路径（EPUB）、章内 UTF-16 范围、引文、前后文和章内比例；页码、视图矩形与分页偏移都不持久化。定位先尝试原范围是否仍匹配引文，否则按引文出现位置与前后文共同打分，仍有多个同分候选时用章内比例决定，无法区分则暂不显示。同一章内范围重叠只保留最新一条，完全相同范围更新颜色与笔记；每本最多 1000 条，引文 500 UTF-16、笔记 4000 UTF-16。
+
+原生分页由 `EPUBReaderModel` 从 `EPUBPageBook.sourceText` 和 `selectionRects` 计算当前页矩形，`EPUBPagerView` 在选中菜单提供“高亮／添加笔记”，点按优先命中标注再处理链接；Readium 通过 `editingActions` 和 `ReadiumNavigatorContainer` 的选择器提交选中文字，在 `chapterPlainText` 中按引文求 UTF-16 偏移，再用 `Decoration.Style.highlight(tint:)` 在当前章的 `user-annotations` 分组渲染，点按高亮打开同一个编辑面板。两种引擎共用 `AnnotationEditor.swift` 与 `ReaderAnnotationsSheet`（列表、跳转、左滑删除、Markdown 导出）。TXT 滚动模式不创建标注；创建入口只在分页阅读。
+
+同步在清单 `annotations` 中保存 `[标注 ID: 标注]`，含删除墓碑。`ReaderAnnotation.mergedSync` 先按 ID 与 `updatedAt` 合并，再校验键与 ID 一致、范围与文本有效、单条编码不超过 16 KiB，总量超过 20000 条时只保留最近更新；`WebDAVSyncPlanner.annotationsToSync` 只保留清单中仍有 EPUB/TXT 文件的书籍。清单写成功后才经 `WebDAVSyncLocalState.applyAnnotations` 套用到本机 Store。自动同步指纹包含标注记录，`ReaderAnnotationStore.$records` 变化经 `WebDAVAutoSyncTriggers` 转入延迟推送。
 
 
 字数口径与缓存在 Core 的 `BookWordCount.swift`：`BookWordCount` 仿 Word 计数（中日文字符与全角／中文标点逐字计，其余连续非空白字符计一词，弯引号等共用标点紧跟单词时并入该词），XHTML 先去掉 head/script/style、注释与 `<rt>`／`<rp>`，标签视为分隔，实体按 `BookTextSearch.decodeEntities` 解码；`tocCounts` 把 spine 字数按“到下一个更靠后的目录项为止”分给目录项，同一 spine 的后续条目不计。`BookWordCountCache` 以文件内容哈希为键，写在 Caches `BookWordCounts/`（版本不符视为未命中，超过 2000 个文件删最旧），并合并同一哈希的并发统计；修改口径时提高 `ruleVersion`。`Reader/BookWordCounter.swift` 是 App 入口：EPUB 由 `EPUBReader/EPUBWordCount.swift` 打开独立容器逐 spine 统计（不与阅读中的容器共享诊断计数，读取失败的章计 0），TXT 直接用 `TXTTextDecoder` 解码，不经过 `TXTBookCache`，避免书库批量统计挤掉阅读中的书。TXT 各章字数随分章规则变化，由打开方从已解析的书现算（`PagedTextBook.tocWordCounts`），只缓存全书字数。书库的 `Library/LibraryWordCounts.swift`（`LibraryWordCountStore`，Root 持有并注入）在行出现时登记、一次统计一本、后登记先算，行消失时撤回未开始的请求；云端书籍只读缓存。阅读器在打开目录时才统计，在线小说不统计。字数缓存属于可重建数据，不写入书库索引，也不同步。
@@ -430,6 +438,7 @@ AZW3／MOBI 导入在 `Downloads/DownloadsViews.swift` 的 `LibraryImportModel`�
 | 界面、阅读与功能偏好 | `UserDefaults` / `@AppStorage` 与对应设置对象 |
 | 阅读进度 | `ReadingPositionStore` 的 Codable 数据与 legacy 兼容读取；Readium 本机精确位置的键名由 `ReadiumLocatorKeys` 定义 |
 | 书签 | `ReaderBookmarkStore`：Application Support `Bookmarks/bookmarks.json`，键为书签 ID，删除保留墓碑；创建目录、编码与原子写入成功后才发布 records，失败抛给阅读界面／同步调用方，单页批量删除一次提交；经 `ReaderSettings.bookmarks` 交给阅读器 |
+| 摘录与笔记 | `ReaderAnnotationStore`：Application Support `Annotations/annotations.json`，键为标注 ID，删除保留墓碑；位置为章号、章内 UTF-16 范围、引文与前后文，渲染时经 `ReaderAnnotationResolver` 重定位；经 `ReaderSettings.annotations` 交给两种分页引擎与标注列表 |
 | 书籍文件和本地索引 | Application Support 内的两个书库目录与对应 Store |
 | 账号凭据 | `SessionTokenStore` 的生产 Keychain 适配 |
 | 阅读统计与设备统计 | `ReadingStatisticsStore`：本机累计与同步缓存在 Application Support `ReadingStatistics/` 的 `local.json`、`devices.json`（`ReadingStatisticsFiles` 后台串行写入）；开关、设备 ID 与名称在偏好 |
@@ -455,7 +464,7 @@ WebDAV 是独立传输能力，不使用小说 API 服务集合。`WebDAVSyncSto
 | `SyncMerge.swift` | 同步数据合并规则 |
 | `WebDAVCloudBooks.swift` | 云端书籍记录与封面缓存（`CloudBookStore`）、按需下载 |
 | `WebDAVAutoSyncPolicy.swift` | 自动同步的触发判断、失败退避与本机状态指纹（纯计算） |
-| `App/Integrations/SyncLocalStateAdapter.swift` | 连接实际进度、书签、系列、背景、标签与字体状态；`WebDAVAutoSyncTriggers` 转交前后台与书库／系列／书签／标签变化 |
+| `App/Integrations/SyncLocalStateAdapter.swift` | 连接实际进度、书签、摘录与笔记、系列、背景、标签与字体状态；`WebDAVAutoSyncTriggers` 转交前后台与书库／系列／书签／标注／标签变化 |
 
 同步通过 `SyncBookLibrary` 读写两类书籍（包含异步 `prepareForSync` 与可抛错的 `removeFromSync`），通过 `WebDAVSyncLocalState` 访问其他本地状态。远端资源使用内容哈希引用，验证资源名和哈希后才导入。清单写入使用对应并发条件；`WebDAVSyncStore` 经 `WebDAVSyncEngine.runRetryingConcurrentChange` 在 `concurrentChange`（412）时重新读取清单、以新引擎完整重跑（最多三次），重跑安全依赖“清单写入前只追加较新书籍与按时间合并、删除与设置在写入成功后套用”，修改引擎时须保持这一顺序。手动同步传入 `verifiesBlobs`：引擎先用 `WebDAVRemote.listBlobs`（PROPFIND Depth 1）找出清单引用却不在服务器上的 blob，从已知集合中移除，使上传流程补传本机仍有的文件，并在 `WebDAVSyncRunResult` 报告补传与仍缺失的数量；列目录失败或不支持时不补传、不让同步失败。下载遇到 404 抛出 `missingBlob`，同步中缺失的封面跳过，按需下载时封面列为可选文件。成功列目录后，主文件缺失的云端书籍经 `SyncCloudCatalog.setMissingFileKeys` 记入 `CloudBookStore.missingFileKeys`（随本机缓存保存，只保留仍存在的记录），下载遇到缺失也会标记；书库据此显示“云端文件缺失”并提供从云端删除，书目不自动删除。内容同步与 `deleteFromCloud` 经同一 `WebDAVManifestWriteGate` 先到先执行，不交错读写清单；统计同步和按需下载不写清单，不经过它。阅读统计独立同步：每台设备只写 `statistics/<设备 ID>.json`（`ReadingDeviceStatisticsFile`），读取全部设备文件与旧版 `reading-statistics.json` 后按设备取最大值合并，因此不需要条件写入；不得把其他设备的时长写进本机文件，也不得再写旧版文件。设备 ID 用作文件名，须通过 `isValidDeviceID` 校验。设备 ID 由 `ReadingDeviceIdentity` 决定：以 Keychain（`ThisDeviceOnly`，经 `ReadingDeviceIDStoring` 注入）为准；偏好中有 ID 但未绑定 Keychain 视为旧版升级并沿用该 ID；偏好已绑定但 Keychain 没有，视为从备份复制，生成新 ID，并把复制来的本机记录与名称归还原设备。测试必须注入内存实现，不读写真实 Keychain。设备名称（`ReadingDeviceInfo`）随统计同步，本机名称只由本机修改。
 
@@ -479,7 +488,7 @@ WebDAV 请求使用 `reloadIgnoringLocalCacheData` 与 `Cache-Control: no-cache,
 - 同步由用户手动触发，或在开启自动同步后由前台、背景、本机改动和网络恢复触发；两者走同一执行路径，同一时间只跑一个。是否自动执行只由 `WebDAVAutoSyncPolicy` 判断，指纹只读已有本地接口，不读文件内容；书签变化与书库／标签一样接入延迟推送。成功后只在执行前后指纹一致时确认已覆盖；在途编辑或远端合并导致状态变化时清空成功指纹，保守保留待同步状态，下次触发可补跑。统计同样使用上传前快照与合并后的本机状态比较，不能把新累计时长误记已上传。本地删除不传播到云端。
 - 自动同步状态（`webdav.autoSync.state.v1`）分清单内容与阅读时长两部分，各自记录指纹、成功时间与失败退避，成功后记录时间，但指纹仅按上述确认规则更新；内容失败时不再同步统计，统计失败不影响已完成的内容同步；进入背景时用后台时间完成，到期取消，依赖“清单最后写入”保证中断安全。
 - 执行失败或取消时，已传输文件不自动回滚。
-- 清单在流程末尾写入；标签、系列、书签、背景和字体在清单写成功后才应用。书签套用必须持久化成功，失败时向调用方抛错，保留待重试状态；远端已提交的清单不回滚。
+- 清单在流程末尾写入；标签、系列、书签、摘录与笔记、背景和字体在清单写成功后才应用。单书简繁与文字替换以 `textProjections` 随书籍同步，按书键取较新的 `updatedAt`，只同步清单中本机 EPUB/TXT 的记录；单条记录超过编码体积上限时留在本机。摘录与笔记以 `annotations` 随书籍同步，按标注 ID 与 `updatedAt` 合并，远端记录先校验体积与范围，超出总量上限时保留最近更新。应用远端记录后调用 `ReaderSettings.applyTextProjectionRecords` 并推进 `projectionRevision`，打开的阅读器按既有重排路径更新正文；标注经 `ReaderAnnotationStore.applySynced` 写回同一实例。书签套用必须持久化成功，失败时向调用方抛错，保留待重试状态；远端已提交的清单不回滚。
 - 自动同步不逐个检查远端 blob；手动同步列目录并在本机仍有文件时补传缺失 blob，列目录不受支持时不补传。
 
 ## 网络、缓存与诊断约定

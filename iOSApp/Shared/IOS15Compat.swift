@@ -355,6 +355,24 @@ struct CompatShareLink<Label: View>: View {
     }
 }
 
+/// 直接分享文本（如摘录导出的 Markdown）；iOS 15 走系统活动面板。
+struct CompatShareTextLink<Label: View>: View {
+    let text: String
+    @ViewBuilder var label: () -> Label
+
+    var body: some View {
+        if #available(iOS 16, *) {
+            ShareLink(item: text, label: label)
+        } else {
+            Button {
+                ActivityPresenter.present(items: [text])
+            } label: {
+                label()
+            }
+        }
+    }
+}
+
 struct CompatVerticalTextField: View {
     let prompt: String
     @Binding var text: String

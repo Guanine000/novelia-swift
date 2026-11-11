@@ -23,6 +23,8 @@ struct WebDAVAutoSyncTriggers: ViewModifier {
     let blockedTags: BlockedTagsStore
     let identityMaps: WebNovelEPUBMapStore
     let bookmarks: ReaderBookmarkStore
+    let annotations: ReaderAnnotationStore
+    let readerSettings: ReaderSettings
     let characters: CharacterLexiconStore
 
     func body(content: Content) -> some View {
@@ -40,6 +42,8 @@ struct WebDAVAutoSyncTriggers: ViewModifier {
             .onReceive(blockedTags.objectWillChange) { sync.localStateDidChange() }
             .onReceive(identityMaps.$maps.dropFirst()) { _ in sync.localStateDidChange() }
             .onReceive(bookmarks.$records.dropFirst()) { _ in sync.localStateDidChange() }
+            .onReceive(annotations.$records.dropFirst()) { _ in sync.localStateDidChange() }
+            .onReceive(readerSettings.$projectionRevision.dropFirst()) { _ in sync.localStateDidChange() }
             .onReceive(characters.objectWillChange) { sync.localStateDidChange() }
     }
 }
@@ -54,6 +58,8 @@ struct AppWebDAVSyncLocalState: WebDAVSyncLocalState {
     let library: any LibrarySeriesManaging
     let identityMaps: WebNovelEPUBMapStore
     let bookmarkStore: ReaderBookmarkStore
+    let annotationStore: ReaderAnnotationStore
+    let readerSettings: ReaderSettings
     var characterStore: CharacterLexiconStore? = nil
     var characterSync: (any CharacterSyncLocal)? { characterStore }
     var webEPUBMaps: [String: WebNovelEPUBMap] { identityMaps.maps }
@@ -66,6 +72,14 @@ struct AppWebDAVSyncLocalState: WebDAVSyncLocalState {
     func applyLibrarySeries(_ series: LibrarySeriesState) { library.applySynced(series) }
     var bookmarks: [String: ReaderBookmark] { bookmarkStore.records }
     func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) throws { try bookmarkStore.applySynced(bookmarks) }
+    var textProjections: [String: ReaderTextProjectionRecord] { readerSettings.textProjectionRecords }
+    func applyTextProjections(_ records: [String: ReaderTextProjectionRecord]) {
+        readerSettings.applyTextProjectionRecords(records)
+    }
+    var annotations: [String: ReaderAnnotation] { annotationStore.records }
+    func applyAnnotations(_ annotations: [String: ReaderAnnotation]) throws {
+        try annotationStore.applySynced(annotations)
+    }
     var blockedTags: [String: SyncedBlockedTag] { blocked.syncStates }
     func applyBlockedTags(_ tags: [String: SyncedBlockedTag]) { blocked.applySynced(tags) }
     func background(dark: Bool) throws -> SyncedReaderBackground { try backgrounds.syncSnapshot(dark: dark) }

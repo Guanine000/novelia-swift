@@ -67,6 +67,8 @@
   "ReplyPaging.swift": "Sources/NoveliaIOSCore/Features/Community/ReplyPaging.swift",
   "ReaderBookmark.swift": "Sources/NoveliaIOSCore/Domain/ReaderBookmark.swift",
   "ReaderBookmarkStore.swift": "Sources/NoveliaIOSCore/Features/Reader/ReaderBookmarkStore.swift",
+  "ReaderAnnotation.swift": "Sources/NoveliaIOSCore/Features/Reader/ReaderAnnotation.swift",
+  "ReaderAnnotationStore.swift": "Sources/NoveliaIOSCore/Features/Reader/ReaderAnnotationStore.swift",
   "BookTextSearch.swift": "Sources/NoveliaIOSCore/Features/Reader/BookTextSearch.swift",
   "BookWordCount.swift": "Sources/NoveliaIOSCore/Features/Reader/BookWordCount.swift",
   "BookWordCounter.swift": "iOSApp/Features/Reader/BookWordCounter.swift",

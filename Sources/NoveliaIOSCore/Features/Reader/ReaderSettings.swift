@@ -49,7 +49,37 @@ final class ReaderSettings: ObservableObject {
                                         layout: nil, styleOverride: false)
         }
         bookPreferences[id]?.projection = value.normalized
+        bookPreferences[id]?.projectionUpdatedAt = Date()
         saveBookPreferences(); projectionRevision += 1
+    }
+
+    /// 本机需要同步的单书文字处理；只包含用户明确设置过且通过校验的记录。
+    var textProjectionRecords: [String: ReaderTextProjectionRecord] {
+        Dictionary(uniqueKeysWithValues: bookPreferences.compactMap { id, preferences in
+            guard let updatedAt = preferences.projectionUpdatedAt,
+                  updatedAt.timeIntervalSince1970.isFinite,
+                  ReaderTextProjectionRecord.isValidKey(id) else { return nil }
+            let record = ReaderTextProjectionRecord(projection: preferences.projection, updatedAt: updatedAt)
+            guard record.isValid else { return nil }
+            return (id, record)
+        })
+    }
+
+    /// 合并远端单书文字处理；较新的记录胜出，当前打开的书会重新排版。
+    func applyTextProjectionRecords(_ records: [String: ReaderTextProjectionRecord]) {
+        var changed = false
+        for (id, record) in records where ReaderTextProjectionRecord.isValidKey(id) && record.isValid {
+            let localAt = bookPreferences[id]?.projectionUpdatedAt
+            guard record.updatedAt > (localAt ?? .distantPast) else { continue }
+            if bookPreferences[id] == nil {
+                bookPreferences[id] = .init(fontSize: storedFontSize, appearance: storedAppearance,
+                                            paged: storedPagedText, layout: nil, styleOverride: false)
+            }
+            bookPreferences[id]?.projection = record.projection.normalized
+            bookPreferences[id]?.projectionUpdatedAt = record.updatedAt
+            changed = true
+        }
+        if changed { saveBookPreferences(); projectionRevision += 1 }
     }
     private func saveBookPreferences() {
         if let data = try? JSONEncoder().encode(bookPreferences) { defaults.set(data, forKey: Self.bookPreferencesKey) }
@@ -59,6 +89,8 @@ final class ReaderSettings: ObservableObject {
     let positions: any ReadingPositionProviding
     /// EPUB 与本地 TXT 的书签；未注入时只保存在内存。
     let bookmarks: ReaderBookmarkStore
+    /// 阅读器摘录、高亮与笔记；由 App 组装注入同一实例。
+    let annotations: ReaderAnnotationStore
     let webEPUBMaps: WebNovelEPUBMapStore
     let defaults: UserDefaults
     /// 原生分页独有的本机动画偏好；不改变排版样式或 Readium 的导航方式。
@@ -74,7 +106,8 @@ final class ReaderSettings: ObservableObject {
     @Published private var storedPagedText: Bool
 
     init(defaults: UserDefaults = .standard, positions: (any ReadingPositionProviding)? = nil,
-         bookmarks: ReaderBookmarkStore? = nil, offlineDirectory: URL? = nil) {
+         bookmarks: ReaderBookmarkStore? = nil, annotations: ReaderAnnotationStore? = nil,
+         offlineDirectory: URL? = nil) {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         offlineChapters = OnlineChapterOfflineStore(directory: offlineDirectory ?? (defaults === UserDefaults.standard ? support.appendingPathComponent("OfflineChapters") : FileManager.default.temporaryDirectory.appendingPathComponent("OfflineChapters-" + UUID().uuidString)))
         txtAdjustments = TXTChapterAdjustmentStore(directory: defaults === UserDefaults.standard
@@ -87,6 +120,7 @@ final class ReaderSettings: ObservableObject {
         remainingTime = ReadingTimeEstimateStore(defaults: defaults)
         self.positions = positions ?? ReadingPositionStore(defaults: defaults)
         self.bookmarks = bookmarks ?? ReaderBookmarkStore()
+        self.annotations = annotations ?? ReaderAnnotationStore()
         self.defaults = defaults
         nativePageCurlEnabled = defaults.bool(forKey: SettingsKey.readerNativePageCurl)
         readiumPageCurlEnabled = defaults.bool(forKey: SettingsKey.readerReadiumPageCurl)

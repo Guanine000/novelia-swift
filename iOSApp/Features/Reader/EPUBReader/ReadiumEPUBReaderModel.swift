@@ -1,3 +1,4 @@
+import Combine
 import OSLog
 import ReadiumNavigator
 import ReadiumShared
@@ -64,6 +65,22 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     /// 观察各 WebView 的加载状态，每次加载完成后重新读取底色。
     private let pageLoadObservations = NSMapTable<WKWebView, NSKeyValueObservation>.weakToStrongObjects()
     @Published var activeNote: EPUBNote?
+    private var lastAnnotationDecorationTap = Date.distantPast
+    /// 点按正文高亮时打开的标注编辑面板；保存/删除都写回同一份 ReaderAnnotationStore。
+    @Published var activeAnnotation: ReaderAnnotation?
+    @Published var annotationError: String?
+#if DEBUG
+    /// 独立验证 App 检查重开书后标注装饰是否重新套用。
+    @Published private(set) var appliedAnnotationDecorationCount = 0
+#endif
+    /// 当前章节已套用的标注；章节切换或标注变化时重算，避免每次位置回报都重扫正文。
+    private var annotationDecorationChapter: Int?
+    private var annotationRefreshGeneration = UUID()
+    /// 最近一次已算好的当前章装饰，供卷页预取导航器同步套用，避免快照抢在异步计算前。
+    private var cachedAnnotationDecorations: (chapter: Int, decorations: [Decoration])?
+    private var annotationObservation: AnyCancellable?
+    /// 每次刷新使用新的装饰组名：Readium 按组内差异注入脚本，复用旧组名会因“内容相同”跳过注入。
+    private var annotationDecorationGroup = "user-annotations"
     /// 书内图片（点图查看与目录页“图片”）；EPUB 复用打开前预检的原生容器读取图片。
     let imageLibrary = ReaderImageLibrary()
     private var imageContainer: EPUBContainer?
@@ -167,6 +184,13 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             style = saved
         }
         style.fontSize = CGFloat(settings.fontSize)
+        annotationObservation = settings.annotations.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor in self?.refreshAnnotationDecorations(force: true) }
+        }
+    }
+
+    deinit {
+        annotationObservation?.cancel()
     }
 
     // MARK: 打开
@@ -469,7 +493,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         config.decorationTemplates["novelia-speech"] = HTMLDecorationTemplate(
             layout: .boxes, element: "<span role='button' aria-label='当前朗读句' class='novelia-speech-current'></span>",
             stylesheet: ".novelia-speech-current { background: rgba(255,210,0,0.30); border-radius: 3px; }")
-        config.editingActions = [EditingAction(title: "人物词条", action: #selector(ReadiumNavigatorContainer.lookupCharacterSelection)), EditingAction(title: "从此句朗读", action: #selector(ReadiumNavigatorContainer.speakSelection))] + EditingAction.defaultActions
+        config.editingActions = [EditingAction(title: "人物词条", action: #selector(ReadiumNavigatorContainer.lookupCharacterSelection)),
+                                EditingAction(title: "高亮", action: #selector(ReadiumNavigatorContainer.highlightSelection)),
+                                EditingAction(title: "添加笔记", action: #selector(ReadiumNavigatorContainer.noteSelection)),
+                                EditingAction(title: "从此句朗读", action: #selector(ReadiumNavigatorContainer.speakSelection))] + EditingAction.defaultActions
         config.readiumCSSRSProperties.pageGutter = CSSPxLength(Double(style.leftMargin + style.rightMargin) / 2)
         // 根背景透明：书籍未设背景时露出宿主绘制的阅读背景；书籍给 body 设的背景
         // （如 `<body bgcolor>`）按 CSS 规则延伸到整个页面。
@@ -489,12 +516,15 @@ final class ReadiumEPUBReaderModel: ObservableObject {
                 self?.speech.toggleHighlightedSpeech()
             }
         }
+        // 点按高亮只打开编辑面板；每次刷新用新组名时会重新注册该组的回调。
+        observeAnnotationInteractions(in: annotationDecorationGroup, of: navigator)
 
         // 先于翻页适配器注册且不消费事件：只记下点按，供位置日志区分用户翻页与 Readium 自行移动。
         gestureToken = navigator.addObserver(.tap { [weak self] event in
 
             // 同次 WebKit 点击先激活高亮，再上报普通点按；后者不能把刚恢复的朗读再次暂停。
             if let self, Date().timeIntervalSince(self.lastSpeechDecorationTap) < 0.3 { return true }
+            if let self, Date().timeIntervalSince(self.lastAnnotationDecorationTap) < 0.3 { return true }
             if let self, let view = self.navigator?.view,
                event.location.x < view.bounds.width / 3 || event.location.x > view.bounds.width * 2 / 3,
                self.onCurlTurn?(self.curlForward(atRightEdge: event.location.x > view.bounds.width / 2)) == true { return true }
@@ -518,10 +548,12 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         })
 
         self.navigator = navigator
+        annotationDecorationChapter = nil
         redirectedOperation = nil
         pendingLocationCause = nil
         navigatorRevision += 1
         attachSpeechEngine(publication: publication, navigator: navigator)
+        refreshAnnotationDecorations(force: true)
     }
 
     func startSpeechFromVisiblePage() {
@@ -1353,6 +1385,213 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         }
     }
 
+    // MARK: 标注
+
+    /// 选中引文在章纯文本中的 UTF-16 范围。
+    /// WebKit 跨段落选择会在块之间带换行，而纯文本提取直接拼接标签；先精确匹配，失败时忽略空白再匹配。
+    private static func annotationRange(quote: String, in text: String, near progression: Double) -> NSRange? {
+        let needle = quote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return nil }
+        if let start = SpeechText.selectedOffset(needle, in: text, near: progression) {
+            return NSRange(location: start, length: (needle as NSString).length)
+        }
+        let compact = needle.filter { !$0.isWhitespace }
+        guard !compact.isEmpty else { return nil }
+
+        var scalars: [Unicode.Scalar] = []
+        var offsets: [Int] = []
+        /// 去空白字符串的 UTF-16 位置 → 标量下标，兼顾 BMP 以外的字符。
+        var unitToScalar: [Int: Int] = [:]
+        var utf16Offset = 0
+        for scalar in text.unicodeScalars {
+            if !CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                for unit in 0..<scalar.utf16.count {
+                    unitToScalar[utf16Offset + unit] = scalars.count
+                }
+                scalars.append(scalar)
+                offsets.append(utf16Offset)
+            }
+            utf16Offset += scalar.utf16.count
+        }
+        let stripped = String(String.UnicodeScalarView(scalars)) as NSString
+        let target = compact as NSString
+        guard stripped.length > 0 else { return nil }
+        var candidates: [(location: Int, distance: Double)] = []
+        var cursor = 0
+        while cursor < stripped.length {
+            let found = stripped.range(of: target as String,
+                                       options: [], range: NSRange(location: cursor, length: stripped.length - cursor))
+            guard found.location != NSNotFound else { break }
+            candidates.append((found.location, abs(Double(found.location)
+                - progression * Double(stripped.length))))
+            cursor = NSMaxRange(found)
+        }
+        guard let best = candidates.min(by: { $0.distance < $1.distance }),
+              let startIndex = unitToScalar[best.location] else { return nil }
+        let endUTF16 = best.location + target.length
+        let end = unitToScalar[endUTF16].map { offsets[$0] } ?? utf16Offset
+        let start = offsets[startIndex]
+        return end > start ? NSRange(location: start, length: end - start) : nil
+    }
+
+    /// 保存当前选中文字。位置以章内纯文本 UTF-16 偏移与引文持久化，渲染时按引文重新定位。
+    func addAnnotation(selection: Selection, color: ReaderAnnotation.Color = .yellow,
+                       note: String = "", editAfter: Bool = false) {
+        guard let bookKey = bookmarkKey, let publication else { return }
+        let selected = selection.locator
+        let index = navigationIndex?.resourceIndex(for: selected.href) ?? currentPageRange?.chapter ?? 0
+        let quote = (selected.text.highlight ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !quote.isEmpty, publication.readingOrder.indices.contains(index) else { return }
+        let progression = selected.locations.progression ?? 0
+        let href = selected.href.string
+        navigator?.clearSelection()
+        Task { [weak self] in
+            guard let self else { return }
+            guard let text = try? await self.chapterPlainText(index),
+                  let range = Self.annotationRange(quote: quote, in: text, near: progression) else {
+                self.annotationError = "无法定位所选文字，请重新选择。"
+                return
+            }
+            do {
+                let annotation = try self.settings.annotations.add(
+                    bookKey: bookKey, chapterIndex: index, chapterID: self.webChapterID(index),
+                    resourceHref: href, progression: Double(range.location) / Double(max(1, text.utf16.count)),
+                    range: range, quote: (text as NSString).substring(with: range), chapterText: text,
+                    projectionIdentity: self.settings.projection.identity, color: color, note: note)
+                self.refreshAnnotationDecorations(force: true)
+                if editAfter { self.activeAnnotation = annotation }
+            } catch {
+                self.annotationError = error.localizedDescription
+            }
+        }
+    }
+
+    func updateAnnotation(_ annotation: ReaderAnnotation, color: ReaderAnnotation.Color, note: String) {
+        do {
+            try settings.annotations.update(annotation.id, color: color, note: note)
+            refreshAnnotationDecorations(force: true)
+        } catch {
+            annotationError = error.localizedDescription
+        }
+    }
+
+    func deleteAnnotation(_ annotation: ReaderAnnotation) {
+        do {
+            try settings.annotations.remove(annotation.id)
+            refreshAnnotationDecorations(force: true)
+        } catch {
+            annotationError = error.localizedDescription
+        }
+    }
+
+    /// 跳到标注所在章节与位置；引文能解析时同时带上前后文，让 Readium 精确对齐。
+    func jump(to annotation: ReaderAnnotation) {
+        if afterCurlRestores({ [weak self] in self?.jump(to: annotation) }) { return }
+        guard let publication, publication.readingOrder.indices.contains(annotation.chapterIndex) else { return }
+        rememberReadingPoint()
+        markNavigation("navigate")
+        Task { [weak self] in
+            guard let self else { return }
+            guard let text = try? await self.chapterPlainText(annotation.chapterIndex),
+                  let base = await publication.locate(publication.readingOrder[annotation.chapterIndex]) else { return }
+            let source = text as NSString
+            let before: String, highlight: String, after: String
+            if let range = ReaderAnnotationResolver.resolve(annotation, in: text),
+               NSMaxRange(range) <= source.length {
+                let start = max(0, range.location - 80)
+                let end = min(source.length, NSMaxRange(range) + 80)
+                before = source.substring(with: NSRange(location: start, length: range.location - start))
+                highlight = source.substring(with: range)
+                after = source.substring(with: NSRange(location: NSMaxRange(range),
+                                                       length: end - NSMaxRange(range)))
+            } else {
+                before = ""; highlight = annotation.quote; after = ""
+            }
+            let target = base.copy(locations: { $0.progression = annotation.progression }, text: {
+                $0.before = before
+                $0.highlight = highlight
+                $0.after = after
+            })
+            _ = await self.navigator?.go(to: target)
+        }
+    }
+
+    /// 当前章的标注装饰。主阅读器与卷页预取导航器共用，保证快照里也带高亮。
+    private func annotationDecorations(chapter index: Int) async -> [Decoration] {
+        guard let bookKey = bookmarkKey, let publication, publication.readingOrder.indices.contains(index) else { return [] }
+        let annotations = settings.annotations.annotations(for: bookKey, chapter: index)
+        guard !annotations.isEmpty,
+              let text = try? await chapterPlainText(index),
+              let base = await publication.locate(publication.readingOrder[index]) else { return [] }
+        let source = text as NSString
+        return annotations.compactMap { annotation -> Decoration? in
+            guard let range = ReaderAnnotationResolver.resolve(annotation, in: text),
+                  NSMaxRange(range) <= source.length else { return nil }
+            let start = max(0, range.location - 80)
+            let end = min(source.length, NSMaxRange(range) + 80)
+            let target = base.copy(locations: { $0.progression = annotation.progression }, text: {
+                $0.before = source.substring(with: NSRange(location: start, length: range.location - start))
+                $0.highlight = source.substring(with: range)
+                $0.after = source.substring(with: NSRange(location: NSMaxRange(range),
+                                                          length: end - NSMaxRange(range)))
+            })
+            return Decoration(id: annotation.id.uuidString, locator: target,
+                              style: .highlight(tint: annotation.color.uiColor))
+        }
+    }
+
+    private func observeAnnotationInteractions(in group: String, of navigator: EPUBNavigatorViewController) {
+        navigator.observeDecorationInteractions(inGroup: group) { [weak self] event in
+            guard let self, let id = UUID(uuidString: event.decoration.id) else { return }
+            self.lastAnnotationDecorationTap = Date()
+            self.activeAnnotation = self.settings.annotations.annotation(id: id)
+        }
+    }
+
+    /// 只在当前章节套用高亮；换章或标注变化时重算。章节定位不到时清空，避免旧高亮留在新页面。
+    func refreshAnnotationDecorations(force: Bool = false) {
+        guard let navigator, let bookKey = bookmarkKey, let publication, let locator,
+              let index = navigationIndex?.resourceIndex(for: locator.href),
+              publication.readingOrder.indices.contains(index) else {
+            annotationDecorationChapter = nil
+            navigator?.apply(decorations: [], in: annotationDecorationGroup)
+#if DEBUG
+            appliedAnnotationDecorationCount = 0
+#endif
+            return
+        }
+        if !force, annotationDecorationChapter == index { return }
+        annotationDecorationChapter = index
+        let generation = UUID()
+        annotationRefreshGeneration = generation
+        guard !settings.annotations.annotations(for: bookKey, chapter: index).isEmpty else {
+            cachedAnnotationDecorations = nil
+            navigator.apply(decorations: [], in: annotationDecorationGroup)
+#if DEBUG
+            appliedAnnotationDecorationCount = 0
+#endif
+            return
+        }
+        Task { [weak self, weak navigator] in
+            guard let self, let navigator else { return }
+            let decorations = await self.annotationDecorations(chapter: index)
+            guard self.annotationRefreshGeneration == generation, self.navigator === navigator else { return }
+            self.cachedAnnotationDecorations = (index, decorations)
+
+            // Readium 只注入与同组旧状态有差异的装饰；重开书时首次注入可能早于正文装载而被丢弃。
+            // 每次换一个新组名可强制重新注入，再清空旧组，避免重复高亮。
+            let group = "user-annotations-\(generation.uuidString)"
+            let previous = self.annotationDecorationGroup
+            self.annotationDecorationGroup = group
+            self.observeAnnotationInteractions(in: group, of: navigator)
+            navigator.apply(decorations: decorations, in: group)
+            if previous != group { navigator.apply(decorations: [], in: previous) }
+#if DEBUG
+            self.appliedAnnotationDecorationCount = decorations.count
+#endif
+        }
+    }
+
     func jump(toChapter index: Int, progression: Double) {
         if afterCurlRestores({ [weak self] in self?.jump(toChapter: index, progression: progression) }) { return }
         rememberReadingPoint()
@@ -1494,6 +1733,9 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         let current = navigationIndex?.tocIndex(for: locator.href)
         if currentTOCIndex != current { currentTOCIndex = current }
         self.locator = locator
+        if let chapter = navigationIndex?.resourceIndex(for: locator.href), chapter != annotationDecorationChapter {
+            refreshAnnotationDecorations()
+        }
         if textBook != nil {
             if previous != locator { saveTextPosition(locator) }
         } else if !receivedBookLocation {
@@ -1523,6 +1765,8 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         guard (navigator as AnyObject) === self.navigator else { return }
         readingTimePoint.reason = .reset
         (navigator as? UIViewController)?.view.backgroundColor = .clear
+        // 重开书时首次位置回报可能早于 WebView 完成排版，装饰会被随后加载的页面覆盖；排版变化后重套一次。
+        refreshAnnotationDecorations(force: true)
     }
 
     func navigator(_ navigator: Navigator, presentError error: NavigatorError) {
@@ -1590,6 +1834,8 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
             DispatchQueue.main.async {
                 guard let self, !webView.isLoading, webView.url != nil else { return }
                 self.readPageBackground(of: webView)
+                // 章节 WebView 装载完成后再套标注；重开书时首次 apply 往往早于正文装载。
+                self.refreshAnnotationDecorations(force: true)
             }
         }
         pageLoadObservations.setObject(observation, forKey: webView)
@@ -1736,6 +1982,17 @@ extension ReadiumEPUBReaderModel {
         config.preloadNextPositionCount = 1
         let snapshot = try EPUBNavigatorViewController(publication: publication, initialLocation: locator, config: config)
         snapshot.delegate = self
+        // 卷页快照直接截取自这个导航器；先补上与主阅读器相同的标注，否则动画期间高亮会消失。
+        let index = navigationIndex?.resourceIndex(for: locator.href) ?? 0
+        if let cached = cachedAnnotationDecorations, cached.chapter == index {
+            snapshot.apply(decorations: cached.decorations, in: "user-annotations-preview")
+        } else {
+            Task { [weak self, weak snapshot] in
+                guard let self, let snapshot else { return }
+                let decorations = await self.annotationDecorations(chapter: index)
+                snapshot.apply(decorations: decorations, in: "user-annotations-preview")
+            }
+        }
         return snapshot
     }
 

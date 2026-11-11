@@ -332,6 +332,8 @@ struct RootView: View {
         .modifier(WebDAVAutoSyncTriggers(sync: webDAVSync, web: webNovelDownloads, wenku: wenkuDownloads,
                                          library: services.local.library, blockedTags: services.local.blockedTags,
                                          identityMaps: services.local.readerSettings.webEPUBMaps, bookmarks: services.local.bookmarks,
+                                         annotations: services.local.annotations,
+                                         readerSettings: services.local.readerSettings,
                                          characters: services.local.readerSettings.characters))
         .task { if services.performsUpdateChecks { await updates.check() } }
         .task(id: auth.username) {

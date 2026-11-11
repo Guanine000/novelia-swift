@@ -24,11 +24,20 @@ enum EPUBLinkHit: Equatable {
 }
 
 struct EPUBPagerView: UIViewControllerRepresentable {
+    /// 仿真卷页的纸面是位图快照，标注必须画进纸面才能随卷页一起移动。
+    struct PageHighlight: Equatable {
+        let rect: CGRect
+        let color: ReaderAnnotation.Color
+    }
+
     struct PageImages: Equatable {
         var previous: CGImage?
         var current: CGImage?
         var next: CGImage?
         var size: CGSize = .zero
+        var previousHighlights: [PageHighlight] = []
+        var currentHighlights: [PageHighlight] = []
+        var nextHighlights: [PageHighlight] = []
     }
 
     /// 返回是否可以朝该方向翻页（目标页必须已排版；动画期间返回 false）。
@@ -61,6 +70,11 @@ struct EPUBPagerView: UIViewControllerRepresentable {
     /// 选中菜单里的「翻译」；宿主呈现系统翻译面板（iOS 17.4+）。
     var characterLookup: ((String) -> Void)? = nil
     var selectionTranslate: ((String) -> Void)? = { _ in }
+    /// 已保存标注的命中与操作；标注矩形来自模型，不在页面位图上绘制。
+    var annotationHitTest: (CGPoint) -> UUID? = { _ in nil }
+    var onAnnotationTap: (UUID) -> Void = { _ in }
+    var onHighlightSelection: (NSRange, String) -> Void = { _, _ in }
+    var onNoteSelection: (NSRange, String) -> Void = { _, _ in }
     /// 三页位图由宿主从同一份排版缓存派生；每次 SwiftUI 更新都会重放。
     var curlEnabled = false
     var paperInsets: UIEdgeInsets = .zero
@@ -93,6 +107,10 @@ struct EPUBPagerView: UIViewControllerRepresentable {
         view.speakSelectionHandler = onSpeakSelection
         view.selectionTranslateHandler = selectionTranslate
         view.characterLookupHandler = characterLookup
+        view.annotationHitTestProvider = annotationHitTest
+        view.annotationTapHandler = onAnnotationTap
+        view.highlightSelectionHandler = onHighlightSelection
+        view.noteSelectionHandler = onNoteSelection
         container.update(images: images, curl: curlEnabled, insets: paperInsets,
                          color: paperColor, background: paperBackground)
         view.applySpeechRects(speechRects)
@@ -115,6 +133,10 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
     /// 选中菜单里的「翻译」；宿主呈现系统翻译面板（iOS 17.4+）。
     var characterLookupHandler: ((String) -> Void)?
     var selectionTranslateHandler: ((String) -> Void)?
+    var annotationHitTestProvider: ((CGPoint) -> UUID?)?
+    var annotationTapHandler: ((UUID) -> Void)?
+    var highlightSelectionHandler: ((NSRange, String) -> Void)?
+    var noteSelectionHandler: ((NSRange, String) -> Void)?
     private let strip = UIView()
     private let speechLayer = CAShapeLayer()
     private let previousImageView = UIImageView()
@@ -369,6 +391,12 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
             return
         }
 
+        // 已保存的标注优先；点在高亮上打开笔记/颜色菜单，而不是继续命中链接或翻页。
+        if let annotation = annotationHitTestProvider?(location) {
+            annotationTapHandler?(annotation)
+            return
+        }
+
         // 1) 链接/注脚命中优先：当前页槽位与视口重合，视图坐标即页本地坐标。
         if let hit = linkHitTestProvider?(location) {
             switch hit {
@@ -442,6 +470,12 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
         }
         handlesLayer.path = handles.cgPath
         updateCurlSelection()
+    }
+
+    private var selectedRange: NSRange? {
+        guard let initial = selectionInitialRange, let moving = selectionMovingRange else { return nil }
+        let start = min(initial.location, moving.location)
+        return NSRange(location: start, length: max(NSMaxRange(initial), NSMaxRange(moving)) - start)
     }
 
     private func presentCopyMenu(at point: CGPoint) {
@@ -546,7 +580,15 @@ extension EPUBPagerUIView: UIEditMenuInteractionDelegate {
             controller.popoverPresentationController?.sourceRect = CGRect(origin: configuration.sourcePoint, size: CGSize(width: 1, height: 1))
             self.presentSelectionController(controller)
         }
-        var items: [UIMenuElement] = [copy, lookup]
+        let highlight = UIAction(title: "高亮", image: UIImage(systemName: "highlighter")) { [weak self] _ in
+            guard let self, let range = self.selectedRange, let selectedText = self.selectedText else { return }
+            self.clearSelection(); self.highlightSelectionHandler?(range, selectedText)
+        }
+        let note = UIAction(title: "添加笔记", image: UIImage(systemName: "note.text")) { [weak self] _ in
+            guard let self, let range = self.selectedRange, let selectedText = self.selectedText else { return }
+            self.clearSelection(); self.noteSelectionHandler?(range, selectedText)
+        }
+        var items: [UIMenuElement] = [highlight, note, copy, lookup]
         if let handler = characterLookupHandler {
             items.append(UIAction(title: "人物词条", image: UIImage(systemName: "person.text.rectangle")) { [weak self] _ in
                 self?.clearSelection(); handler(selectedText)
@@ -663,14 +705,16 @@ final class EPUBPagerContainer: UIViewController, UIPageViewControllerDataSource
         guard let pager, !turning, view.bounds.width > 0, view.bounds.height > 0 else { return }
         paperSize = view.bounds.size
         var result: [Int: EPUBCurlSheet] = [:]
-        for (slot, image) in [(-1, input.previous), (0, input.current), (1, input.next)] {
+        for (slot, image, highlights) in [(-1, input.previous, input.previousHighlights),
+                                          (0, input.current, input.currentHighlights),
+                                          (1, input.next, input.nextHighlights)] {
             guard let image else { continue }
-            result[slot] = EPUBCurlSheet(slot: slot, image: compose(image))
+            result[slot] = EPUBCurlSheet(slot: slot, image: compose(image, highlights: highlights))
         }
         pages = result
         if let current = pages[0] { pager.setViewControllers([current], direction: .forward, animated: false) }
     }
-    private func compose(_ image: CGImage) -> UIImage {
+    private func compose(_ image: CGImage, highlights: [EPUBPagerView.PageHighlight]) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = view.window?.screen.scale ?? UIScreen.main.scale
         format.opaque = true
@@ -699,6 +743,12 @@ final class EPUBPagerContainer: UIViewController, UIPageViewControllerDataSource
                 edge(CGRect(x: sx, y: ih-1, width: 1, height: 1), CGRect(x: dx, y: y+h, width: dw, height: bottom))
             }
             UIImage(cgImage: image).draw(in: CGRect(x: x, y: y, width: w, height: h))
+            // 标注画在纸面快照里，仿真卷页时随页面一起卷动；静止时由 SwiftUI 覆盖层绘制。
+            for highlight in highlights {
+                highlight.color.uiColor.withAlphaComponent(0.35).setFill()
+                // UIRectFill 会以 copy 混合模式覆盖像素，把文字一起抹掉；UIBezierPath 走正常 alpha 混合。
+                UIBezierPath(rect: highlight.rect.offsetBy(dx: x, dy: y)).fill()
+            }
         }
     }
     private func neighbor(_ controller: UIViewController, forward: Bool) -> UIViewController? {

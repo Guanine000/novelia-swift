@@ -37,6 +37,12 @@ protocol WebDAVSyncLocalState {
     func applyWebEPUBMaps(_ maps: [String: WebNovelEPUBMap]) throws
     var bookmarks: [String: ReaderBookmark] { get }
     func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) throws
+    /// 单书简繁与文字替换，随书籍同步。
+    var textProjections: [String: ReaderTextProjectionRecord] { get }
+    func applyTextProjections(_ records: [String: ReaderTextProjectionRecord])
+    /// 阅读器摘录与笔记（含删除墓碑），随书籍同步。
+    var annotations: [String: ReaderAnnotation] { get }
+    func applyAnnotations(_ annotations: [String: ReaderAnnotation]) throws
     var blockedTags: [String: SyncedBlockedTag] { get }
     func applyBlockedTags(_ tags: [String: SyncedBlockedTag])
     func background(dark: Bool) throws -> SyncedReaderBackground
@@ -56,6 +62,10 @@ extension WebDAVSyncLocalState {
     func applyWebEPUBMaps(_ maps: [String: WebNovelEPUBMap]) throws {}
     var bookmarks: [String: ReaderBookmark] { [:] }
     func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) throws {}
+    var textProjections: [String: ReaderTextProjectionRecord] { [:] }
+    func applyTextProjections(_ records: [String: ReaderTextProjectionRecord]) {}
+    var annotations: [String: ReaderAnnotation] { [:] }
+    func applyAnnotations(_ annotations: [String: ReaderAnnotation]) throws {}
 }
 
 struct WebDAVSyncOptions: Equatable {
@@ -232,6 +242,13 @@ final class WebDAVSyncEngine {
             let bookmarks = WebDAVSyncPlanner.bookmarksToSync(
                 ReaderBookmark.merged(local.bookmarks, manifest.bookmarks ?? [:]), in: manifest)
             if manifest.bookmarks != nil || !bookmarks.isEmpty { manifest.bookmarks = bookmarks }
+            let projections = WebDAVSyncPlanner.textProjectionsToSync(
+                ReaderTextProjectionRecord.merged(local.textProjections, manifest.textProjections ?? [:]),
+                in: manifest)
+            if manifest.textProjections != nil || !projections.isEmpty { manifest.textProjections = projections }
+            let annotations = WebDAVSyncPlanner.annotationsToSync(
+                ReaderAnnotation.mergedSync(local.annotations, manifest.annotations ?? [:]), in: manifest)
+            if manifest.annotations != nil || !annotations.isEmpty { manifest.annotations = annotations }
         }
         if options.tags {
             manifest.blockedTags = BlockedTagsStore.merged(local.blockedTags, manifest.blockedTags ?? [:])
@@ -315,6 +332,8 @@ final class WebDAVSyncEngine {
         if options.tags { local.applyBlockedTags(manifest.blockedTags ?? [:]) }
         if options.books, let series = manifest.librarySeries { local.applyLibrarySeries(series) }
         if options.books, let bookmarks = manifest.bookmarks { try local.applyBookmarks(bookmarks) }
+        if options.books, let projections = manifest.textProjections { local.applyTextProjections(projections) }
+        if options.books, let annotations = manifest.annotations { try local.applyAnnotations(annotations) }
         if options.backgrounds {
             for dark in [false, true] {
                 if let value = manifest.backgrounds?[dark ? "dark" : "light"] {

@@ -28,6 +28,64 @@ struct WebDAVBook<Record: Codable>: Codable {
 
 extension WebDAVBook: Equatable where Record: Equatable {}
 
+/// 单书文字处理（简繁与文字替换）随书籍同步；较新的 `updatedAt` 胜出。
+/// 规则表限制体积，避免单本书把同步清单撑大。
+extension ReaderTextProjectionRecord {
+    static let maxEncodedBytes = 32_768
+    static let maxReplacements = 1_000
+    static let validKeyPrefixes = ["epub:", "txt:", "webepub:", "online:"]
+
+    static func isValidKey(_ key: String) -> Bool {
+        !key.isEmpty && key.utf8.count <= 200 && validKeyPrefixes.contains { key.hasPrefix($0) }
+    }
+
+    var isValid: Bool {
+        guard updatedAt.timeIntervalSince1970.isFinite,
+              projection.replacements.count <= Self.maxReplacements,
+              projection.replacements.allSatisfy({
+                  !$0.key.isEmpty && $0.key.utf16.count <= 120 && $0.value.utf16.count <= 120
+              }),
+              let data = try? JSONEncoder().encode(self),
+              data.count <= Self.maxEncodedBytes
+        else { return false }
+        return true
+    }
+
+    /// 按书键合并，较新的记录胜出；无效键、无效规则或超出体积上限的远端记录忽略。
+    static func merged(_ local: [String: ReaderTextProjectionRecord],
+                       _ remote: [String: ReaderTextProjectionRecord]) -> [String: ReaderTextProjectionRecord] {
+        var result = local.filter { isValidKey($0.key) && $0.value.isValid }
+        for (key, value) in remote where isValidKey(key) && value.isValid {
+            if value.updatedAt > (result[key]?.updatedAt ?? .distantPast) { result[key] = value }
+        }
+        return result
+    }
+}
+
+/// 摘录与笔记随书籍同步；单条记录限制体积，合并时只接受键与 ID 一致且有效的记录。
+extension ReaderAnnotation {
+    static let maxSyncEncodedBytes = 16_384
+    static let maxSyncedTotal = 20_000
+
+    var isValidSyncRecord: Bool {
+        guard isValid, let data = try? JSONEncoder().encode(self) else { return false }
+        return data.count <= Self.maxSyncEncodedBytes
+    }
+
+    /// 按 ID 合并，较新的修改或删除墓碑胜出；超出总量时只保留最近更新的记录。
+    static func mergedSync(_ local: [String: ReaderAnnotation],
+                           _ remote: [String: ReaderAnnotation]) -> [String: ReaderAnnotation] {
+        var result = Self.merged(local, remote).filter {
+            $0.key == $0.value.id.uuidString && $0.value.isValidSyncRecord
+        }
+        if result.count > maxSyncedTotal {
+            let kept = result.sorted { $0.value.updatedAt > $1.value.updatedAt }.prefix(maxSyncedTotal)
+            result = Dictionary(uniqueKeysWithValues: kept.map { ($0.key, $0.value) })
+        }
+        return result
+    }
+}
+
 struct WebDAVManifest: Codable {
     /// 仅独立 characters-v1 目录使用，旧客户端不会读取或覆盖该目录。
     var characters: CharacterSyncState? = nil
@@ -45,6 +103,10 @@ struct WebDAVManifest: Codable {
     var deletedBooks: [String: Date]? = nil
     /// 阅读器书签 `[书签 ID: 书签]`，含删除墓碑；随书籍同步。0.22.0 之前的版本不识别，写回清单时会丢弃。
     var bookmarks: [String: ReaderBookmark]? = nil
+    /// 单书文字处理 `[阅读器书键: 简繁与替换]`，随书籍同步；旧版应用忽略。
+    var textProjections: [String: ReaderTextProjectionRecord]? = nil
+    /// 阅读器摘录与笔记 `[标注 ID: 标注]`，含删除墓碑；随书籍同步。旧版应用忽略。
+    var annotations: [String: ReaderAnnotation]? = nil
 }
 
 enum WebDAVSyncError: LocalizedError, Equatable {

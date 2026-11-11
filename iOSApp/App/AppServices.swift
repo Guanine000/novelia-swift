@@ -61,6 +61,7 @@ final class AppServices: ObservableObject {
 final class LocalAppServices {
     let positions: ReadingPositionStore
     let bookmarks: ReaderBookmarkStore
+    let annotations: ReaderAnnotationStore
     let readerSettings: ReaderSettings
     let recording: ReadingActivityController
     let statistics: ReadingStatisticsStore
@@ -75,6 +76,7 @@ final class LocalAppServices {
     convenience init() {
         self.init(defaults: .standard,
                   bookmarks: ReaderBookmarkStore(directory: ReaderBookmarkStore.defaultDirectory),
+                  annotations: ReaderAnnotationStore(directory: ReaderAnnotationStore.defaultDirectory),
                   statistics: ReadingStatisticsStore(deviceModel: UIDevice.current.model),
                   blockedTags: .shared, backgrounds: .shared, cloudBooks: CloudBookStore(),
                   passwordStore: .keychain)
@@ -82,22 +84,27 @@ final class LocalAppServices {
 
     /// 替代组装必须提供全部持久化对象，避免只隔离偏好却意外访问生产文件与凭据。
     /// 字体由平台字体注册服务管理，不属于此容器的隔离契约。
-    init(defaults: UserDefaults, bookmarks: ReaderBookmarkStore, statistics: ReadingStatisticsStore,
+    init(defaults: UserDefaults, bookmarks: ReaderBookmarkStore, annotations: ReaderAnnotationStore? = nil,
+         statistics: ReadingStatisticsStore,
          blockedTags: BlockedTagsStore, backgrounds: ReaderBackgroundStore, cloudBooks: CloudBookStore,
          passwordStore: WebDAVPasswordStore, recorder: (any ReadingTimeRecording)? = nil) {
         let positions = ReadingPositionStore(defaults: defaults)
         self.positions = positions
         self.bookmarks = bookmarks
+        self.annotations = annotations ?? ReaderAnnotationStore()
         self.statistics = statistics
         self.blockedTags = blockedTags
         self.backgrounds = backgrounds
-        readerSettings = ReaderSettings(defaults: defaults, positions: positions, bookmarks: bookmarks)
+        readerSettings = ReaderSettings(defaults: defaults, positions: positions, bookmarks: bookmarks,
+                                        annotations: self.annotations)
         recording = ReadingActivityController(recorder: recorder ?? statistics)
         library = LibraryStateStore(positions: positions, defaults: defaults)
         self.cloudBooks = cloudBooks
         sync = WebDAVSyncStore(local: AppWebDAVSyncLocalState(blocked: blockedTags, backgrounds: backgrounds,
                                                            positions: positions, library: library,
-                                                           identityMaps: readerSettings.webEPUBMaps, bookmarkStore: bookmarks, characterStore: readerSettings.characters),
+                                                           identityMaps: readerSettings.webEPUBMaps, bookmarkStore: bookmarks,
+                                                           annotationStore: self.annotations,
+                                                           readerSettings: readerSettings, characterStore: readerSettings.characters),
                                statistics: statistics, cloudBooks: cloudBooks,
                                defaults: defaults, passwordStore: passwordStore)
     }

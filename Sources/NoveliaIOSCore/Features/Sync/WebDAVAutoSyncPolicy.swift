@@ -121,6 +121,8 @@ enum WebDAVAutoSyncPolicy {
             hasher.add("positions", local.readingPositions)
             hasher.add("series", local.librarySeries)
             hasher.add("bookmarks", local.bookmarks)
+            hasher.add("textProjections", local.textProjections)
+            hasher.add("annotations", local.annotations)
             hasher.add("webEPUBMaps", local.webEPUBMaps)
         }
         if options.tags { hasher.add("tags", local.blockedTags) }
