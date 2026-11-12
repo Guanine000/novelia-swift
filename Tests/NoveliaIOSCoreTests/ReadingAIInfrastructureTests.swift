@@ -600,6 +600,18 @@ final class ReadingAIFormatTests: XCTestCase {
         ], format: .chatCompletions).text, "OK")
     }
 
+    func testNewFormatsRejectStreamsThatEndBeforeCompletionStatus() {
+        let partials: [(ReadingAIConfiguration.RequestFormat, String)] = [
+            (.responses, #"{"type":"response.output_text.delta","delta":"完整外观的摘要"}"#),
+            (.anthropicMessages, #"{"type":"content_block_delta","delta":{"type":"text_delta","text":"完整外观的摘要"}}"#)
+        ]
+        for (format, partial) in partials {
+            XCTAssertThrowsError(try OpenAIReadingClient.decodeStreamPayloads([partial], format: format)) {
+                XCTAssertEqual($0 as? ReadingAIError, .invalidResponse)
+            }
+        }
+    }
+
     func testClientParsesStreamingAndJSONForResponsesAndAnthropic() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ReadingAITestURLProtocol.self]

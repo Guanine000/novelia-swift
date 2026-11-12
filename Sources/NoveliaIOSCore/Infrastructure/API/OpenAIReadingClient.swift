@@ -386,10 +386,9 @@ private final class ResponsesStreamState: ReadingAIStreamState {
     func finish() throws -> ReadingAIResponse {
         onProgress(text.count, text)
         if refusalDelta { throw ReadingAIError.refused }
-        if let terminal { return try OpenAIReadingClient.interpretResponses(terminal, fallbackText: text) }
-        // 没有终止事件时，已拼出的正文仍交付，和对话补全流式缺少 finish_reason 时一样。
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ReadingAIError.invalidResponse }
-        return .init(text: text, inputTokens: nil, outputTokens: nil)
+        // 正文片段只能用于预览；缺失终止事件时无法确认截断、拒答或工具调用，不能提交为成功结果。
+        guard let terminal else { throw ReadingAIError.invalidResponse }
+        return try OpenAIReadingClient.interpretResponses(terminal, fallbackText: text)
     }
 }
 
@@ -430,7 +429,7 @@ private final class AnthropicStreamState: ReadingAIStreamState {
     func finish() throws -> ReadingAIResponse {
         onProgress(text.count, text)
         return try OpenAIReadingClient.interpretAnthropic(text: text, stopReason: stopReason, inputTokens: inputTokens,
-                                                          outputTokens: outputTokens, requireStopReason: false)
+                                                          outputTokens: outputTokens, requireStopReason: true)
     }
 }
 

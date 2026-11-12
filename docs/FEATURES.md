@@ -189,7 +189,7 @@ EPUB 阅读器的容器解析、页面缓存、翻页界面和字体管理代码
 
 ## AI 阅读辅助配置
 
-“我的 → 高级 → AI 阅读辅助”可配置三种请求格式：OpenAI 兼容的对话补全（Chat Completions）、OpenAI Responses，以及 Anthropic Messages。共同项是 HTTPS API 基础地址、模型名称、API 密钥和输出上限（128–8192 tokens，默认 4096）。基础地址只写到版本前缀，例如 `https://api.example.com/v1`；这个例子只说明写法，不是可点开的链接。程序按所选格式追加路径：对话补全追加 `/chat/completions`，Responses 追加 `/responses`，Anthropic Messages 追加 `/messages`。不要自己带上这三段最终路径，也不接受明文 HTTP、地址中的账号密码或查询参数。官方 Anthropic 的基础地址一般是 `https://api.anthropic.com/v1`。更换地址或请求格式后，要为新的接口地址单独保存密钥。
+“我的 → 高级 → AI 阅读辅助”可配置三种请求格式：OpenAI 兼容的对话补全（Chat Completions）、OpenAI Responses，以及 Anthropic Messages。共同项是 HTTPS API 基础地址、模型名称、API 密钥和输出上限（128–8192 tokens，默认 4096）。基础地址只写到版本前缀，例如 `https://api.example.com/v1`；这个例子只说明写法，不是可点开的链接。程序按所选格式追加路径：对话补全追加 `/chat/completions`，Responses 追加 `/responses`，Anthropic Messages 追加 `/messages`。不要自己带上这三段最终路径，也不接受明文 HTTP、地址中的账号密码或查询参数。官方 Anthropic 的基础地址一般是 `https://api.anthropic.com/v1`。更换地址或请求格式后，要为新的接口地址单独保存密钥。 Responses 与 Anthropic 流式回复必须收到完成状态才作为生成成功保存；提前断流的正文仅供临时预览，明确报错，不提交为完整回顾或人物资料。
 
 对话补全仍可选 `max_completion_tokens` 或 `max_tokens`，以及可选的 JSON 格式。Responses 固定发送 `max_output_tokens`，Anthropic 固定发送 `max_tokens`，这两项不再另选参数名。人物卡按每条事实约 220 tokens 估算单块可容纳的事实条数（4096 时约 18 条，8192 时约 37 条），这个数字跟着输出上限走而不另行封顶；调高上限会让每块覆盖更多人物和事实。输出上限本身受服务端限制（DeepSeek 一类接口最高 8192，不传该参数时反而回落到 4096），应用内不再额外压低；输出被截断时整块 JSON 无法解析，宜留出余量。Responses 的上限按服务商说明包含可见正文和推理 token，推理变长时正文会更早被截断。不少 Anthropic 模型默认会思考，思考 token 也计入 `max_tokens`。
 
