@@ -45,44 +45,57 @@ struct NovelDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                ZStack(alignment: .bottomLeading) {
-                    RoundedRectangle(cornerRadius: 24)
-                        .fill(LinearGradient(
-                            colors: [NoveliaStyle.accent(for: displayNovel.accent), NoveliaStyle.ink],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ))
-                    Circle()
-                        .fill(.white.opacity(0.10))
-                        .frame(width: 190, height: 190)
-                        .offset(x: 205, y: -72)
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(displayNovel.genres.joined(separator: " · "))
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .compatTracking(1)
-                            .foregroundStyle(.white.opacity(0.75))
-                        Text(displayNovel.title)
-                            .font(.system(size: 29, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                        if let originalTitle = displayNovel.distinctOriginalTitle {
-                            Text("原名：\(originalTitle)")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.72))
-                                .lineLimit(2)
+                // 信息决定卡片高度，避免长译名、原名和多人署名被压缩截断。
+                VStack(alignment: .leading, spacing: 18) {
+                    Text(verbatim: displayNovel.title)
+                        .font(.system(.title2, design: .rounded).weight(.bold))
+                        .foregroundStyle(NoveliaStyle.ink)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+
+                    if let originalTitle = displayNovel.distinctOriginalTitle {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("原名")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(NoveliaStyle.muted)
+                            Text(verbatim: originalTitle)
+                                .font(.subheadline)
+                                .foregroundStyle(NoveliaStyle.ink.opacity(0.85))
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        HStack(spacing: 8) {
-                            Label(displayNovel.author, systemImage: "person")
-                            if let totalCharacters = displayNovel.totalCharacters, totalCharacters > 0 {
-                                Text("· \(totalCharacters.formatted()) 字")
-                            }
-                        }
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.82))
                     }
-                    .padding(22)
+
+                    Divider()
+
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "person")
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("作者")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(NoveliaStyle.muted)
+                            Text(verbatim: displayNovel.author)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(NoveliaStyle.ink)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    if let totalCharacters = displayNovel.totalCharacters, totalCharacters > 0 {
+                        Text("\(totalCharacters.formatted()) 字")
+                            .font(.footnote.monospacedDigit())
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                .frame(height: 210)
-                .clipShape(RoundedRectangle(cornerRadius: 24))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(22)
+                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 24))
 
                 if let wenkuId = displayNovel.wenkuId {
                     NavigationLink {
