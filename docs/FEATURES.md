@@ -189,15 +189,23 @@ EPUB 阅读器的容器解析、页面缓存、翻页界面和字体管理代码
 
 ## AI 阅读辅助配置
 
-“我的 → 高级 → AI 阅读辅助”可配置 OpenAI 兼容的 Chat Completions 接口：HTTPS API 基础地址、模型名称、API 密钥、输出上限（128–8192 tokens，默认 4096），以及 `max_completion_tokens`／`max_tokens` 和可选 JSON 格式参数。填写 API 基础地址，程序自动追加 `/chat/completions`；不接受明文 HTTP、地址中的账号密码或查询参数。人物卡按每条事实约 220 tokens 估算单块可容纳的事实条数（4096 时约 18 条，8192 时约 37 条），这个数字跟着输出上限走而不另行封顶；调高上限会让每块覆盖更多人物和事实。输出上限本身受服务端限制（DeepSeek 一类接口最高 8192，不传该参数时反而回落到 4096），应用内不再额外压低；输出被截断时整块 JSON 无法解析，宜留出余量。参数与模型兼容性需按服务商说明选择。
+“我的 → 高级 → AI 阅读辅助”可配置三种请求格式：OpenAI 兼容的对话补全（Chat Completions）、OpenAI Responses，以及 Anthropic Messages。共同项是 HTTPS API 基础地址、模型名称、API 密钥和输出上限（128–8192 tokens，默认 4096）。基础地址只写到版本前缀，例如 `https://api.example.com/v1`；这个例子只说明写法，不是可点开的链接。程序按所选格式追加路径：对话补全追加 `/chat/completions`，Responses 追加 `/responses`，Anthropic Messages 追加 `/messages`。不要自己带上这三段最终路径，也不接受明文 HTTP、地址中的账号密码或查询参数。官方 Anthropic 的基础地址一般是 `https://api.anthropic.com/v1`。更换地址或请求格式后，要为新的接口地址单独保存密钥。
+
+对话补全仍可选 `max_completion_tokens` 或 `max_tokens`，以及可选的 JSON 格式。Responses 固定发送 `max_output_tokens`，Anthropic 固定发送 `max_tokens`，这两项不再另选参数名。人物卡按每条事实约 220 tokens 估算单块可容纳的事实条数（4096 时约 18 条，8192 时约 37 条），这个数字跟着输出上限走而不另行封顶；调高上限会让每块覆盖更多人物和事实。输出上限本身受服务端限制（DeepSeek 一类接口最高 8192，不传该参数时反而回落到 4096），应用内不再额外压低；输出被截断时整块 JSON 无法解析，宜留出余量。Responses 的上限按服务商说明包含可见正文和推理 token，推理变长时正文会更早被截断。不少 Anthropic 模型默认会思考，思考 token 也计入 `max_tokens`。
+
+思考强度默认不发送。对话补全里，OpenAI 名称以 o 开头的推理模型（例如 o1、o3、o4-mini）和 Gemini 使用 `reasoning_effort`。OpenAI 官方的 Chat Completions 不认单独的 thinking 开关；“关闭思考”发送的是部分兼容接口（如 DeepSeek）使用的 thinking 参数。DeepSeek 默认就是高强度思考：选“关闭思考”最快，“低”次之，而“中”在 DeepSeek 会被映射成“高”。Responses 把同一组选项写成官方的 `reasoning.effort`：低、中、高、最高分别是 low、medium、high、max，“关闭思考”是 none；有的模型不接受 none，会直接报错。Responses 没有单独的 thinking 开关。Anthropic 的低、中、高、最高写成 `output_config.effort` 的 low、medium、high、max，没有 xhigh 这一档；“关闭思考”在不少模型上会返回 400，所以这个格式里不能选，应用也不会代发 thinking 字段。
+
+JSON 格式只约束返回是 JSON 对象，不能代替剧情与出处校验。对话补全发送 `response_format.type=json_object`。Responses 发送旧式的 `text.format.type=json_object`；较新模型更推荐自带 schema 的 `json_schema`，这里不代填 schema。Anthropic 只提供带 schema 的 `json_schema`，本应用没有可发送的 schema，因此该开关不能打开；提示词仍可要求 JSON，回顾和人物卡会照旧校验。参数与模型兼容性需按服务商说明选择。Responses 官方默认可能把回复保存在服务端，本应用固定发送 `store` 为 false，避免把章节正文留在那里。Anthropic 请求使用 `x-api-key` 和 `anthropic-version`（当前为 `2026-10-21`），不使用 Bearer。
 
 AI 默认关闭。先保存配置，再点“测试已保存配置”；测试只发送固定英文短句，不读取小说、历史或当前页，也可能产生少量模型费用。测试可取消，离开设置页会取消；修改已保存配置、关闭 AI 或删除密钥会取消进行中的请求。配置本身没有后台扫描、自动上传、自动重试或预生成行为。
 
-请求按流式（`stream: true`）发送，模型生成期间持续接收，界面上的人物卡更新会显示“已接收 N 字”和已等待时间；服务端忽略流式而直接返回完整 JSON 时自动回退，行为不变。
+请求按流式（`stream: true`）发送，模型生成期间持续接收，界面上的人物卡更新会显示“已接收 N 字”和已等待时间；服务端忽略流式而直接返回完整 JSON 时自动回退，行为不变。三种格式都只把可见正文算进这段进度：Responses 的推理摘要和 Anthropic 的思考块不会当作结果。
 
-密钥按接口地址分别存入本机 Keychain，不显示明文，不写入偏好或日志，也不参与 WebDAV／iCloud Keychain 同步；更换地址不自动携带旧接口密钥。配置保存在本机，可删除当前接口密钥并关闭 AI。正文与生成结果不在基础设施层持久化。单次输入限 128 KiB（按 UTF-8 字节，不能等同于模型 token），返回超过 1 MiB 会中止。截断、拒答、工具调用或非文本结果不会当作完整结果交付；接口重定向会拒绝，请填写最终地址。
+密钥按最终接口地址分别存入本机 Keychain，不显示明文，不写入偏好或日志，也不参与 WebDAV／iCloud Keychain 同步；更换地址或请求格式不自动携带旧接口密钥。配置保存在本机，可删除当前接口密钥并关闭 AI。正文与生成结果不在基础设施层持久化。单次输入限 128 KiB（按 UTF-8 字节，不能等同于模型 token），返回超过 1 MiB 会中止。截断、拒答、工具调用或非文本结果不会当作完整结果交付；接口重定向会拒绝，请填写最终地址。
 
-本地书籍的 AI 前情回顾与人物候选提取共用此服务。JSON 模式只约束格式，不能保证剧情正确或替代已读边界与出处校验。真实接口、Keychain 设备行为和两个 iOS 目标尚需 Mac 编译及设备验证。
+本地书籍的 AI 前情回顾与人物候选提取共用此服务。JSON 模式只约束格式，不能保证剧情正确或替代已读边界与出处校验。对话补全的已有配置不用改格式即可继续使用。真实接口、Keychain 设备行为和两个 iOS 目标尚需 Mac 编译及设备验证。
+
+格式之间不能互相替代的限制见[已知限制](#ai-阅读辅助)。
 
 ## AI 前情回顾
 
@@ -329,6 +337,10 @@ GitHub 匿名 API 限流或请求失败时，会尝试通过同一公开仓库�
 Legacy 目标已通过针对 iOS 15 部署目标的编译与自动化检查，但尚未在真实 iOS 15／16 系统上运行验证；旧系统实际交互与真实书籍完整回归仍待验收。
 
 ## 已知限制
+
+### AI 阅读辅助
+
+三种请求格式的参数不能互相借用。Responses 的 `max_output_tokens` 包含推理 token；Anthropic Messages 不能强制 JSON，也不能关闭思考，思考 token 还可能占掉 `max_tokens`。应用不代填 JSON schema，也不发送 xhigh。示例地址只说明写法。细节在[AI 阅读辅助配置](#ai-阅读辅助配置)。真实服务与真机尚未在本环境验证。
 
 ### 阅读器
 
