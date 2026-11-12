@@ -20,31 +20,47 @@ struct ReadingAISettingsView: View {
                 Text("配置 AI 前情回顾等阅读辅助功能的服务。只有主动生成才发送所选正文，启用不会自动上传书籍。")
             }
             Section {
+                Picker("请求格式", selection: requestFormat) {
+                    ForEach(ReadingAIConfiguration.RequestFormat.allCases) { format in
+                        Text(format.title).tag(format)
+                    }
+                }
                 TextField("API 基础地址（HTTPS）", text: $draft.baseURL)
                     .keyboardType(.URL).autocapitalization(.none).disableAutocorrection(true)
                 TextField("模型名称", text: $draft.model)
                     .autocapitalization(.none).disableAutocorrection(true)
                 SecureField("API 密钥（留空保留当前接口密钥）", text: $newKey)
                     .textContentType(.password).autocapitalization(.none).disableAutocorrection(true)
-                if store.hasSavedKey, draft.baseURL == store.configuration.baseURL { Text("已保存当前接口密钥").font(.caption).foregroundStyle(.secondary) }
-            } header: { Text("OpenAI 兼容接口") } footer: {
-                Text("填写服务商提供的 API 基础地址，例如 https://api.example.com/v1；程序会追加 /chat/completions。更换地址后需为新接口单独保存密钥。密钥仅存本机 Keychain，不参与 WebDAV 同步。")
+                if showsSavedKey { Text("已保存当前接口密钥").font(.caption).foregroundStyle(.secondary) }
+            } header: { Text("模型接口") } footer: {
+                // 字面量 `Text("…https://…")` 走 LocalizedStringKey 的 Markdown，裸 URL 会变成可点开的链接。
+                // 示例地址只是占位，必须按纯文本显示。
+                Text(verbatim: draft.addressFootnote)
             }
             Section {
-                Picker("输出上限参数", selection: $draft.tokenParameter) {
-                    Text("max_completion_tokens").tag(ReadingAIConfiguration.TokenParameter.completion)
-                    Text("max_tokens（兼容接口）").tag(ReadingAIConfiguration.TokenParameter.legacy)
+                if draft.requestFormat == .chatCompletions {
+                    Picker("输出上限参数", selection: $draft.tokenParameter) {
+                        Text("max_completion_tokens").tag(ReadingAIConfiguration.TokenParameter.completion)
+                        Text("max_tokens（兼容接口）").tag(ReadingAIConfiguration.TokenParameter.legacy)
+                    }
+                } else if let field = draft.requestFormat.fixedOutputField {
+                    HStack {
+                        Text("输出上限参数")
+                        Spacer()
+                        Text(field).foregroundStyle(.secondary)
+                    }
                 }
                 Stepper("输出上限：\(draft.maximumOutputTokens) tokens", value: $draft.maximumOutputTokens, in: 128...8_192, step: 128)
                 Toggle("请求 JSON 格式", isOn: $draft.requestsJSON)
+                    .disabled(!draft.requestFormat.allowsJSONMode)
                 Picker("思考强度", selection: $draft.reasoningEffort) {
                     Text("不发送").tag(ReadingAIConfiguration.ReasoningEffort?.none)
-                    ForEach(ReadingAIConfiguration.ReasoningEffort.allCases) { effort in
+                    ForEach(draft.requestFormat.selectableEfforts) { effort in
                         Text(effort.title).tag(ReadingAIConfiguration.ReasoningEffort?.some(effort))
                     }
                 }
             } header: { Text("模型兼容参数") } footer: {
-                Text("参数需由模型支持，不支持时会直接报错，所以默认不发送。DeepSeek 默认就是高强度思考：选“关闭思考”最快，“低”次之，而“中”在 DeepSeek 会被映射成“高”。o 系列与 Gemini 认 reasoning_effort；OpenAI 官方不认 thinking 开关。调低能明显变快，但人物与情节判断会更粗。JSON 格式只约束返回格式，不能代替剧情与出处校验；单次输入上限为 128 KiB，输出 tokens 仍可能产生费用。")
+                Text(verbatim: draft.compatibilityFootnote)
             }
             Section {
                 Button("保存配置") { save() }
@@ -73,6 +89,23 @@ struct ReadingAISettingsView: View {
         .onDisappear { cancelTest(); newKey = "" }
         .onValueChange(of: draft) { _, _ in cancelTest(); message = nil }
         .onValueChange(of: newKey) { _, _ in cancelTest(); message = nil }
+    }
+
+    /// 换格式时立刻清掉该格式不能发送的选项，避免保存时才报错。
+    private var requestFormat: Binding<ReadingAIConfiguration.RequestFormat> {
+        Binding(get: { draft.requestFormat }, set: { newValue in
+            var copy = draft
+            copy.requestFormat = newValue
+            copy.applyFormatCompatibility()
+            draft = copy
+        })
+    }
+    /// 密钥按最终接口地址隔离。只改模型名称仍是同一个接口；改地址或请求格式则不是。
+    private var showsSavedKey: Bool {
+        guard store.hasSavedKey,
+              let draftEndpoint = try? draft.endpoint().absoluteString,
+              let savedEndpoint = try? store.configuration.endpoint().absoluteString else { return false }
+        return draftEndpoint == savedEndpoint
     }
 
     private func save() {
