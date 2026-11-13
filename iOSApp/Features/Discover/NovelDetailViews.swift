@@ -351,7 +351,15 @@ struct NovelDetailView: View {
             WebNovelDownloadSheet(novel: requestedNovel, availableSources: availableTranslationSources)
         }
         .toolbar {
-            ToolbarItem(placement: .compatTopBarLeading) { NavigationLink("离线章节") { OfflineChapterManagementView(novel: displayNovel) } }
+            ToolbarItem(placement: .compatTopBarTrailing) {
+                NavigationLink("离线章节") {
+                    OfflineChapterManagementView(novel: displayNovel)
+                }
+            }
+            if #available(iOS 26.0, *) {
+                // 固定间隔将两个操作分成独立的玻璃背景组。
+                ToolbarSpacer(.fixed, placement: .compatTopBarTrailing)
+            }
             ToolbarItem(placement: .compatTopBarTrailing) {
                 Button {
                     favoriteTapped()

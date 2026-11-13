@@ -173,6 +173,24 @@ public struct NovelBilingualParagraph: Hashable, Codable, Sendable {
     }
 }
 
+/// 在线双语阅读的段内顺序；仅改变展示顺序，不交换语言身份和颜色。
+public enum ReaderBilingualOrder: String, CaseIterable, Identifiable, Sendable {
+    case originalFirst
+    case translationFirst
+
+    public var id: String { rawValue }
+    public var title: String {
+        switch self {
+        case .originalFirst: "原文在前"
+        case .translationFirst: "译文在前"
+        }
+    }
+
+    public func ordered<Value>(original: Value, translation: Value) -> [Value] {
+        self == .originalFirst ? [original, translation] : [translation, original]
+    }
+}
+
 public enum NovelAccent: String, Hashable, Codable, Sendable {
     case plum
     case ocean

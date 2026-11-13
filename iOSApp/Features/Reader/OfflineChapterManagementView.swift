@@ -14,6 +14,8 @@ struct OfflineChapterManagementView: View {
     @State private var total = 0
     @State private var job: Task<Void, Never>?
     @State private var running = false
+    @State private var confirmingClearAll = false
+    @State private var clearingAll = false
     @State private var confirmingDelete: String?
     private var account: String { auth.offlineAccountScope }
     private var groups: [String: [OnlineChapterOfflineStore.Entry]] { Dictionary(grouping: entries, by: \.bookID) }
@@ -48,6 +50,20 @@ struct OfflineChapterManagementView: View {
             if entries.isEmpty { Text("当前账号还没有离线章节。可在网络小说详情或阅读菜单中缓存章节。") }
         }
         .navigationTitle("离线章节")
+        .toolbar {
+            if novel == nil {
+                ToolbarItem(placement: .compatTopBarTrailing) {
+                    Button("清除所有", role: .destructive) { confirmingClearAll = true }
+                        .disabled(entries.isEmpty || clearingAll || running)
+                }
+            }
+        }
+        .alert("清除所有离线章节？", isPresented: $confirmingClearAll) {
+            Button("取消", role: .cancel) {}
+            Button("清除所有", role: .destructive) { clearAll() }
+        } message: {
+            Text("将清除当前账号所有书籍的离线章节缓存。已下载的 EPUB、阅读进度和书签会保留，之后可以重新缓存章节。")
+        }
         .task(id: account) { job?.cancel(); await reload() }
         .onDisappear { job?.cancel() }
         .confirmationDialog("清理本书离线章节？进度、书签和已下载文件会保留。", isPresented: Binding(get: { confirmingDelete != nil }, set: { if !$0 { confirmingDelete = nil } }), titleVisibility: .visible) {
@@ -57,6 +73,25 @@ struct OfflineChapterManagementView: View {
             }
         }
     }
+    private func clearAll() {
+        guard !clearingAll else { return }
+        let owner = account
+        clearingAll = true
+        Task {
+            defer { clearingAll = false }
+            do {
+                try await settings.offlineChapters.remove(account: owner)
+                guard owner == account else { return }
+                await reload()
+                message = "已清除当前账号的所有离线章节。"
+            } catch {
+                guard owner == account else { return }
+                await reload()
+                message = error.localizedDescription
+            }
+        }
+    }
+
     private func reload() async {
         do { entries = try await settings.offlineChapters.entries(account: account).filter { novel == nil || $0.bookID == novel?.id } }
         catch { message = error.localizedDescription }

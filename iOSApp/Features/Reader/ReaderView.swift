@@ -58,6 +58,7 @@ struct ReaderView: View {
     @Environment(\.colorScheme) private var systemColorScheme
     @State private var chapterIndex: Int
     @AppStorage(SettingsKey.readerMode) private var modeRaw = ReaderMode.bilingual.rawValue
+    @AppStorage(SettingsKey.readerBilingualOrder) private var bilingualOrderRaw = ReaderBilingualOrder.originalFirst.rawValue
     @AppStorage(SettingsKey.readerTranslationSource) private var translationSourceRaw = NovelTranslationSource.gpt.rawValue
     @AppStorage private var bookmarkIDsJSON: String
     @AppStorage private var savedChapterIndex: Int
@@ -88,6 +89,7 @@ struct ReaderView: View {
         let listed = novel.chapters[chapterIndex]
         return loadedChapters[listed.id] ?? listed
     }
+    private var bilingualOrder: ReaderBilingualOrder { ReaderBilingualOrder(rawValue: bilingualOrderRaw) ?? .originalFirst }
     private var mode: ReaderMode { ReaderMode(rawValue: modeRaw) ?? .bilingual }
     private var appearance: ReaderAppearance { settings.appearance }
     private var translationSource: NovelTranslationSource {
@@ -292,6 +294,9 @@ struct ReaderView: View {
                             }
                         }
                         Divider()
+                        Picker("双语排列", selection: $bilingualOrderRaw) {
+                            ForEach(ReaderBilingualOrder.allCases) { Text($0.title).tag($0.rawValue) }
+                        }
                         Picker("译文来源", selection: $translationSourceRaw) {
                             ForEach(NovelTranslationSource.allCases) { source in
                                 Text(source.title).tag(source.rawValue)
@@ -356,6 +361,11 @@ struct ReaderView: View {
         .environment(\.speechChapterIndex, chapterIndex)
         .onValueChange(of: modeRaw) { _, _ in speech.stop() }
         .onValueChange(of: translationSourceRaw) { _, _ in speech.stop() }
+        .onValueChange(of: bilingualOrderRaw) { _, _ in
+            speech.stop()
+            selectedSearchHit = nil
+            readingReturnPoint = nil
+        }
         .toolbar {
             // 与分页阅读器一致：顶栏同时显示书名与当前章节。
             ToolbarItem(placement: .principal) {
@@ -396,24 +406,25 @@ struct ReaderView: View {
 
     private var bilingualReaderText: some View {
         let paragraphs = bilingualParagraphs
-        let ranges = ReaderTextRanges.sourceRanges(of: paragraphs.flatMap { [$0.original, $0.translation] }, in: displayedText(chapter))
+        let ranges = ReaderTextRanges.sourceRanges(of: paragraphs.flatMap { bilingualOrder.ordered(original: $0.original, translation: $0.translation) }, in: displayedText(chapter))
         return LazyVStack(alignment: .leading, spacing: 35) {
             ForEach(paragraphs.indices, id: \.self) { index in
                 let paragraph = paragraphs[index]
+                let pieces = bilingualOrder.ordered(
+                    original: (text: paragraph.original, isOriginal: true),
+                    translation: (text: paragraph.translation, isOriginal: false))
                 VStack(alignment: .leading, spacing: 8) {
-                    if !paragraph.original.isEmpty {
-                        ReaderTextBlock(text: paragraph.original, fontSize: fontSize, color: readerPrimaryText,
-                                        speechRange: ranges[index * 2].flatMap { ReaderTextRanges.localRange(speechHighlightRange, in: $0) },
-                                        baseOffset: ranges[index * 2]?.lowerBound)
-                            .id("text-block-\(ranges[index * 2]?.lowerBound ?? -1)")
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    if !paragraph.translation.isEmpty {
-                        ReaderTextBlock(text: paragraph.translation, fontSize: fontSize, color: readerSecondaryText,
-                                        speechRange: ranges[index * 2 + 1].flatMap { ReaderTextRanges.localRange(speechHighlightRange, in: $0) },
-                                        baseOffset: ranges[index * 2 + 1]?.lowerBound)
-                            .id("text-block-\(ranges[index * 2 + 1]?.lowerBound ?? -1)")
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach(pieces.indices, id: \.self) { pieceIndex in
+                        let piece = pieces[pieceIndex]
+                        let range = ranges[index * 2 + pieceIndex]
+                        if !piece.text.isEmpty {
+                            ReaderTextBlock(text: piece.text, fontSize: fontSize,
+                                            color: piece.isOriginal ? readerSecondaryText : readerPrimaryText,
+                                            speechRange: range.flatMap { ReaderTextRanges.localRange(speechHighlightRange, in: $0) },
+                                            baseOffset: range?.lowerBound)
+                                .id("text-block-\(range?.lowerBound ?? -1)")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
             }
@@ -452,7 +463,7 @@ struct ReaderView: View {
         case .translated: return chapter.displayedTranslation(source: translationSource).joined(separator: "\n\n")
         case .bilingual:
             return chapter.bilingualParagraphs(source: translationSource)
-                .flatMap { [$0.original, $0.translation] }.joined(separator: "\n\n")
+                .flatMap { bilingualOrder.ordered(original: $0.original, translation: $0.translation) }.joined(separator: "\n\n")
         }
     }
 
@@ -469,7 +480,7 @@ struct ReaderView: View {
         switch mode {
         case .original: pieces = settings.projection.apply(chapter.originalText).components(separatedBy: "\n\n")
         case .translated: pieces = displayedTranslation
-        case .bilingual: pieces = bilingualParagraphs.flatMap { [$0.original, $0.translation] }
+        case .bilingual: pieces = bilingualParagraphs.flatMap { bilingualOrder.ordered(original: $0.original, translation: $0.translation) }
         }
         let ranges = ReaderTextRanges.sourceRanges(of: pieces, in: text)
         guard let index = ranges.firstIndex(where: { $0?.contains(position.currentOffset) == true }),
@@ -486,7 +497,7 @@ struct ReaderView: View {
         switch mode {
         case .original: pieces = settings.projection.apply(chapter.originalText).components(separatedBy: "\n\n")
         case .translated: pieces = displayedTranslation
-        case .bilingual: pieces = bilingualParagraphs.flatMap { [$0.original, $0.translation] }
+        case .bilingual: pieces = bilingualParagraphs.flatMap { bilingualOrder.ordered(original: $0.original, translation: $0.translation) }
         }
         let ranges = ReaderTextRanges.sourceRanges(of: pieces, in: text)
         guard let index = ranges.firstIndex(where: { $0?.contains(offset) == true }),
@@ -560,7 +571,7 @@ extension NovelChapter {
     }
 
     /// 所选显示模式下供分页阅读器使用的章节文本。
-    func pagedContent(novelTitle: String, mode: ReaderMode, source: NovelTranslationSource) -> TextChapterContent {
+    func pagedContent(novelTitle: String, mode: ReaderMode, source: NovelTranslationSource, order: ReaderBilingualOrder = .originalFirst) -> TextChapterContent {
         var paragraphs: [TextChapterParagraph] = []
         switch mode {
         case .original:
@@ -569,8 +580,9 @@ extension NovelChapter {
             paragraphs = displayedTranslation(source: source).flatMap { TextChapterXHTML.paragraphs(fromLines: $0) }
         case .bilingual:
             for pair in bilingualParagraphs(source: source) {
-                paragraphs += TextChapterXHTML.paragraphs(fromLines: pair.original)
-                paragraphs += TextChapterXHTML.paragraphs(fromLines: pair.translation, role: .secondary)
+                paragraphs += order.ordered(
+                    original: TextChapterXHTML.paragraphs(fromLines: pair.original, role: .secondary),
+                    translation: TextChapterXHTML.paragraphs(fromLines: pair.translation)).flatMap { $0 }
             }
         }
         if lacksTranslation(mode: mode, source: source) {
@@ -789,6 +801,7 @@ private struct OnlinePagedReader: View {
     let novel: Novel
     @Binding var chapterIndex: Int
     @AppStorage(SettingsKey.readerMode) private var modeRaw = ReaderMode.bilingual.rawValue
+    @AppStorage(SettingsKey.readerBilingualOrder) private var bilingualOrderRaw = ReaderBilingualOrder.originalFirst.rawValue
     @AppStorage(SettingsKey.readerTranslationSource) private var translationSourceRaw = NovelTranslationSource.gpt.rawValue
     @AppStorage private var bookmarkIDsJSON: String
     @AppStorage private var savedChapterIndex: Int
@@ -801,6 +814,7 @@ private struct OnlinePagedReader: View {
         _savedChapterIndex = AppStorage(wrappedValue: 0, ReadingProgressStore.chapterKey(novelID: novel.id))
     }
 
+    private var bilingualOrder: ReaderBilingualOrder { ReaderBilingualOrder(rawValue: bilingualOrderRaw) ?? .originalFirst }
     private var mode: ReaderMode { ReaderMode(rawValue: modeRaw) ?? .bilingual }
     private var translationSource: NovelTranslationSource { NovelTranslationSource(rawValue: translationSourceRaw) ?? .gpt }
     private var bookmarkIDs: Set<String> {
@@ -826,15 +840,15 @@ private struct OnlinePagedReader: View {
             }
             #endif
         }
-        .id("\(modeRaw)|\(translationSourceRaw)")
+        .id("\(modeRaw)|\(translationSourceRaw)|\(bilingualOrderRaw)")
     }
 
     private func makeBook() -> PagedTextBook {
-        let novel = novel, mode = mode, source = translationSource, cache = cache
+        let novel = novel, mode = mode, source = translationSource, order = bilingualOrder
         let units = novel.chapters.map { listed in
             TextChapterSource.Unit(tocTitle: listed.title) {
                 try await settings.offlineChapters.chapter(listed, book: novel, account: auth.offlineAccountScope, service: services.api.content)
-                    .pagedContent(novelTitle: novel.title, mode: mode, source: source)
+                    .pagedContent(novelTitle: novel.title, mode: mode, source: source, order: order)
             }
         }
         return PagedTextBook(
@@ -844,7 +858,7 @@ private struct OnlinePagedReader: View {
             searchChapterText: { index in
                 let listed = novel.chapters[index]
                 guard let chapter = await settings.offlineChapters.cached(book: novel, chapter: listed.id, account: auth.offlineAccountScope) else { throw CocoaError(.fileReadNoSuchFile) }
-                let html = TextChapterXHTML.document(chapter.pagedContent(novelTitle: novel.title, mode: mode, source: source))
+                let html = TextChapterXHTML.document(chapter.pagedContent(novelTitle: novel.title, mode: mode, source: source, order: order))
                 return BookTextSearch.plainText(html: settings.projection.applyHTML(html))
             })
     }
@@ -876,6 +890,9 @@ private struct OnlinePagedReader: View {
         Menu {
             Picker("显示内容", selection: $modeRaw) {
                 ForEach(ReaderMode.allCases) { Text($0.title).tag($0.rawValue) }
+            }
+            Picker("双语排列", selection: $bilingualOrderRaw) {
+                ForEach(ReaderBilingualOrder.allCases) { Text($0.title).tag($0.rawValue) }
             }
             Picker("译文来源", selection: $translationSourceRaw) {
                 ForEach(NovelTranslationSource.allCases) { Text($0.title).tag($0.rawValue) }

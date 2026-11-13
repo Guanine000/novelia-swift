@@ -32,7 +32,7 @@ extension EPUBContainer: EPUBChapterSource {
 // MARK: - 纯文本章节（TXT / 在线小说）
 
 /// 生成章节文本中的一个段落。`secondary` 使用较淡的阅读器文字色
-/// （用于双语译文）；`note` 是居中的状态提示，例如缺少译文。
+/// （用于双语原文）；`note` 是居中的状态提示，例如缺少译文。
 struct TextChapterParagraph: Equatable {
     enum Role: Equatable { case body, secondary, note }
     var text: String

@@ -283,7 +283,7 @@ Readium 分页使用两层横向滚动视图：章节 WebView 自己的滚动视
 
 `ReadiumTextPublication` 直接把惰性单元包装成 Publication 的 readingOrder，通过 Resource 按需生成内容，不临时打包 EPUB，不提前获取全书正文。生成的 TXT/在线书籍不执行 EPUB 全书资源诊断。位置服务为每个单元提供一个位置，位置数不是实际页数；显示整书比例时还需结合单元内 progression。
 
-在线阅读沿用原文、译文、双语及译源选择，保留段落顺序、次要文字样式与缺译提示。进度、书签和服务端历史仍为章节级；显示模式或译源改变时从该章开头恢复，不能把一份译文的字符偏移直接套用到其他正文。正文 HTTP/HTTPS 链接通过既有打开方式处理，EPUB 包内链接另行解析。
+在线阅读沿用原文、译文、双语及译源选择，保留缺译提示。双语段内顺序由 ReaderBilingualOrder 和本机 readerBilingualOrder 偏好控制，默认原文在前；显示、搜索文本、朗读及偏移映射共用同一顺序，分页书身份含排列设置。原文使用次要色、译文使用正文色，颜色不随排列交换；切换排列停止朗读，滚动清理旧搜索定位，分页从当前章开头重建。此偏好不参与 WebDAV。进度、书签和服务端历史仍为章节级；显示模式或译源改变时从该章开头恢复，不能把一份译文的字符偏移直接套用到其他正文。正文 HTTP/HTTPS 链接通过既有打开方式处理，EPUB 包内链接另行解析。
 
 Resource 每次请求重新创建，避免将一次加载失败固化为缓存结果。EPUB 文件在创建 Readium Publication 前必须先走 `EPUBContainer.open` 与 `validateForReadium()`（校验 spine 完整性、章节条目 CRC 与解压长度），失败直接进入 `.failed`；Readium navigator 在加载期或运行期报资源失败时用 `didFailToLoadResourceAt` 转失败页并保留「重新打开 / 复制错误说明 / 关闭阅读器」，不能停在加载态。`EPUBContainer.chapterHTML(at:)` 与 `validateForReadium()` 都不能解压图片，避免打开变慢。重试可以重建 Readium 导航器并恢复失败位置；章节请求、位置换算和预取保持取消检查，不能让旧请求覆盖当前章节，也不能为翻页阻塞主线程。
 

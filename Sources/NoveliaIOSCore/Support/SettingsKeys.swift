@@ -8,6 +8,7 @@ enum SettingsKey {
     static let readerFontSize = "readerFontSize"
     static let readerAppearance = "readerAppearance"
     static let readerMode = "readerMode"
+    static let readerBilingualOrder = "readerBilingualOrder"
     static let readerTranslationSource = "readerTranslationSource"
     /// 在线小说与 TXT 使用 YueduCoreText 分页代替滚动（默认关闭）。
     static let readerPagedText = "readerPagedText"

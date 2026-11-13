@@ -45,6 +45,20 @@ final class TextChapterSourceTests: XCTestCase {
         XCTAssertEqual(book.firstUnit(ofTOCEntry: 1), book.chapterCount - 1)
     }
 
+    func testBilingualOrderKeepsOriginalSecondaryInBothArrangements() {
+        for order in ReaderBilingualOrder.allCases {
+            let paragraphs = order.ordered(
+                original: TextChapterXHTML.paragraphs(fromLines: "原文😀", role: .secondary),
+                translation: TextChapterXHTML.paragraphs(fromLines: "译文")).flatMap { $0 }
+            XCTAssertEqual(paragraphs.first?.text, order == .originalFirst ? "原文😀" : "译文")
+            XCTAssertEqual(paragraphs.first(where: { $0.text == "原文😀" })?.role, .secondary)
+            XCTAssertEqual(paragraphs.first(where: { $0.text == "译文" })?.role, .body)
+            let html = TextChapterXHTML.document(TextChapterContent(title: "测试", subtitle: nil, paragraphs: paragraphs))
+            XCTAssertTrue(html.contains("<p class=\"secondary\">原文😀</p>"))
+            XCTAssertTrue(html.contains("<p>译文</p>"))
+        }
+    }
+
     func testThemeColourDrivesSecondaryText() {
         XCTAssertTrue(TextChapterXHTML.css(textColor: .black).contains("body { color: #000000; }"))
         XCTAssertTrue(TextChapterXHTML.css(textColor: .black).contains("p.secondary { color: #6B6B70; }"))

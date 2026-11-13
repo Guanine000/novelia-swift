@@ -5,6 +5,16 @@ import XCTest
 /// 已存储在设备上的设置通过这些精确字符串查找；修改任一名称
 /// 都会无提示地重置所有现有用户的对应设置。
 final class SettingsKeysTests: XCTestCase {
+    func testBilingualOrderPreservesLanguageIdentityAndEmptyParagraphs() {
+        let original = "原文😀"
+        let translation = "译文"
+        XCTAssertEqual(ReaderBilingualOrder.originalFirst.ordered(original: original, translation: translation), [original, translation])
+        XCTAssertEqual(ReaderBilingualOrder.translationFirst.ordered(original: original, translation: translation), [translation, original])
+        XCTAssertEqual(ReaderBilingualOrder.translationFirst.ordered(original: original, translation: ""), ["", original])
+        XCTAssertEqual(ReaderBilingualOrder(rawValue: "originalFirst"), .originalFirst)
+        XCTAssertEqual(ReaderBilingualOrder(rawValue: "translationFirst"), .translationFirst)
+    }
+
     func testPersistedKeysAreUnchanged() {
         XCTAssertEqual(SettingsKey.readerFontSize, "readerFontSize")
         XCTAssertEqual(SettingsKey.readerAppearance, "readerAppearance")

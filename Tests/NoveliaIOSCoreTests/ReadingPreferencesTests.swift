@@ -122,6 +122,28 @@ private actor OfflineFixture: NovelContentService {
     func requests() -> Int { count }
 }
 final class OfflineChapterTests: XCTestCase {
+    func testClearAllRemovesEveryBookOnlyForSelectedAccount() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = OnlineChapterOfflineStore(directory: directory)
+        let service = OfflineFixture()
+        let chapter = NovelChapter(id: "chapter", title: "章", originalText: "", translatedText: "")
+        for bookID in ["first", "second"] {
+            let book = Novel(id: bookID, title: bookID, author: "", summary: "", genres: [], chapters: [chapter], accent: .ocean, providerId: "source", novelId: bookID)
+            for account in ["a", "b"] {
+                _ = try await store.chapter(chapter, book: book, account: account, service: service)
+            }
+        }
+        try await store.remove(account: "a")
+        let removed = try await store.entries(account: "a")
+        let preserved = try await store.entries(account: "b")
+        XCTAssertTrue(removed.isEmpty)
+        XCTAssertEqual(Set(preserved.map(\.bookID)), ["first", "second"])
+        try await store.remove(account: "a")
+        let stillPreserved = try await store.entries(account: "b")
+        XCTAssertEqual(stillPreserved.count, 2)
+    }
+
     func testDiskCacheReopenAccountIsolationAndClear() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
