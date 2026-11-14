@@ -20,6 +20,7 @@ methods = r'''
       app.launch()
       let book=app.staticTexts["分页连续性"].firstMatch
       XCTAssertTrue(book.waitForExistence(timeout:20));book.tap()
+      if app.buttons["library-detail-read"].waitForExistence(timeout: 2) { app.buttons["library-detail-read"].tap() }
       waitForCurl(app)
       return app
      }
@@ -132,6 +133,7 @@ methods = r'''
       app.launchArguments=["-architectureValidation","-architectureReadium","-architecturePagination","-reader.readiumPageCurl.v1","YES"]
       app.launch();let book=app.staticTexts["分页连续性"].firstMatch
       XCTAssertTrue(book.waitForExistence(timeout:20));book.tap()
+      if app.buttons["library-detail-read"].waitForExistence(timeout: 2) { app.buttons["library-detail-read"].tap() }
       XCTAssertTrue(app.staticTexts["readium-validation-curl-state"].waitForExistence(timeout:20))
       // 不等待快照ready，第一次中心点按就应隐藏控件；再次点按应恢复。
       let center=app.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5))
@@ -156,6 +158,7 @@ methods = r'''
       app.launchArguments=["-architectureValidation","-architectureReadium","-architecturePagination","-reader.readiumPageCurl.v1","YES"]
       app.launch();let book=app.staticTexts["分页连续性"].firstMatch
       XCTAssertTrue(book.waitForExistence(timeout:20));book.tap()
+      if app.buttons["library-detail-read"].waitForExistence(timeout: 2) { app.buttons["library-detail-read"].tap() }
       XCTAssertTrue(app.staticTexts["readium-validation-curl-state"].waitForExistence(timeout:20))
       app.swipeLeft(velocity:.slow)
       let turned=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in self.curlCounts(app)[1] == 1 },object:nil)
@@ -219,6 +222,7 @@ methods = r'''
       app.launchArguments=["-architectureValidation","-architectureReadium","-architecturePagination","-reader.readiumPageCurl.v1","YES"]
       app.launch();let book=app.staticTexts["分页连续性"].firstMatch
       XCTAssertTrue(book.waitForExistence(timeout:20));book.tap()
+      if app.buttons["library-detail-read"].waitForExistence(timeout: 2) { app.buttons["library-detail-read"].tap() }
       let state=app.staticTexts["readium-validation-curl-state"]
       XCTAssertTrue(state.waitForExistence(timeout:20))
       let busy=XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in state.label == "busy" },object:nil)

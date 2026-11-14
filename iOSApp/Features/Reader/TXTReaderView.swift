@@ -4,6 +4,9 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct DownloadedWebNovelTXTReader: View {
+    @Environment(\.readerCloseAction) private var readerCloseAction
+    @Environment(\.dismiss) private var keyboardDismiss
+    @State private var isShowingKeyboardSettings = false
     @EnvironmentObject private var settings: ReaderSettings
     private var fontSize: Double { settings.fontSize }
     @Environment(\.colorScheme) private var systemColorScheme
@@ -124,6 +127,13 @@ struct DownloadedWebNovelTXTReader: View {
                         }
                     }
                     .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in speech.suspendFollow(true); lastManualScroll = ProcessInfo.processInfo.systemUptime })
+                    .pageKeyboardActions(enabled: !isShowingSearch && !isShowingContents && !isShowingSpeech
+                        && !isShowingBookPreferences && !isShowingAdjustment && !isShowingKeyboardSettings,
+                        readerKeyboardActions(search: { isShowingSearch = true }, contents: { isShowingContents = true },
+                            settings: { isShowingKeyboardSettings = true }, close: { if let readerCloseAction { readerCloseAction() } else { keyboardDismiss() } })
+                        + PageKeyAction.scrollPages(onManualScroll: { speech.suspendFollow(true); lastManualScroll = ProcessInfo.processInfo.systemUptime })
+                        + [.init(input: UIKeyCommand.inputLeftArrow, title: "上一章", perform: { _ in chapterIndex = max(0, chapterIndex - 1) }),
+                           .init(input: UIKeyCommand.inputRightArrow, title: "下一章", perform: { _ in chapterIndex = min(chapters.count - 1, chapterIndex + 1) })])
                     .onPreferenceChange(ReaderScrollFrames.self) { visibleAnchor = ReaderScrollFrames.visible($0) }
                     .task(id: "\(selectedSearchHit?.id ?? "")|\(bodyChunksChapterIndex ?? -1)|\(returnAnchor ?? "")") {
                         guard bodyChunksChapterIndex == chapterIndex else { return }
@@ -270,7 +280,9 @@ struct DownloadedWebNovelTXTReader: View {
                     if readingReturnPoint == nil { readingReturnPoint = .init(chapter: chapterIndex, anchor: visibleAnchor) }
                     speech.pause(); chapterIndex = hit.chapterIndex; selectedSearchHit = hit
                 }, tab: .search)
+                .keyboardDismissible()
         }
+        .sheet(isPresented: $isShowingKeyboardSettings) { ScrollReaderKeyboardSettings() }
         .sheet(isPresented: $isShowingBookPreferences) { ReaderBookPreferencesView() }
         .onValueChange(of: settings.projectionRevision) { _, _ in speech.stop() }
         .sheet(isPresented: $isShowingContents) {
@@ -308,6 +320,7 @@ struct DownloadedWebNovelTXTReader: View {
                     if tocWordCounts == nil, let parsedBook { tocWordCounts = await BookWordCounter.txtTOCCounts(parsedBook) }
                 }
             }
+            .keyboardDismissible()
             .compatPresentationDetents(.medium, .large)
         }
         .task(id: "\(url.path)|\(adjustmentRevision)") {

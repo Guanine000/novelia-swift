@@ -29,6 +29,7 @@ private struct ReadiumEPUBReaderViewContent: View {
     @ObservedObject private var backgrounds: ReaderBackgroundStore
     @StateObject private var model: ReadiumEPUBReaderModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.readerCloseAction) private var readerCloseAction
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @State private var showChrome = true
@@ -180,6 +181,7 @@ private struct ReadiumEPUBReaderViewContent: View {
             if let textBook { await model.open(textBook: textBook, systemIsDark: colorScheme == .dark) }
             else if let bookURL { await model.open(url: bookURL, systemIsDark: colorScheme == .dark) }
         }
+        .pageKeyboardActions(enabled: keyboardEnabled, keyboardActions)
         .modifier(ReaderRecapPresentation(store: settings.recaps, source: model.localRecapSource,
             active: model.status == .ready && !model.speech.isActive && !isShowingTOC && !isShowingStyle
                 && !isShowingBookmarks && !isShowingAnnotations && !isShowingSpeech && !isShowingBookPreferences && model.activeNote == nil,
@@ -258,7 +260,7 @@ private struct ReadiumEPUBReaderViewContent: View {
             guard model.status == .ready, showsTOCDiagnostics, isShowingTOC else { return }
             await model.scanBookDiagnostics()
         }
-        .sheet(isPresented: $isShowingTOC) { tocSheet }
+        .sheet(isPresented: $isShowingTOC) { tocSheet.keyboardDismissible() }
         .modifier(ReaderImagePresenter(library: model.imageLibrary, chapterTitle: { model.imageChapterTitle($0) },
                                        onJump: { model.jump(toImage: $0) }))
         .sheet(isPresented: $isShowingBookmarks) {
@@ -270,9 +272,10 @@ private struct ReadiumEPUBReaderViewContent: View {
                                            legacyBookKey: model.legacyBookmarkKey,
                                            chapterIDAtIndex: { model.webChapterID($0) },
                                            resolveChapter: { model.bookmarkIndex($0) }, scopeDescription: textBook?.searchChapterText == nil ? nil : "仅搜索已缓存章节，不会下载未缓存正文。", onSearchHit: { model.showSearchHit($0) }, tab: bookmarksTab)
+                    .keyboardDismissible()
             }
         }
-        .sheet(isPresented: $isShowingStyle) { styleSheet }
+        .sheet(isPresented: $isShowingStyle) { styleSheet.keyboardDismissible() }
         .sheet(item: $model.activeAnnotation) { annotation in
             AnnotationEditorSheet(
                 target: AnnotationEditorTarget(range: nil, quote: annotation.quote, annotation: annotation),
@@ -302,6 +305,20 @@ private struct ReadiumEPUBReaderViewContent: View {
     }
 
     // MARK: 顶栏
+
+    private var keyboardEnabled: Bool {
+        !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingAnnotations
+            && !isShowingSpeech && !isShowingBookPreferences && model.activeNote == nil && model.activeAnnotation == nil
+    }
+    private var keyboardActions: [PageKeyAction] {
+        var actions = readerKeyboardActions(search: { bookmarksTab = .search; isShowingBookmarks = true },
+            contents: { isShowingTOC = true }, settings: { isShowingStyle = true },
+            close: { if let readerCloseAction { readerCloseAction() } else { dismiss() } })
+        if model.status == .ready {
+            actions += PageKeyAction.pages(previous: { model.speech.suspendFollow(true); model.goBackward() }, next: { model.speech.suspendFollow(true); model.goForward() })
+        }
+        return actions
+    }
 
     private var topBar: some View {
         // 布局与材质由共用骨架提供；菜单内容保持本引擎行为（引擎说明、就绪才可用的书签/目录）。
@@ -626,9 +643,12 @@ private struct ReadiumNavigatorHost: UIViewControllerRepresentable {
 }
 
 final class ReadiumNavigatorContainer: UIViewController {
+    private weak var readerModel: ReadiumEPUBReaderModel?
+    private var viewportRestorationTask: Task<Void, Never>?
     private var curlController: ReadiumPageCurlController?
     private var curlEnabled = false
     func configureCurl(model: ReadiumEPUBReaderModel, enabled: Bool) {
+        readerModel = model
         curlEnabled = enabled
         if enabled, curlController == nil, let navigator = embedded as? EPUBNavigatorViewController {
             let controller = ReadiumPageCurlController(model: model, host: self, navigator: navigator)
@@ -695,6 +715,24 @@ final class ReadiumNavigatorContainer: UIViewController {
         view.addSubview(child.view)
         child.didMove(toParent: self)
         embedded = child
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        // 必须先保存锚点，再让 UIKit 把尺寸变化传给 Readium 子控制器。
+        let restoration: UUID?
+        if view.window?.windowScene?.activationState == .background {
+            restoration = nil
+        } else {
+            viewportRestorationTask?.cancel()
+            restoration = readerModel?.beginViewportTransition()
+        }
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            guard let self, let restoration else { return }
+            self.viewportRestorationTask = Task { [weak self] in
+                await self?.readerModel?.finishViewportTransition(restoration)
+            }
+        }
     }
 
     override func viewDidLayoutSubviews() {

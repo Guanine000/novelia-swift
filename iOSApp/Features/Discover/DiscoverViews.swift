@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 /// “发现”页：顶部切换网络小说与文库，分别保留原有的搜索、排行榜与收藏入口。
 struct DiscoverHomeView: View {
+    @Environment(\.keyboardPageActive) private var keyboardParentActive
     private enum Catalog: String, CaseIterable, Identifiable {
         case webNovel, wenku
         var id: String { rawValue }
@@ -22,6 +23,7 @@ struct DiscoverHomeView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
+            .frame(maxWidth: 760)
             // 两个分段首次打开后都保留，切换时不丢失搜索词和已加载的列表。
             ZStack {
                 ForEach(Catalog.allCases.filter { loaded.contains($0) || $0 == catalog }) { item in
@@ -34,6 +36,7 @@ struct DiscoverHomeView: View {
                     .opacity(item == catalog ? 1 : 0)
                     .allowsHitTesting(item == catalog)
                     .accessibilityHidden(item != catalog)
+                    .environment(\.keyboardPageActive, keyboardParentActive && item == catalog)
                 }
             }
         }
@@ -219,6 +222,10 @@ struct DiscoverView: View {
 }
 
 private struct DiscoverContentView: View {
+    @Environment(\.browseSelection) private var keyboardSelect
+    @Environment(\.browseSelectedID) private var keyboardSelectedID
+    @Environment(\.browseReading) private var keyboardRead
+    @FocusState private var searchFocused: Bool
     @EnvironmentObject private var blocked: BlockedTagsStore
     @State private var query = ""
     @State private var filter = NovelCatalogFilter.standard
@@ -255,7 +262,10 @@ private struct DiscoverContentView: View {
         }
     }
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     private var content: some View {
+        GeometryReader { geometry in
         ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -276,6 +286,8 @@ private struct DiscoverContentView: View {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(NoveliaStyle.muted)
                     TextField("搜索书名、作者或题材", text: $query)
+                        .focused($searchFocused)
+                        .onSubmit { searchFocused = false }
                         .font(.system(size: 15))
                         .compatAutocorrectionDisabled()
                 }
@@ -326,13 +338,13 @@ private struct DiscoverContentView: View {
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        NavigationLink { RankingView() } label: {
+                        BrowseListLink { RankingView() } label: {
                             DiscoverShortcutChip(title: "排行榜", systemImage: "chart.line.uptrend.xyaxis")
                         }
-                        NavigationLink { CloudFavoritesListView() } label: {
+                        BrowseListLink { CloudFavoritesListView() } label: {
                             DiscoverShortcutChip(title: "收藏", systemImage: "heart")
                         }
-                        NavigationLink { CloudReadingHistoryListView() } label: {
+                        BrowseListLink { CloudReadingHistoryListView() } label: {
                             DiscoverShortcutChip(title: "阅读历史", systemImage: "clock.arrow.circlepath")
                         }
                     }
@@ -364,13 +376,18 @@ private struct DiscoverContentView: View {
                     }
                 }
 
-                ForEach(store.novels.filter { !blocked.hides($0.genres) }) { novel in
-                    NavigationLink {
-                        NovelDetailView(novel: novel)
-                    } label: {
-                        FeaturedNovelCard(novel: novel)
+                // 列数取自内容区可用宽度；分屏变窄时回到单列，不按设备型号判断。
+                let cardWidth = min(1120, max(0, geometry.size.width - 40))
+                let cardColumns = dynamicTypeSize.isAccessibilitySize ? 1 : max(1, Int((cardWidth + 20) / 360))
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .top), count: cardColumns), spacing: 20) {
+                    ForEach(store.novels.filter { !blocked.hides($0.genres) }) { novel in
+                        BrowseDetailLink(destination: .novel(novel)) {
+                            FeaturedNovelCard(novel: novel)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("discover-card-\(novel.id)")
+                        .id("novel:" + novel.id)
                     }
-                    .buttonStyle(.plain)
                 }
                 if !store.novels.isEmpty || store.page > 1 {
                     PageNavigator(page: store.page, pageCount: store.pageCount, isLoading: store.isLoading) { target in
@@ -392,9 +409,7 @@ private struct DiscoverContentView: View {
                             .font(NoveliaStyle.fontFootnote)
                             .foregroundStyle(NoveliaStyle.muted)
                         ForEach(store.wenkuNovels) { novel in
-                            NavigationLink {
-                                WenkuDetailView(outline: novel)
-                            } label: {
+                            BrowseDetailLink(destination: .wenku(novel)) {
                                 WenkuNovelRow(novel: novel)
                             }
                             .buttonStyle(.plain)
@@ -410,10 +425,18 @@ private struct DiscoverContentView: View {
             .padding(.horizontal, 20)
             .padding(.top, 18)
             .padding(.bottom, 24)
+            .frame(maxWidth: 1160)
+            .frame(maxWidth: .infinity)
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
         // 翻页后回到顶部，像网页端一样从新一页的第一部作品开始看。
         .onValueChange(of: store.page) { _, _ in proxy.scrollTo(Self.topAnchor, anchor: .top) }
+        .pageKeyboardActions(browseKeyboardActions(
+            destinations: store.novels.filter { !blocked.hides($0.genres) }.map(BrowseDestination.novel),
+            selectedID: keyboardSelectedID, select: keyboardSelect, read: keyboardRead,
+            search: { searchFocused = true },
+            scrollTo: { id in withAnimation { proxy.scrollTo(id, anchor: .center) } }))
+        }
         }
         .task(id: requestKey) { await store.searchIfNeeded(query: query, filter: filter) }
     }
@@ -542,9 +565,7 @@ private struct RankingContentView: View {
                 }
 
                 ForEach(Array(store.novels.enumerated()).filter { !blocked.hides($0.element.genres) }, id: \.element.id) { index, novel in
-                    NavigationLink {
-                        NovelDetailView(novel: novel)
-                    } label: {
+                    BrowseDetailLink(destination: .novel(novel)) {
                         HStack(spacing: 8) {
                             Text(String(format: "%02d", (page - 1) * 20 + index + 1))
                                 .font(.system(size: 14, weight: .heavy, design: .rounded))
@@ -640,9 +661,7 @@ private struct TagSearchContentView: View {
                 }
 
                 ForEach(store.novels.filter { !blocked.hides($0.genres) }) { novel in
-                    NavigationLink {
-                        NovelDetailView(novel: novel)
-                    } label: {
+                    BrowseDetailLink(destination: .novel(novel)) {
                         FeaturedNovelCard(novel: novel)
                     }
                     .buttonStyle(.plain)

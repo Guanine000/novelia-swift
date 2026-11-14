@@ -10,12 +10,12 @@ parser.add_argument('--readium-only', action='store_true',
                     help='Also reject YueduCoreText and libmobi symbols (iOS 15 NoveliaLegacy)')
 args = parser.parse_args()
 data = args.executable.read_bytes()
-for marker in [b'-architectureValidation', b'-resetArchitectureValidation', b'-architectureReadium', b'-architecturePagination',
+for marker in [b'-architectureKeyboardUIHooks', b'keyboard-action-', b'keyboard-input-target', b'keyboard-validation-scope', b'keyboard-validation-focused', b'-architectureValidation', b'-architectureBrowseResize', b'-resetArchitectureValidation', b'-architectureReadium', b'-architecturePagination',
                b'-architectureFailFirstSearch', b'-architectureCharacterPortrait', b'-architectureCharacterConversation', b'-architectureRecapMissingKey', b'-seedPerformanceLibrary', b'-performanceLibraryCount', b'-performanceLargeTXT', b'-architectureTXT', b'ArchitectureNetworkTrap', b'architecture-user']:
     if marker in data:
         raise SystemExit('Unexpected validation runtime marker: ' + marker.decode())
 symbols = subprocess.check_output(['nm', '-gj', str(args.executable)], text=True)
-for marker in ['ArchitectureFixtureBackend', 'ArchitectureCharacterReplyAI', 'FixtureTokenStore', 'ArchitectureNetworkTrap', 'architectureValidation']:
+for marker in ['KeyboardActionValidationBar', 'KeyboardValidationIndicator', 'KeyboardScopeValidation', 'KeyboardFocusedValidation', 'ArchitectureBrowseViewport', 'ArchitectureFixtureBackend', 'ArchitectureCharacterReplyAI', 'FixtureTokenStore', 'ArchitectureNetworkTrap', 'architectureValidation']:
     if marker in symbols:
         raise SystemExit('Unexpected validation runtime symbol: ' + marker)
 # 即使 #if DEBUG 移除了全部声明，编译器的源文件表仍可能保留

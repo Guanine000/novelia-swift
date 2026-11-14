@@ -312,4 +312,30 @@ private struct ArchitectureCharacterReplyAI: ReadingAICompleting {
         return result
     }
 }
+/// 只在独立验证 App 中改变内容区宽度和尺寸类别，不模拟或宣称系统真实分屏。
+/// RootView 始终是同一个实例，用于核对分栏收起/展开时搜索、选择和导航状态的连续性。
+struct ArchitectureBrowseViewport: ViewModifier {
+    @State private var narrow = false
+    private var isEnabled: Bool {
+        Bundle.main.bundleIdentifier == "cc.novelia.ios.architecture-validation"
+            && ProcessInfo.processInfo.arguments.contains("-architectureValidation")
+            && ProcessInfo.processInfo.arguments.contains("-architectureBrowseResize")
+    }
+    func body(content: Content) -> some View {
+        if isEnabled {
+            GeometryReader { geometry in
+                content
+                    .frame(width: narrow ? min(480, geometry.size.width) : geometry.size.width, height: geometry.size.height)
+                    .environment(\.horizontalSizeClass, narrow ? .compact : .regular)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .overlay(alignment: .bottomTrailing) {
+                        Button(narrow ? "验证：恢复宽窗口" : "验证：切换窄窗口") { narrow.toggle() }
+                            .padding(12)
+                            .background(.regularMaterial)
+                            .accessibilityIdentifier("architecture-browse-resize")
+                    }
+            }
+        } else { content }
+    }
+}
 #endif

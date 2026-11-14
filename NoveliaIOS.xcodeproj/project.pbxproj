@@ -338,6 +338,21 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		AF2795795323F7D409C534FA /* CharacterSeriesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 384329C8926A69209ABA6008 /* CharacterSeriesView.swift */; };
 		D55000000000000000000001 /* ReadiumPageCurl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000003; };
 		D55000000000000000000002 /* ReadiumPageCurl.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000003; };
+		B705E0000000000000000002 /* BrowseNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B705E0000000000000000001 /* BrowseNavigation.swift */; };
+		B705E0000000000000000012 /* KeyboardNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B705E0000000000000000011 /* KeyboardNavigation.swift */; };
+		B705E0000000000000000003 /* BrowseNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B705E0000000000000000001 /* BrowseNavigation.swift */; };
+		B705E0000000000000000013 /* KeyboardNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B705E0000000000000000011 /* KeyboardNavigation.swift */; };
+		B70600000000000000000002 /* LibraryBookActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000001 /* LibraryBookActions.swift */; };
+		B70600000000000000000003 /* LibraryBookActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000001 /* LibraryBookActions.swift */; };
+		B70600000000000000000012 /* SpeechPlaybackViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000011 /* SpeechPlaybackViews.swift */; };
+		B70600000000000000000013 /* SpeechPlaybackViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000011 /* SpeechPlaybackViews.swift */; };
+		B70600000000000000000022 /* CharacterCardSupportViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000021 /* CharacterCardSupportViews.swift */; };
+		B70600000000000000000023 /* CharacterCardSupportViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000021 /* CharacterCardSupportViews.swift */; };
+		B70600000000000000000032 /* EPUBContentSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000031 /* EPUBContentSupport.swift */; };
+		B70600000000000000000033 /* EPUBContentSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000031 /* EPUBContentSupport.swift */; };
+		B70600000000000000000042 /* ReadiumEPUBReaderSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000041 /* ReadiumEPUBReaderSupport.swift */; };
+		B70600000000000000000043 /* ReadiumEPUBReaderSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000041 /* ReadiumEPUBReaderSupport.swift */; };
+		B70600000000000000000052 /* EPUBReaderNavigationSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000051 /* EPUBReaderNavigationSupport.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -506,6 +521,14 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 		D24038D26A5A1A5A34320D64 /* ReadingCharactersEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/App/Integrations/ReadingCharactersEntry.swift; sourceTree = SOURCE_ROOT; };
 		384329C8926A69209ABA6008 /* CharacterSeriesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Library/CharacterSeriesView.swift; sourceTree = SOURCE_ROOT; };
 		D55000000000000000000003 /* ReadiumPageCurl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadiumPageCurl.swift; sourceTree = "<group>"; };
+		B705E0000000000000000001 /* BrowseNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/App/Integrations/BrowseNavigation.swift; sourceTree = SOURCE_ROOT; };
+		B705E0000000000000000011 /* KeyboardNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Shared/KeyboardNavigation.swift; sourceTree = SOURCE_ROOT; };
+		B70600000000000000000001 /* LibraryBookActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Library/LibraryBookActions.swift; sourceTree = SOURCE_ROOT; };
+		B70600000000000000000011 /* SpeechPlaybackViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/Speech/SpeechPlaybackViews.swift; sourceTree = SOURCE_ROOT; };
+		B70600000000000000000021 /* CharacterCardSupportViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Library/CharacterCardSupportViews.swift; sourceTree = SOURCE_ROOT; };
+		B70600000000000000000031 /* EPUBContentSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/EPUBContentSupport.swift; sourceTree = SOURCE_ROOT; };
+		B70600000000000000000041 /* ReadiumEPUBReaderSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/ReadiumEPUBReaderSupport.swift; sourceTree = SOURCE_ROOT; };
+		B70600000000000000000051 /* EPUBReaderNavigationSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/EPUBReaderNavigationSupport.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -542,7 +565,15 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 			isa = PBXGroup;
 			children = (
 				384329C8926A69209ABA6008 /* CharacterSeriesView.swift */,
+				B70600000000000000000021 /* CharacterCardSupportViews.swift */,
+				B70600000000000000000001 /* LibraryBookActions.swift */,
+				B70600000000000000000011 /* SpeechPlaybackViews.swift */,
+				B70600000000000000000031 /* EPUBContentSupport.swift */,
+				B70600000000000000000041 /* ReadiumEPUBReaderSupport.swift */,
+				B70600000000000000000051 /* EPUBReaderNavigationSupport.swift */,
 				D24038D26A5A1A5A34320D64 /* ReadingCharactersEntry.swift */,
+				B705E0000000000000000001 /* BrowseNavigation.swift */,
+				B705E0000000000000000011 /* KeyboardNavigation.swift */,
 				94E854C22C4CAF76EC4619B8 /* CharacterVolumeLoader.swift */,
 				FF028E33B1D50C10DA6AF24F /* CharacterLexiconStore.swift */,
 				0E48AD0184BD652154FE91E3 /* CharacterLexicon.swift */,
@@ -973,6 +1004,8 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 			buildActionMask = 2147483647;
 			files = (
 				39466130E0D6E8F97106F7C2 /* CharacterSeriesView.swift in Sources */,
+				B705E0000000000000000002 /* BrowseNavigation.swift in Sources */,
+				B705E0000000000000000012 /* KeyboardNavigation.swift in Sources */,
 				F0B428D25E7CC5BF3F0BD048 /* ReadingCharactersEntry.swift in Sources */,
 				30365401E5F9BB475D4292A7 /* CharacterVolumeLoader.swift in Sources */,
 				35D3A4EDCC7D1C19C90FA1A1 /* CharacterLexiconStore.swift in Sources */,
@@ -1132,6 +1165,12 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A10000000000000000000310 /* ReadiumTextPublication.swift in Sources */,
 				A10000000000000000000301 /* ReadiumEPUBReaderView.swift in Sources */,
 				D55000000000000000000001 /* ReadiumPageCurl.swift in Sources */,
+				B70600000000000000000002 /* LibraryBookActions.swift in Sources */,
+				B70600000000000000000012 /* SpeechPlaybackViews.swift in Sources */,
+				B70600000000000000000022 /* CharacterCardSupportViews.swift in Sources */,
+				B70600000000000000000032 /* EPUBContentSupport.swift in Sources */,
+				B70600000000000000000042 /* ReadiumEPUBReaderSupport.swift in Sources */,
+				B70600000000000000000052 /* EPUBReaderNavigationSupport.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1140,6 +1179,13 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 			buildActionMask = 2147483647;
 			files = (
 				AF2795795323F7D409C534FA /* CharacterSeriesView.swift in Sources */,
+				B70600000000000000000003 /* LibraryBookActions.swift in Sources */,
+				B70600000000000000000013 /* SpeechPlaybackViews.swift in Sources */,
+				B70600000000000000000023 /* CharacterCardSupportViews.swift in Sources */,
+				B70600000000000000000033 /* EPUBContentSupport.swift in Sources */,
+				B70600000000000000000043 /* ReadiumEPUBReaderSupport.swift in Sources */,
+				B705E0000000000000000003 /* BrowseNavigation.swift in Sources */,
+				B705E0000000000000000013 /* KeyboardNavigation.swift in Sources */,
 				644385B483AFC07514AE8DFF /* ReadingCharactersEntry.swift in Sources */,
 				709EA2C6C706B31819C2FCA6 /* CharacterVolumeLoader.swift in Sources */,
 				5CFB62BC67DC91B03A904CFE /* CharacterLexiconStore.swift in Sources */,

@@ -153,5 +153,13 @@
   "CharacterLexiconStore.swift": "Sources/NoveliaIOSCore/Features/ReadingAI/CharacterLexiconStore.swift",
   "CharacterVolumeLoader.swift": "iOSApp/App/Integrations/CharacterVolumeLoader.swift",
   "ReadingCharactersEntry.swift": "iOSApp/App/Integrations/ReadingCharactersEntry.swift",
-  "CharacterSeriesView.swift": "iOSApp/Features/Library/CharacterSeriesView.swift"
+  "CharacterSeriesView.swift": "iOSApp/Features/Library/CharacterSeriesView.swift",
+  "CharacterCardSupportViews.swift": "iOSApp/Features/Library/CharacterCardSupportViews.swift",
+  "LibraryBookActions.swift": "iOSApp/Features/Library/LibraryBookActions.swift",
+  "SpeechPlaybackViews.swift": "iOSApp/Features/Reader/Speech/SpeechPlaybackViews.swift",
+  "EPUBContentSupport.swift": "iOSApp/Features/Reader/EPUBReader/EPUBContentSupport.swift",
+  "ReadiumEPUBReaderSupport.swift": "iOSApp/Features/Reader/EPUBReader/ReadiumEPUBReaderSupport.swift",
+  "EPUBReaderNavigationSupport.swift": "iOSApp/Features/Reader/EPUBReader/EPUBReaderNavigationSupport.swift",
+  "BrowseNavigation.swift": "iOSApp/App/Integrations/BrowseNavigation.swift",
+  "KeyboardNavigation.swift": "iOSApp/Shared/KeyboardNavigation.swift"
 }

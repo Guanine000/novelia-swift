@@ -29,6 +29,73 @@ struct NovelDetailView: View {
         _savedChapterIndex = AppStorage(wrappedValue: 0, ReadingProgressStore.chapterKey(novelID: novel.id))
     }
 
+    private var informationCard: some View {
+        // 信息决定卡片高度，避免长译名、原名和多人署名被压缩截断。
+        VStack(alignment: .leading, spacing: 18) {
+            Text(verbatim: displayNovel.title)
+                .font(.system(.title2, design: .rounded).weight(.bold))
+                .foregroundStyle(NoveliaStyle.ink)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("novel-detail-title")
+
+            if let originalTitle = displayNovel.distinctOriginalTitle {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("原名")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(NoveliaStyle.muted)
+                    Text(verbatim: originalTitle)
+                        .font(.subheadline)
+                        .foregroundStyle(NoveliaStyle.ink.opacity(0.85))
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Divider()
+
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "person")
+                    .foregroundStyle(NoveliaStyle.brandGreen)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("作者")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(NoveliaStyle.muted)
+                    Text(verbatim: displayNovel.author)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(NoveliaStyle.ink)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if let totalCharacters = displayNovel.totalCharacters, totalCharacters > 0 {
+                Text("\(totalCharacters.formatted()) 字")
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(NoveliaStyle.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(22)
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 24))
+    }
+
+    private var introduction: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("作品简介")
+                .accessibilityIdentifier("novel-detail-introduction")
+                .font(.system(size: 19, weight: .bold, design: .rounded))
+            Text(displayNovel.summary)
+                .font(.system(size: 15))
+                .lineSpacing(5)
+                .foregroundStyle(NoveliaStyle.muted)
+        }
+    }
+
     private var continueChapterIndex: Int {
         if let cloudLastReadChapterID,
            let cloudIndex = displayNovel.chapters.firstIndex(where: { $0.id == cloudLastReadChapterID }) {
@@ -42,306 +109,257 @@ struct NovelDetailView: View {
         return NovelTranslationSource.allCases.filter { (counts[$0] ?? 0) > 0 }
     }
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                // 信息决定卡片高度，避免长译名、原名和多人署名被压缩截断。
-                VStack(alignment: .leading, spacing: 18) {
-                    Text(verbatim: displayNovel.title)
-                        .font(.system(.title2, design: .rounded).weight(.bold))
-                        .foregroundStyle(NoveliaStyle.ink)
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-
-                    if let originalTitle = displayNovel.distinctOriginalTitle {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("原名")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(NoveliaStyle.muted)
-                            Text(verbatim: originalTitle)
-                                .font(.subheadline)
-                                .foregroundStyle(NoveliaStyle.ink.opacity(0.85))
-                                .lineLimit(nil)
-                                .fixedSize(horizontal: false, vertical: true)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    if geometry.size.width >= 800 && !dynamicTypeSize.isAccessibilitySize {
+                        HStack(alignment: .top, spacing: 28) {
+                            informationCard.frame(width: 300)
+                            introduction.frame(maxWidth: .infinity, alignment: .leading)
                         }
+                    } else {
+                        informationCard
+                        introduction
                     }
 
-                    Divider()
-
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "person")
-                            .foregroundStyle(NoveliaStyle.brandGreen)
-                            .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("作者")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(NoveliaStyle.muted)
-                            Text(verbatim: displayNovel.author)
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(NoveliaStyle.ink)
-                                .lineLimit(nil)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    if let totalCharacters = displayNovel.totalCharacters, totalCharacters > 0 {
-                        Text("\(totalCharacters.formatted()) 字")
-                            .font(.footnote.monospacedDigit())
-                            .foregroundStyle(NoveliaStyle.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(22)
-                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 24))
-
-                if let wenkuId = displayNovel.wenkuId {
-                    NavigationLink {
-                        WenkuDetailView(outline: WenkuNovelOutline(id: wenkuId, title: "正在加载…"))
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "books.vertical").font(.title3)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("文库版").font(.headline)
-                                Text("查看对应的 Novelia 文库作品")
-                                    .font(.caption).foregroundStyle(NoveliaStyle.muted)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.caption)
-                        }
-                        .padding(14)
-                        .background(NoveliaStyle.brandGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                VStack(alignment: .leading, spacing: 9) {
-                    Text("作品简介")
-                        .font(.system(size: 19, weight: .bold, design: .rounded))
-                    Text(displayNovel.summary)
-                        .font(.system(size: 15))
-                        .lineSpacing(5)
-                        .foregroundStyle(NoveliaStyle.muted)
-                }
-
-                if let translationCounts = displayNovel.translationChapterCounts {
-                    VStack(alignment: .leading, spacing: 11) {
-                        Text("译源进度")
-                            .font(.system(size: 19, weight: .bold, design: .rounded))
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 9) {
-                            ForEach(NovelTranslationSource.allCases) { source in
-                                VStack(spacing: 5) {
-                                    Text(source.title)
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(NoveliaStyle.ink)
-                                    Text("\(translationCounts[source] ?? 0) / \(displayNovel.chapters.count) 章")
-                                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                                        .foregroundStyle(NoveliaStyle.muted)
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.8)
+                    if let wenkuId = displayNovel.wenkuId {
+                        NavigationLink {
+                            WenkuDetailView(outline: WenkuNovelOutline(id: wenkuId, title: "正在加载…"))
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "books.vertical").font(.title3)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("文库版").font(.headline)
+                                    Text("查看对应的 Novelia 文库作品")
+                                        .font(.caption).foregroundStyle(NoveliaStyle.muted)
                                 }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 13))
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption)
                             }
+                            .padding(14)
+                            .background(NoveliaStyle.brandGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
                         }
-                        Text("阅读时可在右上角设置中切换译源。")
-                            .font(NoveliaStyle.fontFootnote)
-                            .foregroundStyle(NoveliaStyle.muted)
+                        .buttonStyle(.plain)
                     }
-                }
 
-                if !displayNovel.genres.isEmpty {
-                    VStack(alignment: .leading, spacing: 11) {
-                        HStack(spacing: 8) {
-                            Text("标签").font(.system(size: 19, weight: .bold, design: .rounded))
-                            Text("点击搜索，长按屏蔽")
+                    if let translationCounts = displayNovel.translationChapterCounts {
+                        VStack(alignment: .leading, spacing: 11) {
+                            Text("译源进度")
+                                .font(.system(size: 19, weight: .bold, design: .rounded))
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 220 : 140), spacing: 9)], spacing: 9) {
+                                ForEach(NovelTranslationSource.allCases) { source in
+                                    VStack(spacing: 5) {
+                                        Text(source.title)
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(NoveliaStyle.ink)
+                                        Text("\(translationCounts[source] ?? 0) / \(displayNovel.chapters.count) 章")
+                                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                                            .foregroundStyle(NoveliaStyle.muted)
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.8)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 13))
+                                }
+                            }
+                            Text("阅读时可在右上角设置中切换译源。")
                                 .font(NoveliaStyle.fontFootnote)
                                 .foregroundStyle(NoveliaStyle.muted)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                            Spacer(minLength: 6)
-                            TagBlockingMenu(tags: displayNovel.genres)
                         }
-                        LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 92), alignment: .leading)],
-                            alignment: .leading,
-                            spacing: 9
-                        ) {
-                            ForEach(displayNovel.genres, id: \.self) { tag in
-                                NavigationLink {
-                                    TagSearchResultsView(tag: tag)
-                                } label: {
-                                    Text(tag)
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(blocked.contains(tag) ? NoveliaStyle.muted : NoveliaStyle.accent(for: displayNovel.accent))
-                                        .lineLimit(1)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .background(NoveliaStyle.card, in: Capsule())
-                                }
-                                .buttonStyle(.plain)
-                                .contextMenu {
-                                    Button(blocked.contains(tag) ? "解除屏蔽此标签" : "屏蔽此标签", systemImage: "eye.slash") {
-                                        if blocked.contains(tag) { blocked.remove(tag) } else { blocked.add(tag) }
+                    }
+
+                    if !displayNovel.genres.isEmpty {
+                        VStack(alignment: .leading, spacing: 11) {
+                            HStack(spacing: 8) {
+                                Text("标签").font(.system(size: 19, weight: .bold, design: .rounded))
+                                Text("点击搜索，长按屏蔽")
+                                    .font(NoveliaStyle.fontFootnote)
+                                    .foregroundStyle(NoveliaStyle.muted)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                                Spacer(minLength: 6)
+                                TagBlockingMenu(tags: displayNovel.genres)
+                            }
+                            LazyVGrid(
+                                columns: [GridItem(.adaptive(minimum: 92), alignment: .leading)],
+                                alignment: .leading,
+                                spacing: 9
+                            ) {
+                                ForEach(displayNovel.genres, id: \.self) { tag in
+                                    NavigationLink {
+                                        TagSearchResultsView(tag: tag)
+                                    } label: {
+                                        Text(tag)
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(blocked.contains(tag) ? NoveliaStyle.muted : NoveliaStyle.accent(for: displayNovel.accent))
+                                            .lineLimit(1)
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(NoveliaStyle.card, in: Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .contextMenu {
+                                        Button(blocked.contains(tag) ? "解除屏蔽此标签" : "屏蔽此标签", systemImage: "eye.slash") {
+                                            if blocked.contains(tag) { blocked.remove(tag) } else { blocked.add(tag) }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                if !displayNovel.chapters.isEmpty {
-                    NavigationLink {
-                        ReaderView(novel: displayNovel, startingAt: continueChapterIndex)
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "book.fill")
-                                .font(.system(size: 17, weight: .semibold))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("继续阅读")
-                                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                                Text(displayNovel.chapters[continueChapterIndex].title)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .lineLimit(1)
-                                    .opacity(0.85)
-                            }
-                            Spacer()
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 13, weight: .bold))
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 17)
-                        .padding(.vertical, 14)
-                        .background(NoveliaStyle.brandGreen, in: RoundedRectangle(cornerRadius: 15))
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                if displayNovel.isRemote && !displayNovel.chapters.isEmpty {
-                    let progress = webNovelDownloads.progress[displayNovel.id]
-                    VStack(alignment: .leading, spacing: 8) {
-                        Button {
-                            downloadRequest = displayNovel
-                        } label: {
-                            HStack(spacing: 10) {
-                                if progress != nil {
-                                    ProgressView().tint(.white)
-                                } else {
-                                    Image(systemName: webNovelDownloads.isDownloaded(displayNovel.id) ? "arrow.clockwise" : "arrow.down.to.line")
-                                }
+                    if !displayNovel.chapters.isEmpty {
+                        BrowseReadingLink(destination: .online(displayNovel, continueChapterIndex)) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "book.fill")
+                                    .font(.system(size: 17, weight: .semibold))
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(progress == nil
-                                         ? (webNovelDownloads.isDownloaded(displayNovel.id) ? "重新下载全书 EPUB" : "下载全书 EPUB")
-                                         : "正在下载整本小说…")
+                                    Text("继续阅读")
                                         .font(.system(size: 15, weight: .bold, design: .rounded))
-                                    Text("选择原文、译文或双语 EPUB，下载后可在 App 内阅读")
-                                        .font(.system(size: 12, weight: .medium)).opacity(0.82)
+                                    Text(displayNovel.chapters[continueChapterIndex].title)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .lineLimit(1)
+                                        .opacity(0.85)
                                 }
                                 Spacer()
-                                if let progress {
-                                    ProgressView(value: progress.fraction).tint(.white).frame(width: 48)
-                                }
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 13, weight: .bold))
                             }
                             .foregroundStyle(.white)
                             .padding(.horizontal, 17)
                             .padding(.vertical, 14)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(NoveliaStyle.accent(for: displayNovel.accent), in: RoundedRectangle(cornerRadius: 15))
+                            .background(NoveliaStyle.brandGreen, in: RoundedRectangle(cornerRadius: 15))
                         }
                         .buttonStyle(.plain)
-                        .disabled(progress != nil)
-                        if let error = webNovelDownloads.errors[displayNovel.id] {
-                            Text("下载失败：\(error)")
-                                .font(.footnote).foregroundStyle(NoveliaStyle.danger)
-                        }
                     }
-                }
 
-                if displayNovel.isRemote,
-                   let providerId = displayNovel.providerId,
-                   let novelId = displayNovel.novelId {
-                    NavigationLink {
-                        NovelCommentsView(title: displayNovel.title, subjectKey: "web-\(providerId)-\(novelId)")
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "text.bubble")
-                                .font(.system(size: 17, weight: .semibold))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("评论区")
-                                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                                Text("查看或参与 Novelia 网页端讨论")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .opacity(0.82)
+                    if displayNovel.isRemote && !displayNovel.chapters.isEmpty {
+                        let progress = webNovelDownloads.progress[displayNovel.id]
+                        VStack(alignment: .leading, spacing: 8) {
+                            Button {
+                                downloadRequest = displayNovel
+                            } label: {
+                                HStack(spacing: 10) {
+                                    if progress != nil {
+                                        ProgressView().tint(.white)
+                                    } else {
+                                        Image(systemName: webNovelDownloads.isDownloaded(displayNovel.id) ? "arrow.clockwise" : "arrow.down.to.line")
+                                    }
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(progress == nil
+                                             ? (webNovelDownloads.isDownloaded(displayNovel.id) ? "重新下载全书 EPUB" : "下载全书 EPUB")
+                                             : "正在下载整本小说…")
+                                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                                        Text("选择原文、译文或双语 EPUB，下载后可在 App 内阅读")
+                                            .font(.system(size: 12, weight: .medium)).opacity(0.82)
+                                    }
+                                    Spacer()
+                                    if let progress {
+                                        ProgressView(value: progress.fraction).tint(.white).frame(width: 48)
+                                    }
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 17)
+                                .padding(.vertical, 14)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(NoveliaStyle.accent(for: displayNovel.accent), in: RoundedRectangle(cornerRadius: 15))
                             }
-                            Spacer()
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 13, weight: .bold))
+                            .buttonStyle(.plain)
+                            .disabled(progress != nil)
+                            if let error = webNovelDownloads.errors[displayNovel.id] {
+                                Text("下载失败：\(error)")
+                                    .font(.footnote).foregroundStyle(NoveliaStyle.danger)
+                            }
                         }
-                        .foregroundStyle(NoveliaStyle.ink)
-                        .padding(.horizontal, 17)
-                        .padding(.vertical, 14)
-                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
                     }
-                    .buttonStyle(.plain)
-                }
 
-                HStack {
-                    Text("章节目录")
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                    Spacer()
-                    Text("\(displayNovel.chapters.count) 章")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(NoveliaStyle.muted)
-                }
-
-                if isLoadingDetail {
-                    HStack { Spacer(); ProgressView("加载作品信息…"); Spacer() }
-                        .padding(.vertical, 16)
-                } else if let detailError {
-                    CompatUnavailable {
-                        Label("作品信息加载失败", systemImage: "wifi.exclamationmark")
-                    } description: {
-                        Text(detailError)
-                    } actions: {
-                        Button("重试") { Task { await loadDetail() } }
-                            .buttonStyle(.borderedProminent)
-                            .tint(NoveliaStyle.brandGreen)
-                    }
-                } else if displayNovel.chapters.isEmpty {
-                    Text("没有可阅读的章节。")
-                        .font(.system(size: 14))
-                        .foregroundStyle(NoveliaStyle.muted)
-                        .padding(.vertical, 12)
-                }
-
-                ForEach(Array(displayNovel.chapters.enumerated()), id: \.element.id) { index, chapter in
-                    NavigationLink {
-                        ReaderView(novel: displayNovel, startingAt: index)
-                    } label: {
-                        HStack(spacing: 13) {
-                            Text(String(format: "%02d", index + 1))
-                                .font(.system(size: 13, weight: .bold, design: .rounded))
-                                .foregroundStyle(NoveliaStyle.brandGreen)
-                                .frame(width: 35, height: 35)
-                                .background(NoveliaStyle.brandGreen.opacity(0.09), in: Circle())
-                            Text(chapter.title)
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(NoveliaStyle.ink)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(NoveliaStyle.muted.opacity(0.6))
+                    if displayNovel.isRemote,
+                       let providerId = displayNovel.providerId,
+                       let novelId = displayNovel.novelId {
+                        NavigationLink {
+                            NovelCommentsView(title: displayNovel.title, subjectKey: "web-\(providerId)-\(novelId)")
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "text.bubble")
+                                    .font(.system(size: 17, weight: .semibold))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("评论区")
+                                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                                    Text("查看或参与 Novelia 网页端讨论")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .opacity(0.82)
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 13, weight: .bold))
+                            }
+                            .foregroundStyle(NoveliaStyle.ink)
+                            .padding(.horizontal, 17)
+                            .padding(.vertical, 14)
+                            .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
                         }
-                        .padding(13)
-                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+
+                    HStack {
+                        Text("章节目录")
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                        Spacer()
+                        Text("\(displayNovel.chapters.count) 章")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(NoveliaStyle.muted)
+                    }
+
+                    if isLoadingDetail {
+                        HStack { Spacer(); ProgressView("加载作品信息…"); Spacer() }
+                            .padding(.vertical, 16)
+                    } else if let detailError {
+                        CompatUnavailable {
+                            Label("作品信息加载失败", systemImage: "wifi.exclamationmark")
+                        } description: {
+                            Text(detailError)
+                        } actions: {
+                            Button("重试") { Task { await loadDetail() } }
+                                .buttonStyle(.borderedProminent)
+                                .tint(NoveliaStyle.brandGreen)
+                        }
+                    } else if displayNovel.chapters.isEmpty {
+                        Text("没有可阅读的章节。")
+                            .font(.system(size: 14))
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .padding(.vertical, 12)
+                    }
+
+                    ForEach(Array(displayNovel.chapters.enumerated()), id: \.element.id) { index, chapter in
+                        BrowseReadingLink(destination: .online(displayNovel, index)) {
+                            HStack(spacing: 13) {
+                                Text(String(format: "%02d", index + 1))
+                                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                                    .foregroundStyle(NoveliaStyle.brandGreen)
+                                    .frame(width: 35, height: 35)
+                                    .background(NoveliaStyle.brandGreen.opacity(0.09), in: Circle())
+                                Text(chapter.title)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(NoveliaStyle.ink)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(NoveliaStyle.muted.opacity(0.6))
+                            }
+                            .padding(13)
+                            .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
+                .padding(20)
+                .frame(maxWidth: geometry.size.width >= 800 ? 1040 : 760)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .padding(20)
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle("作品详情")

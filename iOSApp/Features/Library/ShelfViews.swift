@@ -52,9 +52,7 @@ struct CloudReadingHistoryListView: View {
 
                 ForEach(readingHistory.items) { item in
                     VStack(alignment: .leading, spacing: 4) {
-                        NavigationLink {
-                            NovelDetailView(novel: item.novel)
-                        } label: {
+                        BrowseDetailLink(destination: .novel(item.novel)) {
                             NovelRow(novel: item.novel)
                         }
                         .buttonStyle(.plain)
@@ -145,9 +143,7 @@ struct CloudFavoritesListView: View {
                 }
 
                 ForEach(favorites.novels) { novel in
-                    NavigationLink {
-                        NovelDetailView(novel: novel)
-                    } label: {
+                    BrowseDetailLink(destination: .novel(novel)) {
                         NovelRow(novel: novel)
                     }
                     .buttonStyle(.plain)

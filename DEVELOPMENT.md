@@ -90,7 +90,9 @@ Core 功能逻辑 → Domain 与通用 Support
 
 `NoveliaApp` 是 `@main` 入口，用 `@StateObject` 持有 `AppServices`。正常启动通过 `AppServices.novelia(configuration:)` 创建配置、账号与服务集合，再交给 `RootView`。Debug 启动可选择独立验证组装。
 
-`RootView` 构建底栏和各栏的 `NavigationStack`。底栏顺序、启动页和上次选择由 `AppTabLayout` 与设置键控制；默认入口为书库、发现、社区和我的。修改导航时同时考虑用户保存的底栏配置和页面返回状态。
+`RootView` 构建底栏；iPhone 和普通标签页沿用 `CompatNavigationStack`，iPad 的书库/发现交给 `App/Integrations/BrowseNavigation.swift` 中的 `BrowseNavigationRoot`。iOS 17+ 使用系统 `NavigationSplitView`，iOS 15/16 使用双列 `NavigationView`。尺寸变化不以 if/else 更换主列表视图树，由同一系统容器处理收起和展开。底栏顺序、启动页和上次选择由 `AppTabLayout` 与设置键控制；默认入口为书库、发现、社区和我的。修改导航时同时考虑用户保存的底栏配置和页面返回状态。
+
+`BrowseNavigationRoot` 仅持有当前标签的详情选择、全窗口阅读目标与阅读返回定位请求。页面通过可空环境动作提交浏览选择/发起阅读；未注入时 `BrowseDetailLink`、`BrowseReadingLink` 退回原导航链接，因此手机行为不变。列表点击与菜单阅读分开，云端下载仍走原 `LibraryBookActions`；阅读使用原 Root 注入的所有服务，关闭后刷新位置，`ScrollViewReader` 按书键定位，避免最近阅读排序变化使刚读的书离开视口。详情导航栈仅在选中目标标识变化时重建，旋转或内容宽度变化不重置它。浏览选择不进入磁盘或 WebDAV。
 
 实例所有权分为两类：
 
@@ -111,7 +113,7 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 |---|---|---|
 | 账号 | `Account/AccountAuth.swift` | 登录桥接、统一会话、Keychain 凭据适配与账号状态 |
 | 发现与详情 | `Discover/DiscoverViews.swift`、`DiscoverStore.swift`、`NovelDetailViews.swift` | 搜索、排行、标签、分页、详情和评论；调用目录/评论等服务 |
-| 书库 | `Library/LibraryViews.swift`、`LibraryStore.swift`、`LibraryComponents.swift` | 聚合本地记录、查询筛选、系列、排序与展示状态 |
+| 书库 | `Library/LibraryViews.swift`、`LibraryStore.swift`、`LibraryComponents.swift`、`LibraryBookActions.swift`、`CharacterSeriesView.swift`、`CharacterCardSupportViews.swift` | 聚合本地记录、查询筛选、系列、排序、批量与菜单动作及跨卷人物资料界面 |
 | 收藏与历史 | `Library/FavoritesStore.swift`、`ReadingHistoryStore.swift`、`ShelfViews.swift` | 账号相关远端状态、收藏操作、历史与续读 |
 | 文库 | `Wenku/WenkuStore.swift`、`WenkuViews.swift` | 远端文库查询、详情和收藏；本地文件另由书库 Store 管理 |
 | 下载与导入 | `Downloads/WebNovelDownloadStore.swift`、`Library/WenkuLocalLibraryStore.swift`、`Library/KindleImport/` | 下载、导入（含 AZW3／MOBI 转 EPUB）、文件位置、记录写入及同步书籍接口 |
@@ -139,6 +141,22 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 设置页面按账号、阅读数据、阅读、界面、同步、关于、高级分组，App 主题色与界面底色位于“界面”；“高级”里另有“显示目录诊断信息”开关与导出应用日志，分组只改变展示，沿用已有绑定与存储键。封面网格按列宽与固定宽高比布局，书名预留两行；各系统版本统一使用带主操作且无预览的 Menu，单击打开书籍或切换选择，长按只展开操作菜单，避免封面抬起和 List 整行网格快照。书库菜单复用既有导入、系列、多选、排序及书籍操作处理，分页阅读设置的字号加减只更新 `draftStyle`，由原有“应用”入口保存与重排。
 
 设置通过 `SettingsKeys.swift` 中的已有键及对应状态对象保存偏好。背景、字体、标签和分章规则有各自的存储/适配；设置界面负责用户操作，阅读器负责消费结果，同步通过 App 适配获取可同步部分。新增设置时明确默认值、已保存值、立即生效范围和是否同步。
+
+### iPad 窗口布局
+
+`NovelDetailView` 在导航内容区通过 GeometryReader 读取实际可用宽度，800 点起并排信息卡和简介；辅助功能大字号保持纵排。只切换无状态展示片段，详情加载与导航仍由外层持有，旋转不重建业务实例。文库详情和阅读设置限制内层内容宽度，不限制外层滚动容器、导航栏或阅读视口。译源卡使用自适应网格。`test_api_architecture_ui.py` 的 `testAdaptiveNovelDetailRotation` 检查详情横竖屏编排和边界；`testNativeReaderPanelRotation`、`testReadiumReaderPanelRotation` 检查两种引擎旋转后设置面板的宽度及关闭操作。验证 runner 同时支持 iPhone/iPad；不替代分屏连续缩放和真机阅读位置验收。
+
+`DiscoverView` 以窗口宽度扣除边距并限制内容上限，计算 1–3 个等宽卡片列；大字号退为单列。查询、分页和 `ScrollViewReader` 仍由原层持有。书库 `libraryListRow` 只限制行内内容，不替换 `List` 或拖选坐标系；搜索栏与批量栏保持外层满宽。`LibrarySelectionBar` 在紧凑尺寸类别或辅助功能字号下把计数与两列动作分开；动作共享同一选择状态。UI回归 `testAdaptiveDiscoveryAndLibrarySelection` 检查卡片宽度、导航、多选旋转和各操作可达性。Readium编号合成书的 `testReadiumRotationKeepsVisibleParagraph` 检查章中旋转后的同一正文标记实际可见性，不能外推至任意真实书籍、原生引擎或分屏连续缩放。
+
+Readium宿主在 `viewWillTransition` 调用父类前由模型捕获真实导航器的 Locator，尺寸过渡期间忽略临时位置回报，完成后恢复并等待稳定位置再提交。连续过渡复用最初锚点、取消较早恢复任务；显式翻页/跳转/朗读等通过 `markNavigation` 撤销旧恢复。后台窗口快照不发起恢复；失败时保留进度保护并显示重开入口。`testReadiumRotationKeepsVisibleParagraph` 在章中定位实际正文标记，检查横竖屏和重启恢复；不代表真机、复杂版式、连续分屏缩放或原生引擎已全部验收。
+
+Debug 独立验证 App 可用 `-architectureBrowseResize` 将同一个 Root 内容区切为480点/compact或恢复宽度，检查收起展开与状态保持；仅在独立 bundle id 和架构验证组装同时满足时启用，按钮与标记均不进入 Release，由 `check_architecture_release.py` 检查。此测试改变内容宽度和尺寸类别，不能作为真实 Stage Manager/分屏拖拽验收。第三批UI方法覆盖双栏阅读返回、搜索保留、窄宽切换，以及300本合成书库中的阅读返回定位；截图与实际执行结果保存在仓库外。
+
+### iPad 硬件键盘与指针
+
+`Shared/KeyboardNavigation.swift` 的 `PageKeyAction` 由页面提供操作，`PageKeyboardButtons` 使用 focusedSceneValue 发布当前窗口操作，由 App 的 `PageKeyboardCommands` 在系统菜单中注册 keyboardShortcut 和快捷键说明，页面内的 UIKit 非文本 UIKeyInput 接收器只在当前页空闲时取得焦点，空 inputView 不显示软键盘；文本编辑、非空选区和控件焦点优先。锚点也用于读取本窗口的滚动视口；作用域随页面/窗口生命周期释放，不设全局键盘分发。SwiftUI 弹层在自身注册关闭快捷键，避免后方阅读页响应退出。文本输入或正文选字的 responder 优先，不能为翻页抢走编辑焦点。命令上下文每页稳定持有，只发布可比较的操作说明；回调随页面更新，避免把新闭包数组反复发布到焦点系统。iOS16+用focusedSceneValue，iOS15用非可空focusedValue和同一接收器兼容。书库与发现通过 `browseKeyboardActions` 使用已筛选和排序的目标数组及原有选择/阅读环境动作，不建立第二份书库状态；云端书目不绕过下载确认。
+
+分页快捷键调用原模型 `commitTurn` / `goForward` / `goBackward`，滚动快捷键移动当前视口的真实 UIScrollView 并暂停朗读跟随，沿用原进度观察。滚动阅读设置仍使用注入的同一 ReaderSettings。`pointerBookMenu` 仅在悬停时提供菜单内容，触摸长按留给原拖选；拖选识别器拒绝 indirectPointer。UI回归用 XCTest 的实际 typeKey 输入，分别覆盖浏览焦点和各阅读引擎；不得把模拟器按键通过外推到真实硬件、VoiceOver 或旧系统运行。
 
 ## API、数据模型与认证
 
@@ -222,11 +240,11 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 | `ReaderView.swift` | 在线滚动阅读、正文/译文选择，以及在线分页入口和章节缓存 |
 | `TXTReaderView.swift` | 本地 TXT 阅读入口、目录和滚动/分页模式连接 |
 | `EPUBChapterSource.swift` | 章节内容接口、文本转 XHTML、长章节拆分与 TXT 分页定位转换 |
-| `EPUBContainer.swift` | EPUB 内容与资源读取，提供章节来源能力 |
+| `EPUBContainer.swift`、`EPUBContentSupport.swift` | EPUB 内容与资源读取、图片解码/背景清理/脚注解析与 NCX 解析，提供章节来源能力 |
 | `EPUBPageBook.swift`、`EPUBLayoutCoordinator.swift` | Yuedu 分页内容、布局协调和缓存 |
-| `EPUBReaderModel.swift`、`EPUBReaderView.swift`、`EPUBPagerView.swift` | 原生分页模型、显示与翻页交互 |
+| `EPUBReaderModel.swift`、`EPUBReaderNavigationSupport.swift`、`EPUBReaderView.swift`、`EPUBSharedTypes.swift`、`EPUBPagerView.swift` | 原生分页模型、导航/朗读/搜索协调、共享视图与翻页交互 |
 | `ReadiumTextPublication.swift` | 将 TXT/在线文本章节包装为 Readium Publication，并提供导航索引 |
-| `ReadiumEPUBReaderModel.swift`、`ReadiumEPUBReaderView.swift` | Readium 内容加载、导航、显示和位置连接 |
+| `ReadiumEPUBReaderModel.swift`、`ReadiumEPUBReaderSupport.swift`、`ReadiumEPUBReaderView.swift` | Readium 内容加载、导航、书签/搜索/手势与拟真翻页快照、显示和位置连接 |
 | `ReaderSettings.swift`、`ReaderSettingsAdapters.swift` | 持久化阅读偏好及引擎/界面适配 |
 
 EPUB 默认采用 YueduCoreText 分页；实验性 Readium 开关可用于 EPUB、TXT 和在线分页，开关默认关闭，已有选择继续保留。TXT 和在线内容也支持滚动模式。引擎选择属于 Reader 内部，API 消费方不根据引擎切换后台实现。
@@ -237,7 +255,7 @@ EPUB 默认采用 YueduCoreText 分页；实验性 Readium 开关可用于 EPUB�
 
 朗读引擎的统一契约在 Domain 的 `SpeechPlaybackContract`：`SpeechEngine` 协议声明能力（`SpeechCapabilities`）、状态（`SpeechPlaybackState`）、起播位置（`SpeechAnchor`）与设置（`SpeechSettings`），界面只依赖契约而不认识具体合成实现。引擎实现放 App 层，可按内容类型选择；新增云端合成引擎时只新增实现，不改阅读器界面。声音偏好 `volume`（0…1，默认1）与 `pitch`（-1…1，默认0）用独立v1键本地保存；按 `volumeControl`、`pitchControl` 能力展示。系统在下一utterance设置volume与2^pitch的pitchMultiplier；Edge音量立即赋给AVAudioPlayer，音高映射为-50…50Hz SSML并进入音频缓存键，改变音高取消旧预取；Readium官方配置不支持，不声明对应能力。试听沿用同一参数。章节跳转与真实句级音频定位分别通过 `chapterNavigation`、`sentenceNavigation` 声明；面板按能力显示章跳转，Edge 有时间轴时按句、无时间轴时按段。词级进度由 `SpeechCapabilities.wordLevelProgress` 声明，`SpeechUtterance.highlightRange(for:)` 对不支持的引擎返回 nil，阅读器实际接通高亮与翻页后另声明 `readingFollow`，面板按此能力显示跟读控件；仅提供词级回调不显示无效开关。网络请求、凭据与音频缓存须放 Core 的 Infrastructure/API，由 App 层组装注入，不在阅读功能里直接发请求。
 
-Readium 阅读器的朗读实现在 `iOSApp/Features/Reader/Speech/ReadiumSpeechPlayback.swift`：`ReadiumSpeechEngine` 包装 `PublicationSpeechSynthesizer`，由模型在 `makeNavigator` 完成后挂载（导航器重建即换引擎，旧引擎先停止）；起播用 `firstVisibleElementLocator()`，delegate 的 `.playing` 用 `Decoration` 高亮当前句，并对 `range` 做 0.8 秒节流后 `navigator.go(to:)`。`SpeechPlaybackController` 是界面唯一状态源，`SpeechControlView` 按 `capabilities` 显示控件。官方合成器的 `Configuration` 只有默认语言与音色标识，不暴露语速，因此该引擎不声明 `.rateControl`；音频会话由 Readium 内部管理。`ReadiumTextPublication` 为在线／TXT 注册 `DefaultContentService` 和 `HTMLResourceContentIterator`，不在构造或位置索引阶段加载正文；官方 TTS 按需迭代内容，使用同一套 Locator 高亮与跟读。跟读导航通过模型标记 `speech` 来源，进入既有阅读进度链路；用户手动导航只挂起跟读。
+Readium 阅读器的朗读实现在 `iOSApp/Features/Reader/Speech/ReadiumSpeechPlayback.swift`（界面与音色目录位于同目录 `SpeechPlaybackViews.swift`）：`ReadiumSpeechEngine` 包装 `PublicationSpeechSynthesizer`，由模型在 `makeNavigator` 完成后挂载（导航器重建即换引擎，旧引擎先停止）；起播用 `firstVisibleElementLocator()`，delegate 的 `.playing` 用 `Decoration` 高亮当前句，并对 `range` 做 0.8 秒节流后 `navigator.go(to:)`。`SpeechPlaybackController` 是界面唯一状态源，`SpeechControlView` 按 `capabilities` 显示控件。官方合成器的 `Configuration` 只有默认语言与音色标识，不暴露语速，因此该引擎不声明 `.rateControl`；音频会话由 Readium 内部管理。`ReadiumTextPublication` 为在线／TXT 注册 `DefaultContentService` 和 `HTMLResourceContentIterator`，不在构造或位置索引阶段加载正文；官方 TTS 按需迭代内容，使用同一套 Locator 高亮与跟读。跟读导航通过模型标记 `speech` 来源，进入既有阅读进度链路；用户手动导航只挂起跟读。
 
 系统 TTS 兜底在 `iOSApp/Features/Reader/Speech/SystemSpeechEngine.swift`：`AVSpeechSynthesizer` 逐句朗读 `SpeechText.segments` 的片段，读完一章按 `chapterText` 闭包取下一章；delegate 由独立桥接对象接回主线程，长章节切句在后台线程执行。音频会话由该引擎自己激活／释放，不与 Readium 内部管理的会话复用。`ReaderSpeechPresentation` 挂在 Yuedu 分页 EPUB、在线章节、TXT 滚动阅读宿主上，菜单按钮只改变展示状态；不把 sheet 放在随菜单/顶栏销毁的按钮里。打开面板时才创建引擎以避开阅读器就绪时序。面板允许书内切换本地/Edge，首次Edge先确认发送正文。控制器先截取当前收听锚点、句子文本、Readium Locator与播放意图，再由宿主重建引擎；播放中自动续播，暂停时保存待起播锚点，不启动新合成或云端请求。跨引擎用当前句核对源位置，Readium由模型解析收听锚点，不能重新使用旧可见页。当前引擎类型可观察，语音 Picker 只展示该引擎的音色并按语言分组；固定短句试听通过 `SpeechEngineSelecting.preview` 由 App 工厂注入在线服务，本地试听使用独立系统合成器。试听由控制器持有恢复令牌：临时暂停原书，自然结束或主动结束试听后恢复原意图；离开设置、停止、跳转、换引擎等显式操作取消令牌并停止试听音频。试听对象只释放自己持有的音频会话，避免旧视图销毁时关闭已恢复书籍的音频。音频与合成器回调继续核对身份。正文底部听书条与跨页迷你条复用原控制器；书内保留前后句／播放／定位，跨页只保留书名／播放／返回书内，跳章与停止收在更多。点击文字区打开听书主面板，配置另在第二层。主面板使用实际句首比例展示文字位置，不估计音频时间；语速控件共用SpeechRateControls，用户数据键与归一化范围不变。主要点击区至少44pt。退出阅读器时由 `ReaderSpeechPresentation.handOffOnExit` 移交：系统/云端引擎只依赖正文闭包，交给 `SpeechHandoffStore` 由根视图迷你条继续，重新进入同一本书时接管原音频对象，保持句内播放进度；Readium 官方引擎与阅读模型一并移交，保留导航器继续播放。在线章节按当前原文／译文／双语模式与译源选择正文，按 providerId／novelId／chapterId 走既有 `services.api.content` 接口，不新增请求通道。系统引擎只在 `onReadingPosition` 实际接通时声明 `readingFollow`，停止/结束时发 nil 清理高亮，设置变化时重放当前阅读位置。原生分页的 `speechChapterText` 使用 `EPUBPageBook.sourceText`，避免 HTML 抽取与排版偏移不一致；跟读只定位已准备章节的页面，通过 `moveLocation(cause: "speech")` 保存进度，句子矩形使用独立 CAShapeLayer 绘制，不修改分页位图或选字。滚动模式按原文范围映射既有段落/长文本切片，给 AttributedString 附加底色并用 ScrollViewReader 定位；跨章沿用既有章节进度。用户手动翻页/导航或拖动滚动页挂起跟读，显式返回只定位、恢复跟读才解除挂起；全局关闭跟读时不擅自开启。切换在线阅读模式/译源仍停止。
 
@@ -251,7 +269,7 @@ Readium 阅读器的朗读实现在 `iOSApp/Features/Reader/Speech/ReadiumSpeech
 朗读偏好由 Core 的 `SpeechSettingsStore` 持久化到 `SettingsKey.Speech`：语音标识、归一化语速、跟读两个开关、引擎选择、Edge 独立音色和定时停止分钟数。键名已上设备，不可更改，`SettingsKeysTests` 会锁定。读取先取 `SpeechSettings.default` 再逐项覆盖，缺键、类型错误、无法识别的引擎 rawValue、NaN 与越界数值都安全回落；`SpeechSettings.clamped()` 同时把语速收敛到 0–1、把定时分钟数收敛到固定档位。`SpeechSleepTimer` 只做截止时间与剩余时间的纯计算。这些设置只存本机，不参与 WebDAV 同步；与设置页既有的 `@AppStorage` 简单偏好同一口径，`SpeechSettingsStore` 只是无状态的读写器，不新建共享对象、不恢复全局单例。云端引擎的凭据与音频缓存仍属于 Core 的 Infrastructure/API。`SpeechPlaybackController` 打开时加载、每次 `settings` 变化立即写回，并按书持有 `SpeechRemoteSession`，不设全局单例。
 
 后台与锁屏控制在 `iOSApp/Features/Reader/Speech/SpeechRemoteSession.swift`：两份 Info.plist 都开启 `UIBackgroundModes = audio`；会话注册 `MPRemoteCommandCenter` 的播放／暂停／切换与上一句／下一句、发布 `MPNowPlayingInfoCenter` 的书名与当前句，监听 `AVAudioSession` 的中断通知（`.began` 暂停、`.shouldResume` 继续）与路线变化（拔掉耳机暂停），并用主线程 `Timer` 驱动定时停止。回调只通过闭包接到控制器，引擎不认识该类；`stop()`、跨页移交回收与阅读器 `onDisappear` 会注销命令、观察者与锁屏信息，避免残留无效控件。“我的 → 阅读体验 → 朗读”（`SpeechSettingsView`）与朗读面板共用同一 `SpeechSettingsStore`；关闭面板只收起界面、朗读继续，正在播放时重新打开面板不重建引擎。停止不再绑定阅读器宿主退出（改为按引擎能力移交），也不能绑定会随顶栏隐藏而移除的入口。控制器持有并取消起播任务，控制器与引擎用会话代次丢弃迟到结果；系统合成回调另核对当前 utterance 身份，防止停止／跳句后旧回调继续推进队列。Readium 异步取得起播 Locator 后同样检查代次。远程“播放”在暂停时恢复，结束／失败时从上次起播位置重播，准备／播放中不重复起播；已注销会话的排队命令不再执行。
-`NoveliaLegacy` 定义 `NOVELIA_READIUM_ONLY`。它不编译 `EPUBLayoutCoordinator.swift`、`EPUBPageBook.swift`、`EPUBPagerView.swift`、`EPUBReaderModel.swift`，阅读入口只创建 Readium 阅读器，设置里没有切回原生分页的开关。字体注册与 `EPUBReaderStyle` 在 `EPUBSharedTypes.swift`，两个目标都编译。iOS 16/17 才有的 SwiftUI 调用集中在 `iOSApp/Shared/IOS15Compat.swift`：iOS 17 走原来的系统控件，更低版本走降级实现。该目标也不编译 Kindle 转换源文件，因为 `Vendor/CLibMobi` 的平台声明仍是 iOS 17。
+`NoveliaLegacy` 定义 `NOVELIA_READIUM_ONLY`。它不编译 `EPUBLayoutCoordinator.swift`、`EPUBPageBook.swift`、`EPUBPagerView.swift`、`EPUBReaderModel.swift`、`EPUBReaderNavigationSupport.swift`，阅读入口只创建 Readium 阅读器，设置里没有切回原生分页的开关。字体注册与 `EPUBReaderStyle` 在 `EPUBSharedTypes.swift`，两个目标都编译。iOS 16/17 才有的 SwiftUI 调用集中在 `iOSApp/Shared/IOS15Compat.swift`：iOS 17 走原来的系统控件，更低版本走降级实现。该目标也不编译 Kindle 转换源文件，因为 `Vendor/CLibMobi` 的平台声明仍是 iOS 17。
 
 Readium 深浅色切换通过同一导航器的 `submitPreferences` 更新，不为主题重建导航器；默认文字色沿用 Readium，避免静态 RS 文字色导致切回浅色仍沿用深色默认值。主题变化后重用外层背景缓存。原书双向切换点按回归及 `testReadiumThemeSwitchPreservesCenterTap` 验证控件可隐藏/恢复；模拟器证据不代替真机验收。
 

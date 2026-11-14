@@ -43,6 +43,8 @@ struct ReaderPositionLabel: View {
                 .minimumScaleFactor(0.75)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("reader-position-label")
+        .hoverEffect(.highlight)
         .accessibilityLabel("阅读位置：\(text)")
         .accessibilityHint("轻点切换为\(Self.next(after: style).title)")
     }
@@ -101,6 +103,7 @@ struct ReaderScrubber: View {
         .frame(height: 28)
         .animation(.easeInOut(duration: 0.12), value: isDragging)
         .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("reader-progress")
         .accessibilityLabel("阅读进度")
         .accessibilityValue("\(Int(min(1, max(0, value)) * 100))%")
         .accessibilityAdjustableAction { direction in
@@ -140,6 +143,7 @@ struct ReaderTopBarShell<MenuContent: View, TitleTrailer: View>: View {
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("返回")
+            .hoverEffect(.highlight)
             VStack(spacing: 1) {
                 HStack(spacing: 6) {
                     Text(bookTitle)
@@ -160,6 +164,7 @@ struct ReaderTopBarShell<MenuContent: View, TitleTrailer: View>: View {
                 Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
             }
             .accessibilityLabel("阅读菜单")
+            .hoverEffect(.highlight)
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 10)
@@ -499,6 +504,9 @@ struct ReaderStyleSheet: View {
                 }
                 ReaderIssueMarkSection { onMarkIssue() }
             }
+            .frame(maxWidth: 680)
+            .frame(maxWidth: .infinity)
+            .background(NoveliaStyle.paper)
             .navigationTitle("阅读设置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -599,5 +607,52 @@ private struct ReaderThemeSwatch: View {
         .buttonStyle(.plain)
         .accessibilityLabel(option.title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+/// 两种分页引擎和滚动阅读共用操作名称；页移动仍由各阅读器原有方法执行。
+func readerKeyboardActions(search: @escaping () -> Void, contents: @escaping () -> Void,
+                           settings: @escaping () -> Void, close: @escaping () -> Void) -> [PageKeyAction] {
+    [.command("f", "书内搜索", action: search), .command("t", "章节目录", action: contents),
+     .command(",", "阅读设置", action: settings)] + PageKeyAction.close(close)
+}
+
+/// 滚动模式菜单内的即时样式操作也可从键盘打开；复用同一 ReaderSettings，不创建第二套偏好。
+struct ScrollReaderKeyboardSettings: View {
+    @EnvironmentObject private var settings: ReaderSettings
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        CompatNavigationStack {
+            Form {
+                Section("文字") {
+                    HStack {
+                        Button { settings.fontSize = max(ReaderSettings.fontRange.lowerBound, settings.fontSize - 1) } label: { Image(systemName: "textformat.size.smaller") }
+                            .accessibilityLabel("缩小字号").buttonStyle(.borderless).hoverEffect(.highlight)
+                        Spacer()
+                        Text("字号 \(Int(settings.fontSize))").accessibilityIdentifier("scroll-reader-font-size")
+                        Spacer()
+                        Button { settings.fontSize = min(ReaderSettings.fontRange.upperBound, settings.fontSize + 1) } label: { Image(systemName: "textformat.size.larger") }
+                            .accessibilityLabel("增大字号").buttonStyle(.borderless).hoverEffect(.highlight)
+                    }
+                    .frame(minHeight: 44)
+                }
+                Picker("阅读外观", selection: $settings.appearanceRaw) {
+                    ForEach(ReaderAppearance.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
+            }
+            .navigationTitle("阅读设置").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .compatTopBarTrailing) { Button("完成") { dismiss() } } }
+        }
+        .keyboardDismissible()
+    }
+}
+
+/// 全窗口阅读由展示层提供关闭动作；普通压栈阅读继续使用所在页面的 dismiss。
+private struct ReaderCloseActionKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
+extension EnvironmentValues {
+    var readerCloseAction: (() -> Void)? {
+        get { self[ReaderCloseActionKey.self] }
+        set { self[ReaderCloseActionKey.self] = newValue }
     }
 }

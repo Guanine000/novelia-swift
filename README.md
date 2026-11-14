@@ -4,9 +4,9 @@
 
 # Novelia iOS
 
-[轻小说机翻机器人](https://n.novelia.cc/)的第三方 iPhone 客户端
+[轻小说机翻机器人](https://n.novelia.cc/)的第三方 iPhone / iPad 客户端
 
-在 iPhone 上浏览、下载和阅读 Novelia 网络小说与文库
+在 iPhone 和 iPad 上浏览、下载和阅读 Novelia 网络小说与文库
 
 [![iOS 17+](https://img.shields.io/badge/iOS-17%2B-000000?logo=apple&logoColor=white)](#下载与安装)
 [![iOS 15 Readium](https://img.shields.io/badge/iOS%2015-Readium-555555?logo=apple&logoColor=white)](#下载与安装)
@@ -53,6 +53,8 @@
 想从源码运行，请用 Xcode 打开 `NoveliaIOS.xcodeproj`。iOS 17 选择 `Novelia` scheme，iOS 15 选择 `NoveliaLegacy` scheme。测试、本机构建与分发流程见[本机构建与分发](docs/BUILD.md)。
 
 参与开发前请阅读[开发文档](DEVELOPMENT.md)，了解模块职责、服务与本地状态的依赖注入、文件读写及数据兼容约定；发布流程包含架构依赖与书库事务故障检查；性能测量方法见[性能基线与故障验收](docs/PERFORMANCE.md)。
+
+iPad 书库与发现页支持系统双栏浏览，窄窗口收为单列；进入阅读时覆盖整个窗口，返回后保留浏览选择和筛选。发现卡片、详情与阅读面板按可用宽度布局，窄侧栏批量操作采用两列。真实分屏拖拽、旧系统与真机完整验收仍在进行。 iPad 外接键盘支持页面搜索、选书、阅读翻页、目录和设置，指针悬停提供操作反馈。
 
 ## 已知限制
 

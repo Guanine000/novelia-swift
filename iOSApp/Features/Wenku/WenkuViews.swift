@@ -4,6 +4,7 @@ struct WenkuView: View {
     @EnvironmentObject private var localLibrary: WenkuLocalLibraryStore
     @EnvironmentObject private var store: WenkuStore
     @State private var query = ""
+    @FocusState private var searchFocused: Bool
     /// 嵌入“发现”页时不设置自己的导航标题。
     private let embedded: Bool
 
@@ -27,6 +28,8 @@ struct WenkuView: View {
             HStack(spacing: 9) {
                 Image(systemName: "magnifyingglass").foregroundStyle(NoveliaStyle.muted)
                 TextField("搜索文库作品", text: $query)
+                    .focused($searchFocused)
+                    .onSubmit { searchFocused = false }
                     .textInputAutocapitalization(.never)
                     .compatAutocorrectionDisabled()
                 if !query.isEmpty {
@@ -38,7 +41,7 @@ struct WenkuView: View {
             .padding(.horizontal, 16)
             .padding(.top, 4)
             HStack(spacing: 8) {
-                NavigationLink {
+                BrowseListLink {
                     WenkuFavoritesView()
                         .environmentObject(store)
                         .environmentObject(localLibrary)
@@ -55,6 +58,7 @@ struct WenkuView: View {
                            pager: .init(page: store.page, pageCount: store.pageCount) { target in
                                Task { await store.goTo(page: target) }
                            },
+                           onSearch: { searchFocused = true },
                            reload: { await store.goTo(page: store.page) })
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
@@ -104,6 +108,8 @@ struct WenkuFavoritesView: View {
 }
 
 private struct WenkuNovelList: View {
+    @Environment(\.browseSelection) private var keyboardSelect
+    @Environment(\.browseSelectedID) private var keyboardSelectedID
     struct Pager {
         let page: Int
         let pageCount: Int
@@ -119,6 +125,7 @@ private struct WenkuNovelList: View {
     let filtersBlocked: Bool
     /// 搜索结果按页浏览；收藏一次加载全部，不分页。
     let pager: Pager?
+    var onSearch: (() -> Void)? = nil
     let reload: () async -> Void
     /// 封面网格是文库浏览的默认形态；列表保留给偏好文字信息的场景，选择记在本机。
     @AppStorage("discover.wenkuLayout") private var layout: LibraryBooksLayout = .grid
@@ -168,12 +175,10 @@ private struct WenkuNovelList: View {
                             .environmentObject(localLibrary)
                     } else {
                         ForEach(visibleNovels) { novel in
-                            NavigationLink {
-                                WenkuDetailView(outline: novel)
-                                    .environmentObject(localLibrary)
-                            } label: {
+                            BrowseDetailLink(destination: .wenku(novel)) {
                                 WenkuNovelRow(novel: novel)
                             }
+                            .id("wenku:" + novel.id)
                             .buttonStyle(.plain)
                         }
                     }
@@ -190,6 +195,11 @@ private struct WenkuNovelList: View {
                 .padding(.bottom, 20)
             }
             .refreshable { await reload() }
+            .pageKeyboardActions(browseKeyboardActions(
+                destinations: visibleNovels.map(BrowseDestination.wenku), selectedID: keyboardSelectedID,
+                select: keyboardSelect, read: nil, search: { onSearch?() },
+                scrollTo: { id in withAnimation { proxy.scrollTo(id, anchor: .center) } })
+                .filter { onSearch != nil || $0.input != "f" })
             // 翻页后回到顶部，像网页端一样从新一页的第一部作品开始看。
             .onValueChange(of: pager?.page) { _, _ in proxy.scrollTo(Self.topAnchor, anchor: .top) }
         }
@@ -209,12 +219,10 @@ struct WenkuNovelGrid: View {
     var body: some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: 16) {
             ForEach(novels) { novel in
-                NavigationLink {
-                    WenkuDetailView(outline: novel)
-                        .environmentObject(localLibrary)
-                } label: {
+                BrowseDetailLink(destination: .wenku(novel)) {
                     WenkuNovelGridCell(novel: novel)
                 }
+                .id("wenku:" + novel.id)
                 .buttonStyle(.plain)
             }
         }
@@ -381,6 +389,8 @@ struct WenkuDetailView: View {
                         volumesSection(detail)
                     }
                     .padding(18)
+                    .frame(maxWidth: 800)
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
             } else if isLoading {
                 ProgressView("正在加载文库详情…")
@@ -527,9 +537,7 @@ struct WenkuDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("相关网络小说").font(.headline)
             ForEach(linkedWebNovels(detail.webIds), id: \.self) { linked in
-                NavigationLink {
-                    NovelDetailView(novel: linked.novel)
-                } label: {
+                BrowseDetailLink(destination: .novel(linked.novel)) {
                     HStack(spacing: 12) {
                         Image(systemName: "globe.asia.australia").font(.title3)
                         VStack(alignment: .leading, spacing: 3) {
@@ -575,7 +583,7 @@ struct WenkuDetailView: View {
                         }
                         Spacer()
                         if let local = localLibrary.books.first(where: { $0.parentWenkuID == detail.id && $0.volumeID == volume.volumeId }) {
-                            NavigationLink("阅读本地卷") { LibraryReaderDestination(book: LibraryBook(origin: .wenku(local), fileURL: localLibrary.fileURL(for: local), coverURL: localLibrary.coverFileURL(for: local))) }
+                            BrowseReadingLink(destination: .library(LibraryBook(origin: .wenku(local), fileURL: localLibrary.fileURL(for: local), coverURL: localLibrary.coverFileURL(for: local)))) { Text("阅读本地卷") }
                                 .buttonStyle(.bordered).tint(NoveliaStyle.brandGreen)
                         }
                         Button { downloadRequest = WenkuDownloadRequest(detail: detail, volume: volume) } label: {

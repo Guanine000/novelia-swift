@@ -47,11 +47,16 @@ let package = Package(
                 "DEPENDENCIES.md",
                 "EPUBPagerView.swift",
                 "EPUBReaderModel.swift",
+                "EPUBReaderNavigationSupport.swift",
                 "ReadiumPageCurl.swift",
+                "ReadiumEPUBReaderModel.swift",
+                "ReadiumEPUBReaderSupport.swift",
+                "ReadiumEPUBReaderView.swift",
                 "EPUBReaderView.swift",
+                "EPUBSharedTypes.swift",
                 "EPUBSampleBook.swift",
             ],
-            sources: ["ReadiumTextPublication.swift", "EPUBChapterSource.swift", "EPUBContainer.swift", "EPUBLayoutCoordinator.swift", "EPUBPageBook.swift", "EPUBWordCount.swift", "TXTEPUBExport.swift"]
+            sources: ["ReadiumTextPublication.swift", "EPUBChapterSource.swift", "EPUBContainer.swift", "EPUBContentSupport.swift", "EPUBLayoutCoordinator.swift", "EPUBPageBook.swift", "EPUBWordCount.swift", "TXTEPUBExport.swift"]
         ),
         // App 的 AZW3／MOBI 导入转换，直接编译 App 源码。
         .target(

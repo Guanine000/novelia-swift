@@ -25,6 +25,7 @@ parser.add_argument('--iterations', type=int, choices=range(2, 11), default=3)
 parser.add_argument('--result-json', type=Path)
 parser.add_argument('--epub-failure', choices=['archive', 'chapter', 'spine'], help='Exercise a synthetic broken EPUB in the dedicated App only')
 parser.add_argument('--library-delete', action='store_true', help='Verify deletion of collapsed duplicates and nonblocking cloud failure')
+parser.add_argument('--keyboard-actions', action='store_true', help='Validate real App keyboard action routing through dedicated Debug hooks; does not validate physical keyboard event delivery')
 parser.add_argument('--epub-pagination', action='store_true', help='Check actual visible paragraph continuity with Readium in a synthetic EPUB')
 parser.add_argument('--library-archive', action='store_true', help='Exercise library/series multi-select archive sharing in the dedicated App only')
 parser.add_argument('--native-annotation', action='store_true', help='Verify text selection persists a highlight annotation (native or Readium test)')
@@ -46,12 +47,15 @@ subprocess.run(['xcrun','simctl','bootstatus',args.device,'-b'], check=True)
 subprocess.run(['xcrun','simctl','install',args.device,args.app], check=True)
 (r/'TapRegression.swift').write_text('import SwiftUI\n@main struct TapRegressionApp: App { var body: some Scene { WindowGroup { Text("Architecture UI runner") } } }\n')
 (r/'TapTests.swift').write_text(r'''import XCTest
+import UIKit
 final class TapTests: XCTestCase {
+ let usesKeyboardActions = false
  let bundle = "cc.novelia.ios.architecture-validation"
  func start(readium: Bool = false, failSearch: Bool = false, txt: Bool = false, webUpdate: Bool = false, ambiguous: Bool = false, large: Bool = false, speechAudio: Bool = false, nativeCurl: Bool = false) -> XCUIApplication {
   continueAfterFailure = false
   let app = XCUIApplication(bundleIdentifier: bundle)
   app.launchArguments = ["-architectureValidation", "-resetArchitectureValidation"]
+  if usesKeyboardActions { app.launchArguments.append("-architectureKeyboardUIHooks") }
   if speechAudio { app.launchArguments.append("-architectureSpeechAudio") }
   if txt { app.launchArguments.append("-architectureTXT") }
   if webUpdate { app.launchArguments.append("-architectureWebEPUBUpdate") }
@@ -1153,6 +1157,454 @@ final class TapTests: XCTestCase {
  }
  func testNativeExactSearchAndReturn() { checkExactSearchAndReturn(readium: false) }
  func testReadiumExactSearchAndReturn() { checkExactSearchAndReturn(readium: true) }
+ // 用真实详情视图检查宽屏编排和旋转后返回，保持替代后台与生产数据隔离。
+ func testAdaptiveNovelDetailRotation() {
+  XCUIDevice.shared.orientation = .portrait
+  defer { XCUIDevice.shared.orientation = .portrait }
+  let app = start(); defer { app.terminate() }
+  app.buttons["发现"].firstMatch.tap()
+  let novel = app.staticTexts["架构验证小说"].firstMatch
+  XCTAssertTrue(novel.waitForExistence(timeout: 15)); novel.tap()
+  for orientation in [UIDeviceOrientation.portrait, .landscapeLeft, .portrait] {
+   XCUIDevice.shared.orientation = orientation
+   let title = app.staticTexts["novel-detail-title"]
+   let introduction = app.staticTexts["novel-detail-introduction"]
+   XCTAssertTrue(title.waitForExistence(timeout: 10))
+   XCTAssertTrue(introduction.waitForExistence(timeout: 10))
+   let wide = app.frame.width >= 800
+   let predicate = wide
+    ? NSPredicate { _, _ in introduction.frame.minX > title.frame.maxX }
+    : NSPredicate { _, _ in introduction.frame.minY > title.frame.maxY }
+   expectation(for: predicate, evaluatedWith: app)
+   waitForExpectations(timeout: 10)
+   XCTAssertGreaterThanOrEqual(title.frame.minX, app.frame.minX)
+   XCTAssertLessThanOrEqual(introduction.frame.maxX, app.frame.maxX)
+   let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+   screenshot.name = "详情自适应-\(orientation.rawValue)"; screenshot.lifetime = .keepAlways; add(screenshot)
+  }
+  zeroExternalRequests(app)
+ }
+ func checkReaderPanelRotation(readium: Bool) {
+  XCUIDevice.shared.orientation = .portrait
+  defer { XCUIDevice.shared.orientation = .portrait }
+  let app = openDownloadedNetworkBook(readium: readium); defer { app.terminate() }
+  for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+   XCUIDevice.shared.orientation = orientation
+   XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 20))
+   readerAction(app, "阅读设置").tap()
+   let bar = app.navigationBars["阅读设置"]
+   XCTAssertTrue(bar.waitForExistence(timeout: 10))
+   let slider = app.sliders.firstMatch
+   for _ in 0..<8 {
+    if slider.exists && slider.isHittable { break }
+    app.collectionViews.allElementsBoundByIndex.last?.swipeUp()
+   }
+   XCTAssertTrue(slider.exists && slider.isHittable)
+   XCTAssertLessThanOrEqual(slider.frame.width, 680)
+   XCTAssertTrue(bar.buttons["应用"].exists)
+   XCTAssertTrue(bar.buttons["关闭"].isHittable)
+   let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+   screenshot.name = "阅读设置-\(readium ? "Readium" : "原生")-\(orientation.rawValue)"
+   screenshot.lifetime = .keepAlways; add(screenshot)
+   bar.buttons["关闭"].tap()
+   XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 10))
+  }
+  zeroExternalRequests(app)
+ }
+ func testNativeReaderPanelRotation() { checkReaderPanelRotation(readium: false) }
+ func testReadiumReaderPanelRotation() { checkReaderPanelRotation(readium: true) }
+ func testAdaptiveDiscoveryAndLibrarySelection() {
+  XCUIDevice.shared.orientation = .portrait
+  defer { XCUIDevice.shared.orientation = .portrait }
+  let app = start(txt: true); defer { app.terminate() }
+  app.buttons["发现"].firstMatch.tap()
+  let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "discover-card-")).firstMatch
+  XCTAssertTrue(card.waitForExistence(timeout: 20))
+  for orientation in [UIDeviceOrientation.portrait, .landscapeLeft, .portrait] {
+   XCUIDevice.shared.orientation = orientation
+   XCTAssertTrue(card.waitForExistence(timeout: 10))
+   let width = min(1120.0, max(0.0, app.frame.width - 40))
+   let columns = max(1, Int((width + 20) / 360))
+   expectation(for: NSPredicate { _, _ in card.frame.width <= width / Double(columns) + 2 }, evaluatedWith: app)
+   waitForExpectations(timeout: 10)
+   for _ in 0..<8 {
+    if card.isHittable { break }
+    // 从右侧空白区域滚动，避免横屏时手势落在横向筛选条或底栏上。
+    app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.8))
+     .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.25)))
+   }
+   XCTAssertTrue(card.isHittable)
+   XCTAssertGreaterThanOrEqual(card.frame.minX, app.frame.minX)
+   XCTAssertLessThanOrEqual(card.frame.maxX, app.frame.maxX)
+   let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+   screenshot.name = "发现自适应-\(orientation.rawValue)"; screenshot.lifetime = .keepAlways; add(screenshot)
+  }
+  card.tap()
+  XCTAssertTrue(app.navigationBars["作品详情"].waitForExistence(timeout: 10))
+  app.buttons["书库"].firstMatch.tap()
+  app.buttons["书库菜单"].tap(); app.buttons["选择书籍"].tap()
+  app.buttons["全选"].tap()
+  let count = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "已选 ")).firstMatch
+  XCTAssertTrue(count.waitForExistence(timeout: 10))
+  let selected = count.label
+  for orientation in [UIDeviceOrientation.portrait, .landscapeLeft, .portrait] {
+   XCUIDevice.shared.orientation = orientation
+   for label in ["移入系列", "移出系列", "删除", "压缩分享"] {
+    let button = app.buttons[label].firstMatch
+    XCTAssertTrue(button.waitForExistence(timeout: 10))
+    XCTAssertTrue(button.isHittable)
+    XCTAssertGreaterThanOrEqual(button.frame.minX, app.frame.minX)
+    XCTAssertLessThanOrEqual(button.frame.maxX, app.frame.maxX)
+   }
+   XCTAssertEqual(count.label, selected)
+   let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+   screenshot.name = "书库批量操作-\(orientation.rawValue)"; screenshot.lifetime = .keepAlways; add(screenshot)
+  }
+  app.buttons["移入系列"].firstMatch.tap()
+  XCTAssertTrue(app.buttons["新建系列…"].waitForExistence(timeout: 10))
+  zeroExternalRequests(app)
+ }
+ func testIPadBrowseColumnsAndFullWindowReading() {
+  XCUIDevice.shared.orientation = .landscapeLeft
+  defer { XCUIDevice.shared.orientation = .portrait }
+  let app = start(txt: true); defer { app.terminate() }
+  app.buttons["书库"].firstMatch.tap()
+  app.buttons["搜索书库"].tap()
+  let query = app.textFields["搜索书名或作者"]
+  XCTAssertTrue(query.waitForExistence(timeout: 10)); query.tap(); query.typeText("架构\n")
+  let book = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "library-book-")).firstMatch
+  XCTAssertTrue(book.waitForExistence(timeout: 20)); book.tap()
+  let read = app.buttons["library-detail-read"]
+  XCTAssertTrue(read.waitForExistence(timeout: 15))
+  XCTAssertTrue(book.isHittable); XCTAssertTrue(read.isHittable)
+  XCTAssertLessThan(book.frame.maxX, read.frame.minX)
+  for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
+   XCUIDevice.shared.orientation = orientation
+   XCTAssertTrue(read.waitForExistence(timeout: 10))
+  }
+  read.tap()
+  let menu = app.buttons["阅读菜单"].firstMatch
+  XCTAssertTrue(menu.waitForExistence(timeout: 30))
+  XCTAssertFalse(book.isHittable)
+  let back = app.buttons["返回"].firstMatch
+  XCTAssertTrue(back.waitForExistence(timeout: 10))
+  XCTAssertLessThan(back.frame.midX, app.frame.width * 0.2)
+  back.tap()
+  XCTAssertTrue(read.waitForExistence(timeout: 10)); XCTAssertTrue(read.isHittable)
+  XCTAssertTrue(book.isHittable)
+  XCTAssertEqual(query.value as? String, "架构")
+  let libraryShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+  libraryShot.name = "iPad书库双栏与阅读返回"; libraryShot.lifetime = .keepAlways; add(libraryShot)
+  app.buttons["发现"].firstMatch.tap()
+  let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "discover-card-")).firstMatch
+  XCTAssertTrue(card.waitForExistence(timeout: 20)); card.tap()
+  let title = app.staticTexts["novel-detail-title"]
+  XCTAssertTrue(title.waitForExistence(timeout: 15))
+  XCTAssertTrue(card.isHittable)
+  XCTAssertLessThan(card.frame.maxX, title.frame.minX)
+  let continueReading = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "继续阅读")).firstMatch
+  for _ in 0..<8 {
+   if continueReading.exists && continueReading.isHittable { break }
+   app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.8))
+    .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.25)))
+  }
+  XCTAssertTrue(continueReading.isHittable); continueReading.tap()
+  XCTAssertTrue(menu.waitForExistence(timeout: 30))
+  let onlineBack = app.buttons["返回"].firstMatch
+  XCTAssertTrue(onlineBack.waitForExistence(timeout: 10)); onlineBack.tap()
+  XCTAssertTrue(title.waitForExistence(timeout: 15)); XCTAssertTrue(card.isHittable)
+  app.buttons["书库"].firstMatch.tap()
+  XCTAssertTrue(read.waitForExistence(timeout: 10)); XCTAssertTrue(book.isHittable)
+  XCTAssertEqual(query.value as? String, "架构")
+  zeroExternalRequests(app)
+ }
+ func testIPadBrowseCollapsePreservesState() {
+  XCUIDevice.shared.orientation = .landscapeLeft
+  defer { XCUIDevice.shared.orientation = .portrait }
+  continueAfterFailure = false
+  let app = XCUIApplication(bundleIdentifier: bundle)
+  app.launchArguments = ["-architectureValidation", "-resetArchitectureValidation", "-architectureTXT", "-architectureBrowseResize"]
+  app.launch(); defer { app.terminate() }
+  XCTAssertTrue(app.staticTexts["architecture-validation-status"].waitForExistence(timeout: 20))
+  app.buttons["书库"].firstMatch.tap(); app.buttons["搜索书库"].tap()
+  let query = app.textFields["搜索书名或作者"]
+  XCTAssertTrue(query.waitForExistence(timeout: 10)); query.tap(); query.typeText("架构\n")
+  let book = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "library-book-")).firstMatch
+  XCTAssertTrue(book.waitForExistence(timeout: 15)); book.tap()
+  let read = app.buttons["library-detail-read"]
+  XCTAssertTrue(read.waitForExistence(timeout: 10)); XCTAssertTrue(book.isHittable)
+  let resize = app.buttons["architecture-browse-resize"]
+  XCTAssertTrue(resize.waitForExistence(timeout: 10)); resize.tap()
+  XCTAssertTrue(read.waitForExistence(timeout: 10))
+  expectation(for: NSPredicate { _, _ in !book.isHittable && read.isHittable }, evaluatedWith: app)
+  waitForExpectations(timeout: 10)
+  let narrow = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+  narrow.name = "验证内容区480点-单列详情"; narrow.lifetime = .keepAlways; add(narrow)
+  let compactBack = app.navigationBars["书籍详情"].buttons.element(boundBy: 0)
+  XCTAssertTrue(compactBack.exists); compactBack.tap()
+  expectation(for: NSPredicate { _, _ in book.isHittable && !read.isHittable }, evaluatedWith: app)
+  waitForExpectations(timeout: 10)
+  XCTAssertEqual(query.value as? String, "架构")
+  book.tap()
+  expectation(for: NSPredicate { _, _ in read.isHittable && !book.isHittable }, evaluatedWith: app)
+  waitForExpectations(timeout: 10)
+  resize.tap()
+  expectation(for: NSPredicate { _, _ in book.isHittable && read.isHittable }, evaluatedWith: app)
+  waitForExpectations(timeout: 10)
+  XCTAssertEqual(query.value as? String, "架构")
+  app.buttons["发现"].firstMatch.tap()
+  let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "discover-card-")).firstMatch
+  XCTAssertTrue(card.waitForExistence(timeout: 15)); card.tap()
+  let title = app.staticTexts["novel-detail-title"]
+  XCTAssertTrue(title.waitForExistence(timeout: 10))
+  resize.tap()
+  expectation(for: NSPredicate { _, _ in !card.isHittable && title.isHittable }, evaluatedWith: app)
+  waitForExpectations(timeout: 10)
+  resize.tap()
+  expectation(for: NSPredicate { _, _ in card.isHittable && title.isHittable }, evaluatedWith: app)
+  waitForExpectations(timeout: 10)
+  let wide = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+  wide.name = "恢复宽内容区-保留发现选择"; wide.lifetime = .keepAlways; add(wide)
+  zeroExternalRequests(app)
+ }
+ func testIPadLibraryReturnsToSelectedBookAfterReading() {
+  XCUIDevice.shared.orientation = .landscapeLeft
+  defer { XCUIDevice.shared.orientation = .portrait }
+  continueAfterFailure = false
+  let app = XCUIApplication(bundleIdentifier: bundle)
+  app.launchArguments = ["-architectureValidation", "-resetArchitectureValidation", "-seedPerformanceLibrary", "-performanceLibraryCount", "300"]
+  app.launch(); defer { app.terminate() }
+  XCTAssertTrue(app.staticTexts["architecture-validation-status"].waitForExistence(timeout: 20))
+  let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "library-book-"))
+  XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 30))
+  for _ in 0..<6 {
+   app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.8))
+    .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.3)))
+  }
+  let visible = rows.allElementsBoundByIndex.filter { $0.isHittable }
+  XCTAssertFalse(visible.isEmpty)
+  let book = visible[visible.count / 2]
+  let identifier = book.identifier
+  book.tap()
+  let read = app.buttons["library-detail-read"]
+  XCTAssertTrue(read.waitForExistence(timeout: 15)); read.tap()
+  XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 30))
+  app.buttons["返回"].firstMatch.tap()
+  let returned = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+  expectation(for: NSPredicate { _, _ in returned.exists && returned.isHittable }, evaluatedWith: app)
+  waitForExpectations(timeout: 15)
+  XCTAssertTrue(read.exists)
+  let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+  shot.name = "300本书库阅读返回定位"; shot.lifetime = .keepAlways; add(shot)
+  zeroExternalRequests(app)
+ }
+ func testIPadBrowseSeriesRankingAndWenku() {
+  XCUIDevice.shared.orientation = .landscapeLeft
+  defer { XCUIDevice.shared.orientation = .portrait }
+  let app = start(txt: true); defer { app.terminate() }
+  app.buttons["书库"].firstMatch.tap()
+  let more = app.buttons["更多操作：架构验证TXT"]
+  XCTAssertTrue(more.waitForExistence(timeout: 15)); more.tap()
+  app.buttons["移入系列"].firstMatch.tap(); app.buttons["新建系列…"].firstMatch.tap()
+  let field = app.textFields.firstMatch
+  XCTAssertTrue(field.waitForExistence(timeout: 10)); field.typeText("双栏系列")
+  app.buttons["创建并移入"].tap()
+  let seriesTab = app.segmentedControls.buttons.matching(NSPredicate(format: "label CONTAINS %@", "系列")).firstMatch
+  XCTAssertTrue(seriesTab.waitForExistence(timeout: 10)); seriesTab.tap()
+  let series = app.staticTexts["双栏系列"].firstMatch
+  XCTAssertTrue(series.waitForExistence(timeout: 10)); series.tap()
+  let book = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "library-book-")).firstMatch
+  XCTAssertTrue(book.waitForExistence(timeout: 15)); book.tap()
+  let read = app.buttons["library-detail-read"]
+  XCTAssertTrue(read.waitForExistence(timeout: 10))
+  XCTAssertTrue(book.isHittable)
+  XCTAssertLessThan(book.frame.maxX, read.frame.minX)
+  app.buttons["发现"].firstMatch.tap()
+  let ranking = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "排行榜")).firstMatch
+  XCTAssertTrue(ranking.waitForExistence(timeout: 15)); ranking.tap()
+  let rankedBook = app.scrollViews.firstMatch.staticTexts["架构验证小说"].firstMatch
+  XCTAssertTrue(rankedBook.waitForExistence(timeout: 15)); rankedBook.tap()
+  let title = app.staticTexts["novel-detail-title"]
+  XCTAssertTrue(title.waitForExistence(timeout: 15))
+  XCTAssertTrue(rankedBook.isHittable)
+  XCTAssertLessThan(rankedBook.frame.maxX, title.frame.minX)
+  let rankingBar = app.navigationBars["小说排行榜"]
+  XCTAssertTrue(rankingBar.waitForExistence(timeout: 10)); rankingBar.buttons.element(boundBy: 0).tap()
+  let wenkuTab = app.segmentedControls.buttons["文库小说"].firstMatch
+  XCTAssertTrue(wenkuTab.waitForExistence(timeout: 10)); wenkuTab.tap()
+  let wenku = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "架构验证文库")).firstMatch
+  XCTAssertTrue(wenku.waitForExistence(timeout: 15)); wenku.tap()
+  XCTAssertTrue(app.navigationBars["架构验证文库"].waitForExistence(timeout: 15))
+  XCTAssertTrue(wenku.isHittable)
+  let wenkuShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+  wenkuShot.name = "iPad文库双栏"; wenkuShot.lifetime = .keepAlways; add(wenkuShot)
+  app.buttons["书库"].firstMatch.tap()
+  XCTAssertTrue(read.waitForExistence(timeout: 10)); XCTAssertTrue(book.isHittable)
+  zeroExternalRequests(app)
+ }
+ func checkIPadPagedReaderFullWindowReturn(readium: Bool) {
+  XCUIDevice.shared.orientation = .landscapeLeft
+  defer { XCUIDevice.shared.orientation = .portrait }
+  let app = openDownloadedNetworkBook(readium: readium); defer { app.terminate() }
+  let back = app.buttons["返回"].firstMatch
+  XCTAssertTrue(back.waitForExistence(timeout: 15))
+  XCTAssertLessThan(back.frame.midX, app.frame.width * 0.2)
+  back.tap()
+  let more = app.buttons["更多操作：架构验证小说"].firstMatch
+  XCTAssertTrue(more.waitForExistence(timeout: 15)); XCTAssertTrue(more.isHittable)
+  XCTAssertFalse(app.buttons["阅读菜单"].exists)
+  zeroExternalRequests(app)
+ }
+ func testIPadNativePagedReaderFullWindowReturn() { checkIPadPagedReaderFullWindowReturn(readium: false) }
+ func testIPadReadiumPagedReaderFullWindowReturn() { checkIPadPagedReaderFullWindowReturn(readium: true) }
+ func testIPadGridSelectsDetailAndReturnsFromReading() {
+  XCUIDevice.shared.orientation = .landscapeLeft
+  defer { XCUIDevice.shared.orientation = .portrait }
+  let app = start(txt: true); defer { app.terminate() }
+  app.buttons["书库菜单"].tap()
+  let grid = app.buttons["封面网格"].firstMatch
+  XCTAssertTrue(grid.waitForExistence(timeout: 10)); grid.tap()
+  let book = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "library-book-")).firstMatch
+  XCTAssertTrue(book.waitForExistence(timeout: 15)); book.tap()
+  let read = app.buttons["library-detail-read"]
+  XCTAssertTrue(read.waitForExistence(timeout: 10)); XCTAssertTrue(book.isHittable)
+  read.tap()
+  XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 30))
+  app.buttons["返回"].firstMatch.tap()
+  XCTAssertTrue(read.waitForExistence(timeout: 10)); XCTAssertTrue(book.isHittable)
+  zeroExternalRequests(app)
+ }
+
+ func pageKey(_ app: XCUIApplication, _ key: String, modifiers: XCUIElement.KeyModifierFlags = []) {
+  if usesKeyboardActions {
+   let input: String
+   switch key {
+   case XCUIKeyboardKey.downArrow.rawValue: input = UIKeyCommand.inputDownArrow
+   case XCUIKeyboardKey.upArrow.rawValue: input = UIKeyCommand.inputUpArrow
+   case XCUIKeyboardKey.leftArrow.rawValue: input = UIKeyCommand.inputLeftArrow
+   case XCUIKeyboardKey.rightArrow.rawValue: input = UIKeyCommand.inputRightArrow
+   case XCUIKeyboardKey.escape.rawValue: input = UIKeyCommand.inputEscape
+   default: input = key
+   }
+   var flags: UIKeyModifierFlags = []
+   if modifiers.contains(.command) { flags.insert(.command) }
+   if modifiers.contains(.shift) { flags.insert(.shift) }
+   let button = app.buttons["keyboard-action-" + input + ":" + String(flags.rawValue)]
+   XCTAssertTrue(button.waitForExistence(timeout: 10))
+   for _ in 0..<5 {
+    if button.isHittable { break }
+    app.scrollViews["keyboard-validation-actions"].firstMatch.swipeLeft()
+   }
+   button.tap()
+  } else {
+   let target = app.descendants(matching: .any).matching(identifier: "keyboard-input-target").firstMatch
+   XCTAssertTrue(target.waitForExistence(timeout: 10))
+   target.typeKey(key, modifierFlags: modifiers)
+  }
+ }
+ func testIPadHardwareKeyDeliveryProbe() {
+  let app = start(txt: true); defer { app.terminate() }
+  app.buttons["书库"].firstMatch.tap()
+  app.buttons["搜索书库"].tap()
+  let field = app.textFields["搜索书名或作者"]
+  XCTAssertTrue(field.waitForExistence(timeout: 10)); field.tap()
+  app.typeKey("x", modifierFlags: [])
+  XCTAssertEqual(field.value as? String, "x", "确认 XCTest 是否向模拟器交付物理按键")
+  app.typeKey("a", modifierFlags: .command)
+  field.typeText("y")
+  XCTAssertEqual(field.value as? String, "y", "确认 Command 修饰键能触发系统全选")
+ }
+ func testIPadKeyboardLibrarySearchSelectionAndReturn() {
+  XCUIDevice.shared.orientation = .landscapeLeft
+  defer { XCUIDevice.shared.orientation = .portrait }
+  let app = start(txt: true); defer { app.terminate() }
+  app.buttons["书库"].firstMatch.tap()
+  app.buttons["搜索书库"].tap()
+  let warmup = app.textFields["搜索书名或作者"]
+  XCTAssertTrue(warmup.waitForExistence(timeout: 10)); warmup.tap(); warmup.typeText("\n")
+  app.buttons["取消"].firstMatch.tap()
+  pageKey(app, "f", modifiers: .command)
+  let query = app.textFields["搜索书名或作者"]
+  let found = query.waitForExistence(timeout: 10)
+  if !found {
+   print("KEY STATE " + app.staticTexts.matching(identifier: "keyboard-validation-scope").allElementsBoundByIndex.map { $0.label }.joined(separator: " / "))
+   print("KEY FOCUSED " + app.staticTexts["keyboard-validation-focused"].label)
+  }
+  XCTAssertTrue(found)
+  query.typeText("架构")
+  query.typeKey(XCUIKeyboardKey.downArrow.rawValue, modifierFlags: [])
+  XCTAssertFalse(app.buttons["library-detail-read"].exists, "输入框方向键不能选择书籍")
+  query.typeText("\n")
+  pageKey(app, XCUIKeyboardKey.downArrow.rawValue, modifiers: [])
+  let read = app.buttons["library-detail-read"]
+  XCTAssertTrue(read.waitForExistence(timeout: 10))
+  pageKey(app, "\r", modifiers: .command)
+  XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 20))
+  pageKey(app, "w", modifiers: .command)
+  XCTAssertTrue(read.waitForExistence(timeout: 10))
+  XCTAssertEqual(query.value as? String, "架构")
+  pageKey(app, "f", modifiers: .command)
+  query.typeText("TXT")
+  XCTAssertEqual(query.value as? String, "架构TXT")
+  zeroExternalRequests(app)
+ }
+ func checkIPadKeyboardPagedReader(readium: Bool) {
+  XCUIDevice.shared.orientation = .landscapeLeft
+  defer { XCUIDevice.shared.orientation = .portrait }
+  let app = openDownloadedNetworkBook(readium: readium); defer { app.terminate() }
+  let position = app.buttons["reader-position-label"]
+  XCTAssertTrue(position.waitForExistence(timeout: 20))
+  let progress = app.descendants(matching: .any).matching(identifier: "reader-progress").firstMatch
+  let before = progress.value as? String ?? position.label
+  pageKey(app, XCUIKeyboardKey.rightArrow.rawValue, modifiers: [])
+  expectation(for: NSPredicate { _, _ in (progress.value as? String ?? position.label) != before }, evaluatedWith: app)
+  waitForExpectations(timeout: 15)
+  pageKey(app, "f", modifiers: .command)
+  XCTAssertTrue(app.navigationBars["搜索"].waitForExistence(timeout: 10))
+  let field = app.textFields.firstMatch
+  XCTAssertTrue(field.waitForExistence(timeout: 10)); field.tap(); field.typeText("chapter ")
+  field.typeKey(XCUIKeyboardKey.rightArrow.rawValue, modifierFlags: [])
+  XCTAssertTrue(app.navigationBars["搜索"].exists)
+  pageKey(app, "w", modifiers: .command)
+  XCTAssertTrue(position.waitForExistence(timeout: 10))
+  pageKey(app, "t", modifiers: .command)
+  XCTAssertTrue(app.navigationBars["目录"].waitForExistence(timeout: 10))
+  pageKey(app, XCUIKeyboardKey.escape.rawValue, modifiers: [])
+  pageKey(app, ",", modifiers: .command)
+  XCTAssertTrue(app.navigationBars["阅读设置"].waitForExistence(timeout: 10))
+  pageKey(app, XCUIKeyboardKey.escape.rawValue, modifiers: [])
+  XCTAssertTrue(position.waitForExistence(timeout: 10))
+  pageKey(app, " ", modifiers: .shift)
+  pageKey(app, "w", modifiers: .command)
+  XCTAssertTrue(app.buttons["更多操作：架构验证小说"].waitForExistence(timeout: 10))
+  zeroExternalRequests(app)
+ }
+ func testIPadKeyboardNativePagedReader() { checkIPadKeyboardPagedReader(readium: false) }
+ func testIPadKeyboardReadiumPagedReader() { checkIPadKeyboardPagedReader(readium: true) }
+ func testIPadKeyboardScrollReaderAndSettings() {
+  XCUIDevice.shared.orientation = .landscapeLeft
+  defer { XCUIDevice.shared.orientation = .portrait }
+  let app = start(txt: true); defer { app.terminate() }
+  app.buttons["书库"].firstMatch.tap()
+  pageKey(app, XCUIKeyboardKey.downArrow.rawValue, modifiers: [])
+  XCTAssertTrue(app.buttons["library-detail-read"].waitForExistence(timeout: 10))
+  pageKey(app, "\r", modifiers: .command)
+  XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 20))
+  pageKey(app, " ", modifiers: [])
+  pageKey(app, ",", modifiers: .command)
+  XCTAssertTrue(app.navigationBars["阅读设置"].waitForExistence(timeout: 10))
+  let size = app.staticTexts["scroll-reader-font-size"]
+  let old = size.label
+  app.buttons["增大字号"].tap()
+  XCTAssertNotEqual(size.label, old)
+  pageKey(app, "w", modifiers: .command)
+  pageKey(app, "f", modifiers: .command)
+  XCTAssertTrue(app.navigationBars["搜索"].waitForExistence(timeout: 10))
+  pageKey(app, XCUIKeyboardKey.escape.rawValue, modifiers: [])
+  pageKey(app, "w", modifiers: .command)
+  XCTAssertTrue(app.buttons["library-detail-read"].waitForExistence(timeout: 10))
+  zeroExternalRequests(app)
+ }
  func testOfflineChapterManagement() {
   let app = start(); defer { app.terminate() }
   app.buttons["发现"].firstMatch.tap()
@@ -1429,6 +1881,10 @@ final class TapTests: XCTestCase {
  }
 }
 ''')
+if args.keyboard_actions:
+    generated = r/'TapTests.swift'
+    generated.write_text(generated.read_text().replace('let usesKeyboardActions = false', 'let usesKeyboardActions = true'))
+
 if args.performance:
     performance = r'''import XCTest
 final class TapTests: XCTestCase {
@@ -1517,7 +1973,7 @@ obj(11,f'isa=PBXNativeTarget; name=TapTests; productName=TapTests; productRefere
 obj(12,f'isa=PBXSourcesBuildPhase; buildActionMask=2147483647; files=({ID(8)}); runOnlyForDeploymentPostprocessing=0;');obj(13,f'isa=PBXSourcesBuildPhase; buildActionMask=2147483647; files=({ID(9)}); runOnlyForDeploymentPostprocessing=0;')
 obj(14,f'isa=PBXContainerItemProxy; containerPortal={ID(1)}; proxyType=1; remoteGlobalIDString={ID(10)}; remoteInfo=TapRegression;')
 obj(15,f'isa=PBXTargetDependency; target={ID(10)}; targetProxy={ID(14)};')
-settings='SWIFT_VERSION=5.0; SDKROOT=iphonesimulator; IPHONEOS_DEPLOYMENT_TARGET=17.0; CODE_SIGNING_ALLOWED=NO; GENERATE_INFOPLIST_FILE=YES; TARGETED_DEVICE_FAMILY=1; PRODUCT_NAME="$(TARGET_NAME)";'
+settings='SWIFT_VERSION=5.0; SDKROOT=iphonesimulator; IPHONEOS_DEPLOYMENT_TARGET=17.0; CODE_SIGNING_ALLOWED=NO; GENERATE_INFOPLIST_FILE=YES; TARGETED_DEVICE_FAMILY="1,2"; PRODUCT_NAME="$(TARGET_NAME)";'
 for n,extra in [(30,''),(31,'PRODUCT_BUNDLE_IDENTIFIER="cc.novelia.library-regression"; INFOPLIST_KEY_UILaunchScreen_Generation=YES;'),(32,'PRODUCT_BUNDLE_IDENTIFIER="cc.novelia.library-regression.tests"; TEST_TARGET_NAME=TapRegression;')]:obj(n,'isa=XCBuildConfiguration; name=Debug; buildSettings={'+settings+extra+'};')
 for n,c in [(20,30),(21,31),(22,32)]:obj(n,f'isa=XCConfigurationList; buildConfigurations=({ID(c)}); defaultConfigurationIsVisible=0; defaultConfigurationName=Debug;')
 p=r/'TapRegression.xcodeproj';p.mkdir(exist_ok=True);(p/'project.pbxproj').write_text('// !$*UTF8*$!\n{archiveVersion=1; classes={}; objectVersion=56; objects={'+''.join(objects)+'}; rootObject='+ID(1)+';}')
@@ -1659,6 +2115,55 @@ if args.epub_pagination:
     (library_dir/'library.json').write_text(json.dumps([{'id':str(uuid.uuid4()).upper(),'title':'分页连续性','filename':'pagination.epub','addedAt':time.time()-978307200,'metadataLoaded':True,'fileFormat':'epub'}]))
     (r/'TapTests.swift').write_text(r"""import XCTest
     final class TapTests: XCTestCase {
+     func testReadiumRotationKeepsVisibleParagraph() {
+      continueAfterFailure = false
+      XCUIDevice.shared.orientation = .portrait
+      defer { XCUIDevice.shared.orientation = .portrait }
+      let app = XCUIApplication(bundleIdentifier: "cc.novelia.ios.architecture-validation")
+      app.launchArguments = ["-architectureValidation", "-architectureReadium", "-architecturePagination", "-reader.readiumPageCurl.v1", "NO"]
+      app.launch(); defer { app.terminate() }
+      let book = app.staticTexts["分页连续性"].firstMatch
+      XCTAssertTrue(book.waitForExistence(timeout: 20)); book.tap()
+      if app.buttons["library-detail-read"].waitForExistence(timeout: 2) { app.buttons["library-detail-read"].tap() }
+      let probe = app.staticTexts["readium-validation-visible-paragraphs"]
+      XCTAssertTrue(probe.waitForExistence(timeout: 30))
+      func visible() -> [Int] {
+       guard let data = probe.label.data(using: .utf8), let values = try? JSONSerialization.jsonObject(with: data) as? [Int] else { return [] }
+       return values.sorted()
+      }
+      expectation(for: NSPredicate { _, _ in !visible().isEmpty }, evaluatedWith: app)
+      waitForExpectations(timeout: 20)
+      for _ in 0..<8 {
+       let before = probe.label
+       app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)).tap()
+       expectation(for: NSPredicate { _, _ in probe.label != before }, evaluatedWith: app)
+       waitForExpectations(timeout: 15)
+       if let first = visible().first, first > 1 { break }
+      }
+      guard let anchor = visible().first else { return XCTFail("Missing visible paragraph") }
+      XCTAssertGreaterThan(anchor, 1)
+      let marker = app.webViews.staticTexts[String(format: "PAGE_%03d", anchor)].firstMatch
+      for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+       XCUIDevice.shared.orientation = orientation
+       expectation(for: NSPredicate { _, _ in
+        guard marker.exists else { return false }
+        let intersection = marker.frame.intersection(app.frame)
+        return visible().contains(anchor) && !intersection.isNull && intersection.width > 0 && intersection.height > 0
+       }, evaluatedWith: app)
+       waitForExpectations(timeout: 20)
+       let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+       shot.name = "Readium旋转保留正文-\(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+      }
+      app.terminate(); app.launch()
+      XCTAssertTrue(book.waitForExistence(timeout: 20)); book.tap()
+      if app.buttons["library-detail-read"].waitForExistence(timeout: 2) { app.buttons["library-detail-read"].tap() }
+      expectation(for: NSPredicate { _, _ in
+       guard marker.exists else { return false }
+       let intersection = marker.frame.intersection(app.frame)
+       return visible().contains(anchor) && !intersection.isNull && intersection.width > 0 && intersection.height > 0
+      }, evaluatedWith: app)
+      waitForExpectations(timeout: 30)
+     }
      func testReadiumEPUBPageContinuity() {
       continueAfterFailure = false
       let app=XCUIApplication(bundleIdentifier:"cc.novelia.ios.architecture-validation")
@@ -1666,6 +2171,7 @@ if args.epub_pagination:
       app.launch(); defer { app.terminate() }
       let book=app.staticTexts["分页连续性"].firstMatch
       XCTAssertTrue(book.waitForExistence(timeout:20)); book.tap()
+      if app.buttons["library-detail-read"].waitForExistence(timeout: 2) { app.buttons["library-detail-read"].tap() }
       XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout:30))
       XCTAssertTrue(app.webViews.staticTexts["PAGE_001"].firstMatch.waitForExistence(timeout:30))
       sleep(3)
@@ -1712,6 +2218,7 @@ if args.epub_pagination:
       app.launch(); defer { app.terminate() }
       let book=app.staticTexts["分页连续性"].firstMatch
       XCTAssertTrue(book.waitForExistence(timeout:20)); book.tap()
+      if app.buttons["library-detail-read"].waitForExistence(timeout: 2) { app.buttons["library-detail-read"].tap() }
       XCTAssertTrue(app.webViews.staticTexts["PAGE_001"].firstMatch.waitForExistence(timeout:30))
       sleep(3)
       let probe=app.staticTexts["readium-validation-visible-paragraphs"]

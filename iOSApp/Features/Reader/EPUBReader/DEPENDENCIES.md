@@ -14,19 +14,19 @@
 ## 本项目代码与上游依赖
 
 - **本项目实现（位于 `iOSApp/Features/Reader/EPUBReader/`）**：
-  - `EPUBContainer.swift` — 最小 EPUB 容器解析（ZIP/container.xml/OPF/spine/nav、CSS 与图片装载）。
+  - `EPUBContainer.swift`、`EPUBContentSupport.swift` — 最小 EPUB 容器解析（ZIP/container.xml/OPF/spine/nav、CSS 与图片装载、底色清理与 NCX 解析）。
   - `EPUBPageBook.swift` — 页面标识（generation × spineIndex × pageIndex）、排版缓存、页面位图渲染。
   - `EPUBPagerView.swift` — 左右相接、跟手平移的翻页视图（预览页与落页共用同一份位图）。
-  - `EPUBReaderModel.swift` — 阅读状态、代次失效、跨章节与预取。
-  - `EPUBReaderView.swift` — 阅读界面（目录、字号、翻页入口）。
+  - `EPUBReaderModel.swift`、`EPUBReaderNavigationSupport.swift` — 阅读状态、代次失效、跨章节、导航与预取。
+  - `EPUBReaderView.swift`、`EPUBSharedTypes.swift` — 阅读界面（目录、字号、翻页入口與共享字体/样式组件）。
   - `EPUBChapterSource.swift` — EPUB、TXT 与在线内容的章节接口及文本适配。
   - `EPUBLayoutCoordinator.swift` — 排版请求合并和结果缓存。
-  - `ReadiumEPUBReaderModel.swift`、`ReadiumEPUBReaderView.swift` — Readium 导航、界面和阅读进度连接。
+  - `ReadiumEPUBReaderModel.swift`、`ReadiumEPUBReaderSupport.swift`、`ReadiumEPUBReaderView.swift` — Readium 导航、界面和阅读进度连接。
   - `ReadiumTextPublication.swift` — 惰性文本 Publication 与导航索引。
   - `EPUBSampleBook.swift` — 可复现样例 EPUB 生成器，仅在 Debug 构建中编译。
 - **上游**：通过 Swift Package Manager 引入并编译上表依赖源码；**没有复制、嵌入或修改 YueduCoreText 或 Yuedu-reader 的任何源码文件**。
 - **修改的上游文件**：无。包引用与版本配置由 Xcode 工程、`Package.swift` 和锁定文件管理，宿主适配不等于修改上游源码。
-- **iOS 15 目标**：`NoveliaLegacy` 不链接 YueduCoreText，也不编译 `EPUBLayoutCoordinator.swift`、`EPUBPageBook.swift`、`EPUBPagerView.swift`、`EPUBReaderModel.swift`。分页只使用 Readium。`EPUBSharedTypes.swift` 里的字体与阅读样式两个目标都编译。CLibMobi 也不链接到这个目标。
+- **iOS 15 目标**：`NoveliaLegacy` 不链接 YueduCoreText，也不编译 `EPUBLayoutCoordinator.swift`、`EPUBPageBook.swift`、`EPUBPagerView.swift`、`EPUBReaderModel.swift`、`EPUBReaderNavigationSupport.swift`。分页只使用 Readium。`EPUBSharedTypes.swift` 里的字体与阅读样式两个目标都编译。CLibMobi 也不链接到这个目标。
 
 ## 许可合规说明（分发 IPA 时）
 

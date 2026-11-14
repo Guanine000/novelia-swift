@@ -29,12 +29,19 @@ struct NoveliaApp: App {
         WindowGroup {
             RootView(services: services)
                 .textSelection(.enabled)
+                #if DEBUG
+                .modifier(ArchitectureBrowseViewport())
+                #endif
                 .overlay(alignment: .topTrailing) {
                     #if DEBUG
-                    if ProcessInfo.processInfo.arguments.contains("-architectureValidation") { ArchitectureValidationIndicator() }
+                    if ProcessInfo.processInfo.arguments.contains("-architectureValidation") {
+                        ArchitectureValidationIndicator()
+                        KeyboardValidationIndicator()
+                    }
                     #endif
                 }
         }
+        .commands { PageKeyboardCommands() }
     }
 }
 
@@ -270,17 +277,30 @@ struct RootView: View {
         #endif
     }
 
+    @ViewBuilder
+    private func tabContent(_ tab: AppTab) -> some View {
+        if UIDevice.current.userInterfaceIdiom == .pad && (tab == .library || tab == .discover) {
+            if tab == .library {
+                BrowseNavigationRoot { LibraryView() }
+            } else {
+                BrowseNavigationRoot { DiscoverHomeView() }
+            }
+        } else {
+            CompatNavigationStack {
+                switch tab {
+                case .library: LibraryView()
+                case .discover: DiscoverHomeView()
+                case .community: ForumView()
+                case .me: SettingsView()
+                }
+            }
+        }
+    }
+
     var body: some View {
         TabView(selection: $selectedTab) {
             ForEach(tabOrder) { tab in
-                CompatNavigationStack {
-                    switch tab {
-                    case .library: LibraryView()
-                    case .discover: DiscoverHomeView()
-                    case .community: ForumView()
-                    case .me: SettingsView()
-                    }
-                }
+                tabContent(tab)
                 // 由标签页内容的安全区承载，避免跨页听书条覆盖直板机底部标签栏。
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     SpeechMiniBarHost(store: services.speechHandoff)

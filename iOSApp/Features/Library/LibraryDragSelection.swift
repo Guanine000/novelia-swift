@@ -57,6 +57,7 @@ private struct LibraryDragSelectionBridge: UIViewRepresentable {
             other is UIPanGestureRecognizer
         }
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard touch.type != .indirectPointer else { return false }
             let p = touch.location(in: nil)
             return frames.contains { keys.contains($0.key) && $0.value.contains(p) }
         }

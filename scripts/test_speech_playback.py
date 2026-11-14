@@ -49,7 +49,7 @@ def main():
     assert 'final class SpeechHandoffStore' in accessory and 'func adopt(' in accessory and 'func release()' in accessory
     assert 'speechHandoff?.release()' in accessory and 'speechHandoff?.adopt(' in accessory
     assert '.speechHandoff' in (ROOT / 'iOSApp/Features/Reader/EPUBReader/ReadiumEPUBReaderView.swift').read_text()
-    assert 'controller.capabilities.contains(.readingFollow)' in (speech / 'ReadiumSpeechPlayback.swift').read_text()
+    assert 'controller.capabilities.contains(.readingFollow)' in (speech / 'SpeechPlaybackViews.swift').read_text()
     root = (ROOT / 'iOSApp/App/NoveliaApp.swift').read_text()
     library = (ROOT / 'iOSApp/Features/Library/LibraryViews.swift').read_text()
     assert '.onReceive(services.speechHandoff.$openRequest)' in root

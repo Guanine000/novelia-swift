@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum ReaderAppearance: String, CaseIterable, Identifiable {
     case light
@@ -49,6 +50,9 @@ enum ReaderAppearance: String, CaseIterable, Identifiable {
 }
 
 struct ReaderView: View {
+    @Environment(\.readerCloseAction) private var readerCloseAction
+    @Environment(\.dismiss) private var keyboardDismiss
+    @State private var isShowingKeyboardSettings = false
     @EnvironmentObject private var services: AppServices
     @EnvironmentObject private var settings: ReaderSettings
     private var fontSize: Double { settings.fontSize }
@@ -202,6 +206,13 @@ struct ReaderView: View {
             }
             .background(ReaderBackgroundView(dark: appearance.isDark(system: systemColorScheme), fallback: readerBackground).ignoresSafeArea())
             .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in speech.suspendFollow(true) })
+            .pageKeyboardActions(enabled: !isShowingSearch && !isShowingChapterDirectory && !isShowingSpeech
+                && !isShowingBookPreferences && !isShowingKeyboardSettings,
+                readerKeyboardActions(search: { isShowingSearch = true }, contents: { isShowingChapterDirectory = true },
+                    settings: { isShowingKeyboardSettings = true }, close: { if let readerCloseAction { readerCloseAction() } else { keyboardDismiss() } })
+                + PageKeyAction.scrollPages(onManualScroll: { speech.suspendFollow(true) })
+                + [.init(input: UIKeyCommand.inputLeftArrow, title: "上一章", perform: { _ in changeChapter(by: -1) }),
+                   .init(input: UIKeyCommand.inputRightArrow, title: "下一章", perform: { _ in changeChapter(by: 1) })])
             .onPreferenceChange(ReaderScrollFrames.self) { visibleAnchor = ReaderScrollFrames.visible($0) }
             .task(id: "\(selectedSearchHit?.id ?? "")|\(chapter.id)|\(isLoadingChapter)|\(returnAnchor ?? "")") {
                 guard !isLoadingChapter else { return }
@@ -349,13 +360,16 @@ struct ReaderView: View {
                     if readingReturnPoint == nil { readingReturnPoint = .init(chapter: chapterIndex, anchor: visibleAnchor) }
                     speech.pause(); chapterIndex = hit.chapterIndex; selectedSearchHit = hit
                 }, tab: .search)
+                .keyboardDismissible()
         }
+        .sheet(isPresented: $isShowingKeyboardSettings) { ScrollReaderKeyboardSettings() }
         .sheet(isPresented: $isShowingBookPreferences) { ReaderBookPreferencesView() }
         .sheet(isPresented: $isShowingChapterDirectory) {
             ChapterDirectoryView(novel: novel, selectedIndex: Binding(get: { chapterIndex }, set: { index in
                 if index != chapterIndex, readingReturnPoint == nil { readingReturnPoint = .init(chapter: chapterIndex, anchor: visibleAnchor) }
                 chapterIndex = index
             }), appearance: appearance)
+                .keyboardDismissible()
         }
         .environment(\.readerSearchRange, selectedSearchHit.flatMap { $0.chapterIndex == chapterIndex ? $0.utf16Offset..<($0.utf16Offset + $0.match.utf16.count) : nil })
         .environment(\.speechChapterIndex, chapterIndex)
