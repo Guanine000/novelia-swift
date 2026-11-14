@@ -52,7 +52,7 @@ struct LibraryView: View {
     }
     /// 系统“用 Novelia 打开”的文件先进入书库导入队列；导入期间到达的文件保留到本轮结束。
     private func handleIncomingDocuments() {
-        guard !importer.isImporting, !incomingDocuments.pending.isEmpty else { return }
+        guard !importer.isBusy, !incomingDocuments.pending.isEmpty else { return }
         let urls = incomingDocuments.take()
         importer.attach(wenkuDownloads)
         Task { await importer.handlePickedFiles(urls) }
@@ -231,7 +231,7 @@ struct LibraryView: View {
             handleIncomingDocuments()
         }
         .onValueChange(of: incomingDocuments.pending) { _, _ in handleIncomingDocuments() }
-        .onValueChange(of: importer.isImporting) { _, importing in
+        .onValueChange(of: importer.isBusy) { _, importing in
             if !importing { handleIncomingDocuments() }
         }
         .task { importer.attach(wenkuDownloads) }
@@ -388,7 +388,7 @@ struct LibraryView: View {
                 Image(systemName: "plus")
             }
             .accessibilityLabel("导入 TXT 或 EPUB")
-            .disabled(importer.isImporting)
+            .disabled(importer.isBusy)
             Menu {
                 if !selectableBooks.isEmpty {
                     Button { bookActions.beginSelection() } label: {

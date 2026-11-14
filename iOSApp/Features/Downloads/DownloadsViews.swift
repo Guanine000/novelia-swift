@@ -33,6 +33,9 @@ final class LibraryImportModel: ObservableObject {
     @Published var importError: String?
 
     private var library: WenkuLocalLibraryStore!
+    @Published private(set) var isStagingDrop = false
+    /// 从接收拖放到转换确认、实际导入结束，共用同一入口互斥状态。
+    var isBusy: Bool { isStagingDrop || isImporting || pendingKindleImport != nil }
     private var dropStagingDirectory: URL?
 
     func attach(_ library: WenkuLocalLibraryStore) {
@@ -58,7 +61,7 @@ final class LibraryImportModel: ObservableObject {
 
     /// 选择器回调：含 AZW3／MOBI 时先请用户确认转换，否则直接导入。
     func handlePickedFiles(_ pickedURLs: [URL]) async {
-        guard !pickedURLs.isEmpty, !isImporting, pendingKindleImport == nil else { return }
+        guard !pickedURLs.isEmpty, !isBusy else { return }
         let kindle = pickedURLs.filter(Self.isKindleFile)
         guard kindle.isEmpty else {
             pendingKindleImport = PendingKindleImport(urls: pickedURLs, kindleFilenames: kindle.map(\.lastPathComponent))
@@ -69,13 +72,15 @@ final class LibraryImportModel: ObservableObject {
 
     /// 接收 iPad 分屏或文件拖放：将拖入项复制到临时目录后复用统一导入管线，导入结束后清理临时目录。
     func handleDroppedProviders(_ providers: [NSItemProvider], contentTypes: [UTType]) -> Bool {
-        guard !providers.isEmpty, !isImporting, pendingKindleImport == nil else { return false }
+        guard !providers.isEmpty, !isBusy else { return false }
         let matched = providers.filter { provider in
             contentTypes.contains { provider.hasItemConformingToTypeIdentifier($0.identifier) }
                 || provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
         }
         guard !matched.isEmpty else { return false }
+        isStagingDrop = true
         Task {
+            defer { isStagingDrop = false }
             let stagingRoot = FileManager.default.temporaryDirectory
                 .appendingPathComponent("library-drop-\(UUID().uuidString)", isDirectory: true)
             try? FileManager.default.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
@@ -90,8 +95,9 @@ final class LibraryImportModel: ObservableObject {
                 importError = LibraryImportError.unsupportedFile.localizedDescription
                 return
             }
-            cleanupDropStagingDirectory()
             dropStagingDirectory = stagingRoot
+            // 同一主执行器上交接状态，中间没有挂起点，外部入口无法插入。
+            isStagingDrop = false
             await handlePickedFiles(stagedURLs)
             if pendingKindleImport == nil {
                 cleanupDropStagingDirectory()
@@ -152,7 +158,7 @@ final class LibraryImportModel: ObservableObject {
     /// 从“文件”批量导入：逐项复制并登记到本地书库。
     func importFiles(_ pickedURLs: [URL]) async {
         // 一次只执行一个导入：复制期间再次收到选择器回调会重复登记相同文件。
-        guard !pickedURLs.isEmpty, !isImporting else { return }
+        guard !pickedURLs.isEmpty, !isBusy else { return }
         isImporting = true
         importCompletedCount = 0
         importTotalCount = pickedURLs.count
