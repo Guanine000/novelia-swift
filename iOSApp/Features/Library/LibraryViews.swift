@@ -41,6 +41,7 @@ struct LibraryView: View {
     @State private var syncTask: Task<Void, Never>?
     @State private var hasTriggeredSync = false
     @State private var isShowingSyncProgress = false
+    @State private var isDropTargeted = false
     /// 列表与封面网格之间切换；选择记在偏好里，下次打开书库沿用。
     @AppStorage("library.booksLayout") private var booksLayout: LibraryBooksLayout = .list
 
@@ -281,6 +282,18 @@ struct LibraryView: View {
             Text("创建后，可在书籍的“更多”菜单中移入系列。")
         }
         .overlay { LibraryImportProgressOverlay(model: importer) }
+        .overlay {
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
+                    .stroke(NoveliaStyle.brandGreen, lineWidth: 3)
+                    .padding(6)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onDrop(of: importContentTypes + [.fileURL], isTargeted: $isDropTargeted) { providers in
+            importer.attach(wenkuDownloads)
+            return importer.handleDroppedProviders(providers, contentTypes: importContentTypes)
+        }
         .modifier(LibraryBookActionDialogs(actions: bookActions))
         .onValueChange(of: bookActions.downloadedBookKey) { _, key in
             guard let key else { return }

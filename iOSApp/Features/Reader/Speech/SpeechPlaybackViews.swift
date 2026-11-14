@@ -143,7 +143,10 @@ struct SpeechControlView: View {
                 if controller.state != .idle {
                     Button("停止朗读", role: .destructive) { controller.stop() }.frame(minHeight: 44)
                 }
-            }.padding()
+            }
+            .padding()
+            .frame(maxWidth: 640)
+            .frame(maxWidth: .infinity)
         }.background(NoveliaStyle.paper)
     }
 

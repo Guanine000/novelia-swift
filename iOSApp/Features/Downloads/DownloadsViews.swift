@@ -33,6 +33,7 @@ final class LibraryImportModel: ObservableObject {
     @Published var importError: String?
 
     private var library: WenkuLocalLibraryStore!
+    private var dropStagingDirectory: URL?
 
     func attach(_ library: WenkuLocalLibraryStore) {
         self.library = library
@@ -66,11 +67,86 @@ final class LibraryImportModel: ObservableObject {
         await importFiles(pickedURLs)
     }
 
+    /// 接收 iPad 分屏或文件拖放：将拖入项复制到临时目录后复用统一导入管线，导入结束后清理临时目录。
+    func handleDroppedProviders(_ providers: [NSItemProvider], contentTypes: [UTType]) -> Bool {
+        guard !providers.isEmpty, !isImporting, pendingKindleImport == nil else { return false }
+        let matched = providers.filter { provider in
+            contentTypes.contains { provider.hasItemConformingToTypeIdentifier($0.identifier) }
+                || provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+        }
+        guard !matched.isEmpty else { return false }
+        Task {
+            let stagingRoot = FileManager.default.temporaryDirectory
+                .appendingPathComponent("library-drop-\(UUID().uuidString)", isDirectory: true)
+            try? FileManager.default.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
+            var stagedURLs: [URL] = []
+            for (index, provider) in matched.enumerated() {
+                if let url = await Self.stageDroppedFile(from: provider, matching: contentTypes, into: stagingRoot, index: index) {
+                    stagedURLs.append(url)
+                }
+            }
+            guard !stagedURLs.isEmpty else {
+                try? FileManager.default.removeItem(at: stagingRoot)
+                importError = LibraryImportError.unsupportedFile.localizedDescription
+                return
+            }
+            cleanupDropStagingDirectory()
+            dropStagingDirectory = stagingRoot
+            await handlePickedFiles(stagedURLs)
+            if pendingKindleImport == nil {
+                cleanupDropStagingDirectory()
+            }
+        }
+        return true
+    }
+
     /// 用户对转换确认的回应；取消时只跳过 Kindle 文件，同批的 EPUB／TXT 照常导入。
     func resolvePendingKindleImport(convert: Bool) async {
         guard let pending = pendingKindleImport else { return }
         pendingKindleImport = nil
+        defer { cleanupDropStagingDirectory() }
         await importFiles(convert ? pending.urls : pending.urls.filter { !Self.isKindleFile($0) })
+    }
+
+    private func cleanupDropStagingDirectory() {
+        guard let directory = dropStagingDirectory else { return }
+        dropStagingDirectory = nil
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    nonisolated private static func stageDroppedFile(from provider: NSItemProvider, matching contentTypes: [UTType],
+                                                     into stagingRoot: URL, index: Int) async -> URL? {
+        let itemFolder = stagingRoot.appendingPathComponent("\(index)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: itemFolder, withIntermediateDirectories: true)
+        for type in contentTypes where provider.hasItemConformingToTypeIdentifier(type.identifier) {
+            if let staged = await stageFileRepresentation(from: provider, typeIdentifier: type.identifier, into: itemFolder) {
+                return staged
+            }
+        }
+        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
+           let staged = await stageFileRepresentation(from: provider, typeIdentifier: UTType.fileURL.identifier, into: itemFolder) {
+            return staged
+        }
+        return nil
+    }
+
+    nonisolated private static func stageFileRepresentation(from provider: NSItemProvider, typeIdentifier: String,
+                                                            into itemFolder: URL) async -> URL? {
+        await withCheckedContinuation { continuation in
+            _ = provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, _ in
+                guard let url else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let destination = itemFolder.appendingPathComponent(url.lastPathComponent)
+                do {
+                    try Self.coordinatedCopy(from: url, to: destination)
+                    continuation.resume(returning: destination)
+                } catch {
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
     }
 
     /// 从“文件”批量导入：逐项复制并登记到本地书库。

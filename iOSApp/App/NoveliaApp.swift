@@ -279,11 +279,21 @@ struct RootView: View {
 
     @ViewBuilder
     private func tabContent(_ tab: AppTab) -> some View {
-        if UIDevice.current.userInterfaceIdiom == .pad && (tab == .library || tab == .discover) {
-            if tab == .library {
+        if UIDevice.current.userInterfaceIdiom == .pad && (tab == .library || tab == .discover || tab == .community) {
+            switch tab {
+            case .library:
                 BrowseNavigationRoot { LibraryView() }
-            } else {
+            case .discover:
                 BrowseNavigationRoot { DiscoverHomeView() }
+            case .community:
+                BrowseNavigationRoot(
+                    emptyTitle: "选择一个帖子",
+                    emptySystemImage: "bubble.left.and.bubble.right",
+                    emptyDescription: "从左侧列表选择帖子，查看正文与评论。",
+                    navigationTitle: "帖子详情"
+                ) { ForumView() }
+            case .me:
+                CompatNavigationStack { SettingsView() }
             }
         } else {
             CompatNavigationStack {

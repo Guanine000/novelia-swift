@@ -361,6 +361,7 @@ private struct CharacterCardView: View {
     @State private var importing = false
     @State private var importTask: Task<Void, Never>?
     @State private var showingPortrait = false
+    @State private var isPortraitDropTargeted = false
     private var updating: Bool { store.runningTasks[initialScope.work] != nil }
     private var updateTask: Task<Void, Never>? {
         get { store.runningTasks[initialScope.work] }
@@ -528,6 +529,12 @@ private struct CharacterCardView: View {
                                 .padding(3).overlay(Circle().stroke(NoveliaStyle.brandGreen.opacity(0.5), lineWidth: 1))
                         }
                     }.buttonStyle(.plain).accessibilityLabel(portrait == nil ? "添加角色形象" : "查看角色形象")
+                        .overlay {
+                            if isPortraitDropTargeted {
+                                RoundedRectangle(cornerRadius: 18).stroke(NoveliaStyle.brandGreen, lineWidth: 2.5)
+                            }
+                        }
+                        .onDrop(of: [.image], isTargeted: $isPortraitDropTargeted, perform: handleDroppedPortrait)
                     Button { managingPortrait = true } label: {
                         Image(systemName: "camera.fill").font(.system(size: 10)).padding(6)
                             .foregroundStyle(NoveliaStyle.brandGreen).background(NoveliaStyle.card).clipShape(Circle())
@@ -656,6 +663,7 @@ private struct CharacterCardView: View {
             Form {
                 Section {
                     CharacterPortraitImage(store: store, id: id, scope: scope, name: person?.name ?? "", compact: false, fits: true).frame(height: 200)
+                        .onDrop(of: [.image], isTargeted: $isPortraitDropTargeted, perform: handleDroppedPortrait)
                     CompatPhotosPickerButton(isDisabled: importing, onData: importPortrait) {
                         Label(portrait == nil ? "从相册添加角色形象" : "从相册更换角色形象", systemImage: "photo")
                     }
@@ -691,6 +699,25 @@ private struct CharacterCardView: View {
             do { guard let result else { throw CharacterPortraitImportError.invalid }; try store.setPortrait(result, entity: id, scope: scope) }
             catch { self.error = error.localizedDescription }
         }
+    }
+    private func handleDroppedPortrait(_ providers: [NSItemProvider]) -> Bool {
+        guard !importing, let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.image.identifier) }) else {
+            return false
+        }
+        _ = provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, loadError in
+            Task { @MainActor in
+                if let loadError {
+                    self.error = loadError.localizedDescription
+                    return
+                }
+                guard let data, data.count <= 20 * 1_024 * 1_024 else {
+                    self.error = CharacterPortraitImportError.invalid.localizedDescription
+                    return
+                }
+                self.importPortrait(data)
+            }
+        }
+        return true
     }
     /// 建档阶段每人只有一条事实；想看更多就在这里对这个人单独补一次。
     private func enrich() {

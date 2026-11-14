@@ -6,12 +6,14 @@ enum BrowseDestination: Identifiable {
     case library(LibraryBook)
     case novel(Novel)
     case wenku(WenkuNovelOutline)
+    case forumPost(Int64)
 
     var id: String {
         switch self {
         case .library(let book): "library:" + book.key
         case .novel(let novel): "novel:" + novel.id
         case .wenku(let novel): "wenku:" + novel.id
+        case .forumPost(let id): "forum:\(id)"
         }
     }
 }
@@ -150,6 +152,7 @@ private struct BrowseDetailContent: View {
         case .library(let book): LibraryBookDetailView(book: book, embedded: true)
         case .novel(let novel): NovelDetailView(novel: novel)
         case .wenku(let novel): WenkuDetailView(outline: novel)
+        case .forumPost(let postID): ForumPostDetailView(postID: postID)
         }
     }
 }
@@ -161,14 +164,20 @@ struct BrowseNavigationRoot<Master: View>: View {
     @State private var reading: BrowseReadingDestination?
     @State private var readingBookKey: String?
     @State private var readingReturn: BrowseReadingReturn?
+    var emptyTitle = "选择一本书"
+    var emptySystemImage = "book"
+    var emptyDescription = "从左侧列表选择书籍，查看详情或开始阅读。"
+    var navigationTitle = "书籍详情"
     let master: () -> Master
 
     var body: some View {
         Group {
             if #available(iOS 17, *) {
-                ModernBrowseSplit(selection: $selection, master: master)
+                ModernBrowseSplit(selection: $selection, emptyTitle: emptyTitle, emptySystemImage: emptySystemImage,
+                                  emptyDescription: emptyDescription, navigationTitle: navigationTitle, master: master)
             } else {
-                LegacyBrowseSplit(selection: $selection, master: master)
+                LegacyBrowseSplit(selection: $selection, emptyTitle: emptyTitle, emptySystemImage: emptySystemImage,
+                                  emptyDescription: emptyDescription, navigationTitle: navigationTitle, master: master)
             }
         }
         .environment(\.browseReading, { destination in
@@ -197,6 +206,10 @@ private struct ModernBrowseSplit<Master: View>: View {
     @Binding var selection: BrowseDestination?
     @State private var visibility = NavigationSplitViewVisibility.all
     @State private var compactColumn = NavigationSplitViewColumn.sidebar
+    let emptyTitle: String
+    let emptySystemImage: String
+    let emptyDescription: String
+    let navigationTitle: String
     let master: () -> Master
 
     var body: some View {
@@ -206,9 +219,12 @@ private struct ModernBrowseSplit<Master: View>: View {
                 .environment(\.browseSelectedID, selection?.id)
                 .navigationSplitViewColumnWidth(min: 280, ideal: 360, max: 440)
         } detail: {
-            CompatNavigationStack { BrowseSelectedDetail(selection: selection) }
-                .id(selection?.id)
-                .environment(\.browseSelection, nil)
+            CompatNavigationStack {
+                BrowseSelectedDetail(selection: selection, emptyTitle: emptyTitle, emptySystemImage: emptySystemImage,
+                                     emptyDescription: emptyDescription, navigationTitle: navigationTitle)
+            }
+            .id(selection?.id)
+            .environment(\.browseSelection, nil)
         }
         .navigationSplitViewStyle(.balanced)
     }
@@ -219,6 +235,10 @@ private struct LegacyBrowseSplit<Master: View>: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Binding var selection: BrowseDestination?
     @State private var showsDetail = false
+    let emptyTitle: String
+    let emptySystemImage: String
+    let emptyDescription: String
+    let navigationTitle: String
     let master: () -> Master
 
     var body: some View {
@@ -228,13 +248,15 @@ private struct LegacyBrowseSplit<Master: View>: View {
                 .environment(\.browseSelectedID, selection?.id)
                 .background {
                     NavigationLink(isActive: $showsDetail) {
-                        BrowseSelectedDetail(selection: selection)
+                        BrowseSelectedDetail(selection: selection, emptyTitle: emptyTitle, emptySystemImage: emptySystemImage,
+                                             emptyDescription: emptyDescription, navigationTitle: navigationTitle)
                             .id(selection?.id)
                             .environment(\.browseSelection, nil)
                     } label: { EmptyView() }
                     .hidden()
                 }
-            BrowseSelectedDetail(selection: nil)
+            BrowseSelectedDetail(selection: nil, emptyTitle: emptyTitle, emptySystemImage: emptySystemImage,
+                                 emptyDescription: emptyDescription, navigationTitle: navigationTitle)
         }
         .navigationViewStyle(.columns)
         .onValueChange(of: horizontalSizeClass) { _, value in
@@ -245,12 +267,16 @@ private struct LegacyBrowseSplit<Master: View>: View {
 
 private struct BrowseSelectedDetail: View {
     let selection: BrowseDestination?
+    let emptyTitle: String
+    let emptySystemImage: String
+    let emptyDescription: String
+    let navigationTitle: String
     var body: some View {
         if let selection {
             BrowseDetailContent(destination: selection)
         } else {
-            CompatUnavailable("选择一本书", systemImage: "book", description: Text("从左侧列表选择书籍，查看详情或开始阅读。"))
-                .navigationTitle("书籍详情")
+            CompatUnavailable(emptyTitle, systemImage: emptySystemImage, description: Text(emptyDescription))
+                .navigationTitle(navigationTitle)
         }
     }
 }
@@ -282,7 +308,7 @@ func browseKeyboardActions(destinations: [BrowseDestination], selectedID: String
             switch destination {
             case .library(let book): if !book.isCloudOnly { read(.library(book)) }
             case .novel(let novel): if !novel.chapters.isEmpty { read(.online(novel, 0)) }
-            case .wenku: break
+            case .wenku, .forumPost: break
             }
         })
     }

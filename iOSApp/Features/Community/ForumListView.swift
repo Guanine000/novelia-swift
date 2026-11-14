@@ -14,6 +14,8 @@ struct ForumView: View {
 }
 
 private struct ForumContentView: View {
+    @Environment(\.browseSelection) private var browseSelection
+    @Environment(\.browseSelectedID) private var browseSelectedID
     @EnvironmentObject private var auth: ForumAuthStore
     @StateObject private var store: ForumStore
     @State private var isConfirmingLogout = false
@@ -88,12 +90,21 @@ private struct ForumContentView: View {
                     }
 
                     ForEach(visiblePosts) { post in
+                        let destination = BrowseDestination.forumPost(post.id)
                         Button {
-                            openedPostID = post.id
+                            if let browseSelection {
+                                browseSelection(destination)
+                            } else {
+                                openedPostID = post.id
+                            }
                         } label: {
-                            ForumPostCard(post: post, category: store.categories.first { $0.id == post.categoryId })
+                            ForumPostCard(post: post, category: store.categories.first { $0.id == post.categoryId },
+                                          isSelected: browseSelectedID == destination.id)
                         }
                         .buttonStyle(.plain)
+                        .hoverEffect(.highlight)
+                        .accessibilityAddTraits(browseSelectedID == destination.id ? .isSelected : [])
+                        .id(destination.id)
                         .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
@@ -122,6 +133,14 @@ private struct ForumContentView: View {
                 .listStyle(.plain)
                 .compatScrollContentBackgroundHidden()
                 .background(NoveliaStyle.paper)
+                .pageKeyboardActions(browseKeyboardActions(
+                    destinations: visiblePosts.map { .forumPost($0.id) },
+                    selectedID: browseSelectedID,
+                    select: browseSelection,
+                    read: nil,
+                    search: { withAnimation { proxy.scrollTo("forum-post-list-top", anchor: .top) } },
+                    scrollTo: { id in withAnimation { proxy.scrollTo(id, anchor: .center) } }
+                ))
                 .compatNavigationDestination(item: $openedPostID) { postID in
                     ForumPostDetailView(postID: postID)
                 }
@@ -239,6 +258,7 @@ private extension ForumFeedSource {
 private struct ForumPostCard: View {
     let post: ForumPost
     let category: ForumCategory?
+    var isSelected = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -309,7 +329,7 @@ private struct ForumPostCard: View {
         .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
-                .stroke(NoveliaStyle.muted.opacity(0.12), lineWidth: 1)
+                .stroke(isSelected ? NoveliaStyle.brandGreen : NoveliaStyle.muted.opacity(0.12), lineWidth: isSelected ? 2 : 1)
         )
     }
 }

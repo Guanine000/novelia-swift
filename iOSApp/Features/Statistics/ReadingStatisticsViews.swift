@@ -18,6 +18,8 @@ private enum ReadingDuration {
 }
 
 struct ReadingStatisticsView: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var syncStore: WebDAVSyncStore
     @State private var showsSyncOffer = false
     @EnvironmentObject private var store: ReadingStatisticsStore
@@ -50,10 +52,13 @@ struct ReadingStatisticsView: View {
                     Text("默认关闭。开启后记录 EPUB、TXT 和在线阅读时长；关闭后暂停新增记录，已有统计保留。WebDAV 同步开关及按钮位于“我的 → WebDAV 同步”。")
                 }
                 Section("阅读概览") {
-                    CompatLabeledContent("今日", value: ReadingDuration.text(store.statistics.seconds(days: [today])))
-                    CompatLabeledContent("本周", value: ReadingDuration.text(ReadingDuration.weekSeconds(store.statistics, at: context.date)))
-                    CompatLabeledContent("累计", value: ReadingDuration.text(store.statistics.seconds()))
-                    CompatLabeledContent("阅读天数", value: "\(store.statistics.readingDays) 天")
+                    ReadingOverviewMetrics(
+                        today: ReadingDuration.text(store.statistics.seconds(days: [today])),
+                        week: ReadingDuration.text(ReadingDuration.weekSeconds(store.statistics, at: context.date)),
+                        total: ReadingDuration.text(store.statistics.seconds()),
+                        days: "\(store.statistics.readingDays) 天",
+                        usesGrid: horizontalSizeClass == .regular && !dynamicTypeSize.isAccessibilitySize
+                    )
                 }
                 Section {
                     ForEach(store.devices) { device in
@@ -150,6 +155,39 @@ struct ReadingStatisticsView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+}
+
+/// 宽窗口下将四项核心概览排成双列卡片网格，紧凑尺寸或无障碍大字号保持单列行视图。
+private struct ReadingOverviewMetrics: View {
+    let today: String
+    let week: String
+    let total: String
+    let days: String
+    let usesGrid: Bool
+
+    var body: some View {
+        if usesGrid {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 10) {
+                cell("今日", value: today)
+                cell("本周", value: week)
+                cell("累计", value: total)
+                cell("阅读天数", value: days)
+            }
+            .padding(.vertical, 4)
+        } else {
+            CompatLabeledContent("今日", value: today)
+            CompatLabeledContent("本周", value: week)
+            CompatLabeledContent("累计", value: total)
+            CompatLabeledContent("阅读天数", value: days)
+        }
+    }
+
+    private func cell(_ title: String, value: String) -> some View {
+        CompatLabeledContent(title, value: value)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(NoveliaStyle.paper.opacity(0.65), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
+    }
 }
 
 private struct ReadingDayStatisticsView: View {

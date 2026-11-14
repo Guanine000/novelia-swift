@@ -402,11 +402,16 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     /// 替换等待中的重排任务：取消旧代次排版，不让它们继续运行到结束。
+    /// 分屏或台前调度连续拖拽改变窗口尺寸（`.resize`）时先短暂防抖，
+    /// 期间保留当前 `pageBook` 画面与锚点，避免每一帧都清空页面并启动排版。
     func scheduleRelayout(_ reason: EPUBLayoutReason) {
         guard source != nil, status != .idle, status != .opening else { return }
         let cancelled = cancelLayoutTasks()
         EPUBLayoutLog.shareable.notice(ReaderDiagnosticMessage.relayoutScheduled(trace: traceID, generation: generation, reason: reason.rawValue, cancelledTasks: cancelled))
         relayoutTask = Task { [weak self] in
+            if reason == .resize {
+                do { try await Task.sleep(nanoseconds: 120_000_000) } catch { return }
+            }
             await self?.relayout(keepingCurrentSpine: true, reason: reason)
             // 替换操作总会先取消此任务，因此未被取消的完成结果仍属于当前任务。
             if !Task.isCancelled { self?.relayoutTask = nil }

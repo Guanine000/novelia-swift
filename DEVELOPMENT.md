@@ -90,7 +90,7 @@ Core 功能逻辑 → Domain 与通用 Support
 
 `NoveliaApp` 是 `@main` 入口，用 `@StateObject` 持有 `AppServices`。正常启动通过 `AppServices.novelia(configuration:)` 创建配置、账号与服务集合，再交给 `RootView`。Debug 启动可选择独立验证组装。
 
-`RootView` 构建底栏；iPhone 和普通标签页沿用 `CompatNavigationStack`，iPad 的书库/发现交给 `App/Integrations/BrowseNavigation.swift` 中的 `BrowseNavigationRoot`。iOS 17+ 使用系统 `NavigationSplitView`，iOS 15/16 使用双列 `NavigationView`。尺寸变化不以 if/else 更换主列表视图树，由同一系统容器处理收起和展开。底栏顺序、启动页和上次选择由 `AppTabLayout` 与设置键控制；默认入口为书库、发现、社区和我的。修改导航时同时考虑用户保存的底栏配置和页面返回状态。
+`RootView` 构建底栏；iPhone 和“我的”标签页沿用 `CompatNavigationStack`，iPad 的书库、发现和社区交给 `App/Integrations/BrowseNavigation.swift` 中的 `BrowseNavigationRoot`。iOS 17+ 使用系统 `NavigationSplitView`，iOS 15/16 使用双列 `NavigationView`。尺寸变化不以 if/else 更换主列表视图树，由同一系统容器处理收起和展开。底栏顺序、启动页和上次选择由 `AppTabLayout` 与设置键控制；默认入口为书库、发现、社区和我的。修改导航时同时考虑用户保存的底栏配置和页面返回状态。
 
 `BrowseNavigationRoot` 仅持有当前标签的详情选择、全窗口阅读目标与阅读返回定位请求。页面通过可空环境动作提交浏览选择/发起阅读；未注入时 `BrowseDetailLink`、`BrowseReadingLink` 退回原导航链接，因此手机行为不变。列表点击与菜单阅读分开，云端下载仍走原 `LibraryBookActions`；阅读使用原 Root 注入的所有服务，关闭后刷新位置，`ScrollViewReader` 按书键定位，避免最近阅读排序变化使刚读的书离开视口。详情导航栈仅在选中目标标识变化时重建，旋转或内容宽度变化不重置它。浏览选择不进入磁盘或 WebDAV。
 
@@ -144,7 +144,7 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 
 ### iPad 窗口布局
 
-`NovelDetailView` 在导航内容区通过 GeometryReader 读取实际可用宽度，800 点起并排信息卡和简介；辅助功能大字号保持纵排。只切换无状态展示片段，详情加载与导航仍由外层持有，旋转不重建业务实例。文库详情和阅读设置限制内层内容宽度，不限制外层滚动容器、导航栏或阅读视口。译源卡使用自适应网格。`test_api_architecture_ui.py` 的 `testAdaptiveNovelDetailRotation` 检查详情横竖屏编排和边界；`testNativeReaderPanelRotation`、`testReadiumReaderPanelRotation` 检查两种引擎旋转后设置面板的宽度及关闭操作。验证 runner 同时支持 iPhone/iPad；不替代分屏连续缩放和真机阅读位置验收。
+`NovelDetailView` 在导航内容区通过 GeometryReader 读取实际可用宽度，800 点起并排信息卡和简介；辅助功能大字号保持纵排。只切换无状态展示片段，详情加载与导航仍由外层持有，旋转不重建业务实例。文库详情、论坛帖子详情、阅读设置和听书主面板限制内层内容可读宽度，不限制外层滚动容器、导航栏或阅读视口。阅读统计在常规水平尺寸且非无障碍大字号下将“阅读概览”四项排成双列网格，保留 `CompatLabeledContent` 可访问性标签。译源卡使用自适应网格。书库支持 `.onDrop` 接收分屏拖入的书籍文件（`LibraryImportModel.handleDroppedProviders` 先复制到临时目录再走统一导入与 Kindle 转换确认，结束后清理临时目录），人物卡头像区与编辑页支持拖入角色图片。原生分页引擎 `EPUBReaderModel.scheduleRelayout` 对 `.resize`（分屏或台前调度连续拖拽改变窗口尺寸）做 120ms 防抖，期间保留当前 `pageBook` 与锚点，避免逐帧清空页面重排。`test_api_architecture_ui.py` 的 `testAdaptiveNovelDetailRotation` 检查详情横竖屏编排和边界；`testNativeReaderPanelRotation`、`testReadiumReaderPanelRotation` 检查两种引擎旋转后设置面板的宽度及关闭操作。验证 runner 同时支持 iPhone/iPad；不替代分屏连续缩放和真机阅读位置验收。
 
 `DiscoverView` 以窗口宽度扣除边距并限制内容上限，计算 1–3 个等宽卡片列；大字号退为单列。查询、分页和 `ScrollViewReader` 仍由原层持有。书库 `libraryListRow` 只限制行内内容，不替换 `List` 或拖选坐标系；搜索栏与批量栏保持外层满宽。`LibrarySelectionBar` 在紧凑尺寸类别或辅助功能字号下把计数与两列动作分开；动作共享同一选择状态。UI回归 `testAdaptiveDiscoveryAndLibrarySelection` 检查卡片宽度、导航、多选旋转和各操作可达性。Readium编号合成书的 `testReadiumRotationKeepsVisibleParagraph` 检查章中旋转后的同一正文标记实际可见性，不能外推至任意真实书籍、原生引擎或分屏连续缩放。
 
@@ -154,7 +154,7 @@ Debug 独立验证 App 可用 `-architectureBrowseResize` 将同一个 Root 内�
 
 ### iPad 硬件键盘与指针
 
-`Shared/KeyboardNavigation.swift` 的 `PageKeyAction` 由页面提供操作，`PageKeyboardButtons` 使用 focusedSceneValue 发布当前窗口操作，由 App 的 `PageKeyboardCommands` 在系统菜单中注册 keyboardShortcut 和快捷键说明，页面内的 UIKit 非文本 UIKeyInput 接收器只在当前页空闲时取得焦点，空 inputView 不显示软键盘；文本编辑、非空选区和控件焦点优先。锚点也用于读取本窗口的滚动视口；作用域随页面/窗口生命周期释放，不设全局键盘分发。SwiftUI 弹层在自身注册关闭快捷键，避免后方阅读页响应退出。文本输入或正文选字的 responder 优先，不能为翻页抢走编辑焦点。命令上下文每页稳定持有，只发布可比较的操作说明；回调随页面更新，避免把新闭包数组反复发布到焦点系统。iOS16+用focusedSceneValue，iOS15用非可空focusedValue和同一接收器兼容。书库与发现通过 `browseKeyboardActions` 使用已筛选和排序的目标数组及原有选择/阅读环境动作，不建立第二份书库状态；云端书目不绕过下载确认。
+`Shared/KeyboardNavigation.swift` 的 `PageKeyAction` 由页面提供操作，`PageKeyboardButtons` 使用 focusedSceneValue 发布当前窗口操作，由 App 的 `PageKeyboardCommands` 在系统菜单中注册 keyboardShortcut 和快捷键说明，页面内的 UIKit 非文本 UIKeyInput 接收器只在当前页空闲时取得焦点，空 inputView 不显示软键盘；文本编辑、非空选区和控件焦点优先。锚点也用于读取本窗口的滚动视口；作用域随页面/窗口生命周期释放，不设全局键盘分发。SwiftUI 弹层在自身注册关闭快捷键，避免后方阅读页响应退出。文本输入或正文选字的 responder 优先，不能为翻页抢走编辑焦点。命令上下文每页稳定持有，只发布可比较的操作说明；回调随页面更新，避免把新闭包数组反复发布到焦点系统。iOS16+用focusedSceneValue，iOS15用非可空focusedValue和同一接收器兼容。书库、发现与社区通过 `browseKeyboardActions` 使用已筛选和排序的目标数组及原有选择/阅读环境动作，不建立第二份状态；云端书目不绕过下载确认。
 
 分页快捷键调用原模型 `commitTurn` / `goForward` / `goBackward`，滚动快捷键移动当前视口的真实 UIScrollView 并暂停朗读跟随，沿用原进度观察。滚动阅读设置仍使用注入的同一 ReaderSettings。`pointerBookMenu` 仅在悬停时提供菜单内容，触摸长按留给原拖选；拖选识别器拒绝 indirectPointer。UI回归用 XCTest 的实际 typeKey 输入，分别覆盖浏览焦点和各阅读引擎；不得把模拟器按键通过外推到真实硬件、VoiceOver 或旧系统运行。
 

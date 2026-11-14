@@ -155,6 +155,8 @@ struct ForumPostDetailView: View {
                     }
                 }
                 .padding(16)
+                .frame(maxWidth: 840)
+                .frame(maxWidth: .infinity)
             }
             .onValueChange(of: requestedAnchor) { _, anchor in
                 guard let anchor else { return }
@@ -255,6 +257,8 @@ struct ForumPostDetailView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .frame(maxWidth: 840)
+        .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
     }
 
