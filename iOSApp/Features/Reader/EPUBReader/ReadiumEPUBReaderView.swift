@@ -301,7 +301,14 @@ private struct ReadiumEPUBReaderViewContent: View {
                                   model.resumeSpeech(at: point)
                               })
         }
-        .sheet(item: $model.activeNote) { note in noteSheet(note) }
+        .overlay {
+            if let note = model.activeNote {
+                EPUBNotePopover(note: note) {
+                    withAnimation(.easeOut(duration: 0.14)) { model.activeNote = nil }
+                }
+            }
+        }
+        .animation(.easeOut(duration: 0.16), value: model.activeNote?.id)
     }
 
     // MARK: 顶栏
@@ -586,30 +593,6 @@ private struct ReadiumEPUBReaderViewContent: View {
                              }
                          },
                          onMarkIssue: { model.markIssue() }, supportsReadiumPageTurn: true)
-    }
-
-    // MARK: 注脚
-
-    private func noteSheet(_ note: EPUBNote) -> some View {
-        CompatNavigationStack {
-            ScrollView {
-                Text(note.text)
-                    .font(.system(size: 15))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(18)
-                    .textSelection(.enabled)
-            }
-            .navigationTitle("注释")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .compatTopBarLeading) {
-                    Button("关闭") { model.activeNote = nil }
-                }
-            }
-        }
-        .compatPresentationDetents(.medium)
-        // 半屏 sheet 默认为半透明材质，注释正文需要不透明底色才易读。
-        .compatPresentationBackground(Color(uiColor: .systemBackground))
     }
 }
 

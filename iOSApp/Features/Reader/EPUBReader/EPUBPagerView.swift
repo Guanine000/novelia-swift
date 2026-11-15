@@ -51,8 +51,8 @@ struct EPUBPagerView: UIViewControllerRepresentable {
     var linkHitTest: (CGPoint) -> EPUBLinkHit? = { _ in nil }
     /// 页面中部点到图片时打开查看器并返回 true；否则照常显隐工具栏。
     var onImageTap: (CGPoint) -> Bool = { _ in false }
-    /// 命中注脚。
-    var onNoteTap: (String) -> Void = { _ in }
+    /// 命中注脚（返回注释正文与注脚标记在窗口坐标系中的锚点矩形）。
+    var onNoteTap: (String, CGRect) -> Void = { _, _ in }
     /// 命中普通链接（本轮仅提示，不导航）。
     var onPlainLinkTap: (String) -> Void = { _ in }
     /// 点击页面中部（显隐工具栏）。
@@ -124,7 +124,7 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
     var animatingChangeHandler: ((Bool) -> Void)?
     var linkHitTestProvider: ((CGPoint) -> EPUBLinkHit?)?
     var imageTapProvider: ((CGPoint) -> Bool)?
-    var noteTapHandler: ((String) -> Void)?
+    var noteTapHandler: ((String, CGRect) -> Void)?
     var plainLinkTapHandler: ((String) -> Void)?
     var centerTapHandler: (() -> Void)?
     var selectionRangeProvider: ((CGPoint) -> NSRange?)?
@@ -401,7 +401,8 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
         if let hit = linkHitTestProvider?(location) {
             switch hit {
             case .footnote(let text):
-                noteTapHandler?(text)
+                let anchor = convert(CGRect(origin: location, size: .zero).insetBy(dx: -8, dy: -10), to: nil)
+                noteTapHandler?(text, anchor)
             case .plain(let href):
                 plainLinkTapHandler?(href)
             }

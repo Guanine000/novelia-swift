@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 //
 // 布局与交互参考 Yuedu-reader 的阅读器行为（仅参考布局/交互，不复制源码、
 // 不使用其品牌素材）：全屏正文，点击中部显隐工具栏，左右侧点击翻页，
-// 注脚点击底部弹层显示注释文本。工具栏为覆盖层，显隐不改变正文视口，
+// 注脚点击在标记旁弹出深色气泡显示注释文本。工具栏为覆盖层，显隐不改变正文视口，
 // 因此不会触发重排。
 //
 // 分页不变量见 EPUBPageBook：预览页与落页共用同一份排版结果。
@@ -275,7 +275,14 @@ private struct EPUBReaderViewContent: View {
         }
         .onValueChange(of: backgrounds.revision) { _, _ in model.refreshBackground() }
         .sheet(isPresented: $isShowingStyle) { styleSheet.keyboardDismissible() }
-        .sheet(item: $model.activeNote) { note in noteSheet(note) }
+        .overlay {
+            if let note = model.activeNote {
+                EPUBNotePopover(note: note) {
+                    withAnimation(.easeOut(duration: 0.14)) { model.activeNote = nil }
+                }
+            }
+        }
+        .animation(.easeOut(duration: 0.16), value: model.activeNote?.id)
         .alert("链接", isPresented: .init(
             get: { model.plainLinkMessage != nil },
             set: { if !$0 { model.plainLinkMessage = nil } }
@@ -619,29 +626,6 @@ private struct EPUBReaderViewContent: View {
                          },
                          onMarkIssue: { model.markIssue() }, supportsNativePageTurn: true)
     }
-
-    // MARK: 注脚弹层
-
-    private func noteSheet(_ note: EPUBNote) -> some View {
-        CompatNavigationStack {
-            ScrollView {
-                Text(note.text)
-                    .font(.system(size: 15))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(18)
-            }
-            .navigationTitle("注释")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .compatTopBarLeading) {
-                    Button("关闭") { model.activeNote = nil }
-                }
-            }
-        }
-        .compatPresentationDetents(.medium)
-        // 半屏 sheet 默认为半透明材质，注释正文需要不透明底色才易读。
-        .compatPresentationBackground(Color(uiColor: .systemBackground))
-    }
 }
 
 
@@ -679,7 +663,7 @@ private struct EPUBReaderPageSurface: View, Equatable {
             onAnimatingChange: { animating in model.setAnimating(animating) },
             linkHitTest: { point in model.linkHit(at: point) },
             onImageTap: { point in model.openImage(at: point) },
-            onNoteTap: { text in model.activeNote = EPUBNote(text: text) },
+            onNoteTap: { text, anchor in model.activeNote = EPUBNote(text: text, anchor: anchor) },
             onPlainLinkTap: { href in
                 // 生成的在线章节包含网页链接，按滚动阅读器的方式打开；
                 // EPUB 链接仍解析为书内章节。

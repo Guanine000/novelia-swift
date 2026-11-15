@@ -160,9 +160,170 @@ enum EPUBLocalFonts {
 }
 
 /// 注释浮层的正文。原生分页与 Readium 共用，不依赖 YueduCoreText。
+/// `anchor` 为注释标记在窗口坐标系中的矩形；无法取得时为 nil，气泡退回屏幕中上部显示。
 struct EPUBNote: Identifiable, Equatable {
     let id = UUID()
     let text: String
+    var anchor: CGRect? = nil
+}
+
+/// 贴近注释标记的深色气泡，替代原来的半屏 sheet。原生分页与 Readium 共用，两个 App 目标都编译。
+/// 气泡优先显示在标记上方，空间不足时移到下方；长注释在限定高度内滚动。点按背景、Esc 或 ⌘W 关闭。
+struct EPUBNotePopover: View {
+    let note: EPUBNote
+    let onDismiss: () -> Void
+    @State private var textSize: CGSize = .zero
+    @State private var appeared = false
+
+    private static let margin: CGFloat = 16
+    private static let gap: CGFloat = 8
+    private static let arrowSize = CGSize(width: 14, height: 7)
+    private static let padding = EdgeInsets(top: 11, leading: 14, bottom: 11, trailing: 14)
+
+    var body: some View {
+        GeometryReader { proxy in
+            let frame = proxy.frame(in: .global)
+            let layout = layout(in: frame)
+            ZStack(alignment: .topLeading) {
+                Color.black.opacity(appeared ? 0.28 : 0)
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .onTapGesture(perform: onDismiss)
+                    .accessibilityLabel("关闭注释")
+                    .accessibilityAddTraits(.isButton)
+                // 只用于测量正文在最大宽度下的自然尺寸。
+                Text(note.text)
+                    .font(.system(size: 15))
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .background(GeometryReader { Color.clear.preference(key: NoteTextSizeKey.self, value: $0.size) })
+                    .frame(width: layout.maxTextWidth, alignment: .leading)
+                    .hidden()
+                    .accessibilityHidden(true)
+                bubble(layout)
+                    .position(x: layout.center.x, y: layout.center.y)
+                    .opacity(textSize == .zero ? 0 : (appeared ? 1 : 0))
+                    .scaleEffect(appeared ? 1 : 0.94, anchor: layout.placedAbove ? .bottom : .top)
+            }
+            .onPreferenceChange(NoteTextSizeKey.self) { textSize = $0 }
+        }
+        .background(closeShortcuts)
+        .onAppear { withAnimation(.easeOut(duration: 0.16)) { appeared = true } }
+        .accessibilityAddTraits(.isModal)
+        .accessibilityAction(.escape, onDismiss)
+    }
+
+    private struct Layout {
+        var maxTextWidth: CGFloat
+        var textHeight: CGFloat
+        var scrolls: Bool
+        var bubbleSize: CGSize
+        var center: CGPoint
+        var placedAbove: Bool
+        /// 箭头尖端相对气泡左缘的横向位置；无锚点时为 nil，不画箭头。
+        var arrowX: CGFloat?
+    }
+
+    /// `frame` 为安全区内的全局矩形；锚点同为窗口坐标，换算后再决定气泡位置。
+    private func layout(in frame: CGRect) -> Layout {
+        let width = frame.width, height = frame.height
+        let maxBubbleWidth = min(width - Self.margin * 2, 560)
+        let maxTextWidth = max(40, maxBubbleWidth - Self.padding.leading - Self.padding.trailing)
+        let maxTextHeight = max(80, min(height * 0.45, 420) - Self.padding.top - Self.padding.bottom)
+        let textHeight = min(textSize.height, maxTextHeight)
+        let bubble = CGSize(width: min(textSize.width, maxTextWidth) + Self.padding.leading + Self.padding.trailing,
+                            height: textHeight + Self.padding.top + Self.padding.bottom)
+        let top = Self.margin, bottom = height - Self.margin
+        // 锚点换算为本视图坐标；不在可见范围内时视为无锚点。
+        let anchor = note.anchor.map { $0.offsetBy(dx: -frame.minX, dy: -frame.minY) }
+            .flatMap { CGRect(x: 0, y: 0, width: width, height: height).intersects($0) ? $0 : nil }
+        guard let anchor else {
+            return Layout(maxTextWidth: maxTextWidth, textHeight: textHeight, scrolls: textSize.height > maxTextHeight,
+                          bubbleSize: bubble, center: CGPoint(x: width / 2, y: max(top + bubble.height / 2, height * 0.38)),
+                          placedAbove: true, arrowX: nil)
+        }
+        let spaceAbove = anchor.minY - top, spaceBelow = bottom - anchor.maxY
+        let above = spaceAbove >= bubble.height + Self.gap + Self.arrowSize.height || spaceAbove >= spaceBelow
+        let offset = Self.gap + Self.arrowSize.height + bubble.height / 2
+        var centerY = above ? anchor.minY - offset : anchor.maxY + offset
+        centerY = min(max(centerY, top + bubble.height / 2), bottom - bubble.height / 2)
+        let minX = Self.margin + bubble.width / 2, maxX = width - Self.margin - bubble.width / 2
+        let centerX = min(max(anchor.midX, minX), max(minX, maxX))
+        let arrowX = min(max(anchor.midX - (centerX - bubble.width / 2), 18), bubble.width - 18)
+        return Layout(maxTextWidth: maxTextWidth, textHeight: textHeight, scrolls: textSize.height > maxTextHeight,
+                      bubbleSize: bubble, center: CGPoint(x: centerX, y: centerY), placedAbove: above, arrowX: arrowX)
+    }
+
+    @ViewBuilder private func bubble(_ layout: Layout) -> some View {
+        let text = Text(note.text)
+            .font(.system(size: 15))
+            .lineSpacing(3)
+            .foregroundColor(.white)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: max(0, layout.bubbleSize.width - Self.padding.leading - Self.padding.trailing), alignment: .leading)
+            .textSelection(.enabled)
+        Group {
+            if layout.scrolls {
+                ScrollView { text }.frame(height: layout.textHeight)
+            } else {
+                text
+            }
+        }
+        .padding(Self.padding)
+        .frame(width: layout.bubbleSize.width, height: layout.bubbleSize.height)
+        .background(
+            NoteBubbleShape(cornerRadius: 14, arrowX: layout.arrowX, arrowSize: Self.arrowSize, pointsDown: layout.placedAbove)
+                .fill(Color(uiColor: UIColor { $0.userInterfaceStyle == .dark
+                    ? UIColor(white: 0.25, alpha: 0.97) : UIColor(white: 0.17, alpha: 0.95) }))
+                .shadow(color: .black.opacity(0.22), radius: 12, x: 0, y: 4)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("注释：\(note.text)")
+    }
+
+    /// 气泡不是 sheet，需要自行响应 Esc 与 ⌘W，避免后方阅读页接管关闭快捷键。
+    private var closeShortcuts: some View {
+        ZStack {
+            Button("关闭注释", action: onDismiss).keyboardShortcut(.cancelAction)
+            Button("关闭注释", action: onDismiss).keyboardShortcut("w", modifiers: .command)
+        }
+        .opacity(0)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct NoteTextSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let next = nextValue()
+        if next != .zero { value = next }
+    }
+}
+
+/// 圆角矩形加指向注释标记的小箭头；箭头位于气泡外侧，不占用正文布局。
+private struct NoteBubbleShape: Shape {
+    let cornerRadius: CGFloat
+    let arrowX: CGFloat?
+    let arrowSize: CGSize
+    let pointsDown: Bool
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path(roundedRect: rect, cornerRadius: cornerRadius, style: .continuous)
+        guard let arrowX else { return path }
+        let half = arrowSize.width / 2
+        let x = min(max(arrowX, cornerRadius + half), rect.width - cornerRadius - half)
+        if pointsDown {
+            path.move(to: CGPoint(x: x - half, y: rect.maxY - 0.5))
+            path.addLine(to: CGPoint(x: x, y: rect.maxY + arrowSize.height))
+            path.addLine(to: CGPoint(x: x + half, y: rect.maxY - 0.5))
+        } else {
+            path.move(to: CGPoint(x: x - half, y: rect.minY + 0.5))
+            path.addLine(to: CGPoint(x: x, y: rect.minY - arrowSize.height))
+            path.addLine(to: CGPoint(x: x + half, y: rect.minY + 0.5))
+        }
+        path.closeSubpath()
+        return path
+    }
 }
 
 /// 分页阅读器显示的生成章节（TXT / 在线小说），代替 EPUB 文件。

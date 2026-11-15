@@ -72,6 +72,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     /// 观察各 WebView 的加载状态，每次加载完成后重新读取底色。
     let pageLoadObservations = NSMapTable<WKWebView, NSKeyValueObservation>.weakToStrongObjects()
     @Published var activeNote: EPUBNote?
+    /// 最近一次点按在窗口坐标系中的锚点矩形，供紧随其后的注脚回调把气泡贴在注脚标记附近。
+    var lastTapWindowRect: CGRect?
     var lastAnnotationDecorationTap = Date.distantPast
     /// 点按正文高亮时打开的标注编辑面板；保存/删除都写回同一份 ReaderAnnotationStore。
     @Published var activeAnnotation: ReaderAnnotation?
@@ -521,6 +523,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         let navigator = try EPUBNavigatorViewController(
             publication: publication, initialLocation: initialLocation, config: config)
         navigator.delegate = self
+        gestureProbe.attachTapObserver(to: navigator.view)
         for group in ["tts", "edge-tts"] {
             navigator.observeDecorationInteractions(inGroup: group) { [weak self] _ in
                 self?.lastSpeechDecorationTap = Date()
@@ -532,7 +535,12 @@ final class ReadiumEPUBReaderModel: ObservableObject {
 
         // 先于翻页适配器注册且不消费事件：只记下点按，供位置日志区分用户翻页与 Readium 自行移动。
         gestureToken = navigator.addObserver(.tap { [weak self] event in
-
+            if let self, let view = self.navigator?.view {
+                self.lastTapWindowRect = view.convert(
+                    CGRect(origin: event.location, size: .zero).insetBy(dx: -8, dy: -10),
+                    to: nil
+                )
+            }
             // 同次 WebKit 点击先激活高亮，再上报普通点按；后者不能把刚恢复的朗读再次暂停。
             if let self, Date().timeIntervalSince(self.lastSpeechDecorationTap) < 0.3 { return true }
             if let self, Date().timeIntervalSince(self.lastAnnotationDecorationTap) < 0.3 { return true }
@@ -764,6 +772,9 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     var redirectedOperation: Int?
     /// 本次阅读器会话中 Readium 新建章节 WebView 的次数。
     var createdWebViews = 0
-    /// 章节 WebView 与章节间滚动视图的拖动手势观察者。
-    lazy var gestureProbe = ReadiumGestureProbe { [weak self] recognizer in self?.swipeBegan(recognizer) }
+    /// 章节 WebView 与章节间滚动视图的手势观察者（同时记录点按的窗口坐标供注脚气泡定位）。
+    lazy var gestureProbe = ReadiumGestureProbe(
+        onBegan: { [weak self] recognizer in self?.swipeBegan(recognizer) },
+        onTapLocation: { [weak self] windowRect in self?.lastTapWindowRect = windowRect }
+    )
 }

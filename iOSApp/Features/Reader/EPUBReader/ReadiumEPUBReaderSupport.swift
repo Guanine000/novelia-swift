@@ -639,25 +639,26 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         Self.shareable.error(ReaderDiagnosticMessage.readiumResourceLoadFailed(resource: resource))
     }
 
-    /// 注脚不跳转，改为底部弹层显示纯文本。
+    /// 注脚不跳转，改为在注释标记旁弹出气泡显示纯文本。
     func navigator(_ navigator: Navigator, shouldNavigateToNoteAt link: ReadiumShared.Link, content: String, referrer: String?) -> Bool {
         let text = Self.plainText(fromHTML: content)
-        activeNote = EPUBNote(text: text.isEmpty ? "（注释内容为空）" : text)
+        activeNote = EPUBNote(text: text.isEmpty ? "（注释内容为空）" : text, anchor: lastTapWindowRect)
         return false
     }
 
     /// 未标 `epub:type="noteref"` 的注释链接（多看、Sigil 注释插件等）：目标是注释正文时
-    /// 同样以弹层显示；不是注释或读取失败时照常跳转。读取目标需要异步，因此先拦下再决定。
+    /// 同样以气泡浮层显示；不是注释或读取失败时照常跳转。读取目标需要异步，因此先拦下再决定。
     func navigator(_ navigator: VisualNavigator, shouldNavigateToLink link: ReadiumShared.Link) -> Bool {
         guard textBook == nil, let publication,
               let url = AnyURL(string: link.href), let id = url.fragment, !id.isEmpty else { return true }
+        let anchor = lastTapWindowRect
         Task { [weak self] in
             let html = try? await publication.get(url.removingFragment())?.read().asString().get()
             guard let self else { return }
             if let html, let note = EPUBFootnoteTarget.noteHTML(id: id, inDocument: html) {
                 let text = Self.plainText(fromHTML: note)
                 if !text.isEmpty {
-                    activeNote = EPUBNote(text: text)
+                    activeNote = EPUBNote(text: text, anchor: anchor)
                     return
                 }
             }
@@ -776,14 +777,19 @@ struct TransparentCSSColor: CSSColor {
 
 
 /// 给 Readium 内部滚动视图的拖动手势追加观察目标，只在开始拖动时回调（是否取消由回调决定）；
-/// 已附加的手势用弱引用集合去重。
+/// 同时在导航器根视图挂载不拦截触摸的点按观察器，记录每次点按在窗口坐标系中的位置（WebKit 点击 `<a>` 链接时
+/// Readium 的 JS tap 事件不会触发，需由原生手势提前记录注脚锚点）。
 @MainActor
-final class ReadiumGestureProbe: NSObject {
+final class ReadiumGestureProbe: NSObject, UIGestureRecognizerDelegate {
     private let onBegan: (UIPanGestureRecognizer) -> Void
+    private let onTapLocation: (CGRect) -> Void
     private let attached = NSHashTable<UIGestureRecognizer>.weakObjects()
+    private let tapAttachedViews = NSHashTable<UIView>.weakObjects()
 
-    init(onBegan: @escaping (UIPanGestureRecognizer) -> Void) {
+    init(onBegan: @escaping (UIPanGestureRecognizer) -> Void,
+         onTapLocation: @escaping (CGRect) -> Void = { _ in }) {
         self.onBegan = onBegan
+        self.onTapLocation = onTapLocation
     }
 
     func attach(to recognizer: UIPanGestureRecognizer) {
@@ -792,8 +798,31 @@ final class ReadiumGestureProbe: NSObject {
         recognizer.addTarget(self, action: #selector(handle(_:)))
     }
 
+    func attachTapObserver(to view: UIView) {
+        guard !tapAttachedViews.contains(view) else { return }
+        tapAttachedViews.add(view)
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        tap.cancelsTouchesInView = false
+        tap.delaysTouchesBegan = false
+        tap.delaysTouchesEnded = false
+        tap.delegate = self
+        view.addGestureRecognizer(tap)
+    }
+
     @objc private func handle(_ recognizer: UIPanGestureRecognizer) {
         if recognizer.state == .began { onBegan(recognizer) }
+    }
+
+    @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended, let view = recognizer.view else { return }
+        let point = recognizer.location(in: view)
+        let rect = view.convert(CGRect(origin: point, size: .zero).insetBy(dx: -8, dy: -10), to: nil)
+        onTapLocation(rect)
+    }
+
+    nonisolated func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                                       shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
     }
 }
 
