@@ -85,6 +85,8 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     var annotationRefreshGeneration = UUID()
     /// 最近一次已算好的当前章装饰，供卷页预取导航器同步套用，避免快照抢在异步计算前。
     var cachedAnnotationDecorations: (chapter: Int, decorations: [Decoration])?
+    /// 按章节缓存已解析的摘录装饰（包含临近章尾/章首时后台预热的相邻章），跨章仿真翻页快照可直接同步命中。
+    var cachedChapterAnnotationDecorations: [Int: [Decoration]] = [:]
     private var annotationObservation: AnyCancellable?
     /// 每次刷新使用新的装饰组名：Readium 按组内差异注入脚本，复用旧组名会因“内容相同”跳过注入。
     var annotationDecorationGroup = "user-annotations"

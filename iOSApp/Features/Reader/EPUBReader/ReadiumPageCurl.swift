@@ -40,6 +40,10 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
     private var displayLocation: Locator?
     /// 上一次翻页已截好的「落页」和「原当前页」；重建三页时直接复用，少拍两张。
     private var carried: (current: ReadiumCurlSheet, other: ReadiumCurlSheet?, otherSlot: Int)?
+    /// 记录已完成 DOM 与字体就绪的 WebView 及其章节 URL，同章翻页跳过重复字体状态查询并缩短稳定采样间隔。
+    private let readyWebURLs = NSMapTable<WKWebView, NSString>.weakToStrongObjects()
+    /// 缓存当前尺寸、缩放比与阅读外观下的仿真纸面底图（含自定义背景图缩放合成），避免每页截图重复重绘背景大图。
+    private var cachedPaperBackdrop: (key: String, image: UIImage)?
 #if DEBUG
     private var turnStartedAt: CFTimeInterval?
     /// 上一次翻页再次可操作的时刻；用于测量相邻两段卷页之间的真实间隔。
@@ -456,6 +460,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
                 let current = try await snapshot(in: real)
                 result[0] = ReadiumCurlSheet(slot: 0, image: current, location: origin)
                 cover.image = current; cover.isHidden = true
+                model.warmAdjacentChapterAnnotations(around: origin)
             }
             for forward in gaps {
                 try Task.checkCancellation()
@@ -535,18 +540,27 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         }
         walk(root); return result
     }
-    private func waitForPage(in source: EPUBNavigatorViewController? = nil, maximumAttempts: Int = 150) async throws {
+    private func waitForPage(in source: EPUBNavigatorViewController? = nil, maximumAttempts: Int = 180) async throws {
         var previous = "", stable = 0
         for _ in 0..<maximumAttempts {
             try Task.checkCancellation()
             let webs = visibleWebViews(in: source)
             var loaded = !webs.isEmpty && webs.allSatisfy { !$0.isLoading && $0.url != nil && $0.scrollView.alpha > 0.01 && !$0.scrollView.isDecelerating }
+            var allPreviouslyReady = loaded
             if loaded {
                 for web in webs {
+                    let urlKey = web.url?.absoluteString ?? ""
+                    if !urlKey.isEmpty, (readyWebURLs.object(forKey: web) as String?) == urlKey {
+                        continue
+                    }
+                    allPreviouslyReady = false
                     let ready: Bool = await withCheckedContinuation { continuation in
                         web.evaluateJavaScript("document.readyState !== 'loading' && (!document.fonts || document.fonts.status === 'loaded')") { result, _ in
                             continuation.resume(returning: result as? Bool ?? false)
                         }
+                    }
+                    if ready, !urlKey.isEmpty {
+                        readyWebURLs.setObject(urlKey as NSString, forKey: web)
                     }
                     loaded = loaded && ready
                 }
@@ -555,9 +569,34 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             stable = loaded && state == previous ? stable + 1 : 0
             if stable >= 2 { return }
             previous = state
-            try await Task.sleep(nanoseconds: 20_000_000)
+            try await Task.sleep(nanoseconds: allPreviouslyReady ? 6_000_000 : 20_000_000)
         }
         throw CurlError.notReady
+    }
+    private func paperBackdrop(model: ReadiumEPUBReaderModel, scale: CGFloat, bookColor: UIColor?) -> UIImage {
+        let size = view.bounds.size
+        let followsBook = (bookColor?.cgColor.alpha ?? 0) > 0
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        if followsBook { bookColor?.getRed(&r, green: &g, blue: &b, alpha: &a) }
+        let colorKey = followsBook ? "\(r),\(g),\(b),\(a)" : "paper"
+        let key = "\(size)|\(scale)|\(model.curlAppearanceKey)|\(colorKey)"
+        if let cached = cachedPaperBackdrop, cached.key == key {
+            return cached.image
+        }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        format.opaque = true
+        let backdrop = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            (followsBook ? bookColor! : model.curlPaperColor).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            if !followsBook, let background = model.curlPaperBackground(size: size) {
+                let bgScale = max(size.width / background.size.width, size.height / background.size.height)
+                let drawSize = CGSize(width: background.size.width * bgScale, height: background.size.height * bgScale)
+                background.draw(in: CGRect(x: (size.width - drawSize.width) / 2, y: (size.height - drawSize.height) / 2, width: drawSize.width, height: drawSize.height))
+            }
+        }
+        cachedPaperBackdrop = (key, backdrop)
+        return backdrop
     }
     private func snapshot(in source: EPUBNavigatorViewController? = nil) async throws -> UIImage {
         guard let model else { throw CurlError.notReady }
@@ -577,16 +616,12 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             }
             captures.append((web.convert(web.bounds, to: view), image))
         }
-        let format = UIGraphicsImageRendererFormat(); format.scale = view.window?.screen.scale ?? UIScreen.main.scale; format.opaque = true
-        let image = UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in
-            let bookColor = webs.first?.superview?.backgroundColor
-            let followsBook = (bookColor?.cgColor.alpha ?? 0) > 0
-            (followsBook ? bookColor! : model.curlPaperColor).setFill(); context.fill(view.bounds)
-            if !followsBook, let background = model.curlPaperBackground(size: view.bounds.size) {
-                let scale = max(view.bounds.width/background.size.width, view.bounds.height/background.size.height)
-                let size = CGSize(width: background.size.width*scale, height: background.size.height*scale)
-                background.draw(in: CGRect(x: (view.bounds.width-size.width)/2, y: (view.bounds.height-size.height)/2, width: size.width, height: size.height))
-            }
+        let scale = view.window?.screen.scale ?? UIScreen.main.scale
+        let bookColor = webs.first?.superview?.backgroundColor
+        let backdrop = paperBackdrop(model: model, scale: scale, bookColor: bookColor)
+        let format = UIGraphicsImageRendererFormat(); format.scale = scale; format.opaque = true
+        let image = UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { _ in
+            backdrop.draw(at: .zero)
             for (rect, image) in captures { image.draw(in: rect) }
         }
 #if DEBUG
@@ -681,11 +716,19 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
                         try await Task.sleep(nanoseconds: 3_000_000_000)
                     }
 #endif
-                    let location = try await model.prefetchCurlNeighbor(in: snapshotNav, from: origin.location, forward: side, resetOrigin: filledSide || !previousLanded)
                     var page: ReadiumCurlSheet?
-                    if let location {
-                        try await self.waitForPage(in: snapshotNav)
-                        page = ReadiumCurlSheet(slot: side ? 1 : -1, image: try await self.snapshot(in: snapshotNav), location: location)
+                    let movedSnapshot: Bool
+                    if model.isAtCurlBookBoundary(origin.location, forward: side) {
+                        // 全书首章首页的反向已明确为边界，不再把影子导航器拉回首页再跳回目标页，保留在 target 位置直接继续向后预热。
+                        try await Task.sleep(nanoseconds: 2_000_000)
+                        movedSnapshot = false
+                    } else {
+                        let location = try await model.prefetchCurlNeighbor(in: snapshotNav, from: origin.location, forward: side, resetOrigin: filledSide || !previousLanded)
+                        if let location {
+                            try await self.waitForPage(in: snapshotNav)
+                            page = ReadiumCurlSheet(slot: side ? 1 : -1, image: try await self.snapshot(in: snapshotNav), location: location)
+                        }
+                        movedSnapshot = true
                     }
                     try Task.checkCancellation()
                     guard self.available, self.renderingConfiguration == configuration else { return nil }
@@ -700,7 +743,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
 #endif
                         self.setPansReady(true)
                     }
-                    filledSide = true
+                    if movedSnapshot { filledSide = true }
                 }
                 guard let target else { return .boundary }
                 guard let location = try await model.prefetchCurlNeighbor(in: snapshotNav, from: target.location, forward: forward, resetOrigin: filledSide || !previousLanded) else {
@@ -869,6 +912,8 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             snapshotNavigator.removeFromParent()
         }
         snapshotNavigator = nil; snapshotConfiguration = nil
+        readyWebURLs.removeAllObjects()
+        cachedPaperBackdrop = nil
     }
 
     func cancelAndWait() async {

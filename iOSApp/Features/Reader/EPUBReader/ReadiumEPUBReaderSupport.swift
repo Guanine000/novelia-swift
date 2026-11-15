@@ -402,11 +402,13 @@ extension ReadiumEPUBReaderModel {
             return
         }
         if !force, annotationDecorationChapter == index { return }
+        if force { cachedChapterAnnotationDecorations.removeAll() }
         annotationDecorationChapter = index
         let generation = UUID()
         annotationRefreshGeneration = generation
         guard !settings.annotations.annotations(for: bookKey, chapter: index).isEmpty else {
             cachedAnnotationDecorations = nil
+            cachedChapterAnnotationDecorations[index] = []
             navigator.apply(decorations: [], in: annotationDecorationGroup)
 #if DEBUG
             appliedAnnotationDecorationCount = 0
@@ -418,6 +420,7 @@ extension ReadiumEPUBReaderModel {
             let decorations = await self.annotationDecorations(chapter: index)
             guard self.annotationRefreshGeneration == generation, self.navigator === navigator else { return }
             self.cachedAnnotationDecorations = (index, decorations)
+            self.cachedChapterAnnotationDecorations[index] = decorations
 
             // Readium 只注入与同组旧状态有差异的装饰；重开书时首次注入可能早于正文装载而被丢弃。
             // 每次换一个新组名可强制重新注入，再清空旧组，避免重复高亮。
@@ -582,6 +585,7 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         if let chapter = navigationIndex?.resourceIndex(for: locator.href), chapter != annotationDecorationChapter {
             refreshAnnotationDecorations()
         }
+        warmAdjacentChapterAnnotations(around: locator)
         if textBook != nil {
             if previous != locator { saveTextPosition(locator) }
         } else if !receivedBookLocation {
@@ -822,20 +826,23 @@ extension ReadiumEPUBReaderModel {
     /// 预取导航器由卷页宿主持有，仅复用 Publication 与配置，不参与模型进度或正文交互。
     func makeCurlSnapshotNavigator() throws -> EPUBNavigatorViewController? {
         guard let publication, let locator else { return nil }
-        // 影子导航只保留跨章定位必需的前/后各1个位置；其余页面由宿主限量预热，避免复制默认的前2/后6预加载。
+        // 影子导航保留前1个位置，并提前2个位置预加载后一章，使翻近章末时下一章 WebView 已提前挂载排版。
         var config = navigatorConfiguration()
         config.preloadPreviousPositionCount = 1
-        config.preloadNextPositionCount = 1
+        config.preloadNextPositionCount = 2
         let snapshot = try EPUBNavigatorViewController(publication: publication, initialLocation: locator, config: config)
         snapshot.delegate = self
         // 卷页快照直接截取自这个导航器；先补上与主阅读器相同的标注，否则动画期间高亮会消失。
         let index = navigationIndex?.resourceIndex(for: locator.href) ?? 0
-        if let cached = cachedAnnotationDecorations, cached.chapter == index {
+        if let cached = cachedChapterAnnotationDecorations[index] {
+            snapshot.apply(decorations: cached, in: "user-annotations-preview")
+        } else if let cached = cachedAnnotationDecorations, cached.chapter == index {
             snapshot.apply(decorations: cached.decorations, in: "user-annotations-preview")
         } else {
             Task { [weak self, weak snapshot] in
                 guard let self, let snapshot else { return }
                 let decorations = await self.annotationDecorations(chapter: index)
+                self.cachedChapterAnnotationDecorations[index] = decorations
                 snapshot.apply(decorations: decorations, in: "user-annotations-preview")
             }
         }
@@ -871,16 +878,57 @@ extension ReadiumEPUBReaderModel {
         return computed
     }
 
+    /// 临近章首/章尾或短章节时，在后台提前解析相邻章的摘录高亮，消除跨章快照等待。
+    func warmAdjacentChapterAnnotations(around locator: Locator) {
+        guard let bookKey = bookmarkKey, let publication,
+              let index = navigationIndex?.resourceIndex(for: locator.href) else { return }
+        let progression = locator.locations.progression ?? 0
+        let shortChapter = (positionsPerResource[index] ?? 1) <= 3
+        var neighbors: [Int] = []
+        if (shortChapter || progression >= 0.7), publication.readingOrder.indices.contains(index + 1) {
+            neighbors.append(index + 1)
+        }
+        if (shortChapter || progression <= 0.3), publication.readingOrder.indices.contains(index - 1) {
+            neighbors.append(index - 1)
+        }
+        for neighbor in neighbors where cachedChapterAnnotationDecorations[neighbor] == nil {
+            if settings.annotations.annotations(for: bookKey, chapter: neighbor).isEmpty {
+                cachedChapterAnnotationDecorations[neighbor] = []
+                continue
+            }
+            let generation = annotationRefreshGeneration
+            Task { [weak self] in
+                guard let self else { return }
+                let decorations = await self.annotationDecorations(chapter: neighbor)
+                guard self.annotationRefreshGeneration == generation else { return }
+                self.cachedChapterAnnotationDecorations[neighbor] = decorations
+            }
+        }
+    }
+
     func syncCurlSnapshotAnnotations(in snapshot: EPUBNavigatorViewController, locator: Locator) async {
         guard let index = navigationIndex?.resourceIndex(for: locator.href) else { return }
-        if let cached = cachedAnnotationDecorations, cached.chapter == index {
+        if let cached = cachedChapterAnnotationDecorations[index] {
+            snapshot.apply(decorations: cached, in: "user-annotations-preview")
+        } else if let cached = cachedAnnotationDecorations, cached.chapter == index {
+            cachedChapterAnnotationDecorations[index] = cached.decorations
             snapshot.apply(decorations: cached.decorations, in: "user-annotations-preview")
         } else if let bookKey = bookmarkKey, !settings.annotations.annotations(for: bookKey, chapter: index).isEmpty {
             let decorations = await annotationDecorations(chapter: index)
+            cachedChapterAnnotationDecorations[index] = decorations
             snapshot.apply(decorations: decorations, in: "user-annotations-preview")
         } else {
+            cachedChapterAnnotationDecorations[index] = []
             snapshot.apply(decorations: [], in: "user-annotations-preview")
         }
+    }
+
+    /// 判断当前 Locator 在指定方向上是否已明确处于全书起点边界（避免首屏在影子导航器上来回跳页探测上一页）。
+    func isAtCurlBookBoundary(_ locator: Locator, forward: Bool) -> Bool {
+        guard !forward, let publication, !publication.readingOrder.isEmpty,
+              navigationIndex?.resourceIndex(for: locator.href) == 0,
+              let progression = locator.locations.progression else { return false }
+        return progression <= 0.0000001
     }
 
     func beginCurlPreview(snapshot: EPUBNavigatorViewController? = nil) -> UUID? {
@@ -894,11 +942,12 @@ extension ReadiumEPUBReaderModel {
 
     // go 完成不等于排版位置已稳定。跨章向后时会先报告临时的 100%，
     // 分页正文的真实首可见进度应小于 1；连续稳定采样后才能缓存或提交。
-    // 同章内仅滚动 WebView 视口，不发生跨章重排，可减少一次稳定采样；跨章仍保持完整采样次数。
+    // 同章内仅滚动 WebView 视口，不发生跨章重排，采用更短采样间隔并减少一次稳定采样；跨章仍保持完整采样次数。
     func settledCurlLocation(in navigator: EPUBNavigatorViewController, matching destination: Locator? = nil, differentFrom previous: Locator? = nil, minimumStable: Int = 3) async -> Locator? {
         var candidate: Locator?, stable = 0
-        for _ in 0..<150 {
+        for _ in 0..<180 {
             if Task.isCancelled { return nil }
+            var sleepNanoseconds: UInt64 = 20_000_000
             if let current = navigator.currentLocation {
                 let progression = current.locations.progression ?? 0
                 let canonical = publication?.metadata.layout == .fixed || progression < 1
@@ -911,9 +960,10 @@ extension ReadiumEPUBReaderModel {
                     stable = candidate == current ? stable + 1 : 0
                     candidate = current
                     if stable >= requiredStable { return current }
+                    if sameResource { sleepNanoseconds = 8_000_000 }
                 } else { candidate = nil; stable = 0 }
             }
-            try? await Task.sleep(nanoseconds: 20_000_000)
+            try? await Task.sleep(nanoseconds: sleepNanoseconds)
         }
         return nil
     }
@@ -927,6 +977,7 @@ extension ReadiumEPUBReaderModel {
             if navigator !== self.navigator, current.href != previous?.href {
                 await syncCurlSnapshotAnnotations(in: navigator, locator: current)
             }
+            warmAdjacentChapterAnnotations(around: current)
             return current
         }
         try Task.checkCancellation()
