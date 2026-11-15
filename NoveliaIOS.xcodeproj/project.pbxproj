@@ -353,6 +353,13 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		B70600000000000000000042 /* ReadiumEPUBReaderSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000041 /* ReadiumEPUBReaderSupport.swift */; };
 		B70600000000000000000043 /* ReadiumEPUBReaderSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000041 /* ReadiumEPUBReaderSupport.swift */; };
 		B70600000000000000000052 /* EPUBReaderNavigationSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000051 /* EPUBReaderNavigationSupport.swift */; };
+		B70600000000000000000062 /* ReadiumEPUBReaderDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000061 /* ReadiumEPUBReaderDiagnostics.swift */; };
+		B70600000000000000000063 /* ReadiumEPUBReaderDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000061 /* ReadiumEPUBReaderDiagnostics.swift */; };
+		B70600000000000000000072 /* EPUBMetadataAndXML.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000071 /* EPUBMetadataAndXML.swift */; };
+		B70600000000000000000073 /* EPUBMetadataAndXML.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000071 /* EPUBMetadataAndXML.swift */; };
+		B70600000000000000000082 /* EPUBReaderPageRendering.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000081 /* EPUBReaderPageRendering.swift */; };
+		B70600000000000000000092 /* NoveliaAPISessionAndDTOs.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000091 /* NoveliaAPISessionAndDTOs.swift */; };
+		B70600000000000000000093 /* NoveliaAPISessionAndDTOs.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000091 /* NoveliaAPISessionAndDTOs.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -529,6 +536,10 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 		B70600000000000000000031 /* EPUBContentSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/EPUBContentSupport.swift; sourceTree = SOURCE_ROOT; };
 		B70600000000000000000041 /* ReadiumEPUBReaderSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/ReadiumEPUBReaderSupport.swift; sourceTree = SOURCE_ROOT; };
 		B70600000000000000000051 /* EPUBReaderNavigationSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/EPUBReaderNavigationSupport.swift; sourceTree = SOURCE_ROOT; };
+		B70600000000000000000061 /* ReadiumEPUBReaderDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/ReadiumEPUBReaderDiagnostics.swift; sourceTree = SOURCE_ROOT; };
+		B70600000000000000000071 /* EPUBMetadataAndXML.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/EPUBMetadataAndXML.swift; sourceTree = SOURCE_ROOT; };
+		B70600000000000000000081 /* EPUBReaderPageRendering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/EPUBReaderPageRendering.swift; sourceTree = SOURCE_ROOT; };
+		B70600000000000000000091 /* NoveliaAPISessionAndDTOs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/NoveliaIOSCore/Infrastructure/API/NoveliaAPISessionAndDTOs.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -571,6 +582,10 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				B70600000000000000000031 /* EPUBContentSupport.swift */,
 				B70600000000000000000041 /* ReadiumEPUBReaderSupport.swift */,
 				B70600000000000000000051 /* EPUBReaderNavigationSupport.swift */,
+				B70600000000000000000061 /* ReadiumEPUBReaderDiagnostics.swift */,
+				B70600000000000000000071 /* EPUBMetadataAndXML.swift */,
+				B70600000000000000000081 /* EPUBReaderPageRendering.swift */,
+				B70600000000000000000091 /* NoveliaAPISessionAndDTOs.swift */,
 				D24038D26A5A1A5A34320D64 /* ReadingCharactersEntry.swift */,
 				B705E0000000000000000001 /* BrowseNavigation.swift */,
 				B705E0000000000000000011 /* KeyboardNavigation.swift */,
@@ -1171,6 +1186,10 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				B70600000000000000000032 /* EPUBContentSupport.swift in Sources */,
 				B70600000000000000000042 /* ReadiumEPUBReaderSupport.swift in Sources */,
 				B70600000000000000000052 /* EPUBReaderNavigationSupport.swift in Sources */,
+				B70600000000000000000062 /* ReadiumEPUBReaderDiagnostics.swift in Sources */,
+				B70600000000000000000072 /* EPUBMetadataAndXML.swift in Sources */,
+				B70600000000000000000082 /* EPUBReaderPageRendering.swift in Sources */,
+				B70600000000000000000092 /* NoveliaAPISessionAndDTOs.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1184,6 +1203,9 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				B70600000000000000000023 /* CharacterCardSupportViews.swift in Sources */,
 				B70600000000000000000033 /* EPUBContentSupport.swift in Sources */,
 				B70600000000000000000043 /* ReadiumEPUBReaderSupport.swift in Sources */,
+				B70600000000000000000063 /* ReadiumEPUBReaderDiagnostics.swift in Sources */,
+				B70600000000000000000073 /* EPUBMetadataAndXML.swift in Sources */,
+				B70600000000000000000093 /* NoveliaAPISessionAndDTOs.swift in Sources */,
 				B705E0000000000000000003 /* BrowseNavigation.swift in Sources */,
 				B705E0000000000000000013 /* KeyboardNavigation.swift in Sources */,
 				644385B483AFC07514AE8DFF /* ReadingCharactersEntry.swift in Sources */,

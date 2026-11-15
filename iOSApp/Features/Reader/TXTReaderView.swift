@@ -133,7 +133,15 @@ struct DownloadedWebNovelTXTReader: View {
                             settings: { isShowingKeyboardSettings = true }, close: { if let readerCloseAction { readerCloseAction() } else { keyboardDismiss() } })
                         + PageKeyAction.scrollPages(onManualScroll: { speech.suspendFollow(true); lastManualScroll = ProcessInfo.processInfo.systemUptime })
                         + [.init(input: UIKeyCommand.inputLeftArrow, title: "上一章", perform: { _ in chapterIndex = max(0, chapterIndex - 1) }),
-                           .init(input: UIKeyCommand.inputRightArrow, title: "下一章", perform: { _ in chapterIndex = min(chapters.count - 1, chapterIndex + 1) })])
+                           .init(input: UIKeyCommand.inputRightArrow, title: "下一章", perform: { _ in chapterIndex = min(chapters.count - 1, chapterIndex + 1) })]
+                        + readerExtendedKeyboardActions(
+                            bookmarks: { isShowingSearch = true },
+                            speech: { isShowingSpeech = true },
+                            previousChapter: { chapterIndex = max(0, chapterIndex - 1) },
+                            nextChapter: { chapterIndex = min(chapters.count - 1, chapterIndex + 1) },
+                            decreaseFontSize: { settings.adjustFontSize(by: -1) },
+                            increaseFontSize: { settings.adjustFontSize(by: 1) }
+                        ))
                     .onPreferenceChange(ReaderScrollFrames.self) { visibleAnchor = ReaderScrollFrames.visible($0) }
                     .task(id: "\(selectedSearchHit?.id ?? "")|\(bodyChunksChapterIndex ?? -1)|\(returnAnchor ?? "")") {
                         guard bodyChunksChapterIndex == chapterIndex else { return }

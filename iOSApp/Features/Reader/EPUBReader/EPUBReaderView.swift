@@ -360,10 +360,20 @@ private struct EPUBReaderViewContent: View {
     }
     private var keyboardActions: [PageKeyAction] {
         var actions = readerKeyboardActions(search: { bookmarksTab = .search; isShowingBookmarks = true },
-            contents: { isShowingTOC = true }, settings: { isShowingStyle = true },
+            contents: { isShowingTOC = true }, settings: { draftStyle = model.style; isShowingStyle = true },
             close: { if let readerCloseAction { readerCloseAction() } else { dismiss() } })
         if model.status == .ready {
             actions += PageKeyAction.pages(previous: { speech.suspendFollow(true); model.commitTurn(forward: false) }, next: { speech.suspendFollow(true); model.commitTurn(forward: true) })
+            let currentChapter = model.currentPageRange?.chapter ?? 0
+            actions += readerExtendedKeyboardActions(
+                bookmarks: model.bookmarkKey != nil ? { bookmarksTab = .bookmarks; isShowingBookmarks = true } : nil,
+                annotations: model.bookmarkKey != nil ? { isShowingAnnotations = true } : nil,
+                speech: { isShowingSpeech = true },
+                previousChapter: model.chapterCount > 1 ? { speech.suspendFollow(true); model.jump(toChapter: max(0, currentChapter - 1), progression: 0) } : nil,
+                nextChapter: model.chapterCount > 1 ? { speech.suspendFollow(true); model.jump(toChapter: min(model.chapterCount - 1, currentChapter + 1), progression: 0) } : nil,
+                decreaseFontSize: { settings.adjustFontSize(by: -1) },
+                increaseFontSize: { settings.adjustFontSize(by: 1) }
+            )
         }
         return actions
     }

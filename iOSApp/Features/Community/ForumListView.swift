@@ -19,6 +19,7 @@ private struct ForumContentView: View {
     @EnvironmentObject private var auth: ForumAuthStore
     @StateObject private var store: ForumStore
     @State private var isConfirmingLogout = false
+    @State private var isPresentingCompose = false
     @State private var openedPostID: Int64?
 
     init(initialCategory: String, initialQuery: String, api: any ForumService) {
@@ -138,9 +139,15 @@ private struct ForumContentView: View {
                     selectedID: browseSelectedID,
                     select: browseSelection,
                     read: nil,
-                    search: { withAnimation { proxy.scrollTo("forum-post-list-top", anchor: .top) } },
+                    search: {
+                        withAnimation { proxy.scrollTo("forum-post-list-top", anchor: .top) }
+                        _ = PageKeyAction.focusVisibleSearchBar()
+                    },
                     scrollTo: { id in withAnimation { proxy.scrollTo(id, anchor: .center) } }
-                ))
+                ) + [.command("n", "发布新帖", action: { isPresentingCompose = true })])
+                .compatNavigationDestination(isPresented: $isPresentingCompose) {
+                    ForumComposeView(categories: store.categories, initialCategorySlug: store.selectedCategory)
+                }
                 .compatNavigationDestination(item: $openedPostID) { postID in
                     ForumPostDetailView(postID: postID)
                 }

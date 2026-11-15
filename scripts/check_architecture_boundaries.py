@@ -56,6 +56,7 @@ def target_membership_violations(root=ROOT):
         "EPUBPagerView.swift in Sources",
         "EPUBReaderModel.swift in Sources",
         "EPUBReaderNavigationSupport.swift in Sources",
+        "EPUBReaderPageRendering.swift in Sources",
         "KindleEPUBConverter.swift in Sources",
         "KindleCSSMediaFlattener.swift in Sources",
         "KindleMOBI6Normalizer.swift in Sources",

@@ -42,6 +42,20 @@ struct PageKeyAction {
             }
         }
     }
+
+    /// 聚焦当前活动窗口中可见的导航栏 UISearchBar（供使用 `.searchable` 的列表响应 ⌘F）。
+    @discardableResult
+    static func focusVisibleSearchBar() -> Bool {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let windows = scenes.flatMap(\.windows).filter { !$0.isHidden && $0.alpha > 0.01 }
+        for window in windows {
+            if let searchBar = window.keyboardDescendants.compactMap({ $0 as? UISearchBar })
+                .first(where: { !$0.isHidden && $0.alpha > 0.01 && $0.window != nil }) {
+                return searchBar.searchTextField.becomeFirstResponder()
+            }
+        }
+        return false
+    }
 }
 
 extension View {

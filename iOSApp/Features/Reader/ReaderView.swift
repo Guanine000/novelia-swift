@@ -212,7 +212,15 @@ struct ReaderView: View {
                     settings: { isShowingKeyboardSettings = true }, close: { if let readerCloseAction { readerCloseAction() } else { keyboardDismiss() } })
                 + PageKeyAction.scrollPages(onManualScroll: { speech.suspendFollow(true) })
                 + [.init(input: UIKeyCommand.inputLeftArrow, title: "上一章", perform: { _ in changeChapter(by: -1) }),
-                   .init(input: UIKeyCommand.inputRightArrow, title: "下一章", perform: { _ in changeChapter(by: 1) })])
+                   .init(input: UIKeyCommand.inputRightArrow, title: "下一章", perform: { _ in changeChapter(by: 1) })]
+                + readerExtendedKeyboardActions(
+                    bookmarks: toggleBookmark,
+                    speech: { isShowingSpeech = true },
+                    previousChapter: { changeChapter(by: -1) },
+                    nextChapter: { changeChapter(by: 1) },
+                    decreaseFontSize: { settings.adjustFontSize(by: -1) },
+                    increaseFontSize: { settings.adjustFontSize(by: 1) }
+                ))
             .onPreferenceChange(ReaderScrollFrames.self) { visibleAnchor = ReaderScrollFrames.visible($0) }
             .task(id: "\(selectedSearchHit?.id ?? "")|\(chapter.id)|\(isLoadingChapter)|\(returnAnchor ?? "")") {
                 guard !isLoadingChapter else { return }

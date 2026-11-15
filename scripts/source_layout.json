@@ -158,8 +158,12 @@
   "LibraryBookActions.swift": "iOSApp/Features/Library/LibraryBookActions.swift",
   "SpeechPlaybackViews.swift": "iOSApp/Features/Reader/Speech/SpeechPlaybackViews.swift",
   "EPUBContentSupport.swift": "iOSApp/Features/Reader/EPUBReader/EPUBContentSupport.swift",
+  "EPUBMetadataAndXML.swift": "iOSApp/Features/Reader/EPUBReader/EPUBMetadataAndXML.swift",
   "ReadiumEPUBReaderSupport.swift": "iOSApp/Features/Reader/EPUBReader/ReadiumEPUBReaderSupport.swift",
+  "ReadiumEPUBReaderDiagnostics.swift": "iOSApp/Features/Reader/EPUBReader/ReadiumEPUBReaderDiagnostics.swift",
   "EPUBReaderNavigationSupport.swift": "iOSApp/Features/Reader/EPUBReader/EPUBReaderNavigationSupport.swift",
+  "EPUBReaderPageRendering.swift": "iOSApp/Features/Reader/EPUBReader/EPUBReaderPageRendering.swift",
+  "NoveliaAPISessionAndDTOs.swift": "Sources/NoveliaIOSCore/Infrastructure/API/NoveliaAPISessionAndDTOs.swift",
   "BrowseNavigation.swift": "iOSApp/App/Integrations/BrowseNavigation.swift",
   "KeyboardNavigation.swift": "iOSApp/Shared/KeyboardNavigation.swift"
 }

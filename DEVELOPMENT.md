@@ -154,9 +154,9 @@ Debug 独立验证 App 可用 `-architectureBrowseResize` 将同一个 Root 内�
 
 ### iPad 硬件键盘与指针
 
-`Shared/KeyboardNavigation.swift` 的 `PageKeyAction` 由页面提供操作，`PageKeyboardButtons` 使用 focusedSceneValue 发布当前窗口操作，由 App 的 `PageKeyboardCommands` 在系统菜单中注册 keyboardShortcut 和快捷键说明，页面内的 UIKit 非文本 UIKeyInput 接收器只在当前页空闲时取得焦点，空 inputView 不显示软键盘；文本编辑、非空选区和控件焦点优先。锚点也用于读取本窗口的滚动视口；作用域随页面/窗口生命周期释放，不设全局键盘分发。SwiftUI 弹层在自身注册关闭快捷键，避免后方阅读页响应退出。文本输入或正文选字的 responder 优先，不能为翻页抢走编辑焦点。命令上下文每页稳定持有，只发布可比较的操作说明；回调随页面更新，避免把新闭包数组反复发布到焦点系统。iOS16+用focusedSceneValue，iOS15用非可空focusedValue和同一接收器兼容。书库、发现与社区通过 `browseKeyboardActions` 使用已筛选和排序的目标数组及原有选择/阅读环境动作，不建立第二份状态；云端书目不绕过下载确认。
+`Shared/KeyboardNavigation.swift` 的 `PageKeyAction` 由页面提供操作，`PageKeyboardButtons` 使用 focusedSceneValue 发布当前窗口操作，由 App 的 `PageKeyboardCommands` 在系统菜单中注册 keyboardShortcut 和快捷键说明，页面内的 UIKit 非文本 UIKeyInput 接收器只在当前页空闲时取得焦点，空 inputView 不显示软键盘；文本编辑、非空选区和控件焦点优先。锚点也用于读取本窗口的滚动视口；作用域随页面/窗口生命周期释放，不设全局键盘分发。SwiftUI 弹层在自身注册关闭快捷键，避免后方阅读页响应退出。文本输入或正文选字的 responder 优先，不能为翻页抢走编辑焦点。命令上下文每页稳定持有，只发布可比较的操作说明；回调随页面更新，避免把新闭包数组反复发布到焦点系统。iOS16+用focusedSceneValue，iOS15用非可空focusedValue和同一接收器兼容。书库、发现与社区通过 `browseKeyboardActions` 使用已筛选和排序的目标数组及原有选择/阅读环境动作，不建立第二份状态；云端书目不绕过下载确认。社区列表 `⌘F` 通过 `PageKeyAction.focusVisibleSearchBar()` 聚焦当前窗口的 `.searchable` 输入框，`⌘N` 打开新帖编辑页。
 
-分页快捷键调用原模型 `commitTurn` / `goForward` / `goBackward`，滚动快捷键移动当前视口的真实 UIScrollView 并暂停朗读跟随，沿用原进度观察。滚动阅读设置仍使用注入的同一 ReaderSettings。`pointerBookMenu` 仅在悬停时提供菜单内容，触摸长按留给原拖选；拖选识别器拒绝 indirectPointer。UI回归用 XCTest 的实际 typeKey 输入，分别覆盖浏览焦点和各阅读引擎；不得把模拟器按键通过外推到真实硬件、VoiceOver 或旧系统运行。
+分页快捷键调用原模型 `commitTurn` / `goForward` / `goBackward`，滚动快捷键移动当前视口的真实 UIScrollView 并暂停朗读跟随，沿用原进度观察；四个阅读面共用 `readerExtendedKeyboardActions` 提供 `⌘B`（书签）、`⌘I`（摘录与笔记）、`⌘L`（朗读）、`⌘[` / `⌘]`（上一章／下一章）与 `⌘-` / `⌘=`（缩小／增大字号）。滚动阅读设置仍使用注入的同一 ReaderSettings。`pointerBookMenu` 仅在悬停时提供菜单内容，触摸长按留给原拖选；拖选识别器拒绝 indirectPointer。UI回归用 XCTest 的实际 typeKey 输入，分别覆盖浏览焦点和各阅读引擎；不得把模拟器按键通过外推到真实硬件、VoiceOver 或旧系统运行。
 
 ## API、数据模型与认证
 
@@ -164,7 +164,7 @@ Debug 独立验证 App 可用 `-architectureBrowseResize` 将同一个 Root 内�
 
 - `Domain/APIServices.swift`：八类服务协议及 `APIServiceCollection`。
 - `Infrastructure/API/APIConfiguration.swift`：API、网页来源与认证配置。
-- `Infrastructure/API/NoveliaServices.swift`：当前客户端的协议适配与服务集合工厂。
+- `Infrastructure/API/NoveliaAPIClient.swift`、`NoveliaAPISessionAndDTOs.swift`、`NoveliaServices.swift`：当前客户端请求、会话恢复／DTO 解码与协议适配工厂。
 - `App/AppServices.swift`：App 持有服务集合和账号状态；生产入口为 `AppServices.novelia(...)`。
 - `Features/Account/AccountAuth.swift`：当前网页登录、会话恢复与续期适配。
 - `Domain/SessionTokenStore.swift`：凭据存储接口。
@@ -240,11 +240,11 @@ Debug 独立验证 App 可用 `-architectureBrowseResize` 将同一个 Root 内�
 | `ReaderView.swift` | 在线滚动阅读、正文/译文选择，以及在线分页入口和章节缓存 |
 | `TXTReaderView.swift` | 本地 TXT 阅读入口、目录和滚动/分页模式连接 |
 | `EPUBChapterSource.swift` | 章节内容接口、文本转 XHTML、长章节拆分与 TXT 分页定位转换 |
-| `EPUBContainer.swift`、`EPUBContentSupport.swift` | EPUB 内容与资源读取、图片解码/背景清理/脚注解析与 NCX 解析，提供章节来源能力 |
+| `EPUBContainer.swift`、`EPUBContentSupport.swift`、`EPUBMetadataAndXML.swift` | EPUB 内容与资源读取、图片解码/背景清理/脚注解析与 OPF/NCX/ZIP 解析，提供章节来源能力 |
 | `EPUBPageBook.swift`、`EPUBLayoutCoordinator.swift` | Yuedu 分页内容、布局协调和缓存 |
-| `EPUBReaderModel.swift`、`EPUBReaderNavigationSupport.swift`、`EPUBReaderView.swift`、`EPUBSharedTypes.swift`、`EPUBPagerView.swift` | 原生分页模型、导航/朗读/搜索协调、共享视图与翻页交互 |
+| `EPUBReaderModel.swift`、`EPUBReaderNavigationSupport.swift`、`EPUBReaderPageRendering.swift`、`EPUBReaderView.swift`、`EPUBSharedTypes.swift`、`EPUBPagerView.swift` | 原生分页模型、导航/朗读/搜索协调、页位图缓存与选区高亮绘制、共享视图与翻页交互 |
 | `ReadiumTextPublication.swift` | 将 TXT/在线文本章节包装为 Readium Publication，并提供导航索引 |
-| `ReadiumEPUBReaderModel.swift`、`ReadiumEPUBReaderSupport.swift`、`ReadiumEPUBReaderView.swift` | Readium 内容加载、导航、书签/搜索/手势与拟真翻页快照、显示和位置连接 |
+| `ReadiumEPUBReaderModel.swift`、`ReadiumEPUBReaderSupport.swift`、`ReadiumEPUBReaderDiagnostics.swift`、`ReadiumEPUBReaderView.swift` | Readium 内容加载、导航、书签/搜索/手势与拟真翻页快照、全书诊断与插图收集、显示和位置连接 |
 | `ReaderSettings.swift`、`ReaderSettingsAdapters.swift` | 持久化阅读偏好及引擎/界面适配 |
 
 EPUB 默认采用 YueduCoreText 分页；实验性 Readium 开关可用于 EPUB、TXT 和在线分页，开关默认关闭，已有选择继续保留。TXT 和在线内容也支持滚动模式。引擎选择属于 Reader 内部，API 消费方不根据引擎切换后台实现。

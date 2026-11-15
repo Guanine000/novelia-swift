@@ -25,6 +25,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
     /// 已确认的方向既可能有页面，也可能是边界；未准备的方向绝不能当作书籍边界。
     private var resolvedDirections: Set<Bool> = []
     private var work: Task<Void, Never>?
+    private var spinnerTask: Task<Void, Never>?
     private var firstPagePresentation: Task<Bool, Never>?
     /// 首屏检查对应的位置和布局；只有仍匹配时才省略真实正文的重复稳定等待。
     private var firstPresentedKey: String?
@@ -67,8 +68,25 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             model?.curlInputLost += 1
 #endif
         }
+        scheduleLoadingIndicatorIfNeeded()
     }
-    private func clearQueuedTurns() { queuedDirections.removeAll() }
+    private func clearQueuedTurns() {
+        queuedDirections.removeAll()
+        stopLoadingIndicator()
+    }
+    private func scheduleLoadingIndicatorIfNeeded() {
+        guard spinnerTask == nil, work != nil, !queuedDirections.isEmpty, available else { return }
+        spinnerTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled, let self, self.work != nil, !self.queuedDirections.isEmpty, self.available else { return }
+            self.spinner.startAnimating()
+        }
+    }
+    private func stopLoadingIndicator() {
+        spinnerTask?.cancel()
+        spinnerTask = nil
+        spinner.stopAnimating()
+    }
     private enum AheadResult { case page(ReadiumCurlSheet), boundary }
     /// 三张基础纸面之外，沿阅读方向预热一张；独立任务不锁住正文或发布进度。
     private var ahead: (key: String, forward: Bool, configuration: String, task: Task<AheadResult?, Never>)?
@@ -184,7 +202,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             guard let self else { return false }
             do {
                 // 冷启动等待可随时取消，就绪即结束；不能把尚在初始化的 WebKit 按邻页预算误判为失败。
-                try await self.waitForPage(in: real, maximumAttempts: 400)
+                try await self.waitForPage(in: real, maximumAttempts: 1000)
                 for web in self.visibleWebViews(in: real) {
                     let config = WKSnapshotConfiguration()
                     config.rect = CGRect(x: 0, y: 0, width: 1, height: 1)
@@ -280,6 +298,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         guard failedKey != key else { setPansReady(false); return }
         setPansReady(false)
         work = Task { [weak self] in await self?.prepare(key: key) }
+        scheduleLoadingIndicatorIfNeeded()
     }
     private func setPansReady(_ ready: Bool) {
 #if DEBUG
@@ -490,7 +509,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             }
         }
         traceInput("prepared queue=\(queuedDirections) match=\(preparedKey == self.key) cancelled=\(Task.isCancelled)")
-        work = nil; spinner.stopAnimating(); cover.isHidden = true; canvas.blocksTouches = false
+        work = nil; stopLoadingIndicator(); cover.isHidden = true; canvas.blocksTouches = false
         if !available { discardSnapshot() }
         setPansReady(preparedKey == self.key)
         updatePaperVisibility()
@@ -516,7 +535,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         }
         walk(root); return result
     }
-    private func waitForPage(in source: EPUBNavigatorViewController? = nil, maximumAttempts: Int = 60) async throws {
+    private func waitForPage(in source: EPUBNavigatorViewController? = nil, maximumAttempts: Int = 150) async throws {
         var previous = "", stable = 0
         for _ in 0..<maximumAttempts {
             try Task.checkCancellation()
@@ -536,7 +555,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             stable = loaded && state == previous ? stable + 1 : 0
             if stable >= 2 { return }
             previous = state
-            try await Task.sleep(nanoseconds: 50_000_000)
+            try await Task.sleep(nanoseconds: 20_000_000)
         }
         throw CurlError.notReady
     }
@@ -662,7 +681,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
                         try await Task.sleep(nanoseconds: 3_000_000_000)
                     }
 #endif
-                    let location = try await model.prefetchCurlNeighbor(in: snapshotNav, from: origin.location, forward: side, resetOrigin: true)
+                    let location = try await model.prefetchCurlNeighbor(in: snapshotNav, from: origin.location, forward: side, resetOrigin: filledSide || !previousLanded)
                     var page: ReadiumCurlSheet?
                     if let location {
                         try await self.waitForPage(in: snapshotNav)
@@ -780,7 +799,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
             self.commitTask = nil
             // 揭开纸面前确认真实页已绘制，避免露出尚未完成渲染的中间帧。
             if !self.turning, self.pendingCommits.isEmpty, let navigator = self.navigator {
-                try? await self.waitForPage(in: navigator, maximumAttempts: 20)
+                try? await self.waitForPage(in: navigator, maximumAttempts: 50)
             }
             self.updatePaperVisibility()
             self.endSessionIfIdle()
@@ -883,7 +902,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         carried = nil; resolvedDirections = []; firstPresentedKey = nil
         if model?.curlReady == true { model?.curlReady = false }
         discardSnapshot()
-        pager.view.layer.mask = paperMask; cover.isHidden = true; spinner.stopAnimating(); canvas.blocksTouches = false
+        pager.view.layer.mask = paperMask; cover.isHidden = true; stopLoadingIndicator(); canvas.blocksTouches = false
         updatePaperVisibility()
         setPansReady(false)
     }

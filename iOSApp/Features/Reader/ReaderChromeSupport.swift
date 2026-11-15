@@ -617,6 +617,27 @@ func readerKeyboardActions(search: @escaping () -> Void, contents: @escaping () 
      .command(",", "阅读设置", action: settings)] + PageKeyAction.close(close)
 }
 
+/// 阅读器进阶快捷键（书签、摘录、朗读、切章、字号调节），排在翻页与基础快捷键之后。
+func readerExtendedKeyboardActions(
+    bookmarks: (() -> Void)? = nil,
+    annotations: (() -> Void)? = nil,
+    speech: (() -> Void)? = nil,
+    previousChapter: (() -> Void)? = nil,
+    nextChapter: (() -> Void)? = nil,
+    decreaseFontSize: (() -> Void)? = nil,
+    increaseFontSize: (() -> Void)? = nil
+) -> [PageKeyAction] {
+    var actions: [PageKeyAction] = []
+    if let bookmarks { actions.append(.command("b", "书签", action: bookmarks)) }
+    if let annotations { actions.append(.command("i", "摘录与笔记", action: annotations)) }
+    if let speech { actions.append(.command("l", "朗读", action: speech)) }
+    if let previousChapter { actions.append(.command("[", "上一章", action: previousChapter)) }
+    if let nextChapter { actions.append(.command("]", "下一章", action: nextChapter)) }
+    if let decreaseFontSize { actions.append(.command("-", "缩小字号", action: decreaseFontSize)) }
+    if let increaseFontSize { actions.append(.command("=", "增大字号", action: increaseFontSize)) }
+    return actions
+}
+
 /// 滚动模式菜单内的即时样式操作也可从键盘打开；复用同一 ReaderSettings，不创建第二套偏好。
 struct ScrollReaderKeyboardSettings: View {
     @EnvironmentObject private var settings: ReaderSettings

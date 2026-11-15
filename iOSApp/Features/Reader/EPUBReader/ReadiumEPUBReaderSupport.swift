@@ -843,17 +843,44 @@ extension ReadiumEPUBReaderModel {
     }
 
     func curlSnapshotBackground(_ web: WKWebView) async -> UIColor? {
+        let urlKey = web.url?.absoluteString ?? ""
+        let appearance = curlAppearanceKey
+        if !urlKey.isEmpty,
+           let cached = curlWebBackgrounds.object(forKey: web) as? CachedCurlWebBackground,
+           cached.url == urlKey, cached.appearanceKey == appearance {
+            return cached.color
+        }
         let rule = ReaderBookBackgroundFollow(storedValue: UserDefaults.standard.string(forKey: SettingsKey.readerBookBackgroundFollow))
         let script = EPUBReadiumPageBackground.script(ignoresNearWhite: rule == .ignoreNearWhite, threshold: ReaderBookBackgroundFollow.nearWhiteThreshold)
         let result: String? = await withCheckedContinuation { continuation in
             web.evaluateJavaScript(script) { value, _ in continuation.resume(returning: value as? String) }
         }
-        guard let result, let color = Self.opaqueColor(fromCSS: result) else { return nil }
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        color.getRed(&r, green: &g, blue: &b, alpha: &a)
-        let bounds = navigator?.view.bounds ?? web.bounds
-        let hasImage = settings.backgrounds.image(dark: isDarkMode, landscape: bounds.width > bounds.height) != nil
-        return rule.follows(red: r, green: g, blue: b, hasBackgroundImage: hasImage) ? color : nil
+        let computed: UIColor?
+        if let result, let color = Self.opaqueColor(fromCSS: result) {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            color.getRed(&r, green: &g, blue: &b, alpha: &a)
+            let bounds = navigator?.view.bounds ?? web.bounds
+            let hasImage = settings.backgrounds.image(dark: isDarkMode, landscape: bounds.width > bounds.height) != nil
+            computed = rule.follows(red: r, green: g, blue: b, hasBackgroundImage: hasImage) ? color : nil
+        } else {
+            computed = nil
+        }
+        if !urlKey.isEmpty {
+            curlWebBackgrounds.setObject(CachedCurlWebBackground(url: urlKey, appearanceKey: appearance, color: computed) as AnyObject, forKey: web)
+        }
+        return computed
+    }
+
+    func syncCurlSnapshotAnnotations(in snapshot: EPUBNavigatorViewController, locator: Locator) async {
+        guard let index = navigationIndex?.resourceIndex(for: locator.href) else { return }
+        if let cached = cachedAnnotationDecorations, cached.chapter == index {
+            snapshot.apply(decorations: cached.decorations, in: "user-annotations-preview")
+        } else if let bookKey = bookmarkKey, !settings.annotations.annotations(for: bookKey, chapter: index).isEmpty {
+            let decorations = await annotationDecorations(chapter: index)
+            snapshot.apply(decorations: decorations, in: "user-annotations-preview")
+        } else {
+            snapshot.apply(decorations: [], in: "user-annotations-preview")
+        }
     }
 
     func beginCurlPreview(snapshot: EPUBNavigatorViewController? = nil) -> UUID? {
@@ -867,11 +894,10 @@ extension ReadiumEPUBReaderModel {
 
     // go 完成不等于排版位置已稳定。跨章向后时会先报告临时的 100%，
     // 分页正文的真实首可见进度应小于 1；连续稳定采样后才能缓存或提交。
-    // `minimumStable` 是首个样本之后仍需一致的次数：落页提交只接受精确目标，可用 2；
-    // 邻页与回位仍用 3，避免把跨章重排的中间位置当成最终页。
+    // 同章内仅滚动 WebView 视口，不发生跨章重排，可减少一次稳定采样；跨章仍保持完整采样次数。
     func settledCurlLocation(in navigator: EPUBNavigatorViewController, matching destination: Locator? = nil, differentFrom previous: Locator? = nil, minimumStable: Int = 3) async -> Locator? {
         var candidate: Locator?, stable = 0
-        for _ in 0..<60 {
+        for _ in 0..<150 {
             if Task.isCancelled { return nil }
             if let current = navigator.currentLocation {
                 let progression = current.locations.progression ?? 0
@@ -879,12 +905,15 @@ extension ReadiumEPUBReaderModel {
                 let matches = destination.map { current.href == $0.href && abs(progression - ($0.locations.progression ?? 0)) < 0.0000001 } ?? true
                 let changed = previous.map { current.href != $0.href || abs(progression - ($0.locations.progression ?? 0)) > 0.0000001 } ?? true
                 if canonical && matches && changed {
+                    let sameResource = (destination != nil && current.href == destination?.href)
+                        || (previous != nil && current.href == previous?.href)
+                    let requiredStable = sameResource ? max(1, minimumStable - 1) : minimumStable
                     stable = candidate == current ? stable + 1 : 0
                     candidate = current
-                    if stable >= minimumStable { return current }
+                    if stable >= requiredStable { return current }
                 } else { candidate = nil; stable = 0 }
             }
-            try? await Task.sleep(nanoseconds: 50_000_000)
+            try? await Task.sleep(nanoseconds: 20_000_000)
         }
         return nil
     }
@@ -894,7 +923,12 @@ extension ReadiumEPUBReaderModel {
         let moved = forward ? await navigator.goForward(options: .none) : await navigator.goBackward(options: .none)
         try Task.checkCancellation()
         guard moved else { return nil }
-        if let current = await settledCurlLocation(in: navigator, differentFrom: previous) { return current }
+        if let current = await settledCurlLocation(in: navigator, differentFrom: previous) {
+            if navigator !== self.navigator, current.href != previous?.href {
+                await syncCurlSnapshotAnnotations(in: navigator, locator: current)
+            }
+            return current
+        }
         try Task.checkCancellation()
         throw CurlNavigationError.locationUnavailable
     }

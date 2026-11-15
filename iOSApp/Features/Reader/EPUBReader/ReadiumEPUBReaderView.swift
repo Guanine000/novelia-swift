@@ -316,6 +316,16 @@ private struct ReadiumEPUBReaderViewContent: View {
             close: { if let readerCloseAction { readerCloseAction() } else { dismiss() } })
         if model.status == .ready {
             actions += PageKeyAction.pages(previous: { model.speech.suspendFollow(true); model.goBackward() }, next: { model.speech.suspendFollow(true); model.goForward() })
+            let currentChapter = model.currentPageRange?.chapter ?? 0
+            actions += readerExtendedKeyboardActions(
+                bookmarks: model.bookmarkKey != nil ? { bookmarksTab = .bookmarks; isShowingBookmarks = true } : nil,
+                annotations: model.bookmarkKey != nil ? { isShowingAnnotations = true } : nil,
+                speech: { isShowingSpeech = true },
+                previousChapter: model.chapterCount > 1 ? { model.speech.suspendFollow(true); model.jump(toChapter: max(0, currentChapter - 1), progression: 0) } : nil,
+                nextChapter: model.chapterCount > 1 ? { model.speech.suspendFollow(true); model.jump(toChapter: min(model.chapterCount - 1, currentChapter + 1), progression: 0) } : nil,
+                decreaseFontSize: { settings.adjustFontSize(by: -1) },
+                increaseFontSize: { settings.adjustFontSize(by: 1) }
+            )
         }
         return actions
     }

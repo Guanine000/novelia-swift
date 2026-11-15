@@ -15,7 +15,7 @@ core = root / 'Sources/NoveliaIOSCore'
 app = root / 'iOSApp'
 code = '\n'.join((root / layout[name]).read_text() for name in [
     'APIConfiguration.swift', 'Novel.swift', 'WenkuNovel.swift',
-    'NoveliaAPIClient.swift', 'ForumAPIClient.swift', 'APIServices.swift', 'NoveliaServices.swift'])
+    'NoveliaAPIClient.swift', 'NoveliaAPISessionAndDTOs.swift', 'ForumAPIClient.swift', 'APIServices.swift', 'NoveliaServices.swift'])
 code += '\n' + '\n'.join((root / layout[name]).read_text() for name in [
     'DiscoverStore.swift', 'FavoritesStore.swift', 'ReadingHistoryStore.swift'])
 forum = (root / layout['ForumStore.swift']).read_text()
