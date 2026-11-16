@@ -617,10 +617,10 @@ extension EPUBPagerUIView: UIEditMenuInteractionDelegate {
 
 /// SwiftUI 拥有的原生分页宿主。纸面使用全屏坐标，交互视图保留原正文坐标；
 /// 只缓存前/当前/后三张纸，不改变模型的分页结果和进度所有权。
-final class EPUBPagerContainer: UIViewController, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
+final class EPUBPagerContainer: UIViewController {
     let interaction = EPUBPagerUIView()
-    private var pager: UIPageViewController?
-    private var pages: [Int: EPUBCurlSheet] = [:]
+    private var pager: MetalPageCurlViewController?
+    private var pages: [Int: UIImage] = [:]
     private var input = EPUBPagerView.PageImages(previous: nil, current: nil, next: nil)
     private var deferred: (EPUBPagerView.PageImages, Bool, UIEdgeInsets, UIColor, UIImage?)?
     private var paperInsets = UIEdgeInsets.zero
@@ -656,31 +656,33 @@ final class EPUBPagerContainer: UIViewController, UIPageViewControllerDataSource
     }
 
     private func installCurl() {
-        let controller = UIPageViewController(transitionStyle: .pageCurl, navigationOrientation: .horizontal)
-        controller.isDoubleSided = true
-        controller.dataSource = self; controller.delegate = self
+        let controller = MetalPageCurlViewController()
+        controller.showsRestingImage = true
+        controller.canTurnProvider = { [weak self] forward in
+            guard let self, !self.awaitingCommit, !self.turning else { return false }
+            return self.interaction.canTurnProvider?(forward) == true
+        }
+        controller.onTurnWillBegin = { [weak self] _ in self?.beginTurn() }
+        controller.onTurnDidFinish = { [weak self] completed, forward in
+            self?.finishTurn(completed: completed, forward: forward)
+        }
         addChild(controller)
         controller.view.backgroundColor = .clear
         view.insertSubview(controller.view, belowSubview: interaction)
         controller.didMove(toParent: self)
         pager = controller
-        // 迁移公开 pan 到共同祖先，让正文交互层与纸面共享拖动；
-        // 系统 tap 关闭，保留现有链接/注脚优先和中部显隐规则。
-        for gesture in controller.gestureRecognizers {
-            if gesture is UIPanGestureRecognizer {
-                view.addGestureRecognizer(gesture)
-                gesture.require(toFail: interaction.longPressGesture)
-            } else { gesture.isEnabled = false }
-        }
+        // 迁移 pan 到共同祖先，让正文交互层与纸面共享拖动；不阻塞横向拖动起手，已进入选字时由 curlSelectionHandler 禁用。
+        view.addGestureRecognizer(controller.panGesture)
         interaction.curlTurnHandler = { [weak self] in self?.turn(forward: $0) }
         interaction.curlSelectionHandler = { [weak controller] selecting in
-            controller?.gestureRecognizers.filter { $0 is UIPanGestureRecognizer }.forEach { $0.isEnabled = !selecting }
+            controller?.panGesture.isEnabled = !selecting
         }
     }
 
     private func removeCurl() {
         guard let pager else { return }
-        for gesture in pager.gestureRecognizers where gesture.view === view { view.removeGestureRecognizer(gesture) }
+        pager.cancelActiveAnimation()
+        if pager.panGesture.view === view { view.removeGestureRecognizer(pager.panGesture) }
         pager.willMove(toParent: nil); pager.view.removeFromSuperview(); pager.removeFromParent()
         self.pager = nil; pages = [:]; paperSize = .zero
         interaction.curlTurnHandler = nil; interaction.curlSelectionHandler = nil
@@ -700,21 +702,24 @@ final class EPUBPagerContainer: UIViewController, UIPageViewControllerDataSource
     }
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        if turning { finishTurn(completed: false) }
+        pager?.cancelActiveAnimation()
+        if turning { finishTurn(completed: false, forward: true) }
     }
 
     private func rebuildSheets() {
         guard let pager, !turning, view.bounds.width > 0, view.bounds.height > 0 else { return }
         paperSize = view.bounds.size
-        var result: [Int: EPUBCurlSheet] = [:]
+        var result: [Int: UIImage] = [:]
         for (slot, image, highlights) in [(-1, input.previous, input.previousHighlights),
                                           (0, input.current, input.currentHighlights),
                                           (1, input.next, input.nextHighlights)] {
             guard let image else { continue }
-            result[slot] = EPUBCurlSheet(slot: slot, image: compose(image, highlights: highlights))
+            result[slot] = compose(image, highlights: highlights)
         }
         pages = result
-        if let current = pages[0] { pager.setViewControllers([current], direction: .forward, animated: false) }
+        pager.backPaperColor = paperColor
+        pager.isDarkMode = traitCollection.userInterfaceStyle == .dark
+        pager.setImages(previous: result[-1], current: result[0], next: result[1])
     }
     private func compose(_ image: CGImage, highlights: [EPUBPagerView.PageHighlight]) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
@@ -753,46 +758,19 @@ final class EPUBPagerContainer: UIViewController, UIPageViewControllerDataSource
             }
         }
     }
-    private func neighbor(_ controller: UIViewController, forward: Bool) -> UIViewController? {
-        if let back = controller as? EPUBCurlBackSheet {
-            return forward == back.isForward ? back.targetController : back.frontController
-        }
-        guard !awaitingCommit, let sheet = controller as? EPUBCurlSheet else { return nil }
-        let slot = sheet.slot + (forward ? 1 : -1)
-        guard let target = pages[slot] else { return nil }
-        if slot != 0, !turning, interaction.canTurnProvider?(forward) != true { return nil }
-        return EPUBCurlBackSheet(
-            frontController: sheet,
-            targetController: target,
-            isForward: forward,
-            frontImage: forward ? sheet.image : target.image,
-            backdropImage: paperBackground,
-            paperColor: paperColor
-        )
-    }
-    func pageViewController(_ pageViewController: UIPageViewController, viewControllerBefore viewController: UIViewController) -> UIViewController? {
-        neighbor(viewController, forward: false)
-    }
-    func pageViewController(_ pageViewController: UIPageViewController, viewControllerAfter viewController: UIViewController) -> UIViewController? {
-        neighbor(viewController, forward: true)
-    }
-    func pageViewController(_ pageViewController: UIPageViewController, willTransitionTo pendingViewControllers: [UIViewController]) { beginTurn() }
-    func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool, previousViewControllers: [UIViewController], transitionCompleted completed: Bool) { finishTurn(completed: completed) }
-
     private func beginTurn() {
         guard !turning else { return }
         turning = true
         interaction.clearSelection()
         interaction.setCurlAnimating(true)
     }
-    private func finishTurn(completed: Bool) {
+    private func finishTurn(completed: Bool, forward: Bool) {
         guard turning else { return }
-        let slot = (pager?.viewControllers?.first as? EPUBCurlSheet)?.slot ?? 0
         turning = false
         interaction.setCurlAnimating(false)
-        if completed, slot != 0 {
+        if completed {
             staleCurrent = input.current; awaitingCommit = true
-            interaction.commitHandler?(slot > 0)
+            interaction.commitHandler?(forward)
         } else { rebuildSheets() }
         if let deferred {
             self.deferred = nil
@@ -801,33 +779,9 @@ final class EPUBPagerContainer: UIViewController, UIPageViewControllerDataSource
     }
     private func turn(forward: Bool) {
         guard !turning, !awaitingCommit else { return }
-        guard let pager, interaction.canTurnProvider?(forward) == true,
-              let target = pages[forward ? 1 : -1] else { interaction.blockedTurnHandler?(forward); return }
-        beginTurn()
-        let back = EPUBCurlBackSheet(
-            frontController: pages[0] ?? target,
-            targetController: target,
-            isForward: forward,
-            frontImage: forward ? (pages[0]?.image ?? target.image) : target.image,
-            backdropImage: paperBackground,
-            paperColor: paperColor
-        )
-        pager.setViewControllers([target, back], direction: forward ? .forward : .reverse, animated: true) { [weak self] finished in
-            self?.finishTurn(completed: finished)
+        guard let pager, pager.turn(forward: forward) else {
+            interaction.blockedTurnHandler?(forward)
+            return
         }
-    }
-}
-
-/// 动画开始前合成的一张不可变纸面，包含正文与上下页边背景。
-private final class EPUBCurlSheet: UIViewController {
-    let slot: Int
-    let image: UIImage
-    init(slot: Int, image: UIImage) { self.slot = slot; self.image = image; super.init(nibName: nil, bundle: nil) }
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-    override func loadView() {
-        let imageView = UIImageView(image: image)
-        imageView.contentMode = .scaleToFill
-        imageView.isUserInteractionEnabled = true
-        view = imageView
     }
 }
