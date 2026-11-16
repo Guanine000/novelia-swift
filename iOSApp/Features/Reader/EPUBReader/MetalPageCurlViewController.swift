@@ -60,7 +60,7 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
     private var textureCache: [ObjectIdentifier: MTLTexture] = [:]
 
     private var isDragging = false
-    private var dragStartX: CGFloat = 0
+    private var dragStartPoint: CGPoint = .zero
     private var activeForward = true
     private var curlFromRight = true
     private var progress: CGFloat = 0
@@ -273,22 +273,25 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
             let dragLeft = vx <= 0
             let forward = dragLeft != isRightToLeft
             let loc = gesture.location(in: view)
-            let dx = gesture.translation(in: hostView).x
-            dragStartX = min(max(loc.x - dx, 0), width)
+            let translation = gesture.translation(in: hostView)
+            dragStartPoint = CGPoint(
+                x: min(max(loc.x - translation.x, 0), width),
+                y: min(max(loc.y - translation.y, 0), height)
+            )
             let yRatio = min(max(loc.y / height, 0), 1)
             guard prepareTransition(forward: forward, touchYRatio: yRatio, initialProgress: nil) else {
                 gesture.state = .cancelled
                 return
             }
             isDragging = true
-            updateDragState(location: loc, translationX: dx, width: width, height: height)
+            updateDragState(location: loc, translation: translation, width: width, height: height)
             metalView?.draw()
 
         case .changed:
             guard isDragging else { return }
             updateDragState(
                 location: gesture.location(in: view),
-                translationX: gesture.translation(in: hostView).x,
+                translation: gesture.translation(in: hostView),
                 width: width,
                 height: height
             )
@@ -316,31 +319,50 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         }
     }
 
-    private func updateDragState(location: CGPoint, translationX dx: CGFloat, width: CGFloat, height: CGFloat) {
+    private func updateDragState(location: CGPoint, translation: CGPoint, width: CGFloat, height: CGFloat) {
         let touchX = min(max(location.x, 0), width)
-        let yRatio = min(max(location.y / height, 0), 1)
-        tiltAngle = computeTilt(yRatio: yRatio)
+        let touchY = min(max(location.y, 0), height)
+        let startYRatio = min(max(dragStartPoint.y / height, 0), 1)
+        let touchYRatio = min(max(touchY / height, 0), 1)
 
-        // 按指尖屏幕坐标实时映射卷轴进度：拖动前段极短距离迅速追上指尖，之后 1:1 贴指尖跟随。
-        let pFinger = min(max((1.0 - touchX / width) * 0.90, 0), 1)
+        // 右下角上拉使折痕呈 `/`（theta > 0），右上角下拉使折痕呈 `\`（theta < 0），
+        // 让折痕始终垂直于纸角到指尖的拉起方向，最大偏转约 ±40°。
+        let blendedY = ((touchYRatio * 0.7 + startYRatio * 0.3) - 0.5) * 2.0
+        let curvedY = copysign(pow(abs(blendedY), 1.15), blendedY)
+        let positionTilt = (curlFromRight ? curvedY : -curvedY) * 0.50
+        let dragTilt: CGFloat
         if curlFromRight {
-            let drag = max(0, -dx)
-            guard drag > 0 else { progress = 0; return }
-            let catchUpDist = max(min(width - dragStartX, width * 0.14), 24)
-            let catchUp = min(drag / catchUpDist, 1.0)
-            let easedCatchUp = 1.0 - pow(1.0 - catchUp, 2.0)
-            let pLinear = min(drag / max(dragStartX, width * 0.35), 1.0)
-            let targetP = max(pFinger, pLinear)
-            progress = max(0.02, targetP * easedCatchUp)
+            dragTilt = atan2(-translation.y, max(-translation.x, 28.0))
         } else {
-            let drag = max(0, dx)
-            guard drag > 0 else { progress = 1; return }
-            let catchUpDist = max(min(dragStartX, width * 0.14), 24)
-            let catchUp = min(drag / catchUpDist, 1.0)
+            dragTilt = atan2(translation.y, max(translation.x, 28.0))
+        }
+        let vectorWeight = min(hypot(translation.x, translation.y) / 56.0, 1.0)
+        let rawTilt = positionTilt * (1.0 - 0.35 * vectorWeight) + dragTilt * 0.85 * vectorWeight
+        tiltAngle = min(max(rawTilt, -0.70), 0.70)
+
+        let aspect = Float(width / height)
+        let (_, axisX, axisY, dStart, dEnd, radius) = curlGeometry(aspect: aspect, theta: Float(tiltAngle), progress: Float(progress))
+        let pTouch = Float(touchX / height) * axisX + Float(touchY / height) * axisY
+        let targetOffset = pTouch - radius * 0.35
+        let span = max(dStart - dEnd, 0.001)
+        let pFinger = CGFloat(min(max((dStart - targetOffset) / span, 0), 1))
+
+        if curlFromRight {
+            let drag = max(0, -translation.x)
+            guard drag > 0 || abs(translation.y) > 4 else { progress = 0; return }
+            let effectiveDrag = max(drag, hypot(translation.x, translation.y) * 0.5)
+            let catchUpDist = max(min(width - dragStartPoint.x, width * 0.12), 20)
+            let catchUp = min(effectiveDrag / catchUpDist, 1.0)
             let easedCatchUp = 1.0 - pow(1.0 - catchUp, 2.0)
-            let pLinear = max(1.0 - drag / max(width - dragStartX, width * 0.35), 0.0)
-            let targetP = min(pFinger, pLinear)
-            progress = min(0.98, 1.0 - (1.0 - targetP) * easedCatchUp)
+            progress = max(0.02, pFinger * easedCatchUp)
+        } else {
+            let drag = max(0, translation.x)
+            guard drag > 0 || abs(translation.y) > 4 else { progress = 1; return }
+            let effectiveDrag = max(drag, hypot(translation.x, translation.y) * 0.5)
+            let catchUpDist = max(min(dragStartPoint.x, width * 0.12), 20)
+            let catchUp = min(effectiveDrag / catchUpDist, 1.0)
+            let easedCatchUp = 1.0 - pow(1.0 - catchUp, 2.0)
+            progress = min(0.98, 1.0 - (1.0 - pFinger) * easedCatchUp)
         }
     }
 
@@ -360,17 +382,17 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
             activeUnderImage = current
             progress = initialProgress ?? 1.0
         }
-        tiltAngle = computeTilt(yRatio: touchYRatio)
+        tiltAngle = computeTilt(yRatio: touchYRatio, curlFromRight: curlFromRight)
         onTurnWillBegin?(forward)
         metalView?.isHidden = false
         restingImageView.isHidden = true
         return true
     }
 
-    private func computeTilt(yRatio: CGFloat) -> CGFloat {
-        // 手指靠近上下角时纸张微斜（最大约 14°），中间水平拉动时保持水平。
+    private func computeTilt(yRatio: CGFloat, curlFromRight: Bool) -> CGFloat {
         let centered = (yRatio - 0.5) * 2.0
-        return -centered * 0.24
+        let curved = copysign(pow(abs(centered), 1.15), centered)
+        return (curlFromRight ? curved : -curved) * 0.35
     }
 
     private func startAnimation(to target: CGFloat, duration: CFTimeInterval) {
@@ -441,25 +463,8 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         }
 
         let aspect = Float(max(view.bounds.width, 1) / max(view.bounds.height, 1))
-        let theta = Float(tiltAngle)
-        let axisX = cos(theta)
-        let axisY = sin(theta)
-
-        // 计算四角在法向量上的投影范围，确定卷轴起止截距。
-        let corners = [SIMD2<Float>(0, 0), SIMD2<Float>(aspect, 0), SIMD2<Float>(0, 1), SIMD2<Float>(aspect, 1)]
-        let projections = corners.map { $0.x * axisX + $0.y * axisY }
-        let pMin = projections.min() ?? 0
-        let pMax = projections.max() ?? aspect
-
-        let baseRadius: Float = aspect > 0.75 ? 0.095 : 0.068
         let p = Float(progress)
-        // 起点/终点附近平滑收缩卷曲半径，使贴合与收尾干脆无突变。
-        let edgeRamp = min(min(p / 0.10, (1.0 - p) / 0.10), 1.0)
-        let radius = max(baseRadius * (0.40 + 0.60 * max(edgeRamp, 0)), 0.01)
-
-        let dStart = pMax
-        let dEnd = pMin - (Float.pi * radius) * 0.5 - 0.015
-        let axisOffset = dStart + (dEnd - dStart) * p
+        let (axisOffset, axisX, axisY, _, _, radius) = curlGeometry(aspect: aspect, theta: Float(tiltAngle), progress: p)
 
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
         let resolvedBackColor = backPaperColor.resolvedColor(with: traitCollection)
@@ -503,6 +508,22 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         encoder.endEncoding()
         commandBuffer.present(drawable)
         commandBuffer.commit()
+    }
+
+    private func curlGeometry(aspect: Float, theta: Float, progress p: Float) -> (axisOffset: Float, axisX: Float, axisY: Float, dStart: Float, dEnd: Float, radius: Float) {
+        let axisX = cos(theta)
+        let axisY = sin(theta)
+        let corners = [SIMD2<Float>(0, 0), SIMD2<Float>(aspect, 0), SIMD2<Float>(0, 1), SIMD2<Float>(aspect, 1)]
+        let projections = corners.map { $0.x * axisX + $0.y * axisY }
+        let pMin = projections.min() ?? 0
+        let pMax = projections.max() ?? aspect
+        let baseRadius: Float = aspect > 0.75 ? 0.095 : 0.068
+        let edgeRamp = min(min(p / 0.08, (1.0 - p) / 0.08), 1.0)
+        let radius = max(baseRadius * (0.50 + 0.50 * max(edgeRamp, 0)), 0.01)
+        let dStart = pMax
+        let dEnd = pMin - (Float.pi * radius) * 0.5 - 0.015
+        let axisOffset = dStart + (dEnd - dStart) * p
+        return (axisOffset, axisX, axisY, dStart, dEnd, radius)
     }
 
     // 运行时由 Metal 驱动直接编译着色器，无需在 Xcode 额外安装 MetalToolchain 离线编译组件。
