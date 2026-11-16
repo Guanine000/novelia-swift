@@ -657,6 +657,7 @@ final class EPUBPagerContainer: UIViewController, UIPageViewControllerDataSource
 
     private func installCurl() {
         let controller = UIPageViewController(transitionStyle: .pageCurl, navigationOrientation: .horizontal)
+        controller.isDoubleSided = true
         controller.dataSource = self; controller.delegate = self
         addChild(controller)
         controller.view.backgroundColor = .clear
@@ -753,11 +754,21 @@ final class EPUBPagerContainer: UIViewController, UIPageViewControllerDataSource
         }
     }
     private func neighbor(_ controller: UIViewController, forward: Bool) -> UIViewController? {
+        if let back = controller as? EPUBCurlBackSheet {
+            return forward == back.isForward ? back.targetController : back.frontController
+        }
         guard !awaitingCommit, let sheet = controller as? EPUBCurlSheet else { return nil }
         let slot = sheet.slot + (forward ? 1 : -1)
-        guard let page = pages[slot] else { return nil }
+        guard let target = pages[slot] else { return nil }
         if slot != 0, !turning, interaction.canTurnProvider?(forward) != true { return nil }
-        return page
+        return EPUBCurlBackSheet(
+            frontController: sheet,
+            targetController: target,
+            isForward: forward,
+            frontImage: forward ? sheet.image : target.image,
+            backdropImage: paperBackground,
+            paperColor: paperColor
+        )
     }
     func pageViewController(_ pageViewController: UIPageViewController, viewControllerBefore viewController: UIViewController) -> UIViewController? {
         neighbor(viewController, forward: false)
@@ -793,7 +804,15 @@ final class EPUBPagerContainer: UIViewController, UIPageViewControllerDataSource
         guard let pager, interaction.canTurnProvider?(forward) == true,
               let target = pages[forward ? 1 : -1] else { interaction.blockedTurnHandler?(forward); return }
         beginTurn()
-        pager.setViewControllers([target], direction: forward ? .forward : .reverse, animated: true) { [weak self] finished in
+        let back = EPUBCurlBackSheet(
+            frontController: pages[0] ?? target,
+            targetController: target,
+            isForward: forward,
+            frontImage: forward ? (pages[0]?.image ?? target.image) : target.image,
+            backdropImage: paperBackground,
+            paperColor: paperColor
+        )
+        pager.setViewControllers([target, back], direction: forward ? .forward : .reverse, animated: true) { [weak self] finished in
             self?.finishTurn(completed: finished)
         }
     }
@@ -802,7 +821,7 @@ final class EPUBPagerContainer: UIViewController, UIPageViewControllerDataSource
 /// 动画开始前合成的一张不可变纸面，包含正文与上下页边背景。
 private final class EPUBCurlSheet: UIViewController {
     let slot: Int
-    private let image: UIImage
+    let image: UIImage
     init(slot: Int, image: UIImage) { self.slot = slot; self.image = image; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     override func loadView() {

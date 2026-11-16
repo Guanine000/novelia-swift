@@ -129,6 +129,7 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         self.model = model; self.host = host; self.navigator = navigator
         pager = UIPageViewController(transitionStyle: .pageCurl, navigationOrientation: .horizontal,
             options: [.spineLocation: NSNumber(value: (model.curlRightToLeft ? UIPageViewController.SpineLocation.max : .min).rawValue)])
+        pager.isDoubleSided = true
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -656,7 +657,15 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
         beginTurn(forward: forward)
         guard turning else { return true }
         let direction: UIPageViewController.NavigationDirection = forward != (model?.curlRightToLeft ?? false) ? .forward : .reverse
-        pager.setViewControllers([target], direction: direction, animated: true) { [weak self] finished in self?.finishTurn(completed: finished) }
+        let back = EPUBCurlBackSheet(
+            frontController: sheets[0] ?? target,
+            targetController: target,
+            isForward: direction == .forward,
+            frontImage: forward ? (sheets[0]?.image ?? target.image) : target.image,
+            backdropImage: cachedPaperBackdrop?.image ?? model?.curlPaperBackground(size: view.bounds.size),
+            paperColor: model?.curlPaperColor ?? .systemBackground
+        )
+        pager.setViewControllers([target, back], direction: direction, animated: true) { [weak self] finished in self?.finishTurn(completed: finished) }
         return true
     }
     private func beginTurn(forward: Bool) {
@@ -953,14 +962,27 @@ final class ReadiumPageCurlController: UIViewController, UIPageViewControllerDat
     }
 
     private func neighbor(_ controller: UIViewController, after: Bool) -> UIViewController? {
+        if let back = controller as? EPUBCurlBackSheet {
+            return after == back.isForward ? back.targetController : back.frontController
+        }
         guard let sheet = controller as? ReadiumCurlSheet, preparedKey == key || turning else { return nil }
         let delta = after != (model?.curlRightToLeft ?? false) ? 1 : -1
-        return sheets[sheet.slot + delta]
+        guard let target = sheets[sheet.slot + delta] else { return nil }
+        return EPUBCurlBackSheet(
+            frontController: sheet,
+            targetController: target,
+            isForward: after,
+            frontImage: delta > 0 ? sheet.image : target.image,
+            backdropImage: cachedPaperBackdrop?.image ?? model?.curlPaperBackground(size: view.bounds.size),
+            paperColor: model?.curlPaperColor ?? .systemBackground
+        )
     }
     func pageViewController(_ pageViewController: UIPageViewController, viewControllerBefore viewController: UIViewController) -> UIViewController? { neighbor(viewController, after: false) }
     func pageViewController(_ pageViewController: UIPageViewController, viewControllerAfter viewController: UIViewController) -> UIViewController? { neighbor(viewController, after: true) }
     func pageViewController(_ pageViewController: UIPageViewController, willTransitionTo pendingViewControllers: [UIViewController]) {
-        guard let target = pendingViewControllers.first as? ReadiumCurlSheet else { return }
+        let target = (pendingViewControllers.first as? ReadiumCurlSheet)
+            ?? (pendingViewControllers.first as? EPUBCurlBackSheet)?.targetController as? ReadiumCurlSheet
+        guard let target else { return }
         beginTurn(forward: target.slot > 0)
     }
     func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool, previousViewControllers: [UIViewController], transitionCompleted completed: Bool) { finishTurn(completed: completed) }

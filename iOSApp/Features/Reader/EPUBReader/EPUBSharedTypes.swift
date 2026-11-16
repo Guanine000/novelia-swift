@@ -326,6 +326,62 @@ private struct NoteBubbleShape: Shape {
     }
 }
 
+/// 仿真翻页纸张背面视图：开启 `UIPageViewController.isDoubleSided = true` 后提供给系统，
+/// 让卷起的纸背贴合当前阅读主题与纸面背景，避免深色模式下 UIKit 默认单面纸背泛白刺眼。
+final class EPUBCurlBackSheet: UIViewController {
+    let frontController: UIViewController
+    let targetController: UIViewController
+    let isForward: Bool
+    private let frontImage: UIImage
+    private let backdropImage: UIImage?
+    private let paperColor: UIColor
+
+    init(
+        frontController: UIViewController,
+        targetController: UIViewController,
+        isForward: Bool,
+        frontImage: UIImage,
+        backdropImage: UIImage?,
+        paperColor: UIColor
+    ) {
+        self.frontController = frontController
+        self.targetController = targetController
+        self.isForward = isForward
+        self.frontImage = frontImage
+        self.backdropImage = backdropImage
+        self.paperColor = paperColor
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func loadView() {
+        let container = UIView()
+        container.backgroundColor = paperColor
+        container.clipsToBounds = true
+
+        if let backdropImage {
+            let backdropView = UIImageView(image: backdropImage)
+            backdropView.contentMode = .scaleAspectFill
+            backdropView.frame = container.bounds
+            backdropView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            container.addSubview(backdropView)
+        }
+
+        // 水平镜像正面正文并压低透明度，呈现轻微透印质感；深浅色均随当前纸面底色变化。
+        let mirrorView = UIImageView(image: frontImage)
+        mirrorView.contentMode = .scaleToFill
+        mirrorView.frame = container.bounds
+        mirrorView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        mirrorView.transform = CGAffineTransform(scaleX: -1, y: 1)
+        mirrorView.alpha = 0.14
+        container.addSubview(mirrorView)
+
+        view = container
+    }
+}
+
 /// 分页阅读器显示的生成章节（TXT / 在线小说），代替 EPUB 文件。
 struct PagedTextBook {
     let source: any EPUBChapterSource
