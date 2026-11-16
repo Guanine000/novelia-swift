@@ -153,6 +153,7 @@ F03100000000000000000001 /* WebNovelEPUBIdentity.swift in Sources */ = {isa = PB
 F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03210000000000000000001; };
 		A15C00000000000000000001 /* IOS15Compat.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15C00000000000000000001 /* IOS15Compat.swift */; };
 		A15C00000000000000000002 /* EPUBSharedTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15C00000000000000000002 /* EPUBSharedTypes.swift */; };
+		A15C00000000000000000011 /* MetalPageCurlViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15C00000000000000000011 /* MetalPageCurlViewController.swift */; };
 		A15F00000000000000000001 /* ArchitectureFixtureBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEB000000000000000000003 /* ArchitectureFixtureBackend.swift */; };
 		A15F00000000000000000002 /* ArchitectureValidation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEB000000000000000000002 /* ArchitectureValidation.swift */; };
 		A15F00000000000000000003 /* SessionTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEB000000000000000000001 /* SessionTokenStore.swift */; };
@@ -207,6 +208,7 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		A15F00000000000000000033 /* CoverImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000042 /* CoverImage.swift */; };
 		A15F00000000000000000034 /* IOS15Compat.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15C00000000000000000001 /* IOS15Compat.swift */; };
 		A15F00000000000000000035 /* EPUBSharedTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15C00000000000000000002 /* EPUBSharedTypes.swift */; };
+		A15F00000000000000000111 /* MetalPageCurlViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15C00000000000000000011 /* MetalPageCurlViewController.swift */; };
 		A15F00000000000000000036 /* ForumAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000025 /* ForumAPIClient.swift */; };
 		A15F00000000000000000037 /* TXTChapterParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000026 /* TXTChapterParser.swift */; };
 		A15F00000000000000000038 /* ForumMarkdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000027 /* ForumMarkdown.swift */; };
@@ -497,6 +499,7 @@ F03110000000000000000001 /* WebNovelEPUBIdentity.swift */ = {isa = PBXFileRefere
 F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/Integrations/WebNovelEPUBReading.swift; sourceTree = "<group>"; };
 		B15C00000000000000000001 /* IOS15Compat.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared/IOS15Compat.swift; sourceTree = "<group>"; };
 		B15C00000000000000000002 /* EPUBSharedTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBSharedTypes.swift; sourceTree = "<group>"; };
+		B15C00000000000000000011 /* MetalPageCurlViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalPageCurlViewController.swift; sourceTree = "<group>"; };
 		B15C00000000000000000003 /* NoveliaLegacy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NoveliaLegacy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F7E09B1085E1F83BE4117661 /* ReadingPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/NoveliaIOSCore/Features/Reader/ReadingPreferences.swift"; sourceTree = SOURCE_ROOT; };
 		AA10000000000000000000C1 /* ChineseConversionTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/NoveliaIOSCore/Features/Reader/ChineseConversionTable.swift"; sourceTree = SOURCE_ROOT; };
@@ -627,6 +630,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				B10000000000000000000018 /* EPUBPagerView.swift */,
 				B10000000000000000000019 /* EPUBReaderModel.swift */,
 				B15C00000000000000000002 /* EPUBSharedTypes.swift */,
+				B15C00000000000000000011 /* MetalPageCurlViewController.swift */,
 				B10000000000000000000020 /* EPUBReaderView.swift */,
 				B100000000000000000001A0 /* AnnotationEditor.swift */,
 				B10000000000000000000021 /* EPUBSampleBook.swift */,
@@ -1096,6 +1100,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A10000000000000000000045 /* CoverImage.swift in Sources */,
 				A15C00000000000000000001 /* IOS15Compat.swift in Sources */,
 				A15C00000000000000000002 /* EPUBSharedTypes.swift in Sources */,
+				A15C00000000000000000011 /* MetalPageCurlViewController.swift in Sources */,
 				A10000000000000000000028 /* ForumAPIClient.swift in Sources */,
 				A10000000000000000000029 /* TXTChapterParser.swift in Sources */,
 				A10000000000000000000030 /* ForumMarkdown.swift in Sources */,
@@ -1283,6 +1288,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A15F00000000000000000033 /* CoverImage.swift in Sources */,
 				A15F00000000000000000034 /* IOS15Compat.swift in Sources */,
 				A15F00000000000000000035 /* EPUBSharedTypes.swift in Sources */,
+				A15F00000000000000000111 /* MetalPageCurlViewController.swift in Sources */,
 				A15F00000000000000000036 /* ForumAPIClient.swift in Sources */,
 				A15F00000000000000000037 /* TXTChapterParser.swift in Sources */,
 				A15F00000000000000000038 /* ForumMarkdown.swift in Sources */,
@@ -1479,7 +1485,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.5.0;
-				CURRENT_PROJECT_VERSION = 215;
+				CURRENT_PROJECT_VERSION = 216;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1503,7 +1509,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.5.0;
-				CURRENT_PROJECT_VERSION = 215;
+				CURRENT_PROJECT_VERSION = 216;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1528,7 +1534,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				INFOPLIST_KEY_CFBundleDisplayName = "Novelia 15";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.5.0;
-				CURRENT_PROJECT_VERSION = 215;
+				CURRENT_PROJECT_VERSION = 216;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port.ios15;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1554,7 +1560,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				INFOPLIST_KEY_CFBundleDisplayName = "Novelia 15";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.5.0;
-				CURRENT_PROJECT_VERSION = 215;
+				CURRENT_PROJECT_VERSION = 216;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port.ios15;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
