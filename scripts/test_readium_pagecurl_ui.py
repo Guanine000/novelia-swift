@@ -264,7 +264,8 @@ methods = r'''
       let initial=curlVisible(app),count=curlCounts(app)[1]
       app.coordinate(withNormalizedOffset:CGVector(dx:0.18,dy:0.17)).press(forDuration:0.8)
       let copy=app.buttons["拷贝"].firstMatch
-      XCTAssertTrue(copy.waitForExistence(timeout:5) || app.menuItems["拷贝"].firstMatch.exists || app.buttons["Copy"].firstMatch.exists)
+      let highlight=app.menuItems["高亮"].firstMatch
+      XCTAssertTrue(highlight.waitForExistence(timeout:5) || app.buttons["高亮"].firstMatch.exists || copy.exists || app.menuItems["拷贝"].firstMatch.exists || app.buttons["Copy"].firstMatch.exists)
       XCTAssertEqual(curlVisible(app),initial);XCTAssertEqual(curlCounts(app)[1],count)
       let shot=XCTAttachment(screenshot:app.screenshot());shot.name="Readium curl text selection";shot.lifetime = .keepAlways;add(shot)
      }

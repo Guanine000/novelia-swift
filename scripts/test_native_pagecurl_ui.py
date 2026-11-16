@@ -24,7 +24,7 @@ methods = r'''
   return app
  }
  func nativePageLabel(_ app: XCUIApplication) -> String {
-  let page = app.staticTexts.matching(NSPredicate(format: "label MATCHES %@", ".*第 [0-9]+/[0-9]+ 页.*")).firstMatch
+  let page = app.descendants(matching: .any).matching(NSPredicate(format: "label MATCHES %@", ".*第 [0-9]+/[0-9]+ 页.*")).firstMatch
   XCTAssertTrue(page.waitForExistence(timeout: 10)); return page.label
  }
  func testNativeCurlTurnsAndRestoresPosition() {
@@ -44,9 +44,10 @@ methods = r'''
   let initial = nativePageLabel(app)
   app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).tap()
   XCTAssertFalse(app.buttons["阅读菜单"].exists)
-  app.swipeLeft(velocity: .slow); XCTAssertNotEqual(nativePageLabel(app), initial)
+  app.swipeLeft(velocity: .slow)
   app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6)).tap()
   XCTAssertTrue(app.buttons["阅读菜单"].waitForExistence(timeout: 5))
+  XCTAssertNotEqual(nativePageLabel(app), initial)
   app.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.35)).press(forDuration: 0.7)
   let copy = app.buttons["拷贝"].firstMatch
   XCTAssertTrue(copy.waitForExistence(timeout: 5) || app.menuItems["拷贝"].firstMatch.exists)

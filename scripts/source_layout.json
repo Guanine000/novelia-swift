@@ -86,6 +86,7 @@
   "ReadiumPageCurl.swift": "iOSApp/Features/Reader/EPUBReader/ReadiumPageCurl.swift",
   "ReadiumEPUBReaderView.swift": "iOSApp/Features/Reader/EPUBReader/ReadiumEPUBReaderView.swift",
   "EPUBPagerView.swift": "iOSApp/Features/Reader/EPUBReader/EPUBPagerView.swift",
+  "MetalPageCurlViewController.swift": "iOSApp/Features/Reader/EPUBReader/MetalPageCurlViewController.swift",
   "EPUBLayoutCoordinator.swift": "iOSApp/Features/Reader/EPUBReader/EPUBLayoutCoordinator.swift",
   "EPUBReaderView.swift": "iOSApp/Features/Reader/EPUBReader/EPUBReaderView.swift",
   "ReadiumTextPublication.swift": "iOSApp/Features/Reader/EPUBReader/ReadiumTextPublication.swift",
