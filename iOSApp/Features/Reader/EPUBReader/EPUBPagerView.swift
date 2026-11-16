@@ -671,9 +671,8 @@ final class EPUBPagerContainer: UIViewController {
         view.insertSubview(controller.view, belowSubview: interaction)
         controller.didMove(toParent: self)
         pager = controller
-        // 迁移 pan 到共同祖先，让正文交互层与纸面共享拖动，长按选字优先。
+        // 迁移 pan 到共同祖先，让正文交互层与纸面共享拖动；不阻塞横向拖动起手，已进入选字时由 curlSelectionHandler 禁用。
         view.addGestureRecognizer(controller.panGesture)
-        controller.panGesture.require(toFail: interaction.longPressGesture)
         interaction.curlTurnHandler = { [weak self] in self?.turn(forward: $0) }
         interaction.curlSelectionHandler = { [weak controller] selecting in
             controller?.panGesture.isEnabled = !selecting

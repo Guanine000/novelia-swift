@@ -155,7 +155,6 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
         selectionPress.cancelsTouchesInView = false; selectionPress.delegate = self
         coldPan.maximumNumberOfTouches = 1; coldPan.delegate = self
         selectionGate.cancelsTouchesInView = false; selectionGate.delegate = self
-        coldPan.require(toFail: selectionPress)
         if let host {
             host.view.addGestureRecognizer(coldPan)
             host.view.addGestureRecognizer(selectionGate)
@@ -182,7 +181,6 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
 
             host.view.addGestureRecognizer(pager.panGesture)
             pager.panGesture.require(toFail: selectionGate)
-            pager.panGesture.require(toFail: selectionPress)
         }
         model?.onCurlTurn = { [weak self] in self?.requestTurn(forward: $0) ?? false }
         model?.cancelCurl = { [weak self] in await self?.cancelAndWait() }
@@ -316,9 +314,10 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
 #endif
         // 预取恰好在手指滑动途中完成时，不能禁用正在识别的冷手势；否则同一次滑动会被两套识别器同时遗漏。
         let finishingColdGesture = coldPan.numberOfTouches > 0 || coldPan.state == .began || coldPan.state == .changed
-        let usePaper = ready && resolvedDirections.count == 2 && !finishingColdGesture && !burstGestureActive
-        pager.panGesture.isEnabled = usePaper && available
-        coldPan.isEnabled = available && !usePaper && !burstGestureActive
+        let hasAnyDirection = ready && !resolvedDirections.isEmpty && !finishingColdGesture && !burstGestureActive
+        let hasBothDirections = ready && resolvedDirections.count == 2 && !finishingColdGesture && !burstGestureActive
+        pager.panGesture.isEnabled = hasAnyDirection && available
+        coldPan.isEnabled = available && !hasBothDirections && !burstGestureActive
     }
     /// 只有屏幕页与已提交页一致时才揭开纸面、露出真实 WebView；提交落后时保持纸面，
     /// 否则会先闪回上一页再跳到目标页。
@@ -972,7 +971,11 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
         guard gestureRecognizer === coldPan else { return true }
         let speed = coldPan.velocity(in: host?.view)
         traceInput("begin available=\(available) selection=\(navigator?.currentSelection != nil) vx=\(Int(speed.x)) vy=\(Int(speed.y))")
-        return available && navigator?.currentSelection == nil && abs(speed.x) > abs(speed.y)*1.2
+        guard available, !turning, navigator?.currentSelection == nil, abs(speed.x) > abs(speed.y)*1.2 else { return false }
+        let forward = (speed.x < 0) != (model?.curlRightToLeft ?? false)
+        // 已有该方向纸面且纸面跟手手势已启用时，让位给 pager.panGesture 实时跟手卷曲；仅缺失方向走 coldPan。
+        if pager.panGesture.isEnabled, preparedKey == key, sheets[forward ? 1 : -1] != nil { return false }
+        return true
     }
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         gestureRecognizer === selectionPress || gestureRecognizer === selectionGate

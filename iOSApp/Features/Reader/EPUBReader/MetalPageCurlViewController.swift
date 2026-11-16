@@ -60,6 +60,7 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
     private var textureCache: [ObjectIdentifier: MTLTexture] = [:]
 
     private var isDragging = false
+    private var dragStartX: CGFloat = 0
     private var activeForward = true
     private var curlFromRight = true
     private var progress: CGFloat = 0
@@ -102,9 +103,36 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         nextImage = next
         restingImageView.image = current
         restingImageView.isHidden = !showsRestingImage || isAnimating
-        // 清理已不再引用的旧纹理，保持缓存最多 3 张页图。
-        let liveIDs = Set([previous, current, next].compactMap { $0?.cgImage.map(ObjectIdentifier.init) })
+        // 清理已不再引用的旧纹理，保持缓存最多 3 张页图并异步预热纹理，消除首次拖动上传卡顿。
+        let images = [current, next, previous].compactMap { $0 }
+        let liveIDs = Set(images.compactMap { $0.cgImage.map(ObjectIdentifier.init) })
         textureCache = textureCache.filter { liveIDs.contains($0.key) }
+        prewarmTextures(for: images)
+    }
+
+    private func prewarmTextures(for images: [UIImage]) {
+        guard let textureLoader else { return }
+        let options: [MTKTextureLoader.Option: Any] = [
+            .SRGB: false,
+            .textureUsage: NSNumber(value: MTLTextureUsage.shaderRead.rawValue),
+            .textureStorageMode: NSNumber(value: MTLStorageMode.private.rawValue)
+        ]
+        for image in images {
+            guard let cgImage = image.cgImage else { continue }
+            let key = ObjectIdentifier(cgImage)
+            if textureCache[key] != nil { continue }
+            textureLoader.newTexture(cgImage: cgImage, options: options) { [weak self] texture, _ in
+                guard let texture else { return }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    let currentLive = Set([self.previousImage, self.currentImage, self.nextImage]
+                        .compactMap { $0?.cgImage.map(ObjectIdentifier.init) })
+                    if currentLive.contains(key) {
+                        self.textureCache[key] = texture
+                    }
+                }
+            }
+        }
     }
 
     @discardableResult
@@ -223,9 +251,10 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard gestureRecognizer === panGesture else { return true }
         guard !isAnimating else { return false }
-        let velocity = panGesture.velocity(in: view)
-        // 仅拦截横向为主的手势，避免干扰纵向交互。
-        guard abs(velocity.x) > abs(velocity.y) * 1.1 else { return false }
+        let hostView = panGesture.view ?? view
+        let velocity = panGesture.velocity(in: hostView)
+        // 分页模式下拇指弧线滑动常带一定纵向分量，仅排除近纯竖直滑动即可。
+        guard abs(velocity.x) > abs(velocity.y) * 0.65 else { return false }
         let dragLeft = velocity.x < 0
         let forward = dragLeft != isRightToLeft
         if let canTurn = canTurnProvider?(forward), !canTurn { return false }
@@ -234,56 +263,84 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
     }
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        let hostView = gesture.view ?? view
         let width = max(view.bounds.width, 1)
         let height = max(view.bounds.height, 1)
         switch gesture.state {
         case .began:
             guard !isAnimating else { return }
-            let vx = gesture.velocity(in: view).x
+            let vx = gesture.velocity(in: hostView).x
             let dragLeft = vx <= 0
             let forward = dragLeft != isRightToLeft
-            let yRatio = min(max(gesture.location(in: view).y / height, 0), 1)
+            let loc = gesture.location(in: view)
+            let dx = gesture.translation(in: hostView).x
+            dragStartX = min(max(loc.x - dx, 0), width)
+            let yRatio = min(max(loc.y / height, 0), 1)
             guard prepareTransition(forward: forward, touchYRatio: yRatio, initialProgress: nil) else {
                 gesture.state = .cancelled
                 return
             }
             isDragging = true
+            updateDragState(location: loc, translationX: dx, width: width, height: height)
             metalView?.draw()
 
         case .changed:
             guard isDragging else { return }
-            let dx = gesture.translation(in: view).x
-            let delta = abs(dx) / width
-            if curlFromRight {
-                // 向左拉：progress 从 0 增至 1
-                progress = dx < 0 ? min(max(delta, 0), 1) : 0
-            } else {
-                // 向右拉：progress 从 1 降至 0
-                progress = dx > 0 ? min(max(1 - delta, 0), 1) : 1
-            }
-            let yRatio = min(max(gesture.location(in: view).y / height, 0), 1)
-            tiltAngle = computeTilt(yRatio: yRatio)
+            updateDragState(
+                location: gesture.location(in: view),
+                translationX: gesture.translation(in: hostView).x,
+                width: width,
+                height: height
+            )
             metalView?.draw()
 
         case .ended, .cancelled:
             guard isDragging else { return }
             isDragging = false
-            let dx = gesture.translation(in: view).x
-            let vx = gesture.velocity(in: view).x
-            let threshold = width * 0.22
+            let dx = gesture.translation(in: hostView).x
+            let vx = gesture.velocity(in: hostView).x
+            let threshold = width * 0.18
             let completed: Bool
             if gesture.state == .cancelled {
                 completed = false
             } else if curlFromRight {
-                completed = dx < -threshold || vx < -550
+                completed = dx < -threshold || vx < -380 || progress > 0.45
             } else {
-                completed = dx > threshold || vx > 550
+                completed = dx > threshold || vx > 380 || progress < 0.55
             }
             let endProgress: CGFloat = curlFromRight ? (completed ? 1.0 : 0.0) : (completed ? 0.0 : 1.0)
-            startAnimation(to: endProgress, duration: 0.24)
+            startAnimation(to: endProgress, duration: 0.22)
 
         default:
             break
+        }
+    }
+
+    private func updateDragState(location: CGPoint, translationX dx: CGFloat, width: CGFloat, height: CGFloat) {
+        let touchX = min(max(location.x, 0), width)
+        let yRatio = min(max(location.y / height, 0), 1)
+        tiltAngle = computeTilt(yRatio: yRatio)
+
+        // 按指尖屏幕坐标实时映射卷轴进度：拖动前段极短距离迅速追上指尖，之后 1:1 贴指尖跟随。
+        let pFinger = min(max((1.0 - touchX / width) * 0.90, 0), 1)
+        if curlFromRight {
+            let drag = max(0, -dx)
+            guard drag > 0 else { progress = 0; return }
+            let catchUpDist = max(min(width - dragStartX, width * 0.14), 24)
+            let catchUp = min(drag / catchUpDist, 1.0)
+            let easedCatchUp = 1.0 - pow(1.0 - catchUp, 2.0)
+            let pLinear = min(drag / max(dragStartX, width * 0.35), 1.0)
+            let targetP = max(pFinger, pLinear)
+            progress = max(0.02, targetP * easedCatchUp)
+        } else {
+            let drag = max(0, dx)
+            guard drag > 0 else { progress = 1; return }
+            let catchUpDist = max(min(dragStartX, width * 0.14), 24)
+            let catchUp = min(drag / catchUpDist, 1.0)
+            let easedCatchUp = 1.0 - pow(1.0 - catchUp, 2.0)
+            let pLinear = max(1.0 - drag / max(width - dragStartX, width * 0.35), 0.0)
+            let targetP = min(pFinger, pLinear)
+            progress = min(0.98, 1.0 - (1.0 - targetP) * easedCatchUp)
         }
     }
 
@@ -394,14 +451,14 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         let pMin = projections.min() ?? 0
         let pMax = projections.max() ?? aspect
 
-        let baseRadius: Float = 0.13
+        let baseRadius: Float = aspect > 0.75 ? 0.095 : 0.068
         let p = Float(progress)
         // 起点/终点附近平滑收缩卷曲半径，使贴合与收尾干脆无突变。
-        let edgeRamp = min(min(p / 0.12, (1.0 - p) / 0.12), 1.0)
-        let radius = max(baseRadius * (0.35 + 0.65 * max(edgeRamp, 0)), 0.01)
+        let edgeRamp = min(min(p / 0.10, (1.0 - p) / 0.10), 1.0)
+        let radius = max(baseRadius * (0.40 + 0.60 * max(edgeRamp, 0)), 0.01)
 
-        let dStart = pMax + 0.015
-        let dEnd = pMin - (Float.pi * radius) * 0.5 - 0.025
+        let dStart = pMax
+        let dEnd = pMin - (Float.pi * radius) * 0.5 - 0.015
         let axisOffset = dStart + (dEnd - dStart) * p
 
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
@@ -475,7 +532,6 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         float2 uv;
         float angle;
         float signedDist;
-        float facing;
     };
 
     vertex CurlVertexOut pageCurlVertex(
@@ -491,7 +547,6 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
             out.position = float4(ndcX, ndcY, 0.9, 1.0);
             out.angle = 0.0;
             out.signedDist = dot(float2(in.uv.x * u.aspect, in.uv.y), float2(u.axisX, u.axisY)) - u.axisOffset;
-            out.facing = 1.0;
             return out;
         }
 
@@ -504,26 +559,22 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         float2 finalP = p;
         float z = 0.0;
         float angle = 0.0;
-        float facing = 1.0;
 
         if (s <= 0.0) {
             finalP = p;
             z = 0.0;
             angle = 0.0;
-            facing = 1.0;
         } else if (s < piR) {
             float alpha = s / r;
             float delta = r * sin(alpha) - s;
             finalP = p + n * delta;
             z = r * (1.0 - cos(alpha));
             angle = alpha;
-            facing = (alpha < M_PI_2_F) ? 1.0 : -1.0;
         } else {
             float delta = -2.0 * s + piR;
             finalP = p + n * delta;
             z = 2.0 * r;
             angle = M_PI_F;
-            facing = -1.0;
         }
 
         float ndcX = (finalP.x / u.aspect) * 2.0 - 1.0;
@@ -534,7 +585,6 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         out.position = float4(ndcX, ndcY, depth, 1.0);
         out.angle = angle;
         out.signedDist = s;
-        out.facing = facing;
         return out;
     }
 
@@ -561,25 +611,27 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         }
 
         float4 frontSample = frontTex.sample(texSampler, in.uv);
+        float clampedAngle = clamp(in.angle, 0.0, M_PI_F);
+        float sinA = max(sin(clampedAngle), 0.0);
 
-        if (in.facing > 0.0) {
+        if (clampedAngle < M_PI_2_F) {
             float bendShade = 1.0;
-            if (in.angle > 0.0) {
-                float sinA = sin(in.angle);
+            if (clampedAngle > 0.0) {
                 bendShade = 1.0 - (u.isDark > 0.5 ? 0.14 : 0.10) * sinA;
             }
             return float4(frontSample.rgb * bendShade, frontSample.a);
         } else {
             float3 backBase = mix(u.backColor.rgb, frontSample.rgb, u.backOpacity);
-            float sinA = sin(clamp(in.angle, 0.0, M_PI_F));
+            float sinA2 = sinA * sinA;
 
             if (u.isDark > 0.5) {
                 // 深色模式：关闭白色镜面高光，仅在折痕弯曲处保留极柔和的深灰立体轮廓
-                float3 darkRim = float3(0.045) * pow(sinA, 2.0);
+                float3 darkRim = float3(0.045) * sinA2;
                 float darkFoldShadow = 1.0 - 0.14 * (1.0 - sinA);
                 return float4(clamp(backBase * darkFoldShadow + darkRim, 0.0, 1.0), 1.0);
             } else {
-                float lightSheen = 0.07 * pow(sinA, 1.5);
+                // 避免 pow(0, x) 在 sin(M_PI_F) <= 0 时产生 NaN 导致背面边缘变黑
+                float lightSheen = 0.07 * sinA * sqrt(sinA);
                 float foldShadow = 1.0 - 0.08 * (1.0 - sinA);
                 float3 lit = clamp(backBase * foldShadow + float3(lightSheen), 0.0, 1.0);
                 return float4(lit, 1.0);
