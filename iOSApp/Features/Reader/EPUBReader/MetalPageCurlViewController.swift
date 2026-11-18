@@ -357,19 +357,71 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         let rawTilt = positionTilt * 0.85 + dragTilt * 0.60 * vectorWeight
         tiltAngle = min(max(rawTilt, -0.68), 0.68)
 
-        // 直接按拖动起手点到屏幕边缘的距离 1:1 映射进度，消除屏幕中部起滑时的突然跳变。
+        let aspect = Float(width / height)
+        let theta = Float(tiltAngle)
+        let taper = min(max((curlFromRight ? theta : -theta) / 0.30, -1.0), 1.0)
+        let (_, axisX, axisY, dStart, dEnd, radius) = curlGeometry(aspect: aspect, theta: theta, progress: Float(progress), taper: taper)
+        let span = max(dStart - dEnd, 0.001)
+
+        // 按翻起纸页外缘（前翻）或可见折痕脊线（后翻）反解轴向偏移，使书页边缘跨过屏幕中线后仍 1:1 紧贴指尖，
+        // 避免线性进度在左半屏以 2 倍速冲过手指、在右半屏滞后于手指。
+        let finger = SIMD2<Float>(Float(touchX / height), Float(touchY / height))
+        let tVec = SIMD2<Float>(-axisY, axisX)
+        let center = SIMD2<Float>(aspect * 0.5, 0.5)
+        let tHalfSpan = 0.5 * (aspect * abs(tVec.x) + abs(tVec.y))
+        let tNorm = min(max(((finger.x - center.x) * tVec.x + (finger.y - center.y) * tVec.y) / max(tHalfSpan, 0.25), -1.0), 1.0)
+        let rLocal = max(radius * (1.0 + 0.36 * taper * tNorm), 0.006)
+        let piR = Float.pi * rLocal
+
         if curlFromRight {
-            let travel = max(dragStartPoint.x * 0.92, width * 0.36)
             let projected = -(translation.x * cos(tiltAngle) + translation.y * sin(tiltAngle))
             let effectiveDrag = translation.x <= 0 ? max(-translation.x, projected * 0.85) : 0
-            progress = min(max(effectiveDrag / travel, 0.005), 1.0)
+            guard effectiveDrag > 0 else { progress = 0.005; return }
+            let rampDist = min(max((width - dragStartPoint.x) * 0.55, 16), width * 0.22)
+            let rampT = Float(min(effectiveDrag / rampDist, 1.0))
+            let rampFactor = 1.0 - (1.0 - rampT) * (1.0 - rampT)
+
+            let startEdge = SIMD2<Float>(aspect, finger.y)
+            let anchor = startEdge + (finger - startEdge) * rampFactor
+            let pAnchor = anchor.x * axisX + anchor.y * axisY
+            let dRight = max((aspect - anchor.x) / max(axisX, 0.25), 0)
+            let dVert: Float
+            if axisY > 0.01 {
+                dVert = max((1.0 - anchor.y) / axisY, 0)
+            } else if axisY < -0.01 {
+                dVert = max(-anchor.y / axisY, 0)
+            } else {
+                dVert = .greatestFiniteMagnitude
+            }
+            let dBoundary = min(dRight, dVert)
+
+            let targetAxis: Float
+            if dBoundary >= piR {
+                targetAxis = pAnchor + 0.5 * (dBoundary - piR)
+            } else {
+                // 在卷曲半圆范围内用二分求解 s - r*sin(s/r) = dBoundary，保证右半侧起步也紧贴手指。
+                var lo: Float = 0
+                var hi = piR
+                for _ in 0..<8 {
+                    let mid = 0.5 * (lo + hi)
+                    if mid - rLocal * sin(mid / rLocal) < dBoundary { lo = mid } else { hi = mid }
+                }
+                let sEdge = 0.5 * (lo + hi)
+                targetAxis = pAnchor + dBoundary - sEdge
+            }
+            progress = CGFloat(min(max((dStart - targetAxis) / span, 0.005), 1.0))
         } else {
-            let travel = max((width - dragStartPoint.x) * 0.92, width * 0.36)
             let projected = translation.x * cos(tiltAngle) + translation.y * sin(tiltAngle)
             let effectiveDrag = translation.x >= 0 ? max(translation.x, projected * 0.85) : 0
-            progress = min(max(1.0 - effectiveDrag / travel, 0.0), 0.995)
+            guard effectiveDrag > 0 else { progress = 0.995; return }
+            let rampDist = min(max(dragStartPoint.x * 0.55, 16), width * 0.22)
+            let rampT = Float(min(effectiveDrag / rampDist, 1.0))
+            let rampFactor = 1.0 - (1.0 - rampT) * (1.0 - rampT)
+
+            let pFinger = finger.x * axisX + finger.y * axisY
+            let targetAxis = dEnd * (1.0 - rampFactor) + (pFinger - rLocal) * rampFactor
+            progress = CGFloat(min(max((dStart - targetAxis) / span, 0.0), 0.995))
         }
-        _ = touchX
     }
 
     private func prepareTransition(forward: Bool, touchYRatio: CGFloat, initialProgress: CGFloat?) -> Bool {
