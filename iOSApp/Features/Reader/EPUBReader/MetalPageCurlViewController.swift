@@ -18,6 +18,9 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         var backOpacity: Float
         var backColor: SIMD4<Float>
         var isUnderLayer: Float
+        var taper: Float
+        var padding0: Float = 0
+        var padding1: Float = 0
     }
 
     private struct CurlVertex {
@@ -68,8 +71,10 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
     private var startProgress: CGFloat = 0
     private var tiltAngle: CGFloat = 0
     private var startTiltAngle: CGFloat = 0
+    private var targetTiltAngle: CGFloat = 0
+    private var isTapAnimation = false
     private var animationStartTime: CFTimeInterval = 0
-    private var animationDuration: CFTimeInterval = 0.26
+    private var animationDuration: CFTimeInterval = 0.36
     private var displayLink: CADisplayLink?
     private var activeFrontImage: UIImage?
     private var activeUnderImage: UIImage?
@@ -138,8 +143,13 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
     @discardableResult
     func turn(forward: Bool) -> Bool {
         guard !isAnimating else { return false }
-        guard prepareTransition(forward: forward, touchYRatio: 0.5, initialProgress: nil) else { return false }
-        startAnimation(to: curlFromRight ? 1.0 : 0.0, duration: 0.30)
+        // 点按翻页模拟老版系统卷页：从下角斜角卷起并平缓扫过全页，而非生硬的 0° 垂直平推。
+        let touchYRatio: CGFloat = 0.80
+        guard prepareTransition(forward: forward, touchYRatio: touchYRatio, initialProgress: nil) else { return false }
+        tiltAngle = curlFromRight ? 0.40 : -0.32
+        let endProgress: CGFloat = curlFromRight ? 1.0 : 0.0
+        let endTilt: CGFloat = curlFromRight ? 0.14 : -0.10
+        startAnimation(to: endProgress, endTilt: endTilt, duration: 0.40, isTap: true)
         return true
     }
 
@@ -188,7 +198,7 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         self.pipelineState = pipeline
         self.depthState = depth
         self.textureLoader = MTKTextureLoader(device: device)
-        buildGridMesh(device: device, cols: 72, rows: 96)
+        buildGridMesh(device: device, cols: 96, rows: 120)
 
         let mtk = MTKView(frame: view.bounds, device: device)
         mtk.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -307,13 +317,19 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
             let completed: Bool
             if gesture.state == .cancelled {
                 completed = false
+            } else if abs(vx) > 260 {
+                completed = curlFromRight ? (vx < 0) : (vx > 0)
             } else if curlFromRight {
-                completed = dx < -threshold || vx < -380 || progress > 0.45
+                completed = dx < -threshold || progress > 0.44
             } else {
-                completed = dx > threshold || vx > 380 || progress < 0.55
+                completed = dx > threshold || progress < 0.56
             }
             let endProgress: CGFloat = curlFromRight ? (completed ? 1.0 : 0.0) : (completed ? 0.0 : 1.0)
-            startAnimation(to: endProgress, duration: 0.22)
+            let endTilt: CGFloat = completed ? tiltAngle * 0.45 : 0
+            let releaseDuration: CFTimeInterval = completed
+                ? max(0.24, 0.36 - min(Double(abs(vx)), 1600) / 10000)
+                : 0.26
+            startAnimation(to: endProgress, endTilt: endTilt, duration: releaseDuration, isTap: false)
 
         default:
             break
@@ -327,44 +343,33 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         let touchYRatio = min(max(touchY / height, 0), 1)
 
         // 右下角上拉使折痕呈 `/`（theta > 0），右上角下拉使折痕呈 `\`（theta < 0），
-        // 让折痕始终垂直于纸角到指尖的拉起方向，最大偏转约 ±40°。
-        let blendedY = ((touchYRatio * 0.7 + startYRatio * 0.3) - 0.5) * 2.0
-        let curvedY = copysign(pow(abs(blendedY), 1.15), blendedY)
-        let positionTilt = (curlFromRight ? curvedY : -curvedY) * 0.50
+        // 在保持起手纵向角落倾斜的同时平滑融合二维拖动向量，避免横向滑动时角落倾角塌陷。
+        let blendedY = ((touchYRatio * 0.72 + startYRatio * 0.28) - 0.5) * 2.0
+        let curvedY = copysign(pow(abs(blendedY), 1.1), blendedY)
+        let positionTilt = (curlFromRight ? curvedY : -curvedY) * 0.52
         let dragTilt: CGFloat
         if curlFromRight {
-            dragTilt = atan2(-translation.y, max(-translation.x, 28.0))
+            dragTilt = atan2(-translation.y, max(-translation.x, 32.0))
         } else {
-            dragTilt = atan2(translation.y, max(translation.x, 28.0))
+            dragTilt = atan2(translation.y, max(translation.x, 32.0))
         }
-        let vectorWeight = min(hypot(translation.x, translation.y) / 56.0, 1.0)
-        let rawTilt = positionTilt * (1.0 - 0.35 * vectorWeight) + dragTilt * 0.85 * vectorWeight
-        tiltAngle = min(max(rawTilt, -0.70), 0.70)
+        let vectorWeight = min(hypot(translation.x, translation.y) / 64.0, 1.0)
+        let rawTilt = positionTilt * 0.85 + dragTilt * 0.60 * vectorWeight
+        tiltAngle = min(max(rawTilt, -0.68), 0.68)
 
-        let aspect = Float(width / height)
-        let (_, axisX, axisY, dStart, dEnd, radius) = curlGeometry(aspect: aspect, theta: Float(tiltAngle), progress: Float(progress))
-        let pTouch = Float(touchX / height) * axisX + Float(touchY / height) * axisY
-        let targetOffset = pTouch - radius * 0.35
-        let span = max(dStart - dEnd, 0.001)
-        let pFinger = CGFloat(min(max((dStart - targetOffset) / span, 0), 1))
-
+        // 直接按拖动起手点到屏幕边缘的距离 1:1 映射进度，消除屏幕中部起滑时的突然跳变。
         if curlFromRight {
-            let drag = max(0, -translation.x)
-            guard drag > 0 || abs(translation.y) > 4 else { progress = 0; return }
-            let effectiveDrag = max(drag, hypot(translation.x, translation.y) * 0.5)
-            let catchUpDist = max(min(width - dragStartPoint.x, width * 0.12), 20)
-            let catchUp = min(effectiveDrag / catchUpDist, 1.0)
-            let easedCatchUp = 1.0 - pow(1.0 - catchUp, 2.0)
-            progress = max(0.02, pFinger * easedCatchUp)
+            let travel = max(dragStartPoint.x * 0.92, width * 0.36)
+            let projected = -(translation.x * cos(tiltAngle) + translation.y * sin(tiltAngle))
+            let effectiveDrag = translation.x <= 0 ? max(-translation.x, projected * 0.85) : 0
+            progress = min(max(effectiveDrag / travel, 0.005), 1.0)
         } else {
-            let drag = max(0, translation.x)
-            guard drag > 0 || abs(translation.y) > 4 else { progress = 1; return }
-            let effectiveDrag = max(drag, hypot(translation.x, translation.y) * 0.5)
-            let catchUpDist = max(min(dragStartPoint.x, width * 0.12), 20)
-            let catchUp = min(effectiveDrag / catchUpDist, 1.0)
-            let easedCatchUp = 1.0 - pow(1.0 - catchUp, 2.0)
-            progress = min(0.98, 1.0 - (1.0 - pFinger) * easedCatchUp)
+            let travel = max((width - dragStartPoint.x) * 0.92, width * 0.36)
+            let projected = translation.x * cos(tiltAngle) + translation.y * sin(tiltAngle)
+            let effectiveDrag = translation.x >= 0 ? max(translation.x, projected * 0.85) : 0
+            progress = min(max(1.0 - effectiveDrag / travel, 0.0), 0.995)
         }
+        _ = touchX
     }
 
     private func prepareTransition(forward: Bool, touchYRatio: CGFloat, initialProgress: CGFloat?) -> Bool {
@@ -386,23 +391,26 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         tiltAngle = computeTilt(yRatio: touchYRatio, curlFromRight: curlFromRight)
         onTurnWillBegin?(forward)
         metalView?.isHidden = false
-        restingImageView.isHidden = true
+        restingImageView.isHidden = !showsRestingImage
         return true
     }
 
     private func computeTilt(yRatio: CGFloat, curlFromRight: Bool) -> CGFloat {
         let centered = (yRatio - 0.5) * 2.0
-        let curved = copysign(pow(abs(centered), 1.15), centered)
-        return (curlFromRight ? curved : -curved) * 0.35
+        let curved = copysign(pow(abs(centered), 1.1), centered)
+        return (curlFromRight ? curved : -curved) * 0.42
     }
 
-    private func startAnimation(to target: CGFloat, duration: CFTimeInterval) {
+    private func startAnimation(to target: CGFloat, endTilt: CGFloat, duration: CFTimeInterval, isTap: Bool) {
         stopDisplayLink()
         startProgress = progress
         targetProgress = target
         startTiltAngle = tiltAngle
+        targetTiltAngle = endTilt
+        isTapAnimation = isTap
         animationStartTime = CACurrentMediaTime()
-        animationDuration = max(duration * max(abs(target - startProgress), 0.25), 0.12)
+        let minimumDuration: CFTimeInterval = isTap ? 0.32 : 0.14
+        animationDuration = max(duration * max(abs(target - startProgress), 0.35), minimumDuration)
         let link = CADisplayLink(target: self, selector: #selector(stepAnimation(_:)))
         link.add(to: .main, forMode: .common)
         displayLink = link
@@ -417,10 +425,18 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
     @objc private func stepAnimation(_ link: CADisplayLink) {
         let elapsed = CACurrentMediaTime() - animationStartTime
         let rawT = min(max(elapsed / animationDuration, 0), 1)
-        // cubic ease-out：松手后快速收拢卷角
-        let eased = 1.0 - pow(1.0 - rawT, 3.0)
+        let eased: Double
+        if isTapAnimation {
+            // 点按翻页使用平缓起手、顺滑收尾的 S 型曲线，接近系统 UIPageViewController(.pageCurl) 手感。
+            let smooth = rawT * rawT * (3.0 - 2.0 * rawT)
+            let easeOut = 1.0 - pow(1.0 - rawT, 2.5)
+            eased = smooth * 0.65 + easeOut * 0.35
+        } else {
+            // 拖动松手衔接指尖速度，用自然减速度收拢。
+            eased = 1.0 - pow(1.0 - rawT, 2.8)
+        }
         progress = startProgress + (targetProgress - startProgress) * CGFloat(eased)
-        tiltAngle = startTiltAngle * CGFloat(1.0 - eased)
+        tiltAngle = startTiltAngle + (targetTiltAngle - startTiltAngle) * CGFloat(eased)
         metalView?.draw()
 
         if rawT >= 1.0 {
@@ -471,7 +487,9 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
 
         let aspect = Float(max(view.bounds.width, 1) / max(view.bounds.height, 1))
         let p = Float(progress)
-        let (axisOffset, axisX, axisY, _, _, radius) = curlGeometry(aspect: aspect, theta: Float(tiltAngle), progress: p)
+        let rawTaper = (curlFromRight ? Float(tiltAngle) : Float(-tiltAngle)) / 0.30
+        let taper = min(max(rawTaper, -1.0), 1.0)
+        let (axisOffset, axisX, axisY, _, _, radius) = curlGeometry(aspect: aspect, theta: Float(tiltAngle), progress: p, taper: taper)
 
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
         let resolvedBackColor = backPaperColor.resolvedColor(with: traitCollection)
@@ -490,9 +508,10 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
             radius: radius,
             progress: p,
             isDark: darkSurface ? 1.0 : 0.0,
-            backOpacity: darkSurface ? 0.08 : 0.14,
+            backOpacity: darkSurface ? 0.10 : 0.16,
             backColor: SIMD4<Float>(Float(r), Float(g), Float(b), Float(a)),
-            isUnderLayer: 1.0
+            isUnderLayer: 1.0,
+            taper: taper
         )
 
         encoder.setRenderPipelineState(pipelineState)
@@ -517,18 +536,20 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         commandBuffer.commit()
     }
 
-    private func curlGeometry(aspect: Float, theta: Float, progress p: Float) -> (axisOffset: Float, axisX: Float, axisY: Float, dStart: Float, dEnd: Float, radius: Float) {
+    private func curlGeometry(aspect: Float, theta: Float, progress p: Float, taper: Float) -> (axisOffset: Float, axisX: Float, axisY: Float, dStart: Float, dEnd: Float, radius: Float) {
         let axisX = cos(theta)
         let axisY = sin(theta)
         let corners = [SIMD2<Float>(0, 0), SIMD2<Float>(aspect, 0), SIMD2<Float>(0, 1), SIMD2<Float>(aspect, 1)]
         let projections = corners.map { $0.x * axisX + $0.y * axisY }
         let pMin = projections.min() ?? 0
         let pMax = projections.max() ?? aspect
-        let baseRadius: Float = aspect > 0.75 ? 0.095 : 0.068
-        let edgeRamp = min(min(p / 0.08, (1.0 - p) / 0.08), 1.0)
-        let radius = max(baseRadius * (0.50 + 0.50 * max(edgeRamp, 0)), 0.01)
+        // 紧致纸张卷径（接近 UIKit pageCurl 的薄纸卷曲感），两端平滑收拢。
+        let baseRadius: Float = aspect > 0.75 ? 0.044 : 0.033
+        let edgeRamp = min(min(p / 0.07, (1.0 - p) / 0.07), 1.0)
+        let radius = max(baseRadius * (0.55 + 0.45 * max(edgeRamp, 0)), 0.008)
+        let maxLocalRadius = radius * (1.0 + 0.36 * abs(taper))
         let dStart = pMax
-        let dEnd = pMin - (Float.pi * radius) * 0.5 - 0.015
+        let dEnd = pMin - (Float.pi * maxLocalRadius) * 0.5 - 0.018
         let axisOffset = dStart + (dEnd - dStart) * p
         return (axisOffset, axisX, axisY, dStart, dEnd, radius)
     }
@@ -549,6 +570,9 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         float backOpacity;
         float4 backColor;
         float isUnderLayer;
+        float taper;
+        float padding0;
+        float padding1;
     };
 
     struct CurlVertexIn {
@@ -558,9 +582,15 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
     struct CurlVertexOut {
         float4 position [[position]];
         float2 uv;
-        float angle;
-        float signedDist;
     };
+
+    inline float localRadius(float2 p, constant CurlUniforms &u) {
+        float2 tVec = float2(-u.axisY, u.axisX);
+        float2 center = float2(u.aspect * 0.5, 0.5);
+        float tHalfSpan = 0.5 * (u.aspect * abs(tVec.x) + abs(tVec.y));
+        float tNorm = clamp(dot(p - center, tVec) / max(tHalfSpan, 0.25), -1.0, 1.0);
+        return max(u.radius * (1.0 + 0.36 * u.taper * tNorm), 0.006);
+    }
 
     vertex CurlVertexOut pageCurlVertex(
         CurlVertexIn in [[stage_in]],
@@ -573,46 +603,44 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
             float ndcX = in.uv.x * 2.0 - 1.0;
             float ndcY = 1.0 - in.uv.y * 2.0;
             out.position = float4(ndcX, ndcY, 0.9, 1.0);
-            out.angle = 0.0;
-            out.signedDist = dot(float2(in.uv.x * u.aspect, in.uv.y), float2(u.axisX, u.axisY)) - u.axisOffset;
             return out;
         }
 
         float2 p = float2(in.uv.x * u.aspect, in.uv.y);
         float2 n = float2(u.axisX, u.axisY);
         float s = dot(p, n) - u.axisOffset;
-        float r = max(u.radius, 0.0005);
+        float r = localRadius(p, u);
         float piR = M_PI_F * r;
 
         float2 finalP = p;
         float z = 0.0;
-        float angle = 0.0;
 
         if (s <= 0.0) {
             finalP = p;
             z = 0.0;
-            angle = 0.0;
         } else if (s < piR) {
             float alpha = s / r;
             float delta = r * sin(alpha) - s;
             finalP = p + n * delta;
             z = r * (1.0 - cos(alpha));
-            angle = alpha;
         } else {
             float delta = -2.0 * s + piR;
             finalP = p + n * delta;
             z = 2.0 * r;
-            angle = M_PI_F;
         }
 
-        float ndcX = (finalP.x / u.aspect) * 2.0 - 1.0;
-        float ndcY = 1.0 - finalP.y * 2.0;
-        float maxZ = max(2.0 * r, 0.001);
+        // 轻微 3D 透视投影：z = 0 处与底图 1:1 像素对齐，抬起的卷页自然向视线前倾。
+        float2 center = float2(u.aspect * 0.5, 0.5);
+        float focal = 2.4;
+        float persp = focal / max(focal - z, 0.6);
+        float2 projP = center + (finalP - center) * persp;
+
+        float ndcX = (projP.x / u.aspect) * 2.0 - 1.0;
+        float ndcY = 1.0 - projP.y * 2.0;
+        float maxZ = max(2.0 * u.radius * 1.4, 0.001);
         float depth = clamp(0.8 - (z / maxZ) * 0.7, 0.05, 0.85);
 
         out.position = float4(ndcX, ndcY, depth, 1.0);
-        out.angle = angle;
-        out.signedDist = s;
         return out;
     }
 
@@ -623,45 +651,66 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         texture2d<float> underTex [[texture(1)]]
     ) {
         constexpr sampler texSampler(mag_filter::linear, min_filter::linear, address::clamp_to_edge);
+        float2 p = float2(in.uv.x * u.aspect, in.uv.y);
+        float2 n = float2(u.axisX, u.axisY);
+        float r = localRadius(p, u);
+        float piR = M_PI_F * r;
+        float s = dot(p, n) - u.axisOffset;
 
         if (u.isUnderLayer > 0.5) {
             float4 base = underTex.sample(texSampler, in.uv);
-            float shadowFade = 1.0 - smoothstep(0.78, 1.0, u.progress);
-            float shadowWidth = max(u.radius * 2.2, 0.06);
-            float d = in.signedDist;
-            float shadow = 0.0;
-            if (d >= -0.015 && d < shadowWidth) {
-                float t = clamp((d + 0.015) / (shadowWidth + 0.015), 0.0, 1.0);
-                shadow = (1.0 - smoothstep(0.0, 1.0, t)) * (u.isDark > 0.5 ? 0.55 : 0.28);
-            }
-            base.rgb *= (1.0 - shadow * shadowFade);
+            float activeMask = smoothstep(0.0, 0.035, u.progress) * (1.0 - smoothstep(0.84, 1.0, u.progress));
+            float contactT = clamp((s - r * 0.55) / max(r * 1.45, 0.02), 0.0, 1.0);
+            float contact = (1.0 - smoothstep(0.0, 1.0, contactT)) * (u.isDark > 0.5 ? 0.48 : 0.24);
+            float ambientW = max(r * 3.6, 0.11);
+            float ambientT = clamp((s - r * 0.45) / ambientW, 0.0, 1.0);
+            float ambient = (1.0 - smoothstep(0.0, 1.0, ambientT)) * (u.isDark > 0.5 ? 0.22 : 0.14);
+            float shadow = clamp(contact + ambient, 0.0, 0.72) * activeMask;
+            base.rgb *= (1.0 - shadow);
             return base;
         }
 
         float4 frontSample = frontTex.sample(texSampler, in.uv);
-        float clampedAngle = clamp(in.angle, 0.0, M_PI_F);
-        float sinA = max(sin(clampedAngle), 0.0);
+        float clampedAngle = clamp(s / r, 0.0, M_PI_F);
+        float activeMask = smoothstep(0.0, 0.035, u.progress) * (1.0 - smoothstep(0.93, 1.0, u.progress));
+        float penumbra = max(r * 1.15, 0.035);
 
-        if (clampedAngle < M_PI_2_F) {
-            float bendShade = 1.0;
-            if (clampedAngle > 0.0) {
-                bendShade = 1.0 - (u.isDark > 0.5 ? 0.14 : 0.10) * sinA;
-            }
-            return float4(frontSample.rgb * bendShade, frontSample.a);
+        if (s <= 0.0) {
+            // 翻起的纸背悬停在当前页上方，在当前页平面投射柔和阴影，拉开纸页层次感。
+            float2 pOrig = p + (piR - 2.0 * s) * n;
+            float edgeDist = min(min(pOrig.x, u.aspect - pOrig.x), min(pOrig.y, 1.0 - pOrig.y));
+            float flapMask = smoothstep(-penumbra, 0.015, edgeDist);
+            float creaseAO = (1.0 - smoothstep(0.0, max(r * 2.4, 0.07), -s)) * (u.isDark > 0.5 ? 0.16 : 0.14);
+            float dropShadow = flapMask * ((u.isDark > 0.5 ? 0.09 : 0.075) + creaseAO) * activeMask;
+            return float4(frontSample.rgb * (1.0 - dropShadow), frontSample.a);
+        } else if (clampedAngle < M_PI_2_F) {
+            float2 pOrigCrease = p + piR * n;
+            float creaseEdgeDist = min(min(pOrigCrease.x, u.aspect - pOrigCrease.x), min(pOrigCrease.y, 1.0 - pOrigCrease.y));
+            float creaseMask = smoothstep(-penumbra, 0.015, creaseEdgeDist);
+            float creaseBase = creaseMask * (u.isDark > 0.5 ? 0.25 : 0.215) * activeMask;
+            float climb = smoothstep(0.0, 0.65, clampedAngle);
+            float shade = mix(1.0 - creaseBase, 1.0, climb);
+            float sinA = max(sin(clampedAngle), 0.0);
+            float ridge = sin(clamp(clampedAngle / M_PI_2_F, 0.0, 1.0) * M_PI_F);
+            float3 sheen = (u.isDark > 0.5 ? float3(0.010) : u.backColor.rgb * 0.028) * ridge * activeMask;
+            float turnShade = 1.0 - (u.isDark > 0.5 ? 0.12 : 0.08) * sinA * sqrt(sinA) * activeMask;
+            return float4(clamp(frontSample.rgb * shade * turnShade + sheen, 0.0, 1.0), frontSample.a);
         } else {
             float3 backBase = mix(u.backColor.rgb, frontSample.rgb, u.backOpacity);
-            float sinA2 = sinA * sinA;
+            float sinA = max(sin(clampedAngle), 0.0);
+            float sinPow = sinA * sqrt(sinA);
+            float innerT = smoothstep(M_PI_2_F, M_PI_F, clampedAngle);
+            float innerDip = sin(innerT * M_PI_F);
 
             if (u.isDark > 0.5) {
-                // 深色模式：关闭白色镜面高光，仅在折痕弯曲处保留极柔和的深灰立体轮廓
-                float3 darkRim = float3(0.045) * sinA2;
-                float darkFoldShadow = 1.0 - 0.14 * (1.0 - sinA);
-                return float4(clamp(backBase * darkFoldShadow + darkRim, 0.0, 1.0), 1.0);
+                // 深色模式：关闭白色镜面高光，仅保留折痕弯曲处的柔和立体轮廓
+                float3 darkContour = float3(0.026) * sinPow * activeMask;
+                float darkHollow = 1.0 - 0.11 * innerDip * activeMask;
+                return float4(clamp(backBase * darkHollow + darkContour, 0.0, 1.0), 1.0);
             } else {
-                // 避免 pow(0, x) 在 sin(M_PI_F) <= 0 时产生 NaN 导致背面边缘变黑
-                float lightSheen = 0.07 * sinA * sqrt(sinA);
-                float foldShadow = 1.0 - 0.08 * (1.0 - sinA);
-                float3 lit = clamp(backBase * foldShadow + float3(lightSheen), 0.0, 1.0);
+                float3 lightSheen = u.backColor.rgb * (0.055 * sinPow * activeMask);
+                float hollowShadow = 1.0 - 0.070 * innerDip * activeMask;
+                float3 lit = clamp(backBase * hollowShadow + lightSheen, 0.0, 1.0);
                 return float4(lit, 1.0);
             }
         }
