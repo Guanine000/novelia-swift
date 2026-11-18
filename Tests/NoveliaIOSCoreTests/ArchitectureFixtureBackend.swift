@@ -140,7 +140,18 @@ actor ArchitectureFixtureBackend: NovelCatalogService, NovelContentService, Wenk
     }
     func categories() async throws -> [ForumCategory] { try mark("categories"); return try decode([["id": 1, "slug": "novel", "tags": []]], as: [ForumCategory].self) }
     func posts(page: Int, pageSize: Int, category: String, query: String, sort: ForumSort,
-               tagID: Int64?, source: ForumFeedSource) async throws -> ForumPage<ForumPost> { try mark("posts"); return ForumPage(total: 1, items: [try postModel()]) }
+               tagID: Int64?, source: ForumFeedSource) async throws -> ForumPage<ForumPost> {
+        try mark("posts")
+        let post = try postModel()
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if source == .all, !trimmed.isEmpty {
+            let matches = post.title.localizedCaseInsensitiveContains(trimmed)
+                || post.content.localizedCaseInsensitiveContains(trimmed)
+            let items = matches ? [post] : []
+            return ForumPage(total: Int64(items.count), items: items)
+        }
+        return ForumPage(total: 1, items: [post])
+    }
     func post(id: Int64) async throws -> ForumPost { try mark("post"); return try postModel(id: id) }
     func comments(postID: Int64, page: Int, pageSize: Int) async throws -> ForumPage<ForumComment> { try mark("comments"); return ForumPage(total: Int64(forumComments.count), items: forumComments) }
     func replies(postID: Int64, rootID: Int64, page: Int, pageSize: Int) async throws -> ForumPage<ForumComment> { try mark("replies"); return ForumPage(total: 0, items: []) }

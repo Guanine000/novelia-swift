@@ -56,7 +56,12 @@ final class ArchitectureReplacementTests: XCTestCase {
         _ = try await api.bookComments.novelCommentReplies(subjectKey: "web-fixture-one", rootID: 1, page: 1, pageSize: 20)
 
         _ = try await api.forum.categories()
-        _ = try await api.forum.posts(page: 0, pageSize: 20, category: "novel", query: "", sort: .active, tagID: nil, source: .all)
+        let allForumPosts = try await api.forum.posts(page: 0, pageSize: 20, category: "novel", query: "", sort: .active, tagID: nil, source: .all)
+        XCTAssertEqual(allForumPosts.items.first?.title, "架构验证帖子")
+        let matchedForumPosts = try await api.forum.posts(page: 0, pageSize: 20, category: "novel", query: "验证", sort: .active, tagID: nil, source: .all)
+        XCTAssertEqual(matchedForumPosts.items.count, 1)
+        let missingForumPosts = try await api.forum.posts(page: 0, pageSize: 20, category: "novel", query: "不存在关键词", sort: .active, tagID: nil, source: .all)
+        XCTAssertTrue(missingForumPosts.items.isEmpty)
         _ = try await api.forum.createPost(categoryID: 1, title: "新帖子", content: "正文", tagIDs: [])
         _ = try await api.forum.updatePost(id: 42, categoryID: 1, title: "已编辑", content: "更新正文", tagIDs: [])
         try await api.forum.setFavorite(postID: 42, isFavorite: true)

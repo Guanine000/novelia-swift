@@ -12,6 +12,8 @@ final class ForumStore: ObservableObject {
     @Published private(set) var isLoadingCategories = false
     @Published private(set) var isLoadingPosts = false
     @Published private(set) var errorMessage: String?
+    /// 最近一次发起的服务器检索词（仅 `source == .all` 时非空）；用于判断清空或取消时是否需要恢复原列表。
+    @Published private(set) var activeServerQuery = ""
     @Published var selectedCategory = ""
     @Published var query = ""
     @Published var selectedTagID: Int64?
@@ -59,6 +61,8 @@ final class ForumStore: ObservableObject {
         guard requestedPage >= 0 else { return }
         requestGeneration += 1
         let generation = requestGeneration
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        activeServerQuery = source == .all ? normalizedQuery : ""
         isLoadingPosts = true
         errorMessage = nil
         defer { if generation == requestGeneration { isLoadingPosts = false } }
@@ -67,7 +71,7 @@ final class ForumStore: ObservableObject {
                 page: requestedPage,
                 pageSize: pageSize,
                 category: selectedCategory,
-                query: query.trimmingCharacters(in: .whitespacesAndNewlines),
+                query: normalizedQuery,
                 sort: sort,
                 tagID: filterTags.contains(where: { $0.id == selectedTagID }) ? selectedTagID : nil,
                 source: source
@@ -80,6 +84,20 @@ final class ForumStore: ObservableObject {
             guard generation == requestGeneration else { return }
             errorMessage = error.localizedDescription
         }
+    }
+
+    func submitSearch() async {
+        guard source == .all else { return }
+        await loadPosts(page: 0)
+    }
+
+    @discardableResult
+    func clearSearch() async -> Bool {
+        let shouldReload = source == .all && !activeServerQuery.isEmpty
+        query = ""
+        guard shouldReload else { return false }
+        await loadPosts(page: 0)
+        return true
     }
 
     func refresh() async {

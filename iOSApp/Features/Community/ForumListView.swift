@@ -20,6 +20,9 @@ private struct ForumContentView: View {
     @StateObject private var store: ForumStore
     @State private var isConfirmingLogout = false
     @State private var isPresentingCompose = false
+    @State private var isSearching: Bool
+    @State private var autoFocusSearch: Bool
+    @State private var searchFocusRequest = 0
     @State private var openedPostID: Int64?
 
     init(initialCategory: String, initialQuery: String, api: any ForumService) {
@@ -27,11 +30,28 @@ private struct ForumContentView: View {
         store.selectedCategory = initialCategory
         store.query = initialQuery
         _store = StateObject(wrappedValue: store)
+        let hasInitialQuery = !initialQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        _isSearching = State(initialValue: hasInitialQuery)
+        _autoFocusSearch = State(initialValue: !hasInitialQuery)
     }
 
     var body: some View {
         ScrollViewReader { proxy in
             VStack(spacing: 0) {
+                if isSearching {
+                    LibrarySearchField(
+                        query: $store.query,
+                        prompt: store.source == .all ? "搜索论坛帖子" : "在本页按标题筛选",
+                        focusRequest: searchFocusRequest,
+                        autoFocus: autoFocusSearch,
+                        isLoading: store.source == .all && store.isLoadingPosts,
+                        onSubmit: { submitSearch(using: proxy) },
+                        onCancel: { closeSearch(using: proxy) }
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(NoveliaStyle.paper)
+                }
                 ForumCategoryBar(categories: store.categories, selectedCategory: store.selectedCategory,
                                  isVisible: store.source == .all) { category in
                     Task { await store.selectCategory(category.slug) }
@@ -76,8 +96,8 @@ private struct ForumContentView: View {
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                     } else if visiblePosts.isEmpty, !store.isLoadingPosts, store.errorMessage == nil {
-                        CompatUnavailable(store.posts.isEmpty ? "这里还没有帖子" : "本页没有匹配的帖子", systemImage: "bubble.left.and.bubble.right",
-                                               description: Text(filtersCurrentPageOnly ? "可翻页查看其他页的帖子。" : "切换分类或调整搜索词。"))
+                        CompatUnavailable(emptyStateTitle, systemImage: emptyStateSystemImage,
+                                          description: Text(emptyStateDescription))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
@@ -133,98 +153,136 @@ private struct ForumContentView: View {
                 }
                 .listStyle(.plain)
                 .compatScrollContentBackgroundHidden()
+                .compatScrollDismissesKeyboardInteractively()
                 .background(NoveliaStyle.paper)
-                .pageKeyboardActions(browseKeyboardActions(
-                    destinations: visiblePosts.map { .forumPost($0.id) },
-                    selectedID: browseSelectedID,
-                    select: browseSelection,
-                    read: nil,
-                    search: {
-                        withAnimation { proxy.scrollTo("forum-post-list-top", anchor: .top) }
-                        _ = PageKeyAction.focusVisibleSearchBar()
-                    },
-                    scrollTo: { id in withAnimation { proxy.scrollTo(id, anchor: .center) } }
-                ) + [.command("n", "发布新帖", action: { isPresentingCompose = true })])
-                .compatNavigationDestination(isPresented: $isPresentingCompose) {
-                    ForumComposeView(categories: store.categories, initialCategorySlug: store.selectedCategory)
-                }
-                .compatNavigationDestination(item: $openedPostID) { postID in
-                    ForumPostDetailView(postID: postID)
-                }
-                .navigationTitle("论坛")
-                .toolbar {
-                    ToolbarItem(placement: .compatTopBarLeading) {
-                        Menu {
-                            Button("全部帖子", systemImage: "text.bubble") { Task { await store.selectSource(.all) } }
-                            Button("我的帖子", systemImage: "person.text.rectangle") {
-                                guard auth.username != nil else { auth.isLoginPresented = true; return }
-                                Task { await store.selectSource(.myPosts) }
-                            }
-                            Button("云端收藏", systemImage: "bookmark") {
-                                guard auth.username != nil else { auth.isLoginPresented = true; return }
-                                Task { await store.selectSource(.favorites) }
-                            }
-                            if auth.username != nil {
-                                Button("退出登录", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                                    isConfirmingLogout = true
-                                }
-                            } else {
-                                Button("登录 Novelia", systemImage: "person.crop.circle.badge.plus") { auth.isLoginPresented = true }
-                            }
-                        } label: {
-                            Label(auth.username ?? "我的", systemImage: "person.crop.circle")
-                                .labelStyle(.iconOnly)
-                        }
-                    }
-                    ToolbarItemGroup(placement: .compatTopBarTrailing) {
-                        Menu {
-                            ForEach(ForumSort.allCases) { option in
-                                Button {
-                                    store.sort = option
-                                    Task { await store.loadPosts(page: 0) }
-                                } label: {
-                                    if store.sort == option { Label(option.title, systemImage: "checkmark") }
-                                    else { Text(option.title) }
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "arrow.up.arrow.down")
-                        }
-                        .accessibilityLabel("排序：\(store.sort.title)")
-
-                        NavigationLink {
-                            ForumComposeView(categories: store.categories, initialCategorySlug: store.selectedCategory)
-                        } label: {
-                            Image(systemName: "square.and.pencil")
-                        }
-                        .accessibilityLabel("发布新帖")
-                    }
-                }
-                .searchable(text: $store.query, prompt: "搜索论坛帖子")
-                .confirmationDialog("退出登录？", isPresented: $isConfirmingLogout, titleVisibility: .visible) {
-                    Button("退出登录", role: .destructive) {
-                        auth.logout()
-                        Task { await store.selectSource(.all) }
-                    }
-                    Button("取消", role: .cancel) {}
-                } message: {
-                    Text("小说与论坛使用同一账号，会一起退出。")
-                }
-                .onSubmit(of: .search) { Task { await store.loadPosts(page: 0) } }
                 .refreshable { await store.refresh() }
-                .task { if store.categories.isEmpty { await store.refresh() } }
-                .sheet(isPresented: $auth.isLoginPresented) {
-                    ForumLoginSheet(auth: auth)
-                }
-                .overlay {
-                    if let error = store.errorMessage {
-                        ForumErrorOverlay(
-                            message: error,
-                            onDismiss: { store.clearError() },
-                            onRetry: { Task { await store.refresh() } }
-                        )
+            }
+            .pageKeyboardActions(browseKeyboardActions(
+                destinations: visiblePosts.map { .forumPost($0.id) },
+                selectedID: browseSelectedID,
+                select: browseSelection,
+                read: nil,
+                search: {
+                    withAnimation { proxy.scrollTo("forum-post-list-top", anchor: .top) }
+                    openSearch()
+                },
+                scrollTo: { id in withAnimation { proxy.scrollTo(id, anchor: .center) } }
+            ) + [.command("n", "发布新帖", action: { isPresentingCompose = true })])
+            .compatNavigationDestination(isPresented: $isPresentingCompose) {
+                ForumComposeView(categories: store.categories, initialCategorySlug: store.selectedCategory)
+            }
+            .compatNavigationDestination(item: $openedPostID) { postID in
+                ForumPostDetailView(postID: postID)
+            }
+            .navigationTitle("论坛")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .compatTopBarLeading) {
+                    Menu {
+                        Button("全部帖子", systemImage: "text.bubble") { Task { await store.selectSource(.all) } }
+                        Button("我的帖子", systemImage: "person.text.rectangle") {
+                            guard auth.username != nil else { auth.isLoginPresented = true; return }
+                            Task { await store.selectSource(.myPosts) }
+                        }
+                        Button("云端收藏", systemImage: "bookmark") {
+                            guard auth.username != nil else { auth.isLoginPresented = true; return }
+                            Task { await store.selectSource(.favorites) }
+                        }
+                        if auth.username != nil {
+                            Button("退出登录", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                                isConfirmingLogout = true
+                            }
+                        } else {
+                            Button("登录 Novelia", systemImage: "person.crop.circle.badge.plus") { auth.isLoginPresented = true }
+                        }
+                    } label: {
+                        Label(auth.username ?? "我的", systemImage: "person.crop.circle")
+                            .labelStyle(.iconOnly)
                     }
                 }
+                ToolbarItemGroup(placement: .compatTopBarTrailing) {
+                    Button {
+                        if isSearching { closeSearch(using: proxy) } else { openSearch() }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .accessibilityLabel("搜索帖子")
+
+                    Menu {
+                        ForEach(ForumSort.allCases) { option in
+                            Button {
+                                store.sort = option
+                                Task { await store.loadPosts(page: 0) }
+                            } label: {
+                                if store.sort == option { Label(option.title, systemImage: "checkmark") }
+                                else { Text(option.title) }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                    .accessibilityLabel("排序：\(store.sort.title)")
+
+                    NavigationLink {
+                        ForumComposeView(categories: store.categories, initialCategorySlug: store.selectedCategory)
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .accessibilityLabel("发布新帖")
+                }
+            }
+            .confirmationDialog("退出登录？", isPresented: $isConfirmingLogout, titleVisibility: .visible) {
+                Button("退出登录", role: .destructive) {
+                    auth.logout()
+                    Task { await store.selectSource(.all) }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("小说与论坛使用同一账号，会一起退出。")
+            }
+            .onValueChange(of: store.query) { _, newValue in
+                guard newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                guard store.source == .all, !store.activeServerQuery.isEmpty else { return }
+                Task {
+                    if await store.clearSearch() {
+                        scrollToTop(using: proxy)
+                    }
+                }
+            }
+            .task { if store.categories.isEmpty { await store.refresh() } }
+            .sheet(isPresented: $auth.isLoginPresented) {
+                ForumLoginSheet(auth: auth)
+            }
+            .overlay {
+                if let error = store.errorMessage {
+                    ForumErrorOverlay(
+                        message: error,
+                        onDismiss: { store.clearError() },
+                        onRetry: { Task { await store.refresh() } }
+                    )
+                }
+            }
+        }
+    }
+
+    private func openSearch() {
+        autoFocusSearch = true
+        withAnimation { isSearching = true }
+        searchFocusRequest += 1
+    }
+
+    private func submitSearch(using proxy: ScrollViewProxy) {
+        Task {
+            await store.submitSearch()
+            scrollToTop(using: proxy)
+        }
+    }
+
+    private func closeSearch(using proxy: ScrollViewProxy) {
+        withAnimation { isSearching = false }
+        Task {
+            if await store.clearSearch() {
+                scrollToTop(using: proxy)
             }
         }
     }
@@ -232,11 +290,34 @@ private struct ForumContentView: View {
     private func loadPage(_ page: Int, using proxy: ScrollViewProxy) {
         Task {
             await store.loadPosts(page: page)
+            scrollToTop(using: proxy)
+        }
+    }
+
+    private func scrollToTop(using proxy: ScrollViewProxy) {
+        Task {
             await Task.yield()
             withAnimation(.easeInOut(duration: 0.25)) {
                 proxy.scrollTo("forum-post-list-top", anchor: .top)
             }
         }
+    }
+
+    private var emptyStateTitle: String {
+        if filtersCurrentPageOnly { return "本页没有匹配的帖子" }
+        if !store.activeServerQuery.isEmpty { return "没有找到匹配的帖子" }
+        return "这里还没有帖子"
+    }
+
+    private var emptyStateSystemImage: String {
+        if filtersCurrentPageOnly || !store.activeServerQuery.isEmpty { return "magnifyingglass" }
+        return "bubble.left.and.bubble.right"
+    }
+
+    private var emptyStateDescription: String {
+        if filtersCurrentPageOnly { return "可翻页查看其他页的帖子。" }
+        if !store.activeServerQuery.isEmpty { return "尝试更换关键词或切换分类。" }
+        return "切换分类或下拉刷新。"
     }
 
     /// “我的帖子”和“收藏”的接口不接受搜索词，只能在已取回的本页中筛选标题。

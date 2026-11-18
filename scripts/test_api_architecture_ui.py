@@ -1650,6 +1650,27 @@ final class TapTests: XCTestCase {
   XCTAssertTrue(app.staticTexts["\u{8fd9}\u{662f}\u{66ff}\u{4ee3}\u{670d}\u{52a1}\u{63d0}\u{4f9b}\u{7684}\u{5e16}\u{5b50}\u{6b63}\u{6587}\u{3002}"].firstMatch.waitForExistence(timeout: 10))
   zeroExternalRequests(app)
  }
+ func testCommunitySearchAndClear() {
+  let app = start(); defer { app.terminate() }
+  app.tabBars.buttons["\u{793e}\u{533a}"].tap()
+  XCTAssertTrue(app.staticTexts["\u{67b6}\u{6784}\u{9a8c}\u{8bc1}\u{5e16}\u{5b50}"].firstMatch.waitForExistence(timeout: 15))
+  let searchButton = app.buttons["\u{641c}\u{7d22}\u{5e16}\u{5b50}"].firstMatch
+  XCTAssertTrue(searchButton.waitForExistence(timeout: 5)); searchButton.tap()
+  let field = app.textFields["\u{641c}\u{7d22}\u{8bba}\u{575b}\u{5e16}\u{5b50}"].firstMatch
+  XCTAssertTrue(field.waitForExistence(timeout: 5))
+  field.typeText("\u{4e0d}\u{5b58}\u{5728}\u{7684}\u{5173}\u{952e}\u{8bcd}\n")
+  XCTAssertTrue(app.staticTexts["\u{6ca1}\u{6709}\u{627e}\u{5230}\u{5339}\u{914d}\u{7684}\u{5e16}\u{5b50}"].firstMatch.waitForExistence(timeout: 10))
+  let clear = app.buttons["\u{6e05}\u{9664}\u{641c}\u{7d22}"].firstMatch
+  XCTAssertTrue(clear.waitForExistence(timeout: 5)); clear.tap()
+  XCTAssertTrue(app.staticTexts["\u{67b6}\u{6784}\u{9a8c}\u{8bc1}\u{5e16}\u{5b50}"].firstMatch.waitForExistence(timeout: 10))
+  field.tap()
+  field.typeText("\u{9a8c}\u{8bc1}\n")
+  XCTAssertTrue(app.staticTexts["\u{67b6}\u{6784}\u{9a8c}\u{8bc1}\u{5e16}\u{5b50}"].firstMatch.waitForExistence(timeout: 10))
+  app.buttons["\u{53d6}\u{6d88}"].firstMatch.tap()
+  XCTAssertFalse(field.exists)
+  XCTAssertTrue(app.staticTexts["\u{67b6}\u{6784}\u{9a8c}\u{8bc1}\u{5e16}\u{5b50}"].firstMatch.waitForExistence(timeout: 10))
+  zeroExternalRequests(app)
+ }
  func testReadiumOnlineChapterFromReplacement() {
   let app = start(readium: true); defer { app.terminate() }
   openNovel(app)

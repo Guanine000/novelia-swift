@@ -58,7 +58,24 @@ func query() -> [String:String] { Dictionary(uniqueKeysWithValues: URLComponents
   await store.selectSource(.favorites)
   precondition(store.selectedTagID == nil && store.filterTags.isEmpty && query()["tag"] == nil && query()["sort"] == nil)
   await store.selectSource(.all); precondition(store.filterTags.count == 4 && query()["tag"] == nil)
-  print("Forum filters passed: four tags, five sorts across three categories, clearing, pagination and favorites return")
+  store.query = "  求书集中贴  "
+  await store.submitSearch()
+  precondition(store.activeServerQuery == "求书集中贴" && query()["q"] == "求书集中贴" && query()["category"] == "novel")
+  let beforeNoOpClear = Mock.requests.count
+  store.query = ""
+  _ = await store.clearSearch()
+  precondition(store.activeServerQuery.isEmpty && query()["q"] == nil && Mock.requests.count == beforeNoOpClear + 1)
+  let countAfterClear = Mock.requests.count
+  store.query = "未提交词"
+  let didReloadUnfetched = await store.clearSearch()
+  precondition(!didReloadUnfetched && store.query.isEmpty && Mock.requests.count == countAfterClear)
+  await store.selectSource(.favorites)
+  store.query = "本地筛选"
+  await store.submitSearch()
+  precondition(Mock.requests.count == countAfterClear + 1)
+  let didReloadFavorites = await store.clearSearch()
+  precondition(!didReloadFavorites && store.query.isEmpty && Mock.requests.count == countAfterClear + 1)
+  print("Forum filters passed: four tags, five sorts across three categories, search submit/clear, pagination and favorites return")
  }
 }
 '''

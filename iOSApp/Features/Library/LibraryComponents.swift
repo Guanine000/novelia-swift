@@ -640,6 +640,9 @@ struct LibrarySearchField: View {
     @Binding var query: String
     let prompt: String
     var focusRequest = 0
+    var autoFocus = true
+    var isLoading = false
+    var onSubmit: () -> Void = {}
     let onCancel: () -> Void
     @FocusState private var isFocused: Bool
 
@@ -651,13 +654,21 @@ struct LibrarySearchField: View {
                     .textInputAutocapitalization(.never)
                     .compatAutocorrectionDisabled()
                     .submitLabel(.search)
-                    .onSubmit { isFocused = false }
+                    .onSubmit {
+                        isFocused = false
+                        onSubmit()
+                    }
                     .focused($isFocused)
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                }
                 if !query.isEmpty {
                     Button { query = "" } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(NoveliaStyle.muted)
                             .frame(width: 44, height: 44).contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("清除搜索")
                 }
             }
@@ -670,7 +681,9 @@ struct LibrarySearchField: View {
                 .frame(minWidth: 44, minHeight: 44)
                 .tint(NoveliaStyle.brandGreen)
         }
-        .onAppear { isFocused = true }
+        .onAppear {
+            if autoFocus { isFocused = true }
+        }
         .onValueChange(of: focusRequest) { _, _ in isFocused = true }
     }
 }
