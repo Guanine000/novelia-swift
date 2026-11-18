@@ -148,6 +148,7 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         isDragging = false
         activeFrontImage = nil
         activeUnderImage = nil
+        restingImageView.image = currentImage
         hideMetalOverlay()
     }
 
@@ -426,8 +427,14 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
             stopDisplayLink()
             let completed = curlFromRight ? (targetProgress > 0.5) : (targetProgress < 0.5)
             let forward = activeForward
-            if completed, let under = activeUnderImage {
-                restingImageView.image = under
+            // 从左向右回卷时，新页面是展开覆盖在上的 activeFrontImage，而非底层 activeUnderImage。
+            if completed {
+                let landedImage = curlFromRight ? activeUnderImage : activeFrontImage
+                if let landedImage {
+                    restingImageView.image = landedImage
+                }
+            } else {
+                restingImageView.image = currentImage
             }
             activeFrontImage = nil
             activeUnderImage = nil

@@ -208,17 +208,7 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
             do {
                 // 冷启动等待可随时取消，就绪即结束；不能把尚在初始化的 WebKit 按邻页预算误判为失败。
                 try await self.waitForPage(in: real, maximumAttempts: 1000)
-                for web in self.visibleWebViews(in: real) {
-                    let config = WKSnapshotConfiguration()
-                    config.rect = CGRect(x: 0, y: 0, width: 1, height: 1)
-                    config.afterScreenUpdates = true
-                    let _: UIImage = try await withCheckedThrowingContinuation { continuation in
-                        web.takeSnapshot(with: config) { image, error in
-                            if let image { continuation.resume(returning: image) }
-                            else { continuation.resume(throwing: error ?? CurlError.notReady) }
-                        }
-                    }
-                }
+                try await self.waitForWebPresentation(in: real)
                 try Task.checkCancellation()
                 self.firstPresentedKey = self.key
 #if DEBUG
@@ -541,6 +531,20 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
         }
         walk(root); return result
     }
+    private func waitForWebPresentation(in source: EPUBNavigatorViewController) async throws {
+        for web in visibleWebViews(in: source) {
+            try Task.checkCancellation()
+            let config = WKSnapshotConfiguration()
+            config.rect = CGRect(x: 0, y: 0, width: 1, height: 1)
+            config.afterScreenUpdates = true
+            let _: UIImage = try await withCheckedThrowingContinuation { continuation in
+                web.takeSnapshot(with: config) { image, error in
+                    if let image { continuation.resume(returning: image) }
+                    else { continuation.resume(throwing: error ?? CurlError.notReady) }
+                }
+            }
+        }
+    }
     private func waitForPage(in source: EPUBNavigatorViewController? = nil, maximumAttempts: Int = 180) async throws {
         var previous = "", stable = 0
         for _ in 0..<maximumAttempts {
@@ -843,9 +847,12 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
                 self.performQueuedTurn()
             }
             self.commitTask = nil
-            // 揭开纸面前确认真实页已绘制，避免露出尚未完成渲染的中间帧。
+            // 揭开纸面前确认真实页排版与 WebKit 合成均已提交，避免露出尚未完成渲染的中间帧。
             if !self.turning, self.pendingCommits.isEmpty, let navigator = self.navigator {
                 try? await self.waitForPage(in: navigator, maximumAttempts: 50)
+                if !self.turning, !self.cancelling, self.pendingCommits.isEmpty {
+                    try? await self.waitForWebPresentation(in: navigator)
+                }
             }
             self.updatePaperVisibility()
             self.endSessionIfIdle()
