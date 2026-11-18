@@ -167,7 +167,7 @@ struct LibrarySelectionToolbar: ToolbarContent {
     }
 }
 
-/// 多选时显示在底部的批量操作：移入系列、移出系列、删除。只作用于当前列出且已选中的书。
+/// 多选时显示在底部的批量操作：移入系列、移出系列、删除、压缩分享。只作用于当前列出且已选中的书。
 struct LibrarySelectionBar: View {
     let books: [LibraryBook]
     @ObservedObject var actions: LibraryBookActions
@@ -183,25 +183,47 @@ struct LibrarySelectionBar: View {
     private var selected: [LibraryBook] { books.filter { actions.selectedKeys.contains($0.key) } }
     private var shareableCount: Int { selected.filter { !$0.isCloudOnly }.count }
 
+    private var usesAccessibilityGrid: Bool {
+        dynamicTypeSize.isAccessibilitySize
+    }
+
+    private var stacksCountAboveActions: Bool {
+        guard !usesAccessibilityGrid, availableWidth > 0 else { return false }
+        return availableWidth < 360 || (availableWidth < 460 && dynamicTypeSize >= .xxLarge)
+    }
+
+    private var isRegularWide: Bool {
+        horizontalSizeClass == .regular && (availableWidth == 0 || availableWidth >= 560)
+    }
+
     var body: some View {
         Group {
-            if availableWidth < 560 || horizontalSizeClass != .regular || dynamicTypeSize.isAccessibilitySize {
+            if usesAccessibilityGrid {
                 VStack(alignment: .leading, spacing: 8) {
                     selectionCount
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                        actionButtons
+                        actionButtons(expanded: true)
+                    }
+                }
+            } else if stacksCountAboveActions {
+                VStack(alignment: .leading, spacing: 6) {
+                    selectionCount
+                    HStack(spacing: 4) {
+                        actionButtons(expanded: true)
                     }
                 }
             } else {
-                HStack(spacing: 12) {
+                HStack(spacing: 8) {
                     selectionCount
                     Spacer(minLength: 4)
-                    actionButtons
+                    HStack(spacing: isRegularWide ? 12 : 6) {
+                        actionButtons(expanded: false)
+                    }
                 }
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .frame(maxWidth: 1152)
         .frame(maxWidth: .infinity)
         .background(GeometryReader { geometry in
@@ -216,10 +238,12 @@ struct LibrarySelectionBar: View {
         Text("已选 \(selected.count) 本")
             .font(.subheadline.weight(.medium))
             .foregroundStyle(NoveliaStyle.ink)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     @ViewBuilder
-    private var actionButtons: some View {
+    private func actionButtons(expanded: Bool) -> some View {
         let selected = selected
         let inSeries = selected.filter { state.series.seriesID(forBook: $0.key) != nil }
         Menu {
@@ -240,24 +264,24 @@ struct LibrarySelectionBar: View {
                 Label("新建系列…", systemImage: "plus")
             }
         } label: {
-            barLabel("移入系列", systemImage: "rectangle.stack.badge.plus")
+            barLabel("移入系列", systemImage: "rectangle.stack.badge.plus", expanded: expanded)
         }
         .disabled(selected.isEmpty)
         Button {
             inSeries.forEach { state.assign($0, to: nil) }
             actions.endSelection()
         } label: {
-            barLabel("移出系列", systemImage: "rectangle.stack.badge.minus")
+            barLabel("移出系列", systemImage: "rectangle.stack.badge.minus", expanded: expanded)
         }
         .disabled(inSeries.isEmpty)
         Button(role: .destructive) { actions.pendingDelete = selected } label: {
-            barLabel("删除", systemImage: "trash")
+            barLabel("删除", systemImage: "trash", expanded: expanded)
         }
         .disabled(selected.isEmpty)
         Button {
             actions.prepareArchiveShare(books: selected, title: "\(archiveTitle) \(selected.count) 本")
         } label: {
-            barLabel("压缩分享", systemImage: "doc.zipper")
+            barLabel("压缩分享", systemImage: "doc.zipper", expanded: expanded)
         }
         .disabled(shareableCount == 0 || actions.isPreparingArchive)
         .accessibilityHint(shareableCount < selected.count
@@ -265,13 +289,15 @@ struct LibrarySelectionBar: View {
                            : "把选中的书打成一个压缩包后分享")
     }
 
-    private func barLabel(_ title: String, systemImage: String) -> some View {
+    private func barLabel(_ title: String, systemImage: String, expanded: Bool) -> some View {
         VStack(spacing: 2) {
             Image(systemName: systemImage).font(.system(size: 17))
-            Text(title).font(.caption2)
+            Text(title)
+                .font(.caption2)
+                .lineLimit(1)
         }
-        .frame(minWidth: 56, minHeight: 44)
-        .frame(maxWidth: .infinity)
+        .frame(minWidth: expanded ? 48 : (isRegularWide ? 56 : 50), minHeight: 44)
+        .frame(maxWidth: expanded ? .infinity : nil)
     }
 }
 

@@ -1249,12 +1249,19 @@ final class TapTests: XCTestCase {
   let selected = count.label
   for orientation in [UIDeviceOrientation.portrait, .landscapeLeft, .portrait] {
    XCUIDevice.shared.orientation = orientation
+   var rowMidYs: [CGFloat] = []
    for label in ["移入系列", "移出系列", "删除", "压缩分享"] {
     let button = app.buttons[label].firstMatch
     XCTAssertTrue(button.waitForExistence(timeout: 10))
     XCTAssertTrue(button.isHittable)
     XCTAssertGreaterThanOrEqual(button.frame.minX, app.frame.minX)
     XCTAssertLessThanOrEqual(button.frame.maxX, app.frame.maxX)
+    rowMidYs.append(button.frame.midY)
+   }
+   if let firstMidY = rowMidYs.first {
+    for midY in rowMidYs {
+     XCTAssertLessThanOrEqual(abs(midY - firstMidY), 4)
+    }
    }
    XCTAssertEqual(count.label, selected)
    let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
