@@ -416,10 +416,9 @@ struct LibraryBookActionDialogs: ViewModifier {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge))
                 }
             }
-            .confirmationDialog(
+            .alert(
                 deleteTitle,
                 isPresented: $actions.isShowingDeleteConfirmation,
-                titleVisibility: .visible,
                 presenting: actions.pendingDelete
             ) { books in
                 let localCount = books.filter { !$0.isCloudOnly }.count
@@ -435,18 +434,14 @@ struct LibraryBookActionDialogs: ViewModifier {
                 }
                 Button("取消", role: .cancel) { actions.pendingDelete = [] }
             } message: { books in
-                if syncStore.isEnabled {
-                    Text(books.allSatisfy(\.isCloudOnly)
-                         ? "将删除 WebDAV 中的副本。其他设备同步后也会删除各自已下载的这些书。"
-                         : "仅删除本机时，WebDAV 中的副本会保留，之后显示为未下载。同时删除云端副本后，其他设备同步时也会删除各自已下载的这些书。")
-                } else {
-                    Text("将从本机删除书籍文件。")
-                }
+                let base: String = syncStore.isEnabled
+                    ? (books.allSatisfy(\.isCloudOnly)
+                       ? "将删除 WebDAV 中的副本。其他设备同步后也会删除各自已下载的这些书。"
+                       : "仅删除本机时，WebDAV 中的副本会保留，之后显示为未下载。同时删除云端副本后，其他设备同步时也会删除各自已下载的这些书。")
+                    : "将从本机删除书籍文件。"
                 let targets = state.booksForDeletion(books, from: state.books(web: webDownloads, wenku: wenkuDownloads, cloud: syncStore.cloudBooks))
                 let hiddenCount = targets.count - books.count
-                if hiddenCount > 0 {
-                    Text("另有 \(hiddenCount) 个合并显示的同内容副本，将一并删除。")
-                }
+                Text(hiddenCount > 0 ? "\(base)\n另有 \(hiddenCount) 个合并显示的同内容副本，将一并删除。" : base)
             }
             .alert("新建系列", isPresented: .init(get: { !actions.newSeriesBooks.isEmpty }, set: { if !$0 { actions.newSeriesBooks = [] } })) {
                 TextField("系列名称", text: $actions.newSeriesName)
@@ -471,13 +466,13 @@ struct LibraryBookActionDialogs: ViewModifier {
                     actions.renamingSeries = nil
                 }
             }
-            .confirmationDialog(
+            .alert(
                 "解散系列“\(actions.dissolvingSeries?.name ?? "")”？",
                 isPresented: .init(get: { actions.dissolvingSeries != nil }, set: { if !$0 { actions.dissolvingSeries = nil } }),
-                titleVisibility: .visible,
                 presenting: actions.dissolvingSeries
             ) { target in
                 Button("解散系列", role: .destructive) { state.deleteSeries(target.id) }
+                Button("取消", role: .cancel) { actions.dissolvingSeries = nil }
             } message: { _ in
                 Text("系列中的书会移出系列，书籍文件和阅读进度都会保留。")
             }

@@ -167,11 +167,11 @@ private struct ReadingOverviewMetrics: View {
 
     var body: some View {
         if usesGrid {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 10) {
-                cell("今日", value: today)
-                cell("本周", value: week)
-                cell("累计", value: total)
-                cell("阅读天数", value: days)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                cell("今日", value: today, icon: "sun.max.fill", tint: NoveliaStyle.brandGreen)
+                cell("本周", value: week, icon: "calendar", tint: Color.blue)
+                cell("累计", value: total, icon: "clock.fill", tint: Color.purple)
+                cell("阅读天数", value: days, icon: "flame.fill", tint: Color.orange)
             }
             .padding(.vertical, 4)
         } else {
@@ -182,11 +182,33 @@ private struct ReadingOverviewMetrics: View {
         }
     }
 
-    private func cell(_ title: String, value: String) -> some View {
-        CompatLabeledContent(title, value: value)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(NoveliaStyle.paper.opacity(0.65), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
+    private func cell(_ title: String, value: String, icon: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(tint)
+                Text(title)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(NoveliaStyle.muted)
+            }
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded).monospacedDigit())
+                .foregroundStyle(NoveliaStyle.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(NoveliaStyle.paper.opacity(0.75), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium, style: .continuous)
+                .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(value)
     }
 }
 

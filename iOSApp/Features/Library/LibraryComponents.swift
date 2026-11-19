@@ -11,8 +11,9 @@ struct FeaturedNovelCard: View {
             BookCover(novel: novel, width: 82, height: 112)
             VStack(alignment: .leading, spacing: 7) {
                 Text(novel.title)
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
                     .foregroundStyle(NoveliaStyle.ink)
+                    .lineLimit(2)
                 Text(novel.author)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(NoveliaStyle.muted)
@@ -27,8 +28,8 @@ struct FeaturedNovelCard: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(13)
-        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 19))
+        .padding(14)
+        .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
     }
 }
 
@@ -42,11 +43,12 @@ struct NovelRow: View {
                 Text(novel.title)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .foregroundStyle(NoveliaStyle.ink)
+                    .lineLimit(2)
                 Text(novel.author)
                     .font(NoveliaStyle.fontFootnote)
                     .foregroundStyle(NoveliaStyle.muted)
                 Text(metadata(for: novel))
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
                     .foregroundStyle(NoveliaStyle.muted.opacity(0.85))
             }
             Spacer()
@@ -54,8 +56,8 @@ struct NovelRow: View {
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(NoveliaStyle.muted.opacity(0.5))
         }
-        .padding(11)
-        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 17))
+        .padding(12)
+        .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
     }
 
     private func metadata(for novel: Novel) -> String {
@@ -81,30 +83,32 @@ struct BookCover: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium)
-                .fill(LinearGradient(
-                    colors: [NoveliaStyle.accent(for: novel.accent), NoveliaStyle.ink.opacity(0.95)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ))
+            LinearGradient(
+                colors: [NoveliaStyle.accent(for: novel.accent), NoveliaStyle.accent(for: novel.accent).opacity(0.72), NoveliaStyle.ink.opacity(0.92)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
             Circle()
-                .fill(.white.opacity(0.12))
-                .frame(width: width * 0.8)
+                .fill(.white.opacity(0.11))
+                .frame(width: width * 0.85)
                 .offset(x: width * 0.42, y: -height * 0.48)
             VStack(alignment: .leading, spacing: 4) {
                 Image(systemName: novel.accent == .ocean ? "water.waves" : "moon.stars.fill")
-                    .font(.system(size: 13, weight: .light))
+                    .font(.system(size: max(10, width * 0.16), weight: .light))
                     .foregroundStyle(.white.opacity(0.75))
+                Spacer(minLength: 2)
                 Text(novel.title)
-                    .font(.system(size: max(9, width * 0.16), weight: .bold, design: .rounded))
+                    .font(.system(size: max(9, width * 0.155), weight: .bold, design: .serif))
                     .foregroundStyle(.white)
                     .lineLimit(3)
                     .minimumScaleFactor(0.75)
             }
-            .padding(width * 0.12)
+            .padding(.leading, max(8, width * 0.14))
+            .padding(.trailing, max(6, width * 0.10))
+            .padding(.vertical, max(7, height * 0.10))
         }
         .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
+        .noveliaBookCoverStyle(cornerRadius: NoveliaStyle.radiusSmall, elevated: false)
         .accessibilityLabel("\(novel.title) 封面")
     }
 }
@@ -133,7 +137,8 @@ struct LibraryBookRow: View {
 
     var body: some View {
         let hash = state.hashByBook[book.key] ?? book.cloudFileHash
-        HStack(alignment: .center, spacing: 4) {
+        let isSplitSelected = !isSelecting && browseSelectedID == "library:" + book.key
+        HStack(alignment: .top, spacing: 6) {
             LibraryBookRowContent(book: book, status: state.status(for: book),
                                   wordCount: wordCounts.total(hash: hash))
                 .contentShape(Rectangle())
@@ -153,7 +158,7 @@ struct LibraryBookRow: View {
                 .accessibilityHint(isSelecting ? "切换选择" : (browseSelection == nil ? "打开阅读" : "查看书籍详情"))
                 .accessibilityAction(named: "多选") { actions.beginSelection(with: book) }
                 .accessibilityIdentifier("library-book-\(book.key)")
-        .hoverEffect(.highlight)
+                .hoverEffect(.highlight)
                 .onAppear { if let hash { wordCounts.request(book, hash: hash) } }
                 .onValueChange(of: hash) { _, hash in if let hash { wordCounts.request(book, hash: hash) } }
                 .onDisappear { if let hash { wordCounts.cancel(hash: hash) } }
@@ -161,7 +166,7 @@ struct LibraryBookRow: View {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
                     .foregroundStyle(isSelected ? NoveliaStyle.brandGreen : NoveliaStyle.muted)
-                    .frame(width: 44, height: 44)
+                    .frame(width: 40, height: 78)
                     .contentShape(Rectangle())
                     .onTapGesture { actions.toggleSelection(book) }
                     .accessibilityLabel(isSelected ? "已选择：\(book.title)" : "未选择：\(book.title)")
@@ -171,23 +176,34 @@ struct LibraryBookRow: View {
                     menuItems(for: book)
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(NoveliaStyle.muted)
-                        .frame(width: 44, height: 44)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(NoveliaStyle.muted.opacity(0.75))
+                        .frame(width: 36, height: 34, alignment: .trailing)
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel("更多操作：\(book.title)")
                 .hoverEffect(.highlight)
             }
         }
-        .padding(.leading, 10)
         .padding(.vertical, 8)
-        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14)
-            .stroke(!isSelecting && browseSelectedID == "library:" + book.key ? NoveliaStyle.brandGreen : .clear, lineWidth: 2)
-            .allowsHitTesting(false))
+        .padding(.horizontal, isSplitSelected ? 10 : 0)
+        .background {
+            if isSplitSelected {
+                RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium, style: .continuous)
+                    .fill(NoveliaStyle.brandGreen.opacity(0.09))
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if !isSplitSelected {
+                Rectangle()
+                    .fill(NoveliaStyle.hairline)
+                    .frame(height: 0.5)
+                    .padding(.leading, 72)
+                    .allowsHitTesting(false)
+            }
+        }
         .pointerBookMenu { if !isSelecting { menuItems(for: book) } }
-        .accessibilityAddTraits(!isSelecting && browseSelectedID == "library:" + book.key ? .isSelected : [])
+        .accessibilityAddTraits(isSplitSelected ? .isSelected : [])
     }
 
     @ViewBuilder
@@ -400,14 +416,27 @@ private struct LibraryBookGridCell: View {
     @ViewBuilder
     private var cellContent: some View {
         let status = state.status(for: book)
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topTrailing) {
                 GeometryReader { geometry in
-                    LibraryCoverView(book: book, width: geometry.size.width,
-                                     height: geometry.size.height)
+                    ZStack(alignment: .bottom) {
+                        LibraryCoverView(book: book, width: geometry.size.width,
+                                         height: geometry.size.height, elevated: false)
+                        if let fraction = status.fraction, fraction > 0.005 {
+                            Capsule()
+                                .fill(Color.black.opacity(0.28))
+                                .overlay {
+                                    Capsule()
+                                        .fill(NoveliaStyle.brandGreen)
+                                        .scaleEffect(x: min(1, max(0, fraction)), y: 1, anchor: .leading)
+                                }
+                                .frame(height: 3.5)
+                                .padding(.horizontal, 6)
+                                .padding(.bottom, 6)
+                        }
+                    }
                 }
                 .aspectRatio(96.0 / 134.0, contentMode: .fit)
-                .shadow(color: .black.opacity(0.08), radius: 3, x: 0, y: 2)
                 if isSelecting {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 20))
@@ -415,18 +444,21 @@ private struct LibraryBookGridCell: View {
                         .background(Circle().fill(NoveliaStyle.paper))
                         .offset(x: 4, y: -4)
                 } else if book.cloudFileMissing {
-                    Image(systemName: "exclamationmark.icloud")
-                        .foregroundStyle(NoveliaStyle.warning)
-                        .padding(4)
-                        .background(Circle().fill(NoveliaStyle.paper))
-                        .offset(x: 4, y: -4)
+                    Image(systemName: "exclamationmark.icloud.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(5)
+                        .background(NoveliaStyle.warning, in: Circle())
+                        .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+                        .offset(x: 3, y: -3)
                         .accessibilityLabel("云端文件缺失")
                 } else if book.isCloudOnly {
-                    Image(systemName: "icloud")
-                        .foregroundStyle(NoveliaStyle.muted)
-                        .padding(4)
-                        .background(Circle().fill(NoveliaStyle.paper))
-                        .offset(x: 4, y: -4)
+                    Image(systemName: "icloud.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(5)
+                        .background(Color.black.opacity(0.55), in: Circle())
+                        .offset(x: 3, y: -3)
                         .accessibilityLabel("未下载")
                 }
             }
@@ -452,55 +484,88 @@ private struct LibraryBookRowContent: View {
     /// 全书字数；尚未统计或无法统计时不显示。
     let wordCount: Int?
 
+    private var metaLine: String {
+        var parts = [book.format.title]
+        if let wordCount { parts.append(BookWordCount.format(wordCount)) }
+        return parts.joined(separator: " · ")
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
-            LibraryCoverView(book: book, width: 50, height: 70)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(book.title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(NoveliaStyle.ink)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Text(book.author.isEmpty ? "未知作者" : book.author)
-                    .font(NoveliaStyle.fontFootnote)
-                    .foregroundStyle(NoveliaStyle.muted)
-                    .lineLimit(1)
-                HStack(spacing: 6) {
-                    if book.cloudFileMissing {
-                        Image(systemName: "exclamationmark.icloud")
-                            .foregroundStyle(NoveliaStyle.warning)
-                            .accessibilityLabel("云端文件缺失")
-                    } else if book.isCloudOnly {
-                        Image(systemName: "icloud")
-                            .foregroundStyle(NoveliaStyle.muted)
-                            .accessibilityLabel("未下载")
-                    }
-                    Text(book.format.title)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(NoveliaStyle.brandGreen)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(NoveliaStyle.brandGreen.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                    Text(wordCount.map(BookWordCount.format) ?? "")
+        HStack(alignment: .top, spacing: 14) {
+            LibraryCoverView(book: book, width: 56, height: 78)
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(book.title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(NoveliaStyle.ink)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Text(book.author.isEmpty ? "未知作者" : book.author)
+                        .font(.system(size: 13))
+                        .foregroundStyle(NoveliaStyle.muted)
                         .lineLimit(1)
-                    Spacer(minLength: 4)
-                    Text(status.detail)
-                        .foregroundStyle(status.isUnread ? NoveliaStyle.muted : NoveliaStyle.brandGreen)
                 }
-                .font(NoveliaStyle.fontCaption)
-                .foregroundStyle(NoveliaStyle.muted)
+                Spacer(minLength: 6)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 5) {
+                        if book.cloudFileMissing {
+                            Image(systemName: "exclamationmark.icloud.fill")
+                                .foregroundStyle(NoveliaStyle.warning)
+                                .accessibilityLabel("云端文件缺失")
+                        } else if book.isCloudOnly {
+                            Image(systemName: "icloud")
+                                .foregroundStyle(NoveliaStyle.muted)
+                                .accessibilityLabel("未下载")
+                        }
+                        Text(metaLine)
+                            .lineLimit(1)
+                        Spacer(minLength: 6)
+                        Text(status.detail)
+                            .font(.system(size: 11, weight: status.isUnread ? .regular : .medium).monospacedDigit())
+                            .foregroundStyle(status.isUnread ? NoveliaStyle.muted.opacity(0.8) : NoveliaStyle.brandGreen)
+                    }
+                    .font(.system(size: 11))
+                    .foregroundStyle(NoveliaStyle.muted.opacity(0.9))
+
+                    if let fraction = status.fraction, fraction > 0.005 {
+                        Capsule()
+                            .fill(Color.primary.opacity(0.08))
+                            .overlay {
+                                Capsule()
+                                    .fill(NoveliaStyle.brandGreen)
+                                    .scaleEffect(x: min(1, max(0, fraction)), y: 1, anchor: .leading)
+                            }
+                            .frame(height: 2.5)
+                    }
+                }
             }
+            .frame(minHeight: 78, alignment: .top)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .accessibilityElement(children: .combine)
     }
 }
 
-/// 封面；缺少封面时所有书使用同一种占位样式。
+/// 封面；缺少封面时按书名哈希生成带书脊与衬线排版的纸质书封面，避免书架出现大片重复图标。
 struct LibraryCoverView: View {
     let book: LibraryBook
     var width: CGFloat
     var height: CGFloat
+    var elevated = false
+
+    private static let generatedPalettes: [(top: Color, bottom: Color, ink: Color)] = [
+        (Color(red: 0.24, green: 0.34, blue: 0.31), Color(red: 0.14, green: 0.21, blue: 0.19), Color(white: 0.95)), // 青瓷深绿
+        (Color(red: 0.25, green: 0.31, blue: 0.42), Color(red: 0.15, green: 0.19, blue: 0.28), Color(white: 0.95)), // 靛蓝纸
+        (Color(red: 0.44, green: 0.30, blue: 0.27), Color(red: 0.28, green: 0.18, blue: 0.16), Color(white: 0.96)), // 陶土红棕
+        (Color(red: 0.36, green: 0.29, blue: 0.40), Color(red: 0.22, green: 0.17, blue: 0.26), Color(white: 0.95)), // 暮紫
+        (Color(red: 0.38, green: 0.35, blue: 0.29), Color(red: 0.24, green: 0.22, blue: 0.18), Color(white: 0.95)), // 羊皮褐
+        (Color(red: 0.23, green: 0.26, blue: 0.29), Color(red: 0.14, green: 0.16, blue: 0.18), Color(white: 0.94)), // 墨灰
+    ]
+
+    private var palette: (top: Color, bottom: Color, ink: Color) {
+        let hash = book.title.unicodeScalars.reduce(0) { ($0 &* 31) &+ Int($1.value) }
+        return Self.generatedPalettes[abs(hash) % Self.generatedPalettes.count]
+    }
 
     var body: some View {
         Group {
@@ -511,22 +576,121 @@ struct LibraryCoverView: View {
             }
         }
         .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .noveliaBookCoverStyle(cornerRadius: NoveliaStyle.radiusSmall, elevated: elevated)
         .accessibilityHidden(true)
     }
 
     private var placeholder: some View {
-        ZStack {
-            // 先铺不透明底色，系列封面叠放时不会透出后面的封面。
-            RoundedRectangle(cornerRadius: 7).fill(NoveliaStyle.card)
-            RoundedRectangle(cornerRadius: 7).fill(NoveliaStyle.brandGreen.opacity(0.12))
-            VStack(spacing: 3) {
-                Image(systemName: "book.closed.fill")
-                    .font(.system(size: width * 0.34))
+        let theme = palette
+        return ZStack(alignment: .topLeading) {
+            LinearGradient(
+                colors: [theme.top, theme.bottom],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            // 装订线装饰
+            Rectangle()
+                .fill(theme.ink.opacity(0.18))
+                .frame(width: 1)
+                .padding(.leading, max(6, width * 0.12))
+            VStack(alignment: .leading, spacing: max(2, height * 0.03)) {
+                Text(book.title)
+                    .font(.system(size: max(8, min(14, width * 0.145)), weight: .semibold, design: .serif))
+                    .foregroundStyle(theme.ink)
+                    .lineLimit(width < 56 ? 2 : 3)
+                    .multilineTextAlignment(.leading)
+                    .minimumScaleFactor(0.75)
+                if width >= 62, !book.author.isEmpty {
+                    Text(book.author)
+                        .font(.system(size: max(7, min(10, width * 0.10)), weight: .regular))
+                        .foregroundStyle(theme.ink.opacity(0.68))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 2)
                 Text(book.format.title)
-                    .font(.system(size: max(8, width * 0.17), weight: .semibold))
+                    .font(.system(size: max(7, min(9, width * 0.12)), weight: .bold, design: .monospaced))
+                    .foregroundStyle(theme.ink.opacity(0.82))
+                    .padding(.horizontal, max(3, width * 0.05))
+                    .padding(.vertical, 1.5)
+                    .background(theme.ink.opacity(0.14), in: RoundedRectangle(cornerRadius: 3, style: .continuous))
             }
-            .foregroundStyle(NoveliaStyle.brandGreen)
+            .padding(.leading, max(9, width * 0.18))
+            .padding(.trailing, max(5, width * 0.10))
+            .padding(.vertical, max(6, height * 0.10))
+        }
+    }
+}
+
+/// 顶部「继续阅读」横向大封面书架：直接展示最近阅读的书籍，与下方极简列表形成视觉层次。
+struct LibraryRecentCarousel: View {
+    let books: [LibraryBook]
+    let open: (LibraryBook) -> Void
+    @EnvironmentObject private var state: LibraryStateStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("继续阅读")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(NoveliaStyle.ink)
+                Spacer()
+                if books.count > 1 {
+                    Text("最近 \(books.count) 本")
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(NoveliaStyle.muted)
+                }
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(books) { book in
+                        let status = state.status(for: book)
+                        Button {
+                            NoveliaHaptics.light()
+                            open(book)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ZStack(alignment: .bottom) {
+                                    LibraryCoverView(book: book, width: 88, height: 124, elevated: false)
+                                    if let fraction = status.fraction, fraction > 0.005 {
+                                        ZStack(alignment: .leading) {
+                                            Capsule()
+                                                .fill(Color.black.opacity(0.32))
+                                                .frame(width: 76, height: 3.5)
+                                            Capsule()
+                                                .fill(NoveliaStyle.brandGreen)
+                                                .frame(width: 76 * min(1, max(0, fraction)), height: 3.5)
+                                        }
+                                        .padding(.bottom, 6)
+                                    }
+                                }
+                                .frame(width: 88, height: 124)
+
+                                Text(book.title)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(NoveliaStyle.ink)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                                    .frame(width: 88, height: 34, alignment: .topLeading)
+
+                                Text(status.detail)
+                                    .font(.system(size: 10, weight: .medium).monospacedDigit())
+                                    .foregroundStyle(status.isUnread ? NoveliaStyle.muted : NoveliaStyle.brandGreen)
+                                    .lineLimit(1)
+                                    .frame(width: 88, alignment: .leading)
+                            }
+                            .frame(width: 88, alignment: .topLeading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("继续阅读 \(book.title)，\(status.detail)")
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 4)
+            }
+            .frame(height: 192)
         }
     }
 }
@@ -538,47 +702,66 @@ struct LibraryContinueReadingCard: View {
 
     var body: some View {
         let status = state.status(for: book)
-        Button(action: open) {
-            HStack(spacing: 14) {
-                LibraryCoverView(book: book, width: 62, height: 86)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("继续阅读")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(NoveliaStyle.brandGreen)
+        let shape = RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
+        Button {
+            NoveliaHaptics.light()
+            open()
+        } label: {
+            HStack(alignment: .top, spacing: 14) {
+                LibraryCoverView(book: book, width: 60, height: 84, elevated: false)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 6) {
+                        Text("继续阅读")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                        Spacer(minLength: 4)
+                        if let lastReadAt = status.lastReadAt {
+                            Text(Self.relative(lastReadAt))
+                                .font(.system(size: 11))
+                                .foregroundStyle(NoveliaStyle.muted.opacity(0.85))
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(NoveliaStyle.muted.opacity(0.55))
+                    }
                     Text(book.title)
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(NoveliaStyle.ink)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
+                        .padding(.top, 4)
                     if !book.author.isEmpty {
                         Text(book.author)
-                            .font(NoveliaStyle.fontFootnote)
+                            .font(.system(size: 12))
                             .foregroundStyle(NoveliaStyle.muted)
                             .lineLimit(1)
+                            .padding(.top, 2)
                     }
-                    if let fraction = status.fraction {
-                        ProgressView(value: min(1, max(0, fraction)))
-                            .tint(NoveliaStyle.brandGreen)
+                    Spacer(minLength: 8)
+                    HStack(spacing: 8) {
+                        if let fraction = status.fraction {
+                            GeometryReader { bar in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(Color.primary.opacity(0.08))
+                                    Capsule()
+                                        .fill(NoveliaStyle.brandGreen)
+                                        .frame(width: bar.size.width * min(1, max(0, fraction)))
+                                }
+                            }
+                            .frame(height: 3)
+                        }
+                        Text(status.detail)
+                            .font(.system(size: 11, weight: .medium).monospacedDigit())
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .fixedSize()
                     }
-                    Text([status.detail, status.lastReadAt.map(Self.relative)].compactMap { $0 }.joined(separator: " · "))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(NoveliaStyle.muted)
                 }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(NoveliaStyle.brandGreen)
-                    .frame(width: 44, height: 44)
-                    .background(NoveliaStyle.brandGreen.opacity(0.10), in: Circle())
+                .frame(minHeight: 84, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(16)
-            .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 17))
-            .overlay(alignment: .leading) {
-                Capsule().fill(NoveliaStyle.brandGreen)
-                    .frame(width: 3).padding(.vertical, 18)
-                    .accessibilityHidden(true)
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 17))
+            .padding(14)
+            .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
+            .contentShape(shape)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("继续阅读 \(book.title)，\(status.detail)")
@@ -597,22 +780,29 @@ struct LibrarySeriesRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            ZStack(alignment: .bottomTrailing) {
+            ZStack(alignment: .bottomLeading) {
+                if books.count > 2 {
+                    LibraryCoverView(book: books[2], width: 44, height: 62)
+                        .rotationEffect(.degrees(7))
+                        .opacity(0.55)
+                        .offset(x: 16, y: -10)
+                }
                 if books.count > 1 {
                     LibraryCoverView(book: books[1], width: 46, height: 64)
-                        .opacity(0.5)
-                        .offset(x: 10, y: -8)
+                        .rotationEffect(.degrees(3.5))
+                        .opacity(0.78)
+                        .offset(x: 8, y: -5)
                 }
                 if let first = books.first {
-                    LibraryCoverView(book: first, width: 46, height: 64)
+                    LibraryCoverView(book: first, width: 48, height: 66, elevated: false)
                 } else {
-                    RoundedRectangle(cornerRadius: 7)
+                    RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous)
                         .fill(NoveliaStyle.brandGreen.opacity(0.12))
-                        .frame(width: 46, height: 64)
+                        .frame(width: 48, height: 66)
                         .overlay(Image(systemName: "rectangle.stack").foregroundStyle(NoveliaStyle.brandGreen))
                 }
             }
-            .frame(width: 58, height: 72, alignment: .bottomLeading)
+            .frame(width: 68, height: 76, alignment: .bottomLeading)
             VStack(alignment: .leading, spacing: 4) {
                 Text(name)
                     .font(.system(size: 16, weight: .semibold))
@@ -627,9 +817,15 @@ struct LibrarySeriesRow: View {
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(NoveliaStyle.muted.opacity(0.6))
         }
-        .padding(12)
-        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
-        .contentShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(NoveliaStyle.hairline)
+                .frame(height: 0.5)
+                .padding(.leading, 82)
+                .allowsHitTesting(false)
+        }
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 }

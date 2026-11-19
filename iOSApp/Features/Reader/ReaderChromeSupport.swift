@@ -34,6 +34,7 @@ struct ReaderPositionLabel: View {
     var body: some View {
         let text = texts[style] ?? texts.values.first ?? ""
         Button {
+            NoveliaHaptics.selection()
             storedStyle = Self.next(after: style).rawValue
         } label: {
             Text(text)
@@ -169,7 +170,10 @@ struct ReaderTopBarShell<MenuContent: View, TitleTrailer: View>: View {
         .foregroundStyle(.primary)
         .padding(.horizontal, 10)
         .frame(height: 48)
-        .background(.thinMaterial)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(NoveliaStyle.hairline).frame(height: 0.5)
+        }
     }
 }
 
@@ -215,7 +219,10 @@ struct ReaderBottomBarShell<Content: View>: View {
         .padding(.bottom, 10)
         .background {
             if showChrome {
-                Rectangle().fill(.thinMaterial)
+                Rectangle().fill(.ultraThinMaterial)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(NoveliaStyle.hairline).frame(height: 0.5)
+                    }
                     .ignoresSafeArea(edges: coversBottomSafeArea ? .bottom : [])
             } else if let hiddenBackground {
                 hiddenBackground.opacity(0.92)
@@ -391,6 +398,7 @@ struct ReaderStyleSheet: View {
     let onMarkIssue: () -> Void
     var supportsNativePageTurn = false
     var supportsReadiumPageTurn = false
+    @State private var screenBrightness: Double = Double(UIScreen.main.brightness)
 
     var body: some View {
         CompatNavigationStack {
@@ -401,18 +409,37 @@ struct ReaderStyleSheet: View {
                 }
 
                 Section {
+                    HStack(spacing: 12) {
+                        Image(systemName: "sun.min")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                        Slider(value: $screenBrightness, in: 0.05...1.0)
+                            .tint(NoveliaStyle.brandGreen)
+                            .onValueChange(of: screenBrightness) { _, value in
+                                UIScreen.main.brightness = CGFloat(value)
+                            }
+                            .accessibilityLabel("屏幕亮度")
+                            .accessibilityValue("\(Int((screenBrightness * 100).rounded()))%")
+                        Image(systemName: "sun.max.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(.vertical, 2)
                     NavigationLink("阅读背景") { ReaderBackgroundSettingsView() }
                     HStack(spacing: 10) {
                         ForEach(ReaderAppearance.allCases) { option in
                             ReaderThemeSwatch(option: option,
                                               isSelected: settings.appearanceRaw == option.rawValue) {
+                                NoveliaHaptics.selection()
                                 settings.appearanceRaw = option.rawValue
                             }
                         }
                     }
                     .padding(.vertical, 4)
                 } header: { Text("主题与背景") } footer: {
-                    Text("主题与背景即时生效；字体、字号和排版调整点击“应用”后保存。")
+                    Text("亮度、主题与背景即时生效；字体、字号和排版调整点击“应用”后保存。")
                 }
                 Section("分页") {
                     if supportsNativePageTurn {

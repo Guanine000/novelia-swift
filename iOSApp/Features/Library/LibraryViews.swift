@@ -121,9 +121,14 @@ struct LibraryView: View {
             } else if isSearching && !LibraryOrganizer.normalized(query).isEmpty {
                 searchResults(books)
             } else {
-                if let recent = recentBook(in: books) {
-                    LibraryContinueReadingCard(book: recent) { open(recent) }
-                        .libraryListRow()
+                let recent = recentBooks(in: books)
+                if !recent.isEmpty {
+                    LibraryRecentCarousel(books: recent) { open($0) }
+                        .frame(maxWidth: 1120)
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 10, trailing: 0))
                 }
                 // 全部包含已归入系列的书；未分组只列出没有系列归属的书。
                 let ungrouped = books.filter { state.series.seriesID(forBook: $0.key) == nil }
@@ -496,9 +501,11 @@ struct LibraryView: View {
         }
     }
 
-    private func recentBook(in books: [LibraryBook]) -> LibraryBook? {
+    private func recentBooks(in books: [LibraryBook], limit: Int = 8) -> [LibraryBook] {
         books.compactMap { book in state.status(for: book).lastReadAt.map { (book, $0) } }
-            .max { $0.1 < $1.1 }?.0
+            .sorted { $0.1 > $1.1 }
+            .prefix(limit)
+            .map(\.0)
     }
 
     private func sorted(_ books: [LibraryBook], options: LibrarySortOptions) -> [LibraryBook] {

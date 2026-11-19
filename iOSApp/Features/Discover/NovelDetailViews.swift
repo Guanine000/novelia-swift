@@ -73,15 +73,44 @@ struct NovelDetailView: View {
             }
 
             if let totalCharacters = displayNovel.totalCharacters, totalCharacters > 0 {
-                Text("\(totalCharacters.formatted()) 字")
-                    .font(.footnote.monospacedDigit())
-                    .foregroundStyle(NoveliaStyle.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Label("\(totalCharacters.formatted()) 字", systemImage: "text.alignleft")
+                        .font(.footnote.weight(.medium).monospacedDigit())
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(NoveliaStyle.muted.opacity(0.10), in: Capsule())
+                    if !displayNovel.chapters.isEmpty {
+                        Label("\(displayNovel.chapters.count) 章", systemImage: "list.bullet")
+                            .font(.footnote.weight(.medium).monospacedDigit())
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(NoveliaStyle.muted.opacity(0.10), in: Capsule())
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(22)
-        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 24))
+        .padding(20)
+        .background {
+            ZStack(alignment: .top) {
+                NoveliaStyle.card
+                LinearGradient(
+                    colors: [NoveliaStyle.accent(for: displayNovel.accent).opacity(0.12), .clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 88)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
+                .allowsHitTesting(false)
+        )
+        .shadow(color: NoveliaStyle.cardShadowColor, radius: 10, x: 0, y: 3)
     }
 
     private var introduction: some View {

@@ -414,11 +414,7 @@ private struct ForumPostCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
-                .stroke(isSelected ? NoveliaStyle.brandGreen : NoveliaStyle.muted.opacity(0.12), lineWidth: isSelected ? 2 : 1)
-        )
+        .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge, isSelected: isSelected)
     }
 }
 

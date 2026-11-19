@@ -214,6 +214,80 @@ enum NoveliaStyle {
     static let fontCaption = Font.system(size: 11)
     static let fontFootnote = Font.system(size: 12)
     static let fontBody = Font.system(size: 13)
+
+    /// 极细描边色：浅色纸面下勾勒卡片边缘，深色下柔和分隔层次。
+    static var hairline: Color {
+        Color(uiColor: UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(white: 1, alpha: 0.09)
+                : UIColor(white: 0, alpha: 0.06)
+        })
+    }
+
+    /// 轻弥散投影色：浅色下提供纸面浮起感，深色下收弱避免发灰。
+    static var cardShadowColor: Color {
+        Color(uiColor: UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(white: 0, alpha: 0.24)
+                : UIColor(white: 0, alpha: 0.05)
+        })
+    }
+}
+
+/// 轻量触觉反馈，统一用于书签、主题切换、筛选与翻页微交互。
+@MainActor
+enum NoveliaHaptics {
+    static func light() {
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.impactOccurred()
+    }
+
+    static func selection() {
+        let generator = UISelectionFeedbackGenerator()
+        generator.selectionChanged()
+    }
+}
+
+extension View {
+    /// 统一纸面卡片样式：连续曲率圆角 + 极细描边（列表滚动中不加离屏投影，避免掉帧）。
+    func noveliaCard(cornerRadius: CGFloat = NoveliaStyle.radiusLarge, isSelected: Bool = false) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return self
+            .background(NoveliaStyle.card, in: shape)
+            .overlay(
+                shape.stroke(
+                    isSelected ? NoveliaStyle.brandGreen : NoveliaStyle.hairline,
+                    lineWidth: isSelected ? 2 : 0.75
+                )
+                .allowsHitTesting(false)
+            )
+    }
+
+    /// 实体书封面质感：左侧书脊微高光与压痕 + 0.5pt 内描边；仅非滚动头图（`elevated: true`）叠加单层轻投影。
+    @ViewBuilder
+    func noveliaBookCoverStyle(cornerRadius: CGFloat = NoveliaStyle.radiusSmall, elevated: Bool = false) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let styled = self
+            .overlay(alignment: .leading) {
+                LinearGradient(
+                    colors: [.white.opacity(0.24), .black.opacity(0.12), .clear],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 4)
+                .allowsHitTesting(false)
+            }
+            .clipShape(shape)
+            .overlay(
+                shape.stroke(Color.primary.opacity(0.10), lineWidth: 0.5)
+                    .allowsHitTesting(false)
+            )
+        if elevated {
+            styled.shadow(color: .black.opacity(0.14), radius: 6, x: 0, y: 3)
+        } else {
+            styled
+        }
+    }
 }
 
 struct RootView: View {

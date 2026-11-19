@@ -278,9 +278,9 @@ struct WenkuNovelRow: View {
                 RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall).fill(NoveliaStyle.brandGreen.opacity(0.12))
                     .overlay(Image(systemName: "book.closed").foregroundStyle(NoveliaStyle.brandGreen))
             }
-            .frame(width: 72, height: 96).clipShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall))
+            .frame(width: 72, height: 96).noveliaBookCoverStyle(cornerRadius: NoveliaStyle.radiusSmall, elevated: false)
             VStack(alignment: .leading, spacing: 6) {
-                Text(novel.displayTitle).font(.system(size: 16, weight: .bold)).foregroundStyle(NoveliaStyle.ink).lineLimit(2)
+                Text(novel.displayTitle).font(.system(size: 16, weight: .bold, design: .rounded)).foregroundStyle(NoveliaStyle.ink).lineLimit(2)
                 if !novel.title.isEmpty && novel.title != novel.displayTitle {
                     Text(novel.title).font(NoveliaStyle.fontFootnote).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
                 }
@@ -294,9 +294,9 @@ struct WenkuNovelRow: View {
             Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary).padding(.top, 8)
         }
         .frame(minHeight: 112)
-        .padding(10)
-        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
-        .padding(.vertical, 5)
+        .padding(12)
+        .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
+        .padding(.vertical, 4)
     }
 }
 
@@ -416,14 +416,20 @@ struct WenkuDetailView: View {
     }
 
     private func header(_ detail: WenkuNovelDetail) -> some View {
-        HStack(alignment: .top, spacing: 14) {
+        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+        return HStack(alignment: .top, spacing: 16) {
             CoverImage(url: detail.cover.flatMap(URL.init(string:))) {
-                RoundedRectangle(cornerRadius: 10).fill(NoveliaStyle.brandGreen.opacity(0.12))
-                    .overlay(Image(systemName: "book.closed").font(.largeTitle).foregroundStyle(NoveliaStyle.brandGreen))
+                RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous)
+                    .fill(NoveliaStyle.brandGreen.opacity(0.14))
+                    .overlay(Image(systemName: "book.closed.fill").font(.title).foregroundStyle(NoveliaStyle.brandGreen))
             }
-            .frame(width: 112, height: 154).clipShape(RoundedRectangle(cornerRadius: 10))
+            .frame(width: 118, height: 164)
+            .noveliaBookCoverStyle(cornerRadius: NoveliaStyle.radiusSmall, elevated: true)
             VStack(alignment: .leading, spacing: 8) {
-                Text(detail.displayTitle).font(.system(size: 21, weight: .bold)).foregroundStyle(NoveliaStyle.ink)
+                Text(detail.displayTitle)
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundStyle(NoveliaStyle.ink)
+                    .fixedSize(horizontal: false, vertical: true)
                 if !detail.authors.isEmpty { metadataSearchLinks(label: "作者", values: detail.authors) }
                 if !detail.artists.isEmpty { metadataSearchLinks(label: "画师", values: detail.artists) }
                 if !detail.publisher.isNilOrEmpty, let publisher = detail.publisher {
@@ -432,9 +438,25 @@ struct WenkuDetailView: View {
                 if !detail.imprint.isNilOrEmpty, let imprint = detail.imprint {
                     metadataSearchValue(label: "文库", value: imprint)
                 }
-                Text(detail.level).font(.caption2.weight(.medium)).padding(.horizontal, 8).padding(.vertical, 4).background(NoveliaStyle.brandGreen.opacity(0.1), in: Capsule())
+                HStack(spacing: 6) {
+                    Text(detail.level)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(NoveliaStyle.brandGreen)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(NoveliaStyle.brandGreen.opacity(0.12), in: Capsule())
+                    if !detail.volumes.isEmpty {
+                        Text("\(detail.volumes.count) 卷")
+                            .font(.caption2.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(NoveliaStyle.muted.opacity(0.12), in: Capsule())
+                    }
+                }
                 Spacer(minLength: 4)
                 Button {
+                    NoveliaHaptics.light()
                     Task {
                         guard let account = auth.username else { auth.isLoginPresented = true; return }
                         let target = WenkuNovelOutline(
@@ -453,12 +475,34 @@ struct WenkuDetailView: View {
                         catch { favoriteError = error.localizedDescription }
                     }
                 } label: {
-                    Label(detail.favored == nil ? "收藏文库" : "取消收藏", systemImage: detail.favored == nil ? "heart" : "heart.fill")
+                    Label(detail.favored == nil ? "收藏文库" : "已收藏", systemImage: detail.favored == nil ? "heart" : "heart.fill")
                         .font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(detail.favored == nil ? .white : NoveliaStyle.brandGreen)
+                        .background(detail.favored == nil ? NoveliaStyle.brandGreen : NoveliaStyle.brandGreen.opacity(0.14), in: Capsule())
                 }
-                .buttonStyle(.borderedProminent).tint(NoveliaStyle.brandGreen)
+                .buttonStyle(.plain)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .background {
+            ZStack {
+                NoveliaStyle.card
+                if let url = detail.cover.flatMap(URL.init(string:)) {
+                    CoverImage(url: url) { Color.clear }
+                        .scaledToFill()
+                        .blur(radius: 42)
+                        .opacity(0.24)
+                        .allowsHitTesting(false)
+                }
+                Rectangle().fill(.ultraThinMaterial).opacity(0.68)
             }
         }
+        .clipShape(shape)
+        .overlay(shape.stroke(NoveliaStyle.hairline, lineWidth: 0.75).allowsHitTesting(false))
+        .shadow(color: NoveliaStyle.cardShadowColor, radius: 12, x: 0, y: 4)
         // 根视图全局开启文本选择时，选择手势会吞掉作者/出版社搜索链接文字上的点按。
         .textSelection(.disabled)
     }
