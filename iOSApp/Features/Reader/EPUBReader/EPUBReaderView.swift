@@ -705,7 +705,7 @@ private struct EPUBReaderPageSurface: View, Equatable {
                 annotationEditor = .init(range: range, quote: quote, annotation: nil)
             },
             curlEnabled: curlEnabled,
-            isRightToLeft: model.style.verticalText == true,
+            isRightToLeft: false,
             paperInsets: UIEdgeInsets(top: pageInsets.top, left: pageInsets.leading, bottom: pageInsets.bottom, right: pageInsets.trailing),
             paperColor: UIColor(model.pageBackgroundColor),
             paperBackground: settings.backgrounds.image(dark: model.isDarkMode, landscape: size.width > size.height),

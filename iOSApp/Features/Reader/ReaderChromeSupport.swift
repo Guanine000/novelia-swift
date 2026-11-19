@@ -598,16 +598,6 @@ struct ReaderStyleSheet: View {
                             Text(option.title).tag(option)
                         }
                     }
-                    Toggle(isOn: Binding(
-                        get: { draftStyle.verticalText == true },
-                        set: { draftStyle.verticalText = $0 ? true : nil }
-                    )) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("日文／繁体竖排（纵书）")
-                            Text("从右向左纵排与翻页，适合阅读日文原版或繁体轻小说。")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
                     styleSlider("字间距", value: Binding(
                         get: { draftStyle.letterSpacing ?? 0 },
                         set: { draftStyle.letterSpacing = $0 > 0.05 ? $0 : nil }

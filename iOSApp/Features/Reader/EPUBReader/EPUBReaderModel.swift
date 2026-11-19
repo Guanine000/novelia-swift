@@ -652,7 +652,7 @@ final class EPUBReaderModel: ObservableObject {
         case .justified: config.defaultTextAlignment = .justified
         case .left: config.defaultTextAlignment = .left
         }
-        config.writingMode = (style.verticalText == true) ? .verticalRTL : .horizontal
+        config.writingMode = .horizontal
         EPUBPageBook.applyEngineWorkarounds(to: &config)
         if let spacing = style.letterSpacing, spacing > 0 {
             config.letterSpacing = spacing

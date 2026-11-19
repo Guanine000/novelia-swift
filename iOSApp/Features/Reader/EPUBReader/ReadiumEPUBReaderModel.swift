@@ -628,7 +628,6 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         // 深色模式仍用 Readium 夜间主题，强制可读的浅色文字。
         // 行距、段距、缩进属于 ReadiumCSS 的“高级设置”，需关闭出版社样式才生效；
         // 保持默认时沿用书籍原有 CSS。
-        let isVertical = style.verticalText == true
         let letterSpacing = style.letterSpacing ?? 0
         let textAlign: ReadiumNavigator.TextAlignment? = switch style.textAlignment ?? .bookDefault {
         case .bookDefault: nil
@@ -637,7 +636,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         }
         let overridesBook = style.lineSpacing > 0 || style.paragraphSpacing > 0
             || style.firstLineIndentEm != nil || letterSpacing > 0
-            || textAlign != nil || isVertical
+            || textAlign != nil
         let fontSize = Double(style.fontSize)
         let projection = settings.projection
         let effectiveFont = style.fontFamily ?? projection.preferredCJKFontFamily
@@ -651,12 +650,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             paragraphIndent: style.firstLineIndentEm.map { Double($0) },
             paragraphSpacing: style.paragraphSpacing > 0 ? Double(style.paragraphSpacing) / fontSize : nil,
             publisherStyles: !overridesBook,
-            readingProgression: isVertical ? .rtl : nil,
             scroll: false,
             spread: style.doublePage == true ? .always : .never,
             textAlign: textAlign,
-            theme: isDarkMode ? .dark : .light,
-            verticalText: isVertical ? true : nil
+            theme: isDarkMode ? .dark : .light
         )
     }
 
@@ -741,7 +738,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         guard updated != style else { return }
         let needsRebuild = updated.topMargin != style.topMargin || updated.bottomMargin != style.bottomMargin
             || updated.leftMargin != style.leftMargin || updated.rightMargin != style.rightMargin
-            || updated.fontFamily != style.fontFamily || updated.verticalText != style.verticalText
+            || updated.fontFamily != style.fontFamily
         style = updated
         if let data = try? JSONEncoder().encode(updated) {
             settings.defaults.set(data, forKey: settings.styleStorageKey)

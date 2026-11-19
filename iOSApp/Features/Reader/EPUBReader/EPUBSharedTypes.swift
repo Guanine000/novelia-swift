@@ -41,8 +41,6 @@ struct EPUBReaderStyle: Codable, Equatable {
     var textAlignment: EPUBTextAlignmentOption? = nil
     /// nil 或 <= 0 使用引擎默认字间距；正值表示额外字间距（pt）。
     var letterSpacing: CGFloat? = nil
-    /// 日文／繁体竖排（纵书，从右向左翻页）；nil 或 false 为横排。
-    var verticalText: Bool? = nil
     var topMargin: CGFloat = 64
     var bottomMargin: CGFloat = 72
     var leftMargin: CGFloat = 20
