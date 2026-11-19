@@ -234,7 +234,10 @@ struct ReaderTopBarShell<MenuContent: View, TitleTrailer: View>: View {
         .foregroundStyle(.primary)
         .padding(.horizontal, 10)
         .frame(height: 48)
-        .background(.ultraThinMaterial)
+        .background {
+            Rectangle().fill(.ultraThinMaterial)
+                .ignoresSafeArea(edges: .top)
+        }
         .overlay(alignment: .bottom) {
             Rectangle().fill(NoveliaStyle.hairline).frame(height: 0.5)
         }
@@ -250,9 +253,8 @@ struct ReaderBottomBarShell<Content: View>: View {
     let hiddenPercentText: String?
     /// 工具栏隐藏时的底色；nil 保持透明。
     var hiddenBackground: Color? = nil
-    /// 工具栏显示时把材质铺到屏幕最下缘。仿真翻页的纸面满屏延伸到安全区，
-    /// 不铺时底栏下方会露出正在卷动的那一条纸面；其他引擎保持原样。
-    var coversBottomSafeArea = false
+    /// 工具栏显示时把材质铺到屏幕最下缘，覆盖底部安全区，避免底栏与屏幕底边之间留下未覆盖空白。
+    var coversBottomSafeArea = true
     var readingTime: AnyView? = nil
     @ViewBuilder var content: Content
 

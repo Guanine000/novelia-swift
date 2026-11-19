@@ -180,6 +180,7 @@ struct BrowseNavigationRoot<Master: View>: View {
                                   emptyDescription: emptyDescription, navigationTitle: navigationTitle, master: master)
             }
         }
+        .background(NoveliaStyle.paper.ignoresSafeArea())
         .environment(\.browseReading, { destination in
             if case .library(let book) = destination {
                 libraryState.markOpened(book)
@@ -272,12 +273,17 @@ private struct BrowseSelectedDetail: View {
     let emptyDescription: String
     let navigationTitle: String
     var body: some View {
-        if let selection {
-            BrowseDetailContent(destination: selection)
-        } else {
-            CompatUnavailable(emptyTitle, systemImage: emptySystemImage, description: Text(emptyDescription))
-                .navigationTitle(navigationTitle)
+        Group {
+            if let selection {
+                BrowseDetailContent(destination: selection)
+            } else {
+                CompatUnavailable(emptyTitle, systemImage: emptySystemImage, description: Text(emptyDescription))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .navigationTitle(navigationTitle)
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(NoveliaStyle.paper.ignoresSafeArea())
     }
 }
 

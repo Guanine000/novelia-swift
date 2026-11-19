@@ -99,6 +99,8 @@ struct LibraryBookDetailView: View {
                     CompatLabeledContent("云端", value: cloudStateText)
                 }
             }
+            .compatScrollContentBackgroundHidden()
+            .background(NoveliaStyle.paper.ignoresSafeArea())
             .navigationTitle(embedded ? "书籍详情" : "详细信息")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

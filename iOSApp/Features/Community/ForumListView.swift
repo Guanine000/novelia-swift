@@ -157,6 +157,7 @@ private struct ForumContentView: View {
                 .background(NoveliaStyle.paper)
                 .refreshable { await store.refresh() }
             }
+            .background(NoveliaStyle.paper.ignoresSafeArea())
             .pageKeyboardActions(browseKeyboardActions(
                 destinations: visiblePosts.map { .forumPost($0.id) },
                 selectedID: browseSelectedID,

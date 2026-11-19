@@ -271,7 +271,7 @@ struct SettingsView: View {
             }
         }
         .compatScrollContentBackgroundHidden()
-        .background(NoveliaStyle.paper)
+        .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle("我的")
         .alert("检查更新", isPresented: .init(get: { updateCheckMessage != nil }, set: { if !$0 { updateCheckMessage = nil } })) {
             Button("好", role: .cancel) { updateCheckMessage = nil }
@@ -368,7 +368,7 @@ private struct TabBarSettingsView: View {
         }
         .environment(\.editMode, .constant(.active))
         .compatScrollContentBackgroundHidden()
-        .background(NoveliaStyle.paper)
+        .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle("自定义底栏")
         .navigationBarTitleDisplayMode(.inline)
         .onDisappear {

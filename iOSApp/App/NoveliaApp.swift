@@ -394,6 +394,7 @@ struct RootView: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     SpeechMiniBarHost(store: services.speechHandoff)
                 }
+                .background(NoveliaStyle.paper.ignoresSafeArea())
                 .tabItem { Label(tab.title, systemImage: tab.systemImage) }
                 .tag(tab)
             }
@@ -414,7 +415,7 @@ struct RootView: View {
             selectedTab = .library
         }
         .tint(AppThemeColor.color(for: appThemeColorRaw, customHex: appThemeCustomHex))
-        .background(NoveliaStyle.paper)
+        .background(NoveliaStyle.paper.ignoresSafeArea())
         // 纸面/卡片的动态色提供器只在视图重新求值时重新解析；换底色预设时用行身份
         // 重建整棵 TabView 让全部界面立即跟随（tab 选择状态在本视图上，不受影响）。
         .id(paperStyleRaw)

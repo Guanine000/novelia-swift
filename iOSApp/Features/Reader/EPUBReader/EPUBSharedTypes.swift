@@ -50,6 +50,19 @@ struct EPUBReaderStyle: Codable, Equatable {
         UIEdgeInsets(top: topMargin, left: leftMargin, bottom: bottomMargin, right: rightMargin)
     }
 
+    /// 阅读器隐藏系统状态栏后，iPad 的顶部 safeArea.top 会归零（而底部仍保留约 20pt 主屏幕指示条安全区），
+    /// 导致阅读空间顶端紧贴顶栏、明显高于底端留白；在 iPad 上补齐顶部基准安全区以保持上下留白平衡。
+    static func effectiveTopSafeArea(_ safeAreaTop: CGFloat,
+                                     idiom: UIUserInterfaceIdiom = UIDevice.current.userInterfaceIdiom) -> CGFloat {
+        idiom == .pad ? max(safeAreaTop, 28) : safeAreaTop
+    }
+
+    func effectiveContentInsets(safeAreaTop: CGFloat = 0,
+                                idiom: UIUserInterfaceIdiom = UIDevice.current.userInterfaceIdiom) -> UIEdgeInsets {
+        let extraTop = Self.effectiveTopSafeArea(safeAreaTop, idiom: idiom) - safeAreaTop
+        return UIEdgeInsets(top: topMargin + extraTop, left: leftMargin, bottom: bottomMargin, right: rightMargin)
+    }
+
     var readerCSS: String? {
         readerCSS(for: .init())
     }

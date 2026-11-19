@@ -420,6 +420,8 @@ struct WenkuDetailView: View {
                 CompatUnavailable("无法加载作品", systemImage: "wifi.exclamationmark", description: Text(error ?? "请稍后重试。"))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle(detail?.displayTitle ?? outline.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: outline.id) {

@@ -426,7 +426,6 @@ private struct ReadiumEPUBReaderViewContent: View {
             showChrome: showChrome,
             batteryLevel: Double(batteryLevel),
             hiddenPercentText: showChrome ? nil : FractionText.percent(model.overallProgress),
-            coversBottomSafeArea: settings.readiumPageCurlEnabled,
             readingTime: AnyView(ReaderRemainingTimeView(store: settings.remainingTime,
                 source: model.localTimeSource, point: model.readingTimePoint, mode: "paged|" + settings.projection.identity,
                 active: model.status == .ready && !model.curlBusy && !isScrubbing && !model.speech.isActive

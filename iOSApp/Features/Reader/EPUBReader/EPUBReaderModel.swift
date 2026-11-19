@@ -141,6 +141,9 @@ final class EPUBReaderModel: ObservableObject {
     }
     private var tocDiagnosticsPreferenceKey: String?
 
+    /// 视口顶部安全区高度（用于补齐 iPad 隐藏状态栏后的顶部基准安全区）。
+    var safeAreaTop: CGFloat = 0
+
     /// 视口内容区尺寸（由界面测量后注入；变化即触发重排）。
     var viewportSize: CGSize = .zero {
         didSet {
@@ -633,7 +636,7 @@ final class EPUBReaderModel: ObservableObject {
     }
 
     func makeConfig() -> BrowserLayoutConfig {
-        let contentInsets = style.contentInsets
+        let contentInsets = style.effectiveContentInsets(safeAreaTop: safeAreaTop)
         let contentWidth = max(1, leafWidth - contentInsets.left - contentInsets.right)
         let contentHeight = max(1, viewportSize.height - contentInsets.top - contentInsets.bottom)
         var config = BrowserLayoutConfig()

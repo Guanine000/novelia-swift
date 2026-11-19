@@ -154,6 +154,7 @@ private struct EPUBReaderViewContent: View {
             .onValueChange(of: geometry.size) { _, newSize in
                 // 进入后台后系统会按其他方向/尺寸截取快照，这些临时尺寸不触发重排。
                 guard scenePhase != .background else { return }
+                model.safeAreaTop = geometry.safeAreaInsets.top
                 model.viewportSize = newSize
             }
             .onValueChange(of: colorScheme) { _, newScheme in
@@ -163,6 +164,7 @@ private struct EPUBReaderViewContent: View {
                 // 回到前台后按当时的真实外观与尺寸补一次同步；没有变化时不会重排。
                 guard phase != .background else { return }
                 synchronizeSettings(systemIsDark: colorScheme == .dark)
+                model.safeAreaTop = geometry.safeAreaInsets.top
                 if model.viewportSize != geometry.size {
                     model.viewportSize = geometry.size
                 }
@@ -174,6 +176,7 @@ private struct EPUBReaderViewContent: View {
                 UIDevice.current.isBatteryMonitoringEnabled = true
                 updateBatteryLevel()
                 synchronizeSettings(systemIsDark: colorScheme == .dark)
+                model.safeAreaTop = geometry.safeAreaInsets.top
                 if model.viewportSize != geometry.size {
                     model.viewportSize = geometry.size
                 }
@@ -401,7 +404,6 @@ private struct EPUBReaderViewContent: View {
             batteryLevel: Double(batteryLevel),
             hiddenPercentText: showChrome ? nil : FractionText.percent(model.overallProgress),
             hiddenBackground: settings.nativePageCurlEnabled ? .clear : model.pageBackgroundColor,
-            coversBottomSafeArea: settings.nativePageCurlEnabled,
             readingTime: AnyView(ReaderRemainingTimeView(store: settings.remainingTime,
                 source: model.localTimeSource, point: model.readingTimePoint, mode: "paged|" + settings.projection.identity,
                 active: model.status == .ready && !model.isLayingOut && !isScrubbing && !speech.isActive

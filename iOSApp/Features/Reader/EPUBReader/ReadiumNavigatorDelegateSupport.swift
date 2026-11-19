@@ -50,8 +50,14 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     /// 上下边距从安全区边缘起算，与 YueduCoreText 阅读器一致，章节名与正文不再重叠。
     /// Readium 默认取安全区与配置边距的较大值，会让正文顶到章节名所在位置。
     func navigatorContentInset(_ navigator: VisualNavigator) -> UIEdgeInsets? {
-        let safeArea = (navigator as? UIViewController)?.view.window?.safeAreaInsets ?? .zero
-        return UIEdgeInsets(top: safeArea.top + style.topMargin, left: 0,
+        let safeArea = (navigator as? UIViewController)?.view.window?.safeAreaInsets
+            ?? UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap(\.windows)
+                .first(where: \.isKeyWindow)?.safeAreaInsets
+            ?? .zero
+        let topSafeArea = EPUBReaderStyle.effectiveTopSafeArea(safeArea.top)
+        return UIEdgeInsets(top: topSafeArea + style.topMargin, left: 0,
                             bottom: safeArea.bottom + style.bottomMargin, right: 0)
     }
 
