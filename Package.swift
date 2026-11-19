@@ -52,6 +52,7 @@ let package = Package(
                 "ReadiumPageCurl.swift",
                 "ReadiumEPUBReaderModel.swift",
                 "ReadiumEPUBReaderSupport.swift",
+                "ReadiumNavigatorDelegateSupport.swift",
                 "ReadiumEPUBReaderDiagnostics.swift",
                 "ReadiumEPUBReaderView.swift",
                 "EPUBReaderView.swift",

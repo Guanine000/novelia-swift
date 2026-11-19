@@ -171,9 +171,11 @@ struct TXTChapterAdjustmentView: View {
                 let oldBook = try await settings.txtBook(url: url, rules: rules, trace: DiagnosticContext.newTraceID())
                 guard oldBook.contentHash == session.baseBook.contentHash else { throw TXTAdjustmentError.invalidDirectory }
                 let migration = try await TXTAdjustmentMigration.prepare(oldBook: oldBook, next: next, settings: settings)
+                let savedAt = Date()
                 let revision = try await settings.txtAdjustments.save(next, hash: oldBook.contentHash,
-                    expectedRevision: session.revision, position: migration.position, bookmarks: migration.bookmarks)
+                    expectedRevision: session.revision, position: migration.position, bookmarks: migration.bookmarks, now: savedAt)
                 committedRevision = revision
+                settings.recordTXTAdjustment(.init(contentHash: oldBook.contentHash, revision: revision, boundaries: next.boundaries, updatedAt: savedAt))
                 settings.invalidateTXTBook(hash: oldBook.contentHash)
                 // 目录与迁移快照已经一起原子保存；失败时重新打开可重放，不能覆盖后来新写的状态。
                 try settings.applyTXTAdjustment(migration, hash: oldBook.contentHash)

@@ -61,6 +61,133 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
     private var indexCount = 0
     private var textureLoader: MTKTextureLoader?
     private var textureCache: [ObjectIdentifier: MTLTexture] = [:]
+    private var prewarmingKeys: Set<ObjectIdentifier> = []
+
+    /// 进程级复用只读 Metal 管线、深度状态与静态网格缓冲，避免每次打开阅读器在主线程重新编译 MSL 着色器。
+    private final class SharedMetalResources: @unchecked Sendable {
+        let device: MTLDevice
+        let commandQueue: MTLCommandQueue
+        let pipelineState: MTLRenderPipelineState
+        let depthState: MTLDepthStencilState
+        let vertexBuffer: MTLBuffer
+        let indexBuffer: MTLBuffer
+        let indexCount: Int
+        let textureLoader: MTKTextureLoader
+
+        private static let lock = NSLock()
+        private static var cached: SharedMetalResources?
+
+        static func shared() -> SharedMetalResources? {
+            lock.lock()
+            if let existing = cached {
+                lock.unlock()
+                return existing
+            }
+            lock.unlock()
+            guard let built = build() else { return nil }
+            lock.lock()
+            if let existing = cached {
+                lock.unlock()
+                return existing
+            }
+            cached = built
+            lock.unlock()
+            return built
+        }
+
+        private static func build() -> SharedMetalResources? {
+            guard let device = MTLCreateSystemDefaultDevice(),
+                  let queue = device.makeCommandQueue(),
+                  let library = try? device.makeLibrary(source: MetalPageCurlViewController.shaderSource, options: nil),
+                  let vertexFn = library.makeFunction(name: "pageCurlVertex"),
+                  let fragmentFn = library.makeFunction(name: "pageCurlFragment") else {
+                return nil
+            }
+            let descriptor = MTLRenderPipelineDescriptor()
+            descriptor.vertexFunction = vertexFn
+            descriptor.fragmentFunction = fragmentFn
+            descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+            descriptor.depthAttachmentPixelFormat = .depth32Float
+
+            let vertexDescriptor = MTLVertexDescriptor()
+            vertexDescriptor.attributes[0].format = .float2
+            vertexDescriptor.attributes[0].offset = 0
+            vertexDescriptor.attributes[0].bufferIndex = 0
+            vertexDescriptor.layouts[0].stride = MemoryLayout<CurlVertex>.stride
+            descriptor.vertexDescriptor = vertexDescriptor
+
+            guard let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
+
+            let depthDesc = MTLDepthStencilDescriptor()
+            depthDesc.depthCompareFunction = .less
+            depthDesc.isDepthWriteEnabled = true
+            guard let depth = device.makeDepthStencilState(descriptor: depthDesc) else { return nil }
+
+            let cols = 96, rows = 120
+            var vertices: [CurlVertex] = []
+            vertices.reserveCapacity((cols + 1) * (rows + 1))
+            for r in 0...rows {
+                let v = Float(r) / Float(rows)
+                for c in 0...cols {
+                    let u = Float(c) / Float(cols)
+                    vertices.append(CurlVertex(uv: SIMD2<Float>(u, v)))
+                }
+            }
+            var indices: [UInt32] = []
+            indices.reserveCapacity(cols * rows * 6)
+            let stride = UInt32(cols + 1)
+            for r in 0..<rows {
+                for c in 0..<cols {
+                    let i0 = UInt32(r) * stride + UInt32(c)
+                    let i1 = i0 + 1
+                    let i2 = i0 + stride
+                    let i3 = i2 + 1
+                    indices.append(contentsOf: [i0, i2, i1, i1, i2, i3])
+                }
+            }
+            guard let vBuf = device.makeBuffer(bytes: vertices, length: vertices.count * MemoryLayout<CurlVertex>.stride, options: .storageModeShared),
+                  let iBuf = device.makeBuffer(bytes: indices, length: indices.count * MemoryLayout<UInt32>.stride, options: .storageModeShared) else {
+                return nil
+            }
+            return SharedMetalResources(
+                device: device,
+                commandQueue: queue,
+                pipelineState: pipeline,
+                depthState: depth,
+                vertexBuffer: vBuf,
+                indexBuffer: iBuf,
+                indexCount: indices.count,
+                textureLoader: MTKTextureLoader(device: device)
+            )
+        }
+
+        private init(
+            device: MTLDevice,
+            commandQueue: MTLCommandQueue,
+            pipelineState: MTLRenderPipelineState,
+            depthState: MTLDepthStencilState,
+            vertexBuffer: MTLBuffer,
+            indexBuffer: MTLBuffer,
+            indexCount: Int,
+            textureLoader: MTKTextureLoader
+        ) {
+            self.device = device
+            self.commandQueue = commandQueue
+            self.pipelineState = pipelineState
+            self.depthState = depthState
+            self.vertexBuffer = vertexBuffer
+            self.indexBuffer = indexBuffer
+            self.indexCount = indexCount
+            self.textureLoader = textureLoader
+        }
+    }
+
+    /// 供阅读器打开早期在后台预编译 Metal 着色器管线，避免首次开书主线程同步编译卡顿。
+    static func prewarmPipelineInBackground() {
+        Task.detached(priority: .utility) {
+            _ = SharedMetalResources.shared()
+        }
+    }
 
     private var isDragging = false
     private var dragStartPoint: CGPoint = .zero
@@ -112,6 +239,7 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         let images = [current, next, previous].compactMap { $0 }
         let liveIDs = Set(images.compactMap { $0.cgImage.map(ObjectIdentifier.init) })
         textureCache = textureCache.filter { liveIDs.contains($0.key) }
+        prewarmingKeys = prewarmingKeys.intersection(liveIDs)
         prewarmTextures(for: images)
     }
 
@@ -125,11 +253,13 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         for image in images {
             guard let cgImage = image.cgImage else { continue }
             let key = ObjectIdentifier(cgImage)
-            if textureCache[key] != nil { continue }
+            if textureCache[key] != nil || prewarmingKeys.contains(key) { continue }
+            prewarmingKeys.insert(key)
             textureLoader.newTexture(cgImage: cgImage, options: options) { [weak self] texture, _ in
-                guard let texture else { return }
                 DispatchQueue.main.async {
                     guard let self else { return }
+                    self.prewarmingKeys.remove(key)
+                    guard let texture else { return }
                     let currentLive = Set([self.previousImage, self.currentImage, self.nextImage]
                         .compactMap { $0?.cgImage.map(ObjectIdentifier.init) })
                     if currentLive.contains(key) {
@@ -165,42 +295,17 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
     // MARK: - Metal 初始化
 
     private func setupMetal() {
-        guard let device = MTLCreateSystemDefaultDevice(),
-              let queue = device.makeCommandQueue(),
-              let library = try? device.makeLibrary(source: Self.shaderSource, options: nil),
-              let vertexFn = library.makeFunction(name: "pageCurlVertex"),
-              let fragmentFn = library.makeFunction(name: "pageCurlFragment") else {
-            return
-        }
+        guard let shared = SharedMetalResources.shared() else { return }
+        self.device = shared.device
+        self.commandQueue = shared.commandQueue
+        self.pipelineState = shared.pipelineState
+        self.depthState = shared.depthState
+        self.vertexBuffer = shared.vertexBuffer
+        self.indexBuffer = shared.indexBuffer
+        self.indexCount = shared.indexCount
+        self.textureLoader = shared.textureLoader
 
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.vertexFunction = vertexFn
-        descriptor.fragmentFunction = fragmentFn
-        descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        descriptor.depthAttachmentPixelFormat = .depth32Float
-
-        let vertexDescriptor = MTLVertexDescriptor()
-        vertexDescriptor.attributes[0].format = .float2
-        vertexDescriptor.attributes[0].offset = 0
-        vertexDescriptor.attributes[0].bufferIndex = 0
-        vertexDescriptor.layouts[0].stride = MemoryLayout<CurlVertex>.stride
-        descriptor.vertexDescriptor = vertexDescriptor
-
-        guard let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return }
-
-        let depthDesc = MTLDepthStencilDescriptor()
-        depthDesc.depthCompareFunction = .less
-        depthDesc.isDepthWriteEnabled = true
-        guard let depth = device.makeDepthStencilState(descriptor: depthDesc) else { return }
-
-        self.device = device
-        self.commandQueue = queue
-        self.pipelineState = pipeline
-        self.depthState = depth
-        self.textureLoader = MTKTextureLoader(device: device)
-        buildGridMesh(device: device, cols: 96, rows: 120)
-
-        let mtk = MTKView(frame: view.bounds, device: device)
+        let mtk = MTKView(frame: view.bounds, device: shared.device)
         mtk.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         mtk.colorPixelFormat = .bgra8Unorm
         mtk.depthStencilPixelFormat = .depth32Float
@@ -213,33 +318,6 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         mtk.delegate = self
         view.addSubview(mtk)
         self.metalView = mtk
-    }
-
-    private func buildGridMesh(device: MTLDevice, cols: Int, rows: Int) {
-        var vertices: [CurlVertex] = []
-        vertices.reserveCapacity((cols + 1) * (rows + 1))
-        for r in 0...rows {
-            let v = Float(r) / Float(rows)
-            for c in 0...cols {
-                let u = Float(c) / Float(cols)
-                vertices.append(CurlVertex(uv: SIMD2<Float>(u, v)))
-            }
-        }
-        var indices: [UInt32] = []
-        indices.reserveCapacity(cols * rows * 6)
-        let stride = UInt32(cols + 1)
-        for r in 0..<rows {
-            for c in 0..<cols {
-                let i0 = UInt32(r) * stride + UInt32(c)
-                let i1 = i0 + 1
-                let i2 = i0 + stride
-                let i3 = i2 + 1
-                indices.append(contentsOf: [i0, i2, i1, i1, i2, i3])
-            }
-        }
-        indexCount = indices.count
-        vertexBuffer = device.makeBuffer(bytes: vertices, length: vertices.count * MemoryLayout<CurlVertex>.stride, options: .storageModeShared)
-        indexBuffer = device.makeBuffer(bytes: indices, length: indices.count * MemoryLayout<UInt32>.stride, options: .storageModeShared)
     }
 
     private func texture(for image: UIImage) -> MTLTexture? {
@@ -464,6 +542,8 @@ final class MetalPageCurlViewController: UIViewController, MTKViewDelegate, UIGe
         let minimumDuration: CFTimeInterval = isTap ? 0.32 : 0.14
         animationDuration = max(duration * max(abs(target - startProgress), 0.35), minimumDuration)
         let link = CADisplayLink(target: self, selector: #selector(stepAnimation(_:)))
+        // ProMotion 设备上显式请求 80–120Hz，避免系统默认按 60Hz 驱动卷页动画。
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
         link.add(to: .main, forMode: .common)
         displayLink = link
         metalView?.draw()

@@ -9,6 +9,8 @@ final class ReaderSettings: ObservableObject {
     @Published private(set) var activeBookID: String?
     @Published private(set) var bookPreferences: [String: BookReadingPreferences] = [:]
     @Published var projectionRevision = 0
+    @Published var txtAdjustmentRevision = 0
+    private(set) var txtAdjustmentRecords: [String: SyncedTXTChapterAdjustment] = [:]
     /// 只属于当前安装的阅读会话代次，防止旧阅读器退出时写回旧目录位置。
     private(set) var txtReaderIdentities: [String: String] = [:]
     func registerTXTBook(_ book: TXTParsedBook) { txtReaderIdentities[book.contentHash] = book.rulesFingerprint }
@@ -81,6 +83,22 @@ final class ReaderSettings: ObservableObject {
         }
         if changed { saveBookPreferences(); projectionRevision += 1 }
     }
+
+    /// 本地保存 TXT 手工分章后刷新内存缓存并通知自动同步。
+    func recordTXTAdjustment(_ record: SyncedTXTChapterAdjustment) {
+        guard record.isValid else { return }
+        txtAdjustmentRecords[record.contentHash] = record
+        txtAdjustmentRevision += 1
+    }
+
+    /// 合并远端同步来的 TXT 手工分章并写盘；发生变更时使旧目录缓存失效并推进修订号。
+    func applySyncedTXTAdjustments(_ records: [String: SyncedTXTChapterAdjustment]) async throws {
+        let changed = try await txtAdjustments.applySynced(records)
+        guard !changed.isEmpty else { return }
+        txtAdjustmentRecords = await txtAdjustments.allSyncRecords()
+        for hash in changed { invalidateTXTBook(hash: hash) }
+        txtAdjustmentRevision += 1
+    }
     private func saveBookPreferences() {
         if let data = try? JSONEncoder().encode(bookPreferences) { defaults.set(data, forKey: Self.bookPreferencesKey) }
     }
@@ -110,9 +128,11 @@ final class ReaderSettings: ObservableObject {
          offlineDirectory: URL? = nil) {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         offlineChapters = OnlineChapterOfflineStore(directory: offlineDirectory ?? (defaults === UserDefaults.standard ? support.appendingPathComponent("OfflineChapters") : FileManager.default.temporaryDirectory.appendingPathComponent("OfflineChapters-" + UUID().uuidString)))
-        txtAdjustments = TXTChapterAdjustmentStore(directory: defaults === UserDefaults.standard
+        let adjustmentsDir = defaults === UserDefaults.standard
             ? support.appendingPathComponent("TXTChapterAdjustments", isDirectory: true)
-            : (offlineDirectory ?? FileManager.default.temporaryDirectory.appendingPathComponent("TXTAdjustments-" + UUID().uuidString)).appendingPathComponent("TXTChapterAdjustments", isDirectory: true))
+            : (offlineDirectory ?? FileManager.default.temporaryDirectory.appendingPathComponent("TXTAdjustments-" + UUID().uuidString)).appendingPathComponent("TXTChapterAdjustments", isDirectory: true)
+        txtAdjustments = TXTChapterAdjustmentStore(directory: adjustmentsDir)
+        txtAdjustmentRecords = TXTChapterAdjustmentStore.loadAllSyncRecords(in: adjustmentsDir)
         characters = CharacterLexiconStore(defaults: defaults, portraitDirectory: defaults === UserDefaults.standard
             ? support.appendingPathComponent("CharacterPortraits", isDirectory: true)
             : (offlineDirectory ?? FileManager.default.temporaryDirectory.appendingPathComponent("Characters-" + UUID().uuidString)).appendingPathComponent("CharacterPortraits", isDirectory: true))

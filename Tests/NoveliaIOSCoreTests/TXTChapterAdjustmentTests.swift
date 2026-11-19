@@ -188,4 +188,57 @@ final class TXTChapterAdjustmentTests: XCTestCase {
         XCTAssertEqual(result.snapshot?.revision, revision)
         XCTAssertEqual(try Data(contentsOf: file), bytes)
     }
+
+    func testSyncedTXTChapterAdjustmentValidationAndMerge() {
+        let hash = String(repeating: "a", count: 64)
+        let b1 = [TXTChapterBoundary(start: 0, titleLength: 2, title: "序章", volume: nil)]
+        let b2 = [
+            TXTChapterBoundary(start: 0, titleLength: 2, title: "序章", volume: nil),
+            TXTChapterBoundary(start: 10, titleLength: 3, title: "第一章", volume: "第一卷")
+        ]
+        let older = SyncedTXTChapterAdjustment(contentHash: hash, revision: "rev-1", boundaries: b1, updatedAt: Date(timeIntervalSince1970: 100))
+        let newer = SyncedTXTChapterAdjustment(contentHash: hash, revision: "rev-2", boundaries: b2, updatedAt: Date(timeIntervalSince1970: 200))
+        XCTAssertTrue(older.isValid)
+        XCTAssertTrue(newer.isValid)
+
+        let badStart = SyncedTXTChapterAdjustment(contentHash: hash, revision: "rev-x", boundaries: [.init(start: 5, titleLength: 2, title: "坏", volume: nil)], updatedAt: Date(timeIntervalSince1970: 300))
+        XCTAssertFalse(badStart.isValid)
+
+        let merged = SyncedTXTChapterAdjustment.merged([hash: older], [hash: newer])
+        XCTAssertEqual(merged[hash], newer)
+
+        let keptWhenInvalidRemote = SyncedTXTChapterAdjustment.merged([hash: older], [hash: badStart])
+        XCTAssertEqual(keptWhenInvalidRemote[hash], older)
+    }
+
+    func testTXTAdjustmentStoreSyncApplyRespectsTimestamp() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = TXTChapterAdjustmentStore(directory: dir)
+        let hash = String(repeating: "c", count: 64)
+        let doc = try document("开头内容\n第一章\n正文")
+        let rev1 = try await store.save(doc, hash: hash, expectedRevision: nil, position: nil, bookmarks: [:], now: Date(timeIntervalSince1970: 200))
+
+        let olderRemote = SyncedTXTChapterAdjustment(
+            contentHash: hash, revision: "remote-old",
+            boundaries: [.init(start: 0, titleLength: 0, title: "旧标题", volume: nil)],
+            updatedAt: Date(timeIntervalSince1970: 100))
+        let changedOld = try await store.applySynced([hash: olderRemote])
+        XCTAssertTrue(changedOld.isEmpty)
+        let afterOld = try await store.snapshot(hash: hash)
+        XCTAssertEqual(afterOld?.revision, rev1)
+
+        let newerRemote = SyncedTXTChapterAdjustment(
+            contentHash: hash, revision: "remote-new",
+            boundaries: [
+                .init(start: 0, titleLength: 0, title: "序", volume: nil),
+                .init(start: 5, titleLength: 3, title: "第一章", volume: nil)
+            ],
+            updatedAt: Date(timeIntervalSince1970: 300))
+        let changedNew = try await store.applySynced([hash: newerRemote])
+        XCTAssertEqual(changedNew, [hash])
+        let afterNew = try await store.snapshot(hash: hash)
+        XCTAssertEqual(afterNew?.revision, "remote-new")
+        XCTAssertEqual(afterNew?.boundaries.count, 2)
+    }
 }

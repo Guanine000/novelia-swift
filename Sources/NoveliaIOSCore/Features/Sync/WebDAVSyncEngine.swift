@@ -43,6 +43,9 @@ protocol WebDAVSyncLocalState {
     /// 阅读器摘录与笔记（含删除墓碑），随书籍同步。
     var annotations: [String: ReaderAnnotation] { get }
     func applyAnnotations(_ annotations: [String: ReaderAnnotation]) throws
+    /// TXT 手工分章目录，随书籍同步。
+    var txtChapterAdjustments: [String: SyncedTXTChapterAdjustment] { get }
+    func applyTXTChapterAdjustments(_ records: [String: SyncedTXTChapterAdjustment]) async throws
     var blockedTags: [String: SyncedBlockedTag] { get }
     func applyBlockedTags(_ tags: [String: SyncedBlockedTag])
     func background(dark: Bool) throws -> SyncedReaderBackground
@@ -66,6 +69,8 @@ extension WebDAVSyncLocalState {
     func applyTextProjections(_ records: [String: ReaderTextProjectionRecord]) {}
     var annotations: [String: ReaderAnnotation] { [:] }
     func applyAnnotations(_ annotations: [String: ReaderAnnotation]) throws {}
+    var txtChapterAdjustments: [String: SyncedTXTChapterAdjustment] { [:] }
+    func applyTXTChapterAdjustments(_ records: [String: SyncedTXTChapterAdjustment]) async throws {}
 }
 
 struct WebDAVSyncOptions: Equatable {
@@ -249,6 +254,10 @@ final class WebDAVSyncEngine {
             let annotations = WebDAVSyncPlanner.annotationsToSync(
                 ReaderAnnotation.mergedSync(local.annotations, manifest.annotations ?? [:]), in: manifest)
             if manifest.annotations != nil || !annotations.isEmpty { manifest.annotations = annotations }
+            let txtAdjustments = WebDAVSyncPlanner.txtChapterAdjustmentsToSync(
+                SyncedTXTChapterAdjustment.merged(local.txtChapterAdjustments, manifest.txtChapterAdjustments ?? [:]),
+                in: manifest)
+            if manifest.txtChapterAdjustments != nil || !txtAdjustments.isEmpty { manifest.txtChapterAdjustments = txtAdjustments }
         }
         if options.tags {
             manifest.blockedTags = BlockedTagsStore.merged(local.blockedTags, manifest.blockedTags ?? [:])
@@ -334,6 +343,7 @@ final class WebDAVSyncEngine {
         if options.books, let bookmarks = manifest.bookmarks { try local.applyBookmarks(bookmarks) }
         if options.books, let projections = manifest.textProjections { local.applyTextProjections(projections) }
         if options.books, let annotations = manifest.annotations { try local.applyAnnotations(annotations) }
+        if options.books, let txtAdjustments = manifest.txtChapterAdjustments { try await local.applyTXTChapterAdjustments(txtAdjustments) }
         if options.backgrounds {
             for dark in [false, true] {
                 if let value = manifest.backgrounds?[dark ? "dark" : "light"] {

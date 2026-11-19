@@ -207,6 +207,11 @@ struct SettingsView: View {
                 } label: {
                     Label("WebDAV 同步", systemImage: "arrow.triangle.2.circlepath")
                 }
+                NavigationLink {
+                    LocalBackupView()
+                } label: {
+                    Label("本地备份与恢复", systemImage: "archivebox")
+                }
             }
             Section("关于") {
                 Toggle("启动时检查更新", isOn: $checksUpdates)

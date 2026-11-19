@@ -44,6 +44,7 @@ struct WebDAVAutoSyncTriggers: ViewModifier {
             .onReceive(bookmarks.$records.dropFirst()) { _ in sync.localStateDidChange() }
             .onReceive(annotations.$records.dropFirst()) { _ in sync.localStateDidChange() }
             .onReceive(readerSettings.$projectionRevision.dropFirst()) { _ in sync.localStateDidChange() }
+            .onReceive(readerSettings.$txtAdjustmentRevision.dropFirst()) { _ in sync.localStateDidChange() }
             .onReceive(characters.objectWillChange) { sync.localStateDidChange() }
     }
 }
@@ -79,6 +80,10 @@ struct AppWebDAVSyncLocalState: WebDAVSyncLocalState {
     var annotations: [String: ReaderAnnotation] { annotationStore.records }
     func applyAnnotations(_ annotations: [String: ReaderAnnotation]) throws {
         try annotationStore.applySynced(annotations)
+    }
+    var txtChapterAdjustments: [String: SyncedTXTChapterAdjustment] { readerSettings.txtAdjustmentRecords }
+    func applyTXTChapterAdjustments(_ records: [String: SyncedTXTChapterAdjustment]) async throws {
+        try await readerSettings.applySyncedTXTAdjustments(records)
     }
     var blockedTags: [String: SyncedBlockedTag] { blocked.syncStates }
     func applyBlockedTags(_ tags: [String: SyncedBlockedTag]) { blocked.applySynced(tags) }

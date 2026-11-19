@@ -203,6 +203,7 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
     /// 真实正文的字体、布局及下一次 WebKit 呈现完成，才算首屏可见；不以卷页缓存就绪代替。
     private func observeFirstPagePresentation() {
         guard firstPagePresentation == nil, let real = navigator else { return }
+        MetalPageCurlViewController.prewarmPipelineInBackground()
         firstPagePresentation = Task { [weak self] in
             guard let self else { return false }
             do {
@@ -445,10 +446,12 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
             if carry != nil {
                 if let current = result[0] { cover.image = current.image; cover.isHidden = true }
             } else {
-                if firstPresentedKey != key { try await waitForPage(in: real) }
+                let alreadyPresented = firstPresentedKey == key
+                if !alreadyPresented { try await waitForPage(in: real) }
                 guard available, key == self.key else { throw CancellationError() }
                 guard let origin = model.locator else { throw CurlError.notReady }
-                let current = try await snapshot(in: real)
+                // 首屏刚通过 waitForWebPresentation(afterScreenUpdates: true) 屏障，跳过第二次强制提交可减少首屏准备耗时。
+                let current = try await snapshot(in: real, afterScreenUpdates: !alreadyPresented)
                 result[0] = ReadiumCurlSheet(slot: 0, image: current, location: origin)
                 cover.image = current; cover.isHidden = true
                 model.warmAdjacentChapterAnnotations(around: origin)
@@ -457,6 +460,10 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
                 try Task.checkCancellation()
                 guard available, key == self.key else { throw CancellationError() }
                 phase = forward ? "next" : "previous"
+                if let origin = result[0]?.location, model.isAtCurlBookBoundary(origin, forward: forward) {
+                    resolvedDirections.insert(forward)
+                    continue
+                }
                 try await waitForPage(in: snapshotNav)
                 if let location = try await model.previewCurlNeighbor(forward: forward, transaction: token) {
                     try await waitForPage()
@@ -551,14 +558,12 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
             try Task.checkCancellation()
             let webs = visibleWebViews(in: source)
             var loaded = !webs.isEmpty && webs.allSatisfy { !$0.isLoading && $0.url != nil && $0.scrollView.alpha > 0.01 && !$0.scrollView.isDecelerating }
-            var allPreviouslyReady = loaded
             if loaded {
                 for web in webs {
                     let urlKey = web.url?.absoluteString ?? ""
                     if !urlKey.isEmpty, (readyWebURLs.object(forKey: web) as String?) == urlKey {
                         continue
                     }
-                    allPreviouslyReady = false
                     let ready: Bool = await withCheckedContinuation { continuation in
                         web.evaluateJavaScript("document.readyState !== 'loading' && (!document.fonts || document.fonts.status === 'loaded')") { result, _ in
                             continuation.resume(returning: result as? Bool ?? false)
@@ -574,7 +579,7 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
             stable = loaded && state == previous ? stable + 1 : 0
             if stable >= 2 { return }
             previous = state
-            try await Task.sleep(nanoseconds: allPreviouslyReady ? 6_000_000 : 20_000_000)
+            try await Task.sleep(nanoseconds: loaded ? 6_000_000 : 12_000_000)
         }
         throw CurlError.notReady
     }
@@ -603,7 +608,7 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
         cachedPaperBackdrop = (key, backdrop)
         return backdrop
     }
-    private func snapshot(in source: EPUBNavigatorViewController? = nil) async throws -> UIImage {
+    private func snapshot(in source: EPUBNavigatorViewController? = nil, afterScreenUpdates: Bool = true) async throws -> UIImage {
         guard let model else { throw CurlError.notReady }
         let webs = visibleWebViews(in: source)
         guard !webs.isEmpty else { throw CurlError.notReady }
@@ -612,7 +617,7 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
             web.isOpaque = false; web.underPageBackgroundColor = .clear
             web.superview?.backgroundColor = await model.curlSnapshotBackground(web) ?? .clear
             try Task.checkCancellation()
-            let config = WKSnapshotConfiguration(); config.rect = web.bounds; config.afterScreenUpdates = true
+            let config = WKSnapshotConfiguration(); config.rect = web.bounds; config.afterScreenUpdates = afterScreenUpdates
             let image: UIImage = try await withCheckedThrowingContinuation { continuation in
                 web.takeSnapshot(with: config) { image, error in
                     if let image { continuation.resume(returning: image) }

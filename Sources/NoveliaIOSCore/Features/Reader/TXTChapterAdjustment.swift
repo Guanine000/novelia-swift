@@ -106,6 +106,53 @@ struct TXTAdjustmentSnapshot: Codable, Sendable {
     let boundaries: [TXTChapterBoundary]
     var position: SyncedReadingPosition?
     var bookmarks: [String: ReaderBookmark]
+    /// 目录修改时间；旧本地记录缺此字段，同步时回退文件修改时间。
+    var updatedAt: Date? = nil
+}
+
+/// 随 WebDAV 书籍同步的 TXT 手工分章记录；只同步边界、修订号与时间，进度和书签走原有同步字段。
+struct SyncedTXTChapterAdjustment: Codable, Equatable, Sendable {
+    static let maxEncodedBytes = 512_000
+    static let maxBoundaries = 20_000
+
+    var contentHash: String
+    var revision: String
+    var boundaries: [TXTChapterBoundary]
+    var updatedAt: Date
+
+    var isValid: Bool {
+        guard WebDAVAsset.isValidHash(contentHash),
+              !revision.isEmpty, revision.utf8.count <= 128,
+              updatedAt.timeIntervalSince1970.isFinite,
+              !boundaries.isEmpty, boundaries.count <= Self.maxBoundaries,
+              boundaries.first?.start == 0 else { return false }
+        for (index, boundary) in boundaries.enumerated() {
+            guard boundary.start >= 0, boundary.titleLength >= 0,
+                  !boundary.title.isEmpty, boundary.title.count <= 200,
+                  (boundary.volume?.count ?? 0) <= 200 else { return false }
+            if index + 1 < boundaries.count {
+                let nextStart = boundaries[index + 1].start
+                guard boundary.start < nextStart,
+                      boundary.titleLength <= nextStart - boundary.start else { return false }
+            }
+        }
+        guard let data = try? JSONEncoder().encode(self), data.count <= Self.maxEncodedBytes else { return false }
+        return true
+    }
+
+    /// 按文件内容哈希合并，较新的修改胜出；时间相同时按修订号确定性决胜。
+    static func merged(_ local: [String: SyncedTXTChapterAdjustment],
+                       _ remote: [String: SyncedTXTChapterAdjustment]) -> [String: SyncedTXTChapterAdjustment] {
+        var result = local.filter { $0.key == $0.value.contentHash && $0.value.isValid }
+        for (hash, incoming) in remote where hash == incoming.contentHash && incoming.isValid {
+            guard let current = result[hash] else { result[hash] = incoming; continue }
+            if incoming.updatedAt > current.updatedAt
+                || (incoming.updatedAt == current.updatedAt && incoming.revision > current.revision) {
+                result[hash] = incoming
+            }
+        }
+        return result
+    }
 }
 
 struct TXTAdjustmentSession: Sendable {
@@ -116,7 +163,7 @@ struct TXTAdjustmentSession: Sendable {
 
 /// ReaderSettings 拥有一个实例。文件与解析在 actor 上运行；不写源 TXT，也不把大书存到偏好里。
 actor TXTChapterAdjustmentStore {
-    private let directory: URL
+    let directory: URL
     init(directory: URL) { self.directory = directory }
 
     private func file(_ hash: String) throws -> URL {
@@ -157,15 +204,66 @@ actor TXTChapterAdjustmentStore {
     }
 
     func save(_ document: TXTAdjustmentDocument, hash: String, expectedRevision: String?,
-              position: SyncedReadingPosition?, bookmarks: [String: ReaderBookmark]) throws -> String {
+              position: SyncedReadingPosition?, bookmarks: [String: ReaderBookmark],
+              now: Date = Date()) throws -> String {
         try document.validate()
         guard try snapshot(hash: hash)?.revision == expectedRevision else { throw TXTAdjustmentError.staleRevision }
         let revision = UUID().uuidString
         let saved = TXTAdjustmentSnapshot(contentHash: hash, revision: revision, boundaries: document.boundaries,
-                                          position: position, bookmarks: bookmarks)
+                                          position: position, bookmarks: bookmarks, updatedAt: now)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try JSONEncoder().encode(saved).write(to: file(hash), options: .atomic)
         return revision
+    }
+
+    /// 供启动缓存与同步读取本机所有已保存的 TXT 手工分章记录；损坏文件忽略，不阻塞其他书。
+    nonisolated static func loadAllSyncRecords(in directory: URL) -> [String: SyncedTXTChapterAdjustment] {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]) else {
+            return [:]
+        }
+        var result: [String: SyncedTXTChapterAdjustment] = [:]
+        for url in urls where url.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: url),
+                  let snap = try? JSONDecoder().decode(TXTAdjustmentSnapshot.self, from: data),
+                  snap.version == 1 else { continue }
+            let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let record = SyncedTXTChapterAdjustment(
+                contentHash: snap.contentHash,
+                revision: snap.revision,
+                boundaries: snap.boundaries,
+                updatedAt: snap.updatedAt ?? mtime)
+            if record.isValid { result[record.contentHash] = record }
+        }
+        return result
+    }
+
+    func allSyncRecords() -> [String: SyncedTXTChapterAdjustment] {
+        Self.loadAllSyncRecords(in: directory)
+    }
+
+    /// 套用远端同步来的 TXT 手工分章；只覆盖本机缺失或更旧的记录，返回实际发生变更的文件哈希。
+    func applySynced(_ records: [String: SyncedTXTChapterAdjustment]) throws -> Set<String> {
+        var changed: Set<String> = []
+        let localRecords = Self.loadAllSyncRecords(in: directory)
+        for (hash, incoming) in records where hash == incoming.contentHash && incoming.isValid {
+            if let existing = localRecords[hash] {
+                if existing.revision == incoming.revision { continue }
+                if existing.updatedAt > incoming.updatedAt { continue }
+                if existing.updatedAt == incoming.updatedAt && existing.revision >= incoming.revision { continue }
+            }
+            let saved = TXTAdjustmentSnapshot(
+                contentHash: incoming.contentHash,
+                revision: incoming.revision,
+                boundaries: incoming.boundaries,
+                position: nil,
+                bookmarks: [:],
+                updatedAt: incoming.updatedAt)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try JSONEncoder().encode(saved).write(to: file(hash), options: .atomic)
+            changed.insert(hash)
+        }
+        return changed
     }
 }
 

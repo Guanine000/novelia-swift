@@ -66,6 +66,7 @@ final class LocalAppServices {
     let recording: ReadingActivityController
     let statistics: ReadingStatisticsStore
     let library: LibraryStateStore
+    let syncLocalState: any WebDAVSyncLocalState
     let sync: WebDAVSyncStore
     /// 只在云端有文件的书；书库显示，同步更新。
     let cloudBooks: CloudBookStore
@@ -100,11 +101,13 @@ final class LocalAppServices {
         recording = ReadingActivityController(recorder: recorder ?? statistics)
         library = LibraryStateStore(positions: positions, defaults: defaults)
         self.cloudBooks = cloudBooks
-        sync = WebDAVSyncStore(local: AppWebDAVSyncLocalState(blocked: blockedTags, backgrounds: backgrounds,
-                                                           positions: positions, library: library,
-                                                           identityMaps: readerSettings.webEPUBMaps, bookmarkStore: bookmarks,
-                                                           annotationStore: self.annotations,
-                                                           readerSettings: readerSettings, characterStore: readerSettings.characters),
+        let localState = AppWebDAVSyncLocalState(blocked: blockedTags, backgrounds: backgrounds,
+                                                 positions: positions, library: library,
+                                                 identityMaps: readerSettings.webEPUBMaps, bookmarkStore: bookmarks,
+                                                 annotationStore: self.annotations,
+                                                 readerSettings: readerSettings, characterStore: readerSettings.characters)
+        syncLocalState = localState
+        sync = WebDAVSyncStore(local: localState,
                                statistics: statistics, cloudBooks: cloudBooks,
                                defaults: defaults, passwordStore: passwordStore)
     }

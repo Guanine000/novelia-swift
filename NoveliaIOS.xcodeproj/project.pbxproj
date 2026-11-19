@@ -56,6 +56,7 @@
 		A10000000000000000000024 /* EPUBSampleBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000021 /* EPUBSampleBook.swift */; };
 		A10000000000000000000025 /* ThirdPartyLicenses in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000022 /* ThirdPartyLicenses */; };
 		A10000000000000000000026 /* WebDAVSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000023 /* WebDAVSync.swift */; };
+		A10000000000000000000501 /* LocalLibraryBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000501 /* LocalLibraryBackup.swift */; };
 		A10000000000000000000027 /* ForumListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000024 /* ForumListView.swift */; };
 		A10000000000000000000033 /* ForumPostDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000030 /* ForumPostDetailView.swift */; };
 		A10000000000000000000034 /* ForumMarkdownViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000031 /* ForumMarkdownViews.swift */; };
@@ -68,7 +69,9 @@
 		C2A000000000000000000018 /* LibraryBookInfoEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A000000000000000000019 /* LibraryBookInfoEditor.swift */; };
 		A10000000000000000000038 /* DiscoverViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000035 /* DiscoverViews.swift */; };
 		A10000000000000000000039 /* NovelDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000036 /* NovelDetailViews.swift */; };
+		A10000000000000000000502 /* NovelCommentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000502 /* NovelCommentsView.swift */; };
 		A10000000000000000000040 /* LibraryComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000037 /* LibraryComponents.swift */; };
+		A10000000000000000000503 /* LibraryBookDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000503 /* LibraryBookDetailView.swift */; };
 		A10000000000000000000041 /* DownloadsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000038 /* DownloadsViews.swift */; };
 		A10000000000000000000042 /* TXTReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000039 /* TXTReaderView.swift */; };
 		A10000000000000000000043 /* SettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000040 /* SettingsViews.swift */; };
@@ -189,6 +192,7 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		A15F00000000000000000020 /* WenkuViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000013 /* WenkuViews.swift */; };
 		A15F00000000000000000021 /* WenkuStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000014 /* WenkuStore.swift */; };
 		A15F00000000000000000022 /* WebDAVSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000023 /* WebDAVSync.swift */; };
+		A15F00000000000000000501 /* LocalLibraryBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000501 /* LocalLibraryBackup.swift */; };
 		A15F00000000000000000023 /* ForumListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000024 /* ForumListView.swift */; };
 		A15F00000000000000000024 /* ForumPostDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000030 /* ForumPostDetailView.swift */; };
 		A15F00000000000000000025 /* ForumMarkdownViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000031 /* ForumMarkdownViews.swift */; };
@@ -201,7 +205,9 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		A15F0000000000000000002C /* LibraryBookInfoEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A000000000000000000019 /* LibraryBookInfoEditor.swift */; };
 		A15F0000000000000000002D /* DiscoverViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000035 /* DiscoverViews.swift */; };
 		A15F0000000000000000002E /* NovelDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000036 /* NovelDetailViews.swift */; };
+		A15F00000000000000000502 /* NovelCommentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000502 /* NovelCommentsView.swift */; };
 		A15F0000000000000000002F /* LibraryComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000037 /* LibraryComponents.swift */; };
+		A15F00000000000000000503 /* LibraryBookDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000503 /* LibraryBookDetailView.swift */; };
 		A15F00000000000000000030 /* DownloadsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000038 /* DownloadsViews.swift */; };
 		A15F00000000000000000031 /* TXTReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000039 /* TXTReaderView.swift */; };
 		A15F00000000000000000032 /* SettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000040 /* SettingsViews.swift */; };
@@ -354,6 +360,8 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		B70600000000000000000033 /* EPUBContentSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000031 /* EPUBContentSupport.swift */; };
 		B70600000000000000000042 /* ReadiumEPUBReaderSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000041 /* ReadiumEPUBReaderSupport.swift */; };
 		B70600000000000000000043 /* ReadiumEPUBReaderSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000041 /* ReadiumEPUBReaderSupport.swift */; };
+		A10000000000000000000504 /* ReadiumNavigatorDelegateSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000504 /* ReadiumNavigatorDelegateSupport.swift */; };
+		A15F00000000000000000504 /* ReadiumNavigatorDelegateSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000504 /* ReadiumNavigatorDelegateSupport.swift */; };
 		B70600000000000000000052 /* EPUBReaderNavigationSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000051 /* EPUBReaderNavigationSupport.swift */; };
 		B70600000000000000000062 /* ReadiumEPUBReaderDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000061 /* ReadiumEPUBReaderDiagnostics.swift */; };
 		B70600000000000000000063 /* ReadiumEPUBReaderDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70600000000000000000061 /* ReadiumEPUBReaderDiagnostics.swift */; };
@@ -406,6 +414,7 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		B10000000000000000000021 /* EPUBSampleBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBSampleBook.swift; sourceTree = "<group>"; };
 		B10000000000000000000022 /* ThirdPartyLicenses */ = {isa = PBXFileReference; lastKnownFileType = folder; path = iOSApp/Resources/ThirdPartyLicenses; sourceTree = "<group>"; };
 		B10000000000000000000023 /* WebDAVSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Sync/WebDAVSync.swift; sourceTree = "<group>"; };
+		B10000000000000000000501 /* LocalLibraryBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Sync/LocalLibraryBackup.swift; sourceTree = "<group>"; };
 		B10000000000000000000024 /* ForumListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Community/ForumListView.swift; sourceTree = "<group>"; };
 		B10000000000000000000030 /* ForumPostDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Community/ForumPostDetailView.swift; sourceTree = "<group>"; };
 		B10000000000000000000031 /* ForumMarkdownViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Community/ForumMarkdownViews.swift; sourceTree = "<group>"; };
@@ -419,7 +428,9 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		C2A000000000000000000019 /* LibraryBookInfoEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/LibraryBookInfoEditor.swift; sourceTree = "<group>"; };
 		B10000000000000000000035 /* DiscoverViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Discover/DiscoverViews.swift; sourceTree = "<group>"; };
 		B10000000000000000000036 /* NovelDetailViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Discover/NovelDetailViews.swift; sourceTree = "<group>"; };
+		B10000000000000000000502 /* NovelCommentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Discover/NovelCommentsView.swift; sourceTree = "<group>"; };
 		B10000000000000000000037 /* LibraryComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/LibraryComponents.swift; sourceTree = "<group>"; };
+		B10000000000000000000503 /* LibraryBookDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Library/LibraryBookDetailView.swift; sourceTree = "<group>"; };
 		B10000000000000000000038 /* DownloadsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Downloads/DownloadsViews.swift; sourceTree = "<group>"; };
 		B10000000000000000000039 /* TXTReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Reader/TXTReaderView.swift; sourceTree = "<group>"; };
 		B10000000000000000000040 /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Settings/SettingsViews.swift; sourceTree = "<group>"; };
@@ -538,6 +549,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 		B70600000000000000000021 /* CharacterCardSupportViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Library/CharacterCardSupportViews.swift; sourceTree = SOURCE_ROOT; };
 		B70600000000000000000031 /* EPUBContentSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/EPUBContentSupport.swift; sourceTree = SOURCE_ROOT; };
 		B70600000000000000000041 /* ReadiumEPUBReaderSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/ReadiumEPUBReaderSupport.swift; sourceTree = SOURCE_ROOT; };
+		B10000000000000000000504 /* ReadiumNavigatorDelegateSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/ReadiumNavigatorDelegateSupport.swift; sourceTree = SOURCE_ROOT; };
 		B70600000000000000000051 /* EPUBReaderNavigationSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/EPUBReaderNavigationSupport.swift; sourceTree = SOURCE_ROOT; };
 		B70600000000000000000061 /* ReadiumEPUBReaderDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/ReadiumEPUBReaderDiagnostics.swift; sourceTree = SOURCE_ROOT; };
 		B70600000000000000000071 /* EPUBMetadataAndXML.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/Reader/EPUBReader/EPUBMetadataAndXML.swift; sourceTree = SOURCE_ROOT; };
@@ -584,6 +596,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				B70600000000000000000011 /* SpeechPlaybackViews.swift */,
 				B70600000000000000000031 /* EPUBContentSupport.swift */,
 				B70600000000000000000041 /* ReadiumEPUBReaderSupport.swift */,
+				B10000000000000000000504 /* ReadiumNavigatorDelegateSupport.swift */,
 				B70600000000000000000051 /* EPUBReaderNavigationSupport.swift */,
 				B70600000000000000000061 /* ReadiumEPUBReaderDiagnostics.swift */,
 				B70600000000000000000071 /* EPUBMetadataAndXML.swift */,
@@ -671,6 +684,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				B10000000000000000000013 /* WenkuViews.swift */,
 				B10000000000000000000014 /* WenkuStore.swift */,
 				B10000000000000000000023 /* WebDAVSync.swift */,
+				B10000000000000000000501 /* LocalLibraryBackup.swift */,
 				F03210000000000000000001 /* WebNovelEPUBReading.swift */,
 				F02910000000000000000002 /* WebNovelEPUBUpdate.swift */,
 				B10000000000000000000024 /* ForumListView.swift */,
@@ -686,7 +700,9 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				C2A000000000000000000019 /* LibraryBookInfoEditor.swift */,
 				B10000000000000000000035 /* DiscoverViews.swift */,
 				B10000000000000000000036 /* NovelDetailViews.swift */,
+				B10000000000000000000502 /* NovelCommentsView.swift */,
 				B10000000000000000000037 /* LibraryComponents.swift */,
+				B10000000000000000000503 /* LibraryBookDetailView.swift */,
 				B10000000000000000000038 /* DownloadsViews.swift */,
 				B10000000000000000000039 /* TXTReaderView.swift */,
 				B10000000000000000000040 /* SettingsViews.swift */,
@@ -1080,6 +1096,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A10000000000000000000012 /* WenkuViews.swift in Sources */,
 				A10000000000000000000013 /* WenkuStore.swift in Sources */,
 				A10000000000000000000026 /* WebDAVSync.swift in Sources */,
+				A10000000000000000000501 /* LocalLibraryBackup.swift in Sources */,
 				A10000000000000000000027 /* ForumListView.swift in Sources */,
 				A10000000000000000000033 /* ForumPostDetailView.swift in Sources */,
 				A10000000000000000000034 /* ForumMarkdownViews.swift in Sources */,
@@ -1093,7 +1110,9 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				C2A000000000000000000018 /* LibraryBookInfoEditor.swift in Sources */,
 				A10000000000000000000038 /* DiscoverViews.swift in Sources */,
 				A10000000000000000000039 /* NovelDetailViews.swift in Sources */,
+				A10000000000000000000502 /* NovelCommentsView.swift in Sources */,
 				A10000000000000000000040 /* LibraryComponents.swift in Sources */,
+				A10000000000000000000503 /* LibraryBookDetailView.swift in Sources */,
 				A10000000000000000000041 /* DownloadsViews.swift in Sources */,
 				A10000000000000000000042 /* TXTReaderView.swift in Sources */,
 				A10000000000000000000043 /* SettingsViews.swift in Sources */,
@@ -1190,6 +1209,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				B70600000000000000000022 /* CharacterCardSupportViews.swift in Sources */,
 				B70600000000000000000032 /* EPUBContentSupport.swift in Sources */,
 				B70600000000000000000042 /* ReadiumEPUBReaderSupport.swift in Sources */,
+				A10000000000000000000504 /* ReadiumNavigatorDelegateSupport.swift in Sources */,
 				B70600000000000000000052 /* EPUBReaderNavigationSupport.swift in Sources */,
 				B70600000000000000000062 /* ReadiumEPUBReaderDiagnostics.swift in Sources */,
 				B70600000000000000000072 /* EPUBMetadataAndXML.swift in Sources */,
@@ -1208,6 +1228,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				B70600000000000000000023 /* CharacterCardSupportViews.swift in Sources */,
 				B70600000000000000000033 /* EPUBContentSupport.swift in Sources */,
 				B70600000000000000000043 /* ReadiumEPUBReaderSupport.swift in Sources */,
+				A15F00000000000000000504 /* ReadiumNavigatorDelegateSupport.swift in Sources */,
 				B70600000000000000000063 /* ReadiumEPUBReaderDiagnostics.swift in Sources */,
 				B70600000000000000000073 /* EPUBMetadataAndXML.swift in Sources */,
 				B70600000000000000000093 /* NoveliaAPISessionAndDTOs.swift in Sources */,
@@ -1268,6 +1289,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A15F00000000000000000020 /* WenkuViews.swift in Sources */,
 				A15F00000000000000000021 /* WenkuStore.swift in Sources */,
 				A15F00000000000000000022 /* WebDAVSync.swift in Sources */,
+				A15F00000000000000000501 /* LocalLibraryBackup.swift in Sources */,
 				A15F00000000000000000023 /* ForumListView.swift in Sources */,
 				A15F00000000000000000024 /* ForumPostDetailView.swift in Sources */,
 				A15F00000000000000000025 /* ForumMarkdownViews.swift in Sources */,
@@ -1281,7 +1303,9 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A15F0000000000000000002C /* LibraryBookInfoEditor.swift in Sources */,
 				A15F0000000000000000002D /* DiscoverViews.swift in Sources */,
 				A15F0000000000000000002E /* NovelDetailViews.swift in Sources */,
+				A15F00000000000000000502 /* NovelCommentsView.swift in Sources */,
 				A15F0000000000000000002F /* LibraryComponents.swift in Sources */,
+				A15F00000000000000000503 /* LibraryBookDetailView.swift in Sources */,
 				A15F00000000000000000030 /* DownloadsViews.swift in Sources */,
 				A15F00000000000000000031 /* TXTReaderView.swift in Sources */,
 				A15F00000000000000000032 /* SettingsViews.swift in Sources */,

@@ -107,6 +107,8 @@ struct WebDAVManifest: Codable {
     var textProjections: [String: ReaderTextProjectionRecord]? = nil
     /// 阅读器摘录与笔记 `[标注 ID: 标注]`，含删除墓碑；随书籍同步。旧版应用忽略。
     var annotations: [String: ReaderAnnotation]? = nil
+    /// TXT 手工分章目录 `[文件 SHA-256: 分章边界]`，随书籍同步；旧版应用忽略。
+    var txtChapterAdjustments: [String: SyncedTXTChapterAdjustment]? = nil
 }
 
 enum WebDAVSyncError: LocalizedError, Equatable {

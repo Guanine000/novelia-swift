@@ -132,6 +132,13 @@ enum WebDAVSyncPlanner {
         return annotations.filter { keys.contains($0.value.bookKey) && $0.value.isValidSyncRecord }
     }
 
+    /// TXT 手工分章随书籍同步，只保留清单中仍有文件的 TXT 书籍（按文件内容哈希匹配）。
+    static func txtChapterAdjustmentsToSync(_ records: [String: SyncedTXTChapterAdjustment],
+                                            in manifest: WebDAVManifest) -> [String: SyncedTXTChapterAdjustment] {
+        let hashes = Set((manifest.webBooks.flatMap(\.assets) + manifest.wenkuBooks.flatMap(\.assets)).map(\.hash))
+        return records.filter { hashes.contains($0.key) && $0.key == $0.value.contentHash && $0.value.isValid }
+    }
+
 
     /// 浅色、深色背景各自比较：远端严格较新才采用远端。
     static func planBackground(local: SyncedReaderBackground, remote: SyncedReaderBackground?) -> BackgroundSyncDecision {
