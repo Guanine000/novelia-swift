@@ -276,6 +276,19 @@ extension EPUBReaderModel {
         pageBook?.selectedText(for: range, on: pageID(location.spineIndex, location.pageIndex + selectionLeaf))
     }
 
+    /// 提取选区前后各约 240 个 UTF-16 字符的上下文，供「AI 语境解析」使用。
+    func selectionContext(for range: NSRange) -> String? {
+        guard let text = pageBook?.sourceText(spineIndex: location.spineIndex) else { return nil }
+        let nsText = text as NSString
+        let total = nsText.length
+        guard total > 0, range.location != NSNotFound, range.location < total else { return nil }
+        let clampedEnd = min(total, NSMaxRange(range))
+        let start = max(0, range.location - 240)
+        let end = min(total, clampedEnd + 240)
+        guard end > start else { return nil }
+        return nsText.substring(with: NSRange(location: start, length: end - start))
+    }
+
     /// 把当前选中的章内范围保存为标注；位置以引文和 UTF-16 范围持久化，不保存页面坐标。
     @discardableResult
     func addAnnotation(range: NSRange, quote: String, color: ReaderAnnotation.Color = .yellow,

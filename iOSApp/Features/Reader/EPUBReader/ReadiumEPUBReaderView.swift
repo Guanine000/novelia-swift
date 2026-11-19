@@ -601,12 +601,14 @@ private struct ReadiumEPUBReaderViewContent: View {
 /// 把模型当前的 EPUBNavigatorViewController 作为子控制器嵌入；重建导航器时由 `.id` 换新宿主。
 private struct ReadiumNavigatorHost: UIViewControllerRepresentable {
     @Environment(\.characterLookup) private var characterLookup
+    @Environment(\.aiContextExplain) private var aiContextExplain
     @ObservedObject var model: ReadiumEPUBReaderModel
     let curlEnabled: Bool
 
     func makeUIViewController(context: Context) -> ReadiumNavigatorContainer {
         let container = ReadiumNavigatorContainer()
         container.onCharacterLookup = characterLookup
+        container.onAIContextExplain = aiContextExplain
         container.onSpeakSelection = { [weak model] selection in model?.startSpeech(selection: selection) }
         container.onHighlightSelection = { [weak model] selection in model?.addAnnotation(selection: selection) }
         container.onNoteSelection = { [weak model] selection in
@@ -623,6 +625,7 @@ private struct ReadiumNavigatorHost: UIViewControllerRepresentable {
 
     func updateUIViewController(_ container: ReadiumNavigatorContainer, context: Context) {
         container.onCharacterLookup = characterLookup
+        container.onAIContextExplain = aiContextExplain
         container.onHighlightSelection = { [weak model] selection in model?.addAnnotation(selection: selection) }
         container.onNoteSelection = { [weak model] selection in
             model?.addAnnotation(selection: selection, editAfter: true)
@@ -655,13 +658,23 @@ final class ReadiumNavigatorContainer: UIViewController {
     }
 
     var onCharacterLookup: ((String) -> Void)?
+    var onAIContextExplain: ((String, String?) -> Void)?
     @objc func lookupCharacterSelection() {
         guard let selection = (embedded as? EPUBNavigatorViewController)?.currentSelection,
               let text = selection.locator.text.highlight else { return }
         onCharacterLookup?(text)
     }
+    @objc func explainSelectionWithAI() {
+        guard let selection = (embedded as? EPUBNavigatorViewController)?.currentSelection,
+              let text = selection.locator.text.highlight else { return }
+        let context = [selection.locator.text.before, text, selection.locator.text.after]
+            .compactMap { $0 }
+            .joined()
+        onAIContextExplain?(text, context.isEmpty ? nil : context)
+    }
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(lookupCharacterSelection) { return onCharacterLookup != nil }
+        if action == #selector(explainSelectionWithAI) { return onAIContextExplain != nil }
         if action == #selector(highlightSelection) { return onHighlightSelection != nil }
         if action == #selector(noteSelection) { return onNoteSelection != nil }
         return super.canPerformAction(action, withSender: sender)

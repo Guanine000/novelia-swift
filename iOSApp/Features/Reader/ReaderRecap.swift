@@ -64,6 +64,7 @@ struct LocalRecapSource {
 }
 
 private struct CharacterLookupKey: EnvironmentKey { static let defaultValue: ((String) -> Void)? = nil }
+private struct AIContextExplainKey: EnvironmentKey { static let defaultValue: ((String, String?) -> Void)? = nil }
 private struct ReadingRecapActionKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
 private struct CharacterCardsKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
 private struct CharacterCardsReadOnlyKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
@@ -71,6 +72,11 @@ extension EnvironmentValues {
     var characterLookup: ((String) -> Void)? {
         get { self[CharacterLookupKey.self] }
         set { self[CharacterLookupKey.self] = newValue }
+    }
+    /// 选中正文后调用的 AI 语境解析动作：(选中文本, 前后上下文)。
+    var aiContextExplain: ((String, String?) -> Void)? {
+        get { self[AIContextExplainKey.self] }
+        set { self[AIContextExplainKey.self] = newValue }
     }
     var readingRecapAction: (() -> Void)? {
         get { self[ReadingRecapActionKey.self] }
@@ -121,7 +127,8 @@ struct ReaderRecapPresentation: ViewModifier {
     @State private var showingCards = false
     @State private var showingCardsReadOnly = false
     @State private var characterQuery = ""
-    private var activityID: String { active && scenePhase == .active && !prompts && !showing && !showingCharacters ? source?.bookKey ?? "none" : "inactive" }
+    @State private var explainRequest: AIContextExplainRequest?
+    private var activityID: String { active && scenePhase == .active && !prompts && !showing && !showingCharacters && explainRequest == nil ? source?.bookKey ?? "none" : "inactive" }
     private var openAction: (() -> Void)? {
         guard let source, source.currentChapter > 0 else { return nil }
         return { showing = true }
@@ -130,6 +137,11 @@ struct ReaderRecapPresentation: ViewModifier {
         content
             .environment(\.readingRecapAction, openAction)
             .environment(\.characterLookup, source == nil ? nil : { text in characterQuery = text; showingCharacters = true })
+            .environment(\.aiContextExplain, services.readingAI.configuration.isEnabled ? { selection, context in
+                let trimmed = selection.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                explainRequest = AIContextExplainRequest(selection: trimmed, context: context, bookTitle: source?.title)
+            } : nil)
             .environment(\.characterCards, libraryBookKey == nil ? nil : { showingCards = true })
             .environment(\.characterCardsReadOnly, libraryBookKey == nil ? nil : { showingCardsReadOnly = true })
             .task(id: source?.bookKey) {
@@ -146,9 +158,9 @@ struct ReaderRecapPresentation: ViewModifier {
                     store.recordReading(book: source.bookKey)
                 }
             }
-            .onValueChange(of: source?.identity) { _, _ in showing = false; showingCharacters = false; showingCards = false }
+            .onValueChange(of: source?.identity) { _, _ in showing = false; showingCharacters = false; showingCards = false; explainRequest = nil }
             .onValueChange(of: source?.currentChapter) { previous, _ in
-                if previous != nil { showing = false; showingCharacters = false; showingCards = false; prompts = false }
+                if previous != nil { showing = false; showingCharacters = false; showingCards = false; prompts = false; explainRequest = nil }
             }
             .alert("要生成前情回顾吗？", isPresented: $prompts) {
                 Button("继续阅读", role: .cancel) {}
@@ -183,6 +195,148 @@ struct ReaderRecapPresentation: ViewModifier {
             .sheet(isPresented: $showing) {
                 if let source { ReadingRecapSheet(source: source, store: store, ai: services.readingAI) }
             }
+            .sheet(item: $explainRequest) { request in
+                ReaderAIExplainSheet(request: request, ai: services.readingAI)
+            }
+    }
+}
+
+private struct AIContextExplainRequest: Identifiable, Equatable {
+    let id = UUID()
+    let selection: String
+    let context: String?
+    let bookTitle: String?
+}
+
+/// 选中正文后的 AI 语境解析面板：仅发送当前选区与前后少量上下文，流式展示解析结果。
+@MainActor
+private struct ReaderAIExplainSheet: View {
+    let request: AIContextExplainRequest
+    @ObservedObject var ai: ReadingAIStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var answer = ""
+    @State private var errorMessage: String?
+    @State private var isLoading = false
+    @State private var copied = false
+    @State private var runID = UUID()
+
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("选中片段")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Text(request.selection)
+                            .font(.callout)
+                            .lineLimit(6)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+
+                    if let errorMessage {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Label(errorMessage, systemImage: "exclamationmark.triangle")
+                                .font(.callout)
+                                .foregroundStyle(.orange)
+                            Button("重试") { runID = UUID() }
+                                .buttonStyle(.bordered)
+                        }
+                    } else if isLoading {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text(ai.streamedCharacters > 0 ? "正在解析（已收到 \(ai.streamedCharacters) 字）…" : "正在结合上下文解析…")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if !ai.streamedPreview.isEmpty {
+                                Text(ai.streamedPreview)
+                                    .font(.body)
+                                    .lineSpacing(5)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    } else if !answer.isEmpty {
+                        Text(answer)
+                            .font(.body)
+                            .lineSpacing(5)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(spacing: 12) {
+                            Button {
+                                UIPasteboard.general.string = answer
+                                copied = true
+                            } label: {
+                                Label(copied ? "已复制" : "复制解析", systemImage: copied ? "checkmark" : "doc.on.doc")
+                            }
+                            .buttonStyle(.bordered)
+                            Button {
+                                runID = UUID()
+                            } label: {
+                                Label("重新解析", systemImage: "arrow.clockwise")
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .padding(.top, 4)
+                    }
+                }
+                .padding(16)
+            }
+            .navigationTitle("AI 语境解析")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+            .task(id: runID) {
+                await runExplain()
+            }
+        }
+    }
+
+    private func runExplain() async {
+        copied = false
+        errorMessage = nil
+        answer = ""
+        ai.refreshKeyStatus()
+        guard ai.isReadyForGeneration else {
+            errorMessage = "请先在「设置 → AI 阅读辅助」启用并配置模型与 API 密钥。"
+            return
+        }
+        isLoading = true
+        defer { isLoading = false }
+        let selectedSnippet = String(request.selection.prefix(500))
+        var sections: [String] = []
+        if let title = request.bookTitle, !title.isEmpty {
+            sections.append("书名：\(title)")
+        }
+        sections.append("选中片段：\n\(selectedSnippet)")
+        if let context = request.context?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !context.isEmpty, context != selectedSnippet {
+            sections.append("所在上下文：\n\(String(context.prefix(1200)))")
+        }
+        let aiRequest = ReadingAIRequest(
+            instruction: "你是轻小说阅读助手。请用简洁清晰的中文，结合上下文语境解释用户选中的片段（包括日语表达、成语俗语、文化梗、专有名词含义、语气 nuance 或更自然的中文译法）。直接输出解析，不要复述指令，不要剧透后续剧情。",
+            input: sections.joined(separator: "\n\n")
+        )
+        do {
+            let response = try await ai.generate(aiRequest)
+            guard !Task.isCancelled else { return }
+            answer = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if answer.isEmpty {
+                errorMessage = "模型返回了空白内容，请重试。"
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            errorMessage = error.localizedDescription
+        }
     }
 }
 

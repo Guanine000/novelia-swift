@@ -642,8 +642,16 @@ final class EPUBReaderModel: ObservableObject {
         config.contentInsets = contentInsets
         config.textColor = pageTextColor
         config.backgroundColor = settings.backgrounds.image(dark: isDarkMode, landscape: viewportSize.width > viewportSize.height) == nil ? pageBackground : .clear
-        config.defaultTextAlignment = .natural
+        switch style.textAlignment ?? .bookDefault {
+        case .bookDefault: config.defaultTextAlignment = .natural
+        case .justified: config.defaultTextAlignment = .justified
+        case .left: config.defaultTextAlignment = .left
+        }
+        config.writingMode = (style.verticalText == true) ? .verticalRTL : .horizontal
         EPUBPageBook.applyEngineWorkarounds(to: &config)
+        if let spacing = style.letterSpacing, spacing > 0 {
+            config.letterSpacing = spacing
+        }
         return config
     }
 

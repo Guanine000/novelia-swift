@@ -407,6 +407,9 @@ extension EPUBReaderModel {
         if let indent = requested.firstLineIndentEm {
             updated.firstLineIndentEm = min(4, max(0, indent))
         }
+        if let spacing = requested.letterSpacing {
+            updated.letterSpacing = min(4, max(0, spacing))
+        }
         updated.topMargin = min(120, max(0, requested.topMargin))
         updated.bottomMargin = min(120, max(0, requested.bottomMargin))
         updated.leftMargin = min(80, max(0, requested.leftMargin))

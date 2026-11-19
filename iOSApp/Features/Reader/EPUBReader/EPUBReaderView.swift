@@ -645,6 +645,7 @@ private struct EPUBReaderPageSurface: View, Equatable {
     let annotationHighlights: [EPUBReaderModel.AnnotationHighlight]
     @Environment(\.readerSpeechActions) private var speechActions
     @Environment(\.characterLookup) private var characterLookup
+    @Environment(\.aiContextExplain) private var aiContextExplain
     @State private var translateText: String?
     @State private var showsTranslate = false
     @State private var annotationEditor: AnnotationEditorTarget?
@@ -678,6 +679,7 @@ private struct EPUBReaderPageSurface: View, Equatable {
             selectionRangeAt: { point in model.selectionRange(at: point) },
             selectionRects: { range in model.selectionRects(for: range) },
             selectedText: { range in model.selectedText(for: range) },
+            selectedContext: { range in model.selectionContext(for: range) },
             speechRects: speechRects,
             onSpeechTap: { speech.toggleHighlightedSpeech() },
             onSpeakSelection: { range in
@@ -685,6 +687,7 @@ private struct EPUBReaderPageSurface: View, Equatable {
                                                 chapterUTF16Length: 0, startIndexHint: nil, sourceUTF16Offset: range.location))
             },
             characterLookup: characterLookup,
+            aiContextExplain: aiContextExplain,
             selectionTranslate: { text in
                 translateText = text
                 showsTranslate = true
@@ -702,6 +705,7 @@ private struct EPUBReaderPageSurface: View, Equatable {
                 annotationEditor = .init(range: range, quote: quote, annotation: nil)
             },
             curlEnabled: curlEnabled,
+            isRightToLeft: model.style.verticalText == true,
             paperInsets: UIEdgeInsets(top: pageInsets.top, left: pageInsets.leading, bottom: pageInsets.bottom, right: pageInsets.trailing),
             paperColor: UIColor(model.pageBackgroundColor),
             paperBackground: settings.backgrounds.image(dark: model.isDarkMode, landscape: size.width > size.height),

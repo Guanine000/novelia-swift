@@ -911,10 +911,17 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
     // 纸面只在动画与落页期间接管触摸，此时也必须保留用户的下一次操作。
     @objc private func blockedTap(_ tap: UITapGestureRecognizer) {
         guard available, tap.state == .ended else { return }
-        let x = tap.location(in: view).x
-        if x < view.bounds.width / 3 || x > view.bounds.width * 2 / 3 {
-            _ = requestTurn(forward: (x > view.bounds.width / 2) != (model?.curlRightToLeft ?? false))
-        } else { model?.onCenterTap() }
+        let action = ReaderTapZoneMode.current.action(
+            at: tap.location(in: view),
+            in: view.bounds.size,
+            isRightToLeft: model?.curlRightToLeft ?? false
+        )
+        switch action {
+        case .menu:
+            model?.onCenterTap()
+        case .next, .previous:
+            _ = requestTurn(forward: action == .next)
+        }
     }
     private static func samePage(_ lhs: Locator, _ rhs: Locator) -> Bool {
         lhs.href == rhs.href && abs((lhs.locations.progression ?? 0) - (rhs.locations.progression ?? 0)) < 0.0000001

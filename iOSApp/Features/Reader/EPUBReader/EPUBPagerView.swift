@@ -63,12 +63,15 @@ struct EPUBPagerView: UIViewControllerRepresentable {
     var selectionRects: (NSRange) -> [CGRect] = { _ in [] }
     /// 取得选中文本，供系统复制菜单使用。
     var selectedText: (NSRange) -> String? = { _ in nil }
+    /// 取得选中文本前后上下文，供「AI 语境解析」使用。
+    var selectedContext: (NSRange) -> String? = { _ in nil }
     /// 当前句高亮独立于选字，不重画分页位图。
     var speechRects: [CGRect] = []
     var onSpeechTap: () -> Void = {}
     var onSpeakSelection: (NSRange) -> Void = { _ in }
     /// 选中菜单里的「翻译」；宿主呈现系统翻译面板（iOS 17.4+）。
     var characterLookup: ((String) -> Void)? = nil
+    var aiContextExplain: ((String, String?) -> Void)? = nil
     var selectionTranslate: ((String) -> Void)? = { _ in }
     /// 已保存标注的命中与操作；标注矩形来自模型，不在页面位图上绘制。
     var annotationHitTest: (CGPoint) -> UUID? = { _ in nil }
@@ -77,6 +80,7 @@ struct EPUBPagerView: UIViewControllerRepresentable {
     var onNoteSelection: (NSRange, String) -> Void = { _, _ in }
     /// 三页位图由宿主从同一份排版缓存派生；每次 SwiftUI 更新都会重放。
     var curlEnabled = false
+    var isRightToLeft = false
     var paperInsets: UIEdgeInsets = .zero
     var paperColor: UIColor = .systemBackground
     var paperBackground: UIImage?
@@ -103,16 +107,19 @@ struct EPUBPagerView: UIViewControllerRepresentable {
         view.selectionRangeProvider = selectionRangeAt
         view.selectionRectsProvider = selectionRects
         view.selectedTextProvider = selectedText
+        view.selectedContextProvider = selectedContext
         view.speechTapHandler = onSpeechTap
         view.speakSelectionHandler = onSpeakSelection
         view.selectionTranslateHandler = selectionTranslate
         view.characterLookupHandler = characterLookup
+        view.aiContextExplainHandler = aiContextExplain
+        view.isRightToLeft = isRightToLeft
         view.annotationHitTestProvider = annotationHitTest
         view.annotationTapHandler = onAnnotationTap
         view.highlightSelectionHandler = onHighlightSelection
         view.noteSelectionHandler = onNoteSelection
-        container.update(images: images, curl: curlEnabled, insets: paperInsets,
-                         color: paperColor, background: paperBackground)
+        container.update(images: images, curl: curlEnabled, isRightToLeft: isRightToLeft,
+                         insets: paperInsets, color: paperColor, background: paperBackground)
         view.applySpeechRects(speechRects)
     }
 }
@@ -130,9 +137,18 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
     var selectionRangeProvider: ((CGPoint) -> NSRange?)?
     var selectionRectsProvider: ((NSRange) -> [CGRect])?
     var selectedTextProvider: ((NSRange) -> String?)?
+    var selectedContextProvider: ((NSRange) -> String?)?
     /// 选中菜单里的「翻译」；宿主呈现系统翻译面板（iOS 17.4+）。
     var characterLookupHandler: ((String) -> Void)?
+    var aiContextExplainHandler: ((String, String?) -> Void)?
     var selectionTranslateHandler: ((String) -> Void)?
+    var isRightToLeft = false {
+        didSet {
+            if oldValue != isRightToLeft, !isDragActive, !isAnimating {
+                layoutStripContent()
+            }
+        }
+    }
     var annotationHitTestProvider: ((CGPoint) -> UUID?)?
     var annotationTapHandler: ((UUID) -> Void)?
     var highlightSelectionHandler: ((NSRange, String) -> Void)?
@@ -257,7 +273,11 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
     private func layoutStripContent() {
         let width = max(bounds.width, pageSize.width)
         let height = max(bounds.height, pageSize.height)
-        let imageViews: [(UIImageView, CGImage?)] = [
+        let imageViews: [(UIImageView, CGImage?)] = isRightToLeft ? [
+            (nextImageView, images.next),
+            (currentImageView, images.current),
+            (previousImageView, images.previous),
+        ] : [
             (previousImageView, images.previous),
             (currentImageView, images.current),
             (nextImageView, images.next),
@@ -349,11 +369,13 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
             var offset = panBaseX + translation
             // 没有对应页位图（或不可翻）时，该方向停住不动。
             if translation > 0 {
-                let canTurnBack = (canTurnProvider?(false) ?? false) && images.previous != nil
-                if !canTurnBack { offset = -width }
+                let forward = isRightToLeft
+                let canTurn = (canTurnProvider?(forward) ?? false) && (forward ? images.next : images.previous) != nil
+                if !canTurn { offset = -width }
             } else if translation < 0 {
-                let canTurnForward = (canTurnProvider?(true) ?? false) && images.next != nil
-                if !canTurnForward { offset = -width }
+                let forward = !isRightToLeft
+                let canTurn = (canTurnProvider?(forward) ?? false) && (forward ? images.next : images.previous) != nil
+                if !canTurn { offset = -width }
             }
             offset = min(0, max(-2 * width, offset))
             strip.frame.origin.x = offset
@@ -365,8 +387,8 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
             let velocity = gesture.velocity(in: self).x
             let threshold = width / 4
             var forward: Bool?
-            if translation < -threshold || velocity < -900 { forward = true }
-            else if translation > threshold || velocity > 900 { forward = false }
+            if translation < -threshold || velocity < -900 { forward = !isRightToLeft }
+            else if translation > threshold || velocity > 900 { forward = isRightToLeft }
             guard let direction = forward,
                   (canTurnProvider?(direction == true) ?? false),
                   (direction == true ? images.next : images.previous) != nil else {
@@ -411,18 +433,22 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
 
         if spokenRects.contains(where: { $0.contains(location) }) { speechTapHandler?(); return }
 
-        // 2) 中部三分之一：点到图片时打开查看器，否则显隐工具栏。
-        if location.x > width / 3, location.x < width * 2 / 3 {
+        // 2) 按用户选择的点击翻页热区决定工具栏显隐或前后翻页。
+        let action = ReaderTapZoneMode.current.action(
+            at: location,
+            in: CGSize(width: width, height: max(bounds.height, pageSize.height)),
+            isRightToLeft: isRightToLeft
+        )
+        switch action {
+        case .menu:
             if imageTapProvider?(location) == true { return }
             centerTapHandler?()
-            return
+        case .next, .previous:
+            let forward = (action == .next)
+            guard (canTurnProvider?(forward) ?? false),
+                  (forward ? images.next : images.previous) != nil else { blockedTurnHandler?(forward); return }
+            completeTurn(forward: forward)
         }
-
-        // 3) 左右三分之一：翻页。
-        let forward = location.x >= width * 2 / 3
-        guard (canTurnProvider?(forward) ?? false),
-              (forward ? images.next : images.previous) != nil else { blockedTurnHandler?(forward); return }
-        completeTurn(forward: forward)
     }
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
@@ -520,7 +546,8 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
         let width = max(bounds.width, pageSize.width)
         isAnimating = true
         animatingChangeHandler?(true)
-        let targetX = forward ? -2 * width : 0
+        let goesLeft = isRightToLeft ? !forward : forward
+        let targetX = goesLeft ? -2 * width : 0
         UIView.animate(withDuration: 0.28, delay: 0,
                        options: [.curveEaseOut, .allowUserInteraction]) {
             self.strip.frame.origin.x = targetX
@@ -595,6 +622,12 @@ extension EPUBPagerUIView: UIEditMenuInteractionDelegate {
                 self?.clearSelection(); handler(selectedText)
             })
         }
+        if let explainHandler = aiContextExplainHandler {
+            let context = selectedRange.flatMap { selectedContextProvider?($0) }
+            items.append(UIAction(title: "AI 解析", image: UIImage(systemName: "sparkles")) { [weak self] _ in
+                self?.clearSelection(); explainHandler(selectedText, context)
+            })
+        }
         if #available(iOS 17.4, *), let translateHandler = selectionTranslateHandler {
             items.append(UIAction(title: "翻译", image: UIImage(systemName: "translate")) { _ in
                 translateHandler(selectedText)
@@ -622,7 +655,7 @@ final class EPUBPagerContainer: UIViewController {
     private var pager: MetalPageCurlViewController?
     private var pages: [Int: UIImage] = [:]
     private var input = EPUBPagerView.PageImages(previous: nil, current: nil, next: nil)
-    private var deferred: (EPUBPagerView.PageImages, Bool, UIEdgeInsets, UIColor, UIImage?)?
+    private var deferred: (EPUBPagerView.PageImages, Bool, Bool, UIEdgeInsets, UIColor, UIImage?)?
     private var paperInsets = UIEdgeInsets.zero
     private var paperColor = UIColor.systemBackground
     private var paperBackground: UIImage?
@@ -631,6 +664,7 @@ final class EPUBPagerContainer: UIViewController {
     private var staleCurrent: CGImage?
     private var awaitingCommit = false
     private var curl = false
+    private var isRightToLeft = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -638,17 +672,19 @@ final class EPUBPagerContainer: UIViewController {
         view.addSubview(interaction)
     }
 
-    func update(images: EPUBPagerView.PageImages, curl: Bool, insets: UIEdgeInsets, color: UIColor, background: UIImage?) {
-        if turning { deferred = (images, curl, insets, color, background); return }
+    func update(images: EPUBPagerView.PageImages, curl: Bool, isRightToLeft: Bool, insets: UIEdgeInsets, color: UIColor, background: UIImage?) {
+        if turning { deferred = (images, curl, isRightToLeft, insets, color, background); return }
         // 已经显示目标快照时，等待模型提交，不能重放提交前的当前页。
-        if awaitingCommit, EPUBPagerUIView.sameImage(images.current, staleCurrent), self.curl == curl { return }
+        if awaitingCommit, EPUBPagerUIView.sameImage(images.current, staleCurrent), self.curl == curl, self.isRightToLeft == isRightToLeft { return }
         awaitingCommit = false
-        let changed = input != images || self.curl != curl || paperInsets != (curl ? insets : .zero)
+        let changed = input != images || self.curl != curl || self.isRightToLeft != isRightToLeft
+            || paperInsets != (curl ? insets : .zero)
             || !paperColor.isEqual(color) || paperBackground !== background
-        input = images; self.curl = curl; paperInsets = curl ? insets : .zero
+        input = images; self.curl = curl; self.isRightToLeft = isRightToLeft; paperInsets = curl ? insets : .zero
         paperColor = color; paperBackground = background
         if curl, pager == nil { installCurl() }
         if !curl { removeCurl() }
+        pager?.isRightToLeft = isRightToLeft
         interaction.apply(images: images)
         interaction.configureCurl(curl)
         layoutSurfaces()
@@ -658,6 +694,7 @@ final class EPUBPagerContainer: UIViewController {
     private func installCurl() {
         let controller = MetalPageCurlViewController()
         controller.showsRestingImage = true
+        controller.isRightToLeft = isRightToLeft
         controller.canTurnProvider = { [weak self] forward in
             guard let self, !self.awaitingCommit, !self.turning else { return false }
             return self.interaction.canTurnProvider?(forward) == true
@@ -774,7 +811,7 @@ final class EPUBPagerContainer: UIViewController {
         } else { rebuildSheets() }
         if let deferred {
             self.deferred = nil
-            update(images: deferred.0, curl: deferred.1, insets: deferred.2, color: deferred.3, background: deferred.4)
+            update(images: deferred.0, curl: deferred.1, isRightToLeft: deferred.2, insets: deferred.3, color: deferred.4, background: deferred.5)
         }
     }
     private func turn(forward: Bool) {

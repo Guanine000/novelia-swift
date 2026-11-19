@@ -8,6 +8,24 @@ import UniformTypeIdentifiers
 // iOS 15 目标不编译原生分页源文件，因此这两类放在独立文件里，两个 App 目标都编译。
 
 /// 阅读器自己的排版偏好；字体名称来自设备当前可用的 UIFont 字体族。
+/// 分页阅读正文对齐方式；nil 或 `.bookDefault` 保留书籍原有排版。
+enum EPUBTextAlignmentOption: String, CaseIterable, Identifiable, Codable {
+    case bookDefault
+    case justified
+    case left
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .bookDefault: "沿用书籍"
+        case .justified: "两端对齐"
+        case .left: "左对齐"
+        }
+    }
+}
+
+/// 分页阅读器的排版样式；同时由默认引擎（YueduCoreText）与实验性 Readium 消费。
+/// 字段按旧存储键兼容持久化，新增字段一律使用可缺省值。
 struct EPUBReaderStyle: Codable, Equatable {
     var doublePage: Bool? = false
     var fontSize: CGFloat = 21
@@ -16,6 +34,12 @@ struct EPUBReaderStyle: Codable, Equatable {
     var paragraphSpacing: CGFloat = 0
     /// nil 保留书籍原样；0、1、2 等值覆盖段落首行缩进（em）。
     var firstLineIndentEm: CGFloat? = nil
+    /// nil 或 `.bookDefault` 沿用书籍默认对齐；可切换两端对齐或左对齐。
+    var textAlignment: EPUBTextAlignmentOption? = nil
+    /// nil 或 <= 0 使用引擎默认字间距；正值表示额外字间距（pt）。
+    var letterSpacing: CGFloat? = nil
+    /// 日文／繁体竖排（纵书，从右向左翻页）；nil 或 false 为横排。
+    var verticalText: Bool? = nil
     var topMargin: CGFloat = 64
     var bottomMargin: CGFloat = 72
     var leftMargin: CGFloat = 20
@@ -34,6 +58,10 @@ struct EPUBReaderStyle: Codable, Equatable {
         }
         if let firstLineIndentEm {
             rules.append("p { text-indent: \(firstLineIndentEm)em !important; }")
+        }
+        if let alignment = textAlignment, alignment != .bookDefault {
+            let value = alignment == .justified ? "justify" : "left"
+            rules.append("p { text-align: \(value) !important; }")
         }
         return rules.isEmpty ? nil : rules.joined(separator: "\n")
     }

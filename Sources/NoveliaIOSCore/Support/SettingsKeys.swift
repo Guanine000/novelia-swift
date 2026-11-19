@@ -15,6 +15,12 @@ enum SettingsKey {
     /// 原生分页的仿真翻页偏好，仅存本机；默认保留跟手平移。
     static let readerNativePageCurl = "reader.nativePageCurl.v1"
     static let readerReadiumPageCurl = "reader.readiumPageCurl.v1"
+    /// 分页阅读器点击翻页热区模式，仅存本机；默认标准左中右。
+    static let readerTapZoneMode = "reader.tapZoneMode.v1"
+    /// 工具栏隐藏时底栏是否显示电量、时间与进度百分比，均默认 true，仅存本机。
+    static let readerFooterShowsBattery = "reader.footer.battery.v1"
+    static let readerFooterShowsTime = "reader.footer.time.v1"
+    static let readerFooterShowsProgress = "reader.footer.progress.v1"
     /// EPUB 使用实验性的 Readium（WKWebView）阅读器代替 YueduCoreText。
     static let readerEPUBReadium = "readerEPUBReadium"
     /// Readium 打开 EPUB 时去掉书内脚本（默认关闭，照常执行）；YueduCoreText 始终不执行书内脚本。

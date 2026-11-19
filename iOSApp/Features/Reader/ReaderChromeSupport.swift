@@ -3,6 +3,70 @@ import SwiftUI
 /// 阅读页共用的显示选项与外观组件：底栏位置口径、目录诊断开关。
 /// 这里只放展示层内容，不参与排版、进度、书签或搜索计算。
 
+/// 分页阅读器点按动作结果。
+enum ReaderTapAction: Equatable {
+    case previous
+    case next
+    case menu
+}
+
+/// 分页阅读器的点击翻页热区预设；本机保存，默认保持原有左/中/右三分。
+enum ReaderTapZoneMode: String, CaseIterable, Identifiable {
+    case standard
+    case oneHandRight
+    case oneHandLeft
+    case swipeOnly
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .standard: "标准（左上一页 / 中菜单 / 右下一页）"
+        case .oneHandRight: "单手右手（右下翻页 / 左上回退）"
+        case .oneHandLeft: "单手左手（左下翻页 / 右上回退）"
+        case .swipeOnly: "仅滑动翻页（点击呼出菜单）"
+        }
+    }
+
+    static var current: ReaderTapZoneMode {
+        let raw = UserDefaults.standard.string(forKey: SettingsKey.readerTapZoneMode)
+        return raw.flatMap(ReaderTapZoneMode.init(rawValue:)) ?? .standard
+    }
+
+    /// 根据点按坐标、视口尺寸与阅读方向（竖排 RTL 为 true）解析对应动作。
+    func action(at point: CGPoint, in size: CGSize, isRightToLeft: Bool) -> ReaderTapAction {
+        guard size.width > 0, size.height > 0 else { return .menu }
+        let nx = point.x / size.width
+        let ny = point.y / size.height
+        switch self {
+        case .swipeOnly:
+            return .menu
+        case .standard:
+            if nx > 1.0 / 3.0 && nx < 2.0 / 3.0 { return .menu }
+            let rightEdge = nx >= 2.0 / 3.0
+            return (rightEdge != isRightToLeft) ? .next : .previous
+        case .oneHandRight:
+            // 中上呼出菜单，左上上一页，其余区域（右侧与下半屏）全部翻下一页。
+            if ny < 0.34 {
+                if nx < 0.34 { return .previous }
+                if nx < 0.68 { return .menu }
+                return .next
+            }
+            if nx >= 0.34 && nx <= 0.66 && ny < 0.56 { return .menu }
+            return .next
+        case .oneHandLeft:
+            // 中上呼出菜单，右上上一页，其余区域（左侧与下半屏）全部翻下一页。
+            if ny < 0.34 {
+                if nx > 0.66 { return .previous }
+                if nx > 0.32 { return .menu }
+                return .next
+            }
+            if nx >= 0.34 && nx <= 0.66 && ny < 0.56 { return .menu }
+            return .next
+        }
+    }
+}
+
 /// 底栏位置信息的口径。按顺序点击循环。
 enum ReaderPositionStyle: String, CaseIterable, Identifiable {
     case chapterPage
@@ -192,31 +256,46 @@ struct ReaderBottomBarShell<Content: View>: View {
     var readingTime: AnyView? = nil
     @ViewBuilder var content: Content
 
+    @AppStorage(SettingsKey.readerFooterShowsBattery) private var showsBattery = true
+    @AppStorage(SettingsKey.readerFooterShowsTime) private var showsTime = true
+    @AppStorage(SettingsKey.readerFooterShowsProgress) private var showsProgress = true
+
+    private var showsHiddenStatusRow: Bool {
+        showsBattery || showsTime || (showsProgress && hiddenPercentText != nil) || readingTime != nil
+    }
+
     var body: some View {
+        let displaysStatusRow = showChrome || showsHiddenStatusRow
         VStack(spacing: 8) {
             if showChrome {
                 content
                     .transition(.opacity)
             }
-            HStack {
-                Text(batteryLevel >= 0 ? "电量 \(Int((batteryLevel * 100).rounded()))%" : "电量 —")
-                Spacer()
-                if let readingTime { readingTime }
-                // 工具栏隐藏时也保留进度百分比，兼顾沉浸阅读与位置感知。
-                if !showChrome, let hiddenPercentText {
-                    Text(hiddenPercentText)
+            if displaysStatusRow {
+                HStack {
+                    if showChrome || showsBattery {
+                        Text(batteryLevel >= 0 ? "电量 \(Int((batteryLevel * 100).rounded()))%" : "电量 —")
+                    }
+                    Spacer()
+                    if let readingTime { readingTime }
+                    // 工具栏隐藏时按偏好保留进度百分比，兼顾沉浸阅读与位置感知。
+                    if !showChrome, showsProgress, let hiddenPercentText {
+                        Text(hiddenPercentText)
+                    }
+                    if showChrome || showsTime {
+                        TimelineView(.periodic(from: .now, by: 60)) { context in
+                            Text(context.date, format: .dateTime.hour().minute())
+                        }
+                    }
                 }
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Text(context.date, format: .dateTime.hour().minute())
-                }
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .allowsHitTesting(false)
             }
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(.secondary)
-            .allowsHitTesting(false)
         }
         .padding(.horizontal, 18)
-        .padding(.top, showChrome ? 8 : 4)
-        .padding(.bottom, 10)
+        .padding(.top, showChrome ? 8 : (displaysStatusRow ? 4 : 0))
+        .padding(.bottom, displaysStatusRow ? 10 : 0)
         .background {
             if showChrome {
                 Rectangle().fill(.ultraThinMaterial)
@@ -224,7 +303,7 @@ struct ReaderBottomBarShell<Content: View>: View {
                         Rectangle().fill(NoveliaStyle.hairline).frame(height: 0.5)
                     }
                     .ignoresSafeArea(edges: coversBottomSafeArea ? .bottom : [])
-            } else if let hiddenBackground {
+            } else if displaysStatusRow, let hiddenBackground {
                 hiddenBackground.opacity(0.92)
             }
         }
@@ -399,6 +478,10 @@ struct ReaderStyleSheet: View {
     var supportsNativePageTurn = false
     var supportsReadiumPageTurn = false
     @State private var screenBrightness: Double = Double(UIScreen.main.brightness)
+    @AppStorage(SettingsKey.readerTapZoneMode) private var tapZoneModeRaw = ReaderTapZoneMode.standard.rawValue
+    @AppStorage(SettingsKey.readerFooterShowsBattery) private var footerShowsBattery = true
+    @AppStorage(SettingsKey.readerFooterShowsTime) private var footerShowsTime = true
+    @AppStorage(SettingsKey.readerFooterShowsProgress) private var footerShowsProgress = true
 
     var body: some View {
         CompatNavigationStack {
@@ -463,6 +546,14 @@ struct ReaderStyleSheet: View {
                     Toggle("双页模式", isOn: Binding(get: { draftStyle.doublePage == true }, set: { draftStyle.doublePage = $0 }))
                     Text("每次显示两页；横屏或 iPad 上阅读更舒适。章节末尾不足两页时保留空白页。")
                         .font(.caption).foregroundStyle(.secondary)
+                    Picker("点击翻页热区", selection: $tapZoneModeRaw) {
+                        ForEach(ReaderTapZoneMode.allCases) { mode in
+                            Text(mode.title).tag(mode.rawValue)
+                        }
+                    }
+                    Toggle("隐藏顶栏时显示电量", isOn: $footerShowsBattery)
+                    Toggle("隐藏顶栏时显示时间", isOn: $footerShowsTime)
+                    Toggle("隐藏顶栏时显示阅读百分比", isOn: $footerShowsProgress)
                 }
                 Section("字体") {
                     NavigationLink {
@@ -499,6 +590,28 @@ struct ReaderStyleSheet: View {
                     }
                 }
                 Section("段落") {
+                    Picker("对齐方式", selection: Binding(
+                        get: { draftStyle.textAlignment ?? .bookDefault },
+                        set: { draftStyle.textAlignment = $0 == .bookDefault ? nil : $0 }
+                    )) {
+                        ForEach(EPUBTextAlignmentOption.allCases) { option in
+                            Text(option.title).tag(option)
+                        }
+                    }
+                    Toggle(isOn: Binding(
+                        get: { draftStyle.verticalText == true },
+                        set: { draftStyle.verticalText = $0 ? true : nil }
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("日文／繁体竖排（纵书）")
+                            Text("从右向左纵排与翻页，适合阅读日文原版或繁体轻小说。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    styleSlider("字间距", value: Binding(
+                        get: { draftStyle.letterSpacing ?? 0 },
+                        set: { draftStyle.letterSpacing = $0 > 0.05 ? $0 : nil }
+                    ), range: 0...4)
                     styleSlider("行间距", value: $draftStyle.lineSpacing, range: 0...24)
                     styleSlider("段落间距", value: $draftStyle.paragraphSpacing, range: 0...40)
                     Picker("首行缩进", selection: Binding(

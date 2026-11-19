@@ -507,6 +507,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             layout: .boxes, element: "<span role='button' aria-label='当前朗读句' class='novelia-speech-current'></span>",
             stylesheet: ".novelia-speech-current { background: rgba(255,210,0,0.30); border-radius: 3px; }")
         config.editingActions = [EditingAction(title: "人物词条", action: #selector(ReadiumNavigatorContainer.lookupCharacterSelection)),
+                                EditingAction(title: "AI 解析", action: #selector(ReadiumNavigatorContainer.explainSelectionWithAI)),
                                 EditingAction(title: "高亮", action: #selector(ReadiumNavigatorContainer.highlightSelection)),
                                 EditingAction(title: "添加笔记", action: #selector(ReadiumNavigatorContainer.noteSelection)),
                                 EditingAction(title: "从此句朗读", action: #selector(ReadiumNavigatorContainer.speakSelection))] + EditingAction.defaultActions
@@ -533,26 +534,41 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         // 点按高亮只打开编辑面板；每次刷新用新组名时会重新注册该组的回调。
         observeAnnotationInteractions(in: annotationDecorationGroup, of: navigator)
 
-        // 先于翻页适配器注册且不消费事件：只记下点按，供位置日志区分用户翻页与 Readium 自行移动。
+        // 先于翻页适配器注册：按用户自定义热区处理点按翻页与工具栏显隐。
         gestureToken = navigator.addObserver(.tap { [weak self] event in
-            if let self, let view = self.navigator?.view {
-                self.lastTapWindowRect = view.convert(
-                    CGRect(origin: event.location, size: .zero).insetBy(dx: -8, dy: -10),
-                    to: nil
-                )
-            }
+            guard let self, let view = self.navigator?.view else { return false }
+            self.lastTapWindowRect = view.convert(
+                CGRect(origin: event.location, size: .zero).insetBy(dx: -8, dy: -10),
+                to: nil
+            )
             // 同次 WebKit 点击先激活高亮，再上报普通点按；后者不能把刚恢复的朗读再次暂停。
-            if let self, Date().timeIntervalSince(self.lastSpeechDecorationTap) < 0.3 { return true }
-            if let self, Date().timeIntervalSince(self.lastAnnotationDecorationTap) < 0.3 { return true }
-            if let self, let view = self.navigator?.view,
-               event.location.x < view.bounds.width / 3 || event.location.x > view.bounds.width * 2 / 3,
-               self.onCurlTurn?(self.curlForward(atRightEdge: event.location.x > view.bounds.width / 2)) == true { return true }
-            self?.noteGesture("tap")
-            if let self, let view = self.navigator?.view,
-               event.location.x < view.bounds.width / 3 || event.location.x > view.bounds.width * 2 / 3 { self.speech.suspendFollow(true); self.pendingWebPositionWrite = true }
-            if let self, self.isAtWebNovelEnd, let view = self.navigator?.view,
-               event.location.x > view.bounds.width * 2 / 3 { self.pendingWebPositionWrite = false; self.onReachedEnd?(); return true }
-            return false
+            if Date().timeIntervalSince(self.lastSpeechDecorationTap) < 0.3 { return true }
+            if Date().timeIntervalSince(self.lastAnnotationDecorationTap) < 0.3 { return true }
+            let mode = ReaderTapZoneMode.current
+            let action = mode.action(at: event.location, in: view.bounds.size, isRightToLeft: self.curlRightToLeft)
+            switch action {
+            case .menu:
+                if await self.openImage(at: event.location) { return true }
+                self.onCenterTap()
+                return true
+            case .next, .previous:
+                let forward = (action == .next)
+                if self.onCurlTurn?(forward) == true { return true }
+                self.noteGesture("tap")
+                self.speech.suspendFollow(true)
+                self.pendingWebPositionWrite = true
+                if forward && self.isAtWebNovelEnd {
+                    self.pendingWebPositionWrite = false
+                    self.onReachedEnd?()
+                    return true
+                }
+                if mode == .standard {
+                    // 标准热区交由 DirectionalNavigationAdapter 处理，保持 Readium 原生翻页体验。
+                    return false
+                }
+                if forward { self.goForward() } else { self.goBackward() }
+                return true
+            }
         })
         let adapter = DirectionalNavigationAdapter(animatedTransition: true)
         adapter.bind(to: navigator)
@@ -601,19 +617,32 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         // 深色模式仍用 Readium 夜间主题，强制可读的浅色文字。
         // 行距、段距、缩进属于 ReadiumCSS 的“高级设置”，需关闭出版社样式才生效；
         // 保持默认时沿用书籍原有 CSS。
-        let overridesBook = style.lineSpacing > 0 || style.paragraphSpacing > 0 || style.firstLineIndentEm != nil
+        let isVertical = style.verticalText == true
+        let letterSpacing = style.letterSpacing ?? 0
+        let textAlign: ReadiumNavigator.TextAlignment? = switch style.textAlignment ?? .bookDefault {
+        case .bookDefault: nil
+        case .justified: .justify
+        case .left: .left
+        }
+        let overridesBook = style.lineSpacing > 0 || style.paragraphSpacing > 0
+            || style.firstLineIndentEm != nil || letterSpacing > 0
+            || textAlign != nil || isVertical
         let fontSize = Double(style.fontSize)
         return EPUBPreferences(
             fontFamily: style.fontFamily.map { FontFamily(rawValue: $0) },
             // WebKit 中 1 CSS px = 1 pt；浏览器默认根字号 16px。
             fontSize: fontSize / 16,
+            letterSpacing: letterSpacing > 0 ? Double(letterSpacing) / fontSize : nil,
             lineHeight: style.lineSpacing > 0 ? 1.5 + Double(style.lineSpacing) / fontSize : nil,
             paragraphIndent: style.firstLineIndentEm.map { Double($0) },
             paragraphSpacing: style.paragraphSpacing > 0 ? Double(style.paragraphSpacing) / fontSize : nil,
             publisherStyles: !overridesBook,
+            readingProgression: isVertical ? .rtl : nil,
             scroll: false,
             spread: style.doublePage == true ? .always : .never,
-            theme: isDarkMode ? .dark : .light
+            textAlign: textAlign,
+            theme: isDarkMode ? .dark : .light,
+            verticalText: isVertical ? true : nil
         )
     }
 
@@ -687,6 +716,9 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         if let indent = requested.firstLineIndentEm {
             updated.firstLineIndentEm = min(4, max(0, indent))
         }
+        if let spacing = requested.letterSpacing {
+            updated.letterSpacing = min(4, max(0, spacing))
+        }
         updated.topMargin = min(120, max(0, requested.topMargin))
         updated.bottomMargin = min(120, max(0, requested.bottomMargin))
         updated.leftMargin = min(80, max(0, requested.leftMargin))
@@ -694,7 +726,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         guard updated != style else { return }
         let needsRebuild = updated.topMargin != style.topMargin || updated.bottomMargin != style.bottomMargin
             || updated.leftMargin != style.leftMargin || updated.rightMargin != style.rightMargin
-            || updated.fontFamily != style.fontFamily
+            || updated.fontFamily != style.fontFamily || updated.verticalText != style.verticalText
         style = updated
         if let data = try? JSONEncoder().encode(updated) {
             settings.defaults.set(data, forKey: settings.styleStorageKey)

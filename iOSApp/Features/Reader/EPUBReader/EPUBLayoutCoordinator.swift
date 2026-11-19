@@ -35,6 +35,7 @@ struct EPUBLayoutParameters: Hashable {
     let textColor: [CGFloat]
     let backgroundColor: [CGFloat]
     let alignment: Int
+    let writingMode: String
     let aspectRatio: CGFloat
     let readerCSS: String?
     let version: Int
@@ -53,6 +54,7 @@ struct EPUBLayoutParameters: Hashable {
         textColor = Self.components(config.textColor)
         backgroundColor = Self.components(config.backgroundColor)
         alignment = config.defaultTextAlignment.rawValue
+        writingMode = config.writingMode.rawValue
         self.aspectRatio = aspectRatio
         self.readerCSS = readerCSS
         version = Self.layoutVersion
