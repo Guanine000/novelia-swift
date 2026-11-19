@@ -49,7 +49,9 @@ enum ReadiumTextPublication {
                      locations: .init(progression: 0, totalProgression: Double(index) / Double(max(1, links.count)), position: index + 1))]
         }
         return Publication(
-            manifest: Manifest(metadata: Metadata(title: source.bookTitle, languages: ["zh"], layout: .reflowable),
+            manifest: Manifest(metadata: Metadata(title: source.bookTitle,
+                                                  languages: [source.displayProjection.htmlLanguageTag ?? "zh"],
+                                                  layout: .reflowable),
                                readingOrder: links, tableOfContents: toc),
             container: TextContainer(source: source, links: links),
             servicesBuilder: PublicationServicesBuilder(positions: { _ in TextPositions(positions: positions) }))

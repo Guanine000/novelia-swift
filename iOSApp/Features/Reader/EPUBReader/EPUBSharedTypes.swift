@@ -3,6 +3,9 @@ import Foundation
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+#if canImport(NoveliaIOSCore)
+import NoveliaIOSCore
+#endif
 
 // 阅读样式与导入字体。Readium 与原生分页共用，且不依赖 YueduCoreText。
 // iOS 15 目标不编译原生分页源文件，因此这两类放在独立文件里，两个 App 目标都编译。
@@ -50,11 +53,17 @@ struct EPUBReaderStyle: Codable, Equatable {
     }
 
     var readerCSS: String? {
+        readerCSS(for: .init())
+    }
+
+    /// 结合本书文字投影生成阅读器覆盖样式。开启简繁转换且未手动指定字体时，
+    /// 用目标地区默认字体压过书内硬编码的日文／繁体字体，避免同码位异体字错形。
+    func readerCSS(for projection: ReadingTextProjection) -> String? {
         var rules: [String] = []
-        if let fontFamily {
-            let escaped = fontFamily.replacingOccurrences(of: "\\", with: "\\\\")
+        if let effectiveFont = fontFamily ?? projection.preferredCJKFontFamily {
+            let escaped = effectiveFont.replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "'", with: "\\'")
-            rules.append("body, p { font-family: '\(escaped)' !important; }")
+            rules.append("body, p, div, span, li, blockquote, h1, h2, h3, h4, h5, h6 { font-family: '\(escaped)' !important; }")
         }
         if let firstLineIndentEm {
             rules.append("p { text-indent: \(firstLineIndentEm)em !important; }")

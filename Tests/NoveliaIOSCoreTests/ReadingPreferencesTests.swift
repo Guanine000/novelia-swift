@@ -60,6 +60,39 @@ final class ReadingPreferencesTests: XCTestCase {
         XCTAssertTrue(result.contains("<script>閱讀</script>"))
         XCTAssertTrue(result.contains("<style>.閱讀{}</style>"))
     }
+    func testChineseProjectionRewritesHTMLLanguageForCJKGlyphs() {
+        var simplified = ReadingTextProjection(); simplified.chinese = .simplified
+        XCTAssertEqual(simplified.htmlLanguageTag, "zh-Hans")
+        XCTAssertEqual(simplified.preferredCJKFontFamily, "PingFang SC")
+        let html = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <html xmlns="http://www.w3.org/1999/xhtml" lang="ja" xml:lang='zh-TW'>
+        <head><title>直骨海</title></head>
+        <body lang="ja-JP"><p xml:lang="zh-Hant" data-lang="ja">直骨海</p><span lang="en">Hello</span><!-- <p lang="ja">comment</p> --></body>
+        </html>
+        """
+        let rewritten = simplified.applyHTML(html)
+        XCTAssertTrue(rewritten.contains(#"<html xmlns="http://www.w3.org/1999/xhtml" lang="zh-Hans" xml:lang='zh-Hans'>"#))
+        XCTAssertTrue(rewritten.contains(#"<body lang="zh-Hans">"#))
+        XCTAssertTrue(rewritten.contains(#"<p xml:lang="zh-Hans" data-lang="ja">直骨海</p>"#))
+        XCTAssertTrue(rewritten.contains(#"<span lang="en">Hello</span>"#))
+        XCTAssertTrue(rewritten.contains(#"<!-- <p lang="ja">comment</p> -->"#))
+
+        let missingLang = #"<html><body><p>直</p></body></html>"#
+        XCTAssertTrue(simplified.applyHTML(missingLang).contains(#"<html lang="zh-Hans" xml:lang="zh-Hans">"#))
+
+        var traditional = ReadingTextProjection(); traditional.chinese = .traditional
+        XCTAssertEqual(traditional.htmlLanguageTag, "zh-Hant")
+        XCTAssertEqual(traditional.preferredCJKFontFamily, "PingFang TC")
+        XCTAssertTrue(traditional.applyHTML(#"<html lang="ja"><body><p lang="zh-CN">直</p></body></html>"#)
+            .contains(#"<html lang="zh-Hant" xml:lang="zh-Hant"><body><p lang="zh-Hant">直</p></body></html>"#))
+
+        var original = ReadingTextProjection(); original.replacements = ["直": "直"]
+        XCTAssertNil(original.htmlLanguageTag)
+        XCTAssertNil(original.preferredCJKFontFamily)
+        XCTAssertEqual(original.applyHTML(#"<html lang="ja"><body><p lang="zh-TW">直</p></body></html>"#),
+                       #"<html lang="ja"><body><p lang="zh-TW">直</p></body></html>"#)
+    }
     func testReverseDragRestoresOriginalSelectionAndCancelDirection() {
         let keys = ["a", "b", "c", "d", "e"]
         let selecting = LibraryRangeSelection(original: ["e"], anchor: 1, selects: true)

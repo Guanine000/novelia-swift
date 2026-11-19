@@ -421,6 +421,9 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         }
         let opener = PublicationOpener(parser: EPUBParser())
         let transform: Publication.Builder.Transform = { manifest, container, _ in
+            if let languageTag = projection.htmlLanguageTag {
+                manifest.metadata.languages = [languageTag]
+            }
             let reflowable = manifest.metadata.layout != .fixed
             container = container.map { href, resource in
                 let path = href.removingFragment().removingQuery().path
@@ -628,10 +631,13 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             || style.firstLineIndentEm != nil || letterSpacing > 0
             || textAlign != nil || isVertical
         let fontSize = Double(style.fontSize)
+        let projection = settings.projection
+        let effectiveFont = style.fontFamily ?? projection.preferredCJKFontFamily
         return EPUBPreferences(
-            fontFamily: style.fontFamily.map { FontFamily(rawValue: $0) },
+            fontFamily: effectiveFont.map { FontFamily(rawValue: $0) },
             // WebKit 中 1 CSS px = 1 pt；浏览器默认根字号 16px。
             fontSize: fontSize / 16,
+            language: projection.htmlLanguageTag.map { Language(code: .bcp47($0)) },
             letterSpacing: letterSpacing > 0 ? Double(letterSpacing) / fontSize : nil,
             lineHeight: style.lineSpacing > 0 ? 1.5 + Double(style.lineSpacing) / fontSize : nil,
             paragraphIndent: style.firstLineIndentEm.map { Double($0) },
@@ -700,6 +706,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
         reloadStoredStyle()
         if let textBook, let source = textBook.source as? TextChapterSource {
             source.displayProjection = settings.projection
+            publication = ReadiumTextPublication.make(source: source)
             rebuildNavigator()
         } else if let url {
             status = .idle

@@ -628,6 +628,10 @@ final class EPUBReaderModel: ObservableObject {
         scheduleRelayout(reason)
     }
 
+    var effectiveReaderCSS: String? {
+        style.readerCSS(for: settings.projection)
+    }
+
     func makeConfig() -> BrowserLayoutConfig {
         let contentInsets = style.contentInsets
         let contentWidth = max(1, leafWidth - contentInsets.left - contentInsets.right)
@@ -636,7 +640,8 @@ final class EPUBReaderModel: ObservableObject {
         config.renderWidth = contentWidth
         config.renderHeight = contentHeight
         config.rootFontSize = style.fontSize
-        config.fontFamilies = style.fontFamily.map { [$0] } ?? []
+        let effectiveFont = style.fontFamily ?? settings.projection.preferredCJKFontFamily
+        config.fontFamilies = effectiveFont.map { [$0] } ?? []
         config.lineSpacing = style.lineSpacing
         config.paragraphSpacing = style.paragraphSpacing
         config.contentInsets = contentInsets
@@ -712,7 +717,7 @@ final class EPUBReaderModel: ObservableObject {
         defer { isLayingOut = false }
         do {
             try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
-                                         aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                         aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
                                          context: layoutContext(reason))
             if book.generation == generation {
                 pendingRelayoutAnchor = nil
@@ -773,7 +778,7 @@ final class EPUBReaderModel: ObservableObject {
             defer { isLayingOut = false }
             guard let book = pageBook, !book.isChapterComplete(target) else { return }
             try? await book.layoutChapter(target, container: container, config: makeConfig(),
-                                          aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                          aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
                                           context: layoutContext(.navigate))
         }
         prefetchNeighbors(of: target)
@@ -799,7 +804,7 @@ final class EPUBReaderModel: ObservableObject {
                 guard let self else { return }
                 do {
                     try await book.layoutChapter(neighbor, container: container, config: config,
-                                                 aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                                 aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
                                                  context: context)
                     failedChapters.remove(neighbor)
                 } catch {

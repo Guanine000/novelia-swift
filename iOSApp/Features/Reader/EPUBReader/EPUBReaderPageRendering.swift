@@ -121,7 +121,7 @@ extension EPUBReaderModel {
                 do {
                     try await book.layoutChapter(spineIndex, container: container,
                                                  config: makeConfig(), aspectRatio: viewportAspectRatio,
-                                                 readerCSS: style.readerCSS, context: layoutContext(.seek))
+                                                 readerCSS: effectiveReaderCSS, context: layoutContext(.seek))
                 } catch {
                     if EPUBLayoutLog.failure(error).kind != "cancelled", pageBook === book {
                         status = .failed(describeLayoutError(error))

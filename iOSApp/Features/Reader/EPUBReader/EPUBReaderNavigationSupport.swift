@@ -103,7 +103,7 @@ extension EPUBReaderModel {
             guard let container = source, let book = pageBook, !book.isChapterComplete(spineIndex) else { return }
             do {
                 try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
-                                             aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                             aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
                                              context: layoutContext(.navigate))
                 if pageBook === book {
                     // 从失败页经目录或书内链接跳到可读章节时恢复阅读状态；
@@ -200,7 +200,7 @@ extension EPUBReaderModel {
         guard let source, let book = pageBook, (0..<source.chapterCount).contains(index) else { throw CancellationError() }
         if !book.isChapterComplete(index) {
             try await book.layoutChapter(index, container: source, config: makeConfig(),
-                                         aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                         aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
                                          context: layoutContext(.navigate))
         }
         try Task.checkCancellation()
@@ -315,7 +315,7 @@ extension EPUBReaderModel {
             do {
                 if !book.isChapterComplete(spineIndex) {
                     try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
-                                                 aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                                 aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
                                                  context: layoutContext(.navigate))
                 }
                 guard pageBook === book else { return }
@@ -360,7 +360,7 @@ extension EPUBReaderModel {
             do {
                 if !book.isChapterComplete(spineIndex) {
                     try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
-                                                 aspectRatio: viewportAspectRatio, readerCSS: style.readerCSS,
+                                                 aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
                                                  context: layoutContext(.navigate))
                 }
                 guard pageBook === book else { return }

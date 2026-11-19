@@ -35,7 +35,7 @@ struct ReaderBookPreferencesView: View {
                             .onTapGesture { source = key; replacement = draft.replacements[key] ?? "" }
                             .swipeActions { Button("删除", role: .destructive) { draft.replacements[key] = nil } }
                     }
-                    Text("先简繁转换，再按最长词优先替换一次；不改原文件。应用时重新排版。")
+                    Text("先简繁转换（并同步修正本书字形语言），再按最长词优先替换一次；不改原文件。应用时重新排版。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("效果预览") { Text(draft.apply(source.isEmpty ? "这是本书的文字预览，閱讀偏好只影响显示。" : source)) }

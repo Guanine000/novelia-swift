@@ -20,6 +20,22 @@ public struct ReadingTextProjection: Codable, Equatable, Sendable {
         value.replacements = Dictionary(uniqueKeysWithValues: replacements.filter { !$0.key.isEmpty && $0.key.utf16.count <= 120 && $0.value.utf16.count <= 120 }.sorted { $0.key < $1.key }.prefix(1000).map { ($0.key, $0.value) })
         return value
     }
+    /// 与简繁转换联动的 BCP-47 语言标记；保持原文时返回 nil，沿用书籍原有语言。
+    public var htmlLanguageTag: String? {
+        switch chinese {
+        case .original: nil
+        case .simplified: "zh-Hans"
+        case .traditional: "zh-Hant"
+        }
+    }
+    /// 未指定阅读字体时的地区默认字体，用于压过书内硬编码的日文／繁体字体。
+    public var preferredCJKFontFamily: String? {
+        switch chinese {
+        case .original: nil
+        case .simplified: "PingFang SC"
+        case .traditional: "PingFang TC"
+        }
+    }
     public func apply(_ text: String) -> String {
         let converted: String
         switch chinese {
@@ -31,14 +47,21 @@ public struct ReadingTextProjection: Codable, Equatable, Sendable {
         guard rules.enabled, !rules.replacements.isEmpty else { return converted }
         return ReplacementTrie.cached(for: rules).apply(converted)
     }
-    /// HTML只处理文本节点，不改链接、属性、脚本、样式或资源路径。
+    private static let htmlTokenRegex = try! NSRegularExpression(pattern: #"(?is)<!--.*?-->|<(script|style|head)\b[^>]*>.*?</\1\s*>|<[^>]*>|[^<]+"#)
+    private static let htmlLangAttrRegex = try! NSRegularExpression(pattern: #"(?i)(?<=\s)(xml:lang|lang)(\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`/]+))"#)
+
+    /// HTML 处理文本节点，并在开启简繁转换时同步修正根标签及 CJK 元素的 lang／xml:lang，
+    /// 避免同码位异体字沿用原书日文或繁体字形；不改链接、脚本、样式或资源路径。
     public func applyHTML(_ html: String) -> String {
         guard chinese != .original || (enabled && !replacements.isEmpty) else { return html }
-        let expression = try! NSRegularExpression(pattern: #"(?is)<!--.*?-->|<(script|style|head)\b[^>]*>.*?</\1\s*>|<[^>]*>|[^<]+"#)
+        let languageTag = htmlLanguageTag
         let source = html as NSString
-        return expression.matches(in: html, range: NSRange(location: 0, length: source.length)).map { match in
+        return Self.htmlTokenRegex.matches(in: html, range: NSRange(location: 0, length: source.length)).map { match in
             let part = source.substring(with: match.range)
-            guard !part.hasPrefix("<") else { return part }
+            if part.hasPrefix("<") {
+                guard let languageTag else { return part }
+                return Self.rewritingHTMLLanguage(in: part, languageTag: languageTag)
+            }
             // 保留实体边界；替换文本转义，不能注入HTML。
             return part.components(separatedBy: "&").enumerated().map { index, piece in
                 if index > 0, let end = piece.firstIndex(of: ";"), piece.distance(from: piece.startIndex, to: end) < 16 {
@@ -47,6 +70,64 @@ public struct ReadingTextProjection: Codable, Equatable, Sendable {
                 return (index > 0 ? "&amp;" : "") + escape(apply(piece))
             }.joined()
         }.joined()
+    }
+    private static func rewritingHTMLLanguage(in tag: String, languageTag: String) -> String {
+        guard tag.hasPrefix("<"), !tag.hasPrefix("</"), !tag.hasPrefix("<!"), !tag.hasPrefix("<?") else { return tag }
+        let afterOpen = tag.index(after: tag.startIndex)
+        let nameEnd = tag[afterOpen...].firstIndex(where: { $0.isWhitespace || $0 == ">" || $0 == "/" }) ?? tag.endIndex
+        let tagName = tag[afterOpen..<nameEnd].lowercased()
+        let isRootHTML = tagName == "html"
+        if !isRootHTML && tag.range(of: "lang", options: .caseInsensitive) == nil { return tag }
+
+        let nsTag = tag as NSString
+        let matches = htmlLangAttrRegex.matches(in: tag, range: NSRange(location: 0, length: nsTag.length))
+        var hasLang = false
+        var hasXMLLang = false
+        var output = ""
+        var cursor = 0
+        for match in matches {
+            let attrName = nsTag.substring(with: match.range(at: 1))
+            let lowerAttr = attrName.lowercased()
+            if lowerAttr == "lang" { hasLang = true }
+            if lowerAttr == "xml:lang" { hasXMLLang = true }
+
+            let valueRange: NSRange
+            let quote: String
+            if match.range(at: 3).location != NSNotFound {
+                valueRange = match.range(at: 3); quote = "\""
+            } else if match.range(at: 4).location != NSNotFound {
+                valueRange = match.range(at: 4); quote = "'"
+            } else {
+                valueRange = match.range(at: 5); quote = "\""
+            }
+            let currentValue = nsTag.substring(with: valueRange)
+            guard isRootHTML || isCJKLanguageTag(currentValue) else { continue }
+
+            output += nsTag.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+            let equals = nsTag.substring(with: match.range(at: 2))
+            output += "\(attrName)\(equals)\(quote)\(languageTag)\(quote)"
+            cursor = match.range.location + match.range.length
+        }
+        var result = cursor == 0 ? tag : output + nsTag.substring(from: cursor)
+        if isRootHTML && (!hasLang || !hasXMLLang) {
+            var additions = ""
+            if !hasLang { additions += " lang=\"\(languageTag)\"" }
+            if !hasXMLLang { additions += " xml:lang=\"\(languageTag)\"" }
+            if result.hasSuffix("/>") {
+                result.insert(contentsOf: additions, at: result.index(result.endIndex, offsetBy: -2))
+            } else if result.hasSuffix(">") {
+                result.insert(contentsOf: additions, at: result.index(before: result.endIndex))
+            }
+        }
+        return result
+    }
+    private static func isCJKLanguageTag(_ raw: String) -> Bool {
+        let primary = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .split(maxSplits: 1, whereSeparator: { $0 == "-" || $0 == "_" })
+            .first
+        guard let primary else { return false }
+        return primary == "zh" || primary == "ja" || primary == "jp" || primary == "ko"
     }
     private func escape(_ text: String) -> String {
         text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")

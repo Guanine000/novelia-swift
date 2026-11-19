@@ -51,9 +51,10 @@ enum TXTEPUBExporter {
         guard !chapters.isEmpty else { throw TXTEPUBExportError.emptyBook }
         let identifier = "urn:uuid:" + UUID().uuidString
         let modified = Date()
+        let language = projection.htmlLanguageTag ?? "zh"
         let headings = makeHeadings(chapters: chapters, projection: projection)
         let fixed = fixedEntries(title: title, author: author, identifier: identifier, modified: modified,
-                                 chapterCount: chapters.count, headings: headings)
+                                 chapterCount: chapters.count, headings: headings, language: language)
         try await write(chapters: chapters, headings: headings, projection: projection,
                         fixed: fixed, to: destination)
     }
@@ -64,9 +65,10 @@ enum TXTEPUBExporter {
                             identifier: String = "urn:uuid:" + UUID().uuidString,
                             modified: Date = Date()) throws -> [Entry] {
         guard !chapters.isEmpty else { throw TXTEPUBExportError.emptyBook }
+        let language = projection.htmlLanguageTag ?? "zh"
         let headings = makeHeadings(chapters: chapters, projection: projection)
         var entries = fixedEntries(title: title, author: author, identifier: identifier, modified: modified,
-                                   chapterCount: chapters.count, headings: headings)
+                                   chapterCount: chapters.count, headings: headings, language: language)
         for index in chapters.indices {
             entries.append(chapterEntry(index: index, chapter: chapters[index], headings: headings,
                                         projection: projection))
@@ -113,13 +115,15 @@ enum TXTEPUBExporter {
 
     private static func chapterEntry(index: Int, chapter: TXTEPUBChapter, headings: Headings,
                                      projection: ReadingTextProjection) -> Entry {
-        Entry(path: "OEBPS/text/\(fileName(index)).xhtml",
-              text: chapterDocument(title: headings.titles[index], volume: headings.volumes[index],
-                                    body: projection.apply(chapter.body),
-                                    startsVolume: headings.volumeStarts.contains(index)))
+        let language = projection.htmlLanguageTag ?? "zh"
+        return Entry(path: "OEBPS/text/\(fileName(index)).xhtml",
+                     text: chapterDocument(title: headings.titles[index], volume: headings.volumes[index],
+                                           body: projection.apply(chapter.body),
+                                           startsVolume: headings.volumeStarts.contains(index),
+                                           language: language))
     }
 
-    private static func chapterDocument(title: String, volume: String?, body: String, startsVolume: Bool) -> String {
+    private static func chapterDocument(title: String, volume: String?, body: String, startsVolume: Bool, language: String) -> String {
         var lines: [String] = []
         if startsVolume, let volume, !volume.isEmpty {
             lines.append("<p class=\"volume\">\(TextChapterXHTML.escape(volume))</p>")
@@ -130,7 +134,7 @@ enum TXTEPUBExporter {
         }
         return """
         <?xml version="1.0" encoding="UTF-8"?>
-        <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh">
+        <html xmlns="http://www.w3.org/1999/xhtml" lang="\(language)" xml:lang="\(language)">
         <head><title>\(TextChapterXHTML.escape(title))</title><link rel="stylesheet" type="text/css" href="../style.css"/></head>
         <body>
         \(lines.joined(separator: "\n"))
@@ -140,19 +144,19 @@ enum TXTEPUBExporter {
     }
 
     private static func fixedEntries(title: String, author: String, identifier: String, modified: Date,
-                                     chapterCount: Int, headings: Headings) -> [Entry] {
+                                     chapterCount: Int, headings: Headings, language: String) -> [Entry] {
         [
             Entry(path: "mimetype", text: "application/epub+zip"),
             Entry(path: "META-INF/container.xml", text: containerXML),
             Entry(path: "OEBPS/content.opf", text: contentOPF(title: title, author: author, identifier: identifier,
-                                                              modified: modified, chapterCount: chapterCount)),
-            Entry(path: "OEBPS/nav.xhtml", text: navigationDocument(title: title, headings: headings)),
-            Entry(path: "OEBPS/toc.ncx", text: ncxDocument(title: title, identifier: identifier, headings: headings)),
+                                                              modified: modified, chapterCount: chapterCount, language: language)),
+            Entry(path: "OEBPS/nav.xhtml", text: navigationDocument(title: title, headings: headings, language: language)),
+            Entry(path: "OEBPS/toc.ncx", text: ncxDocument(title: title, identifier: identifier, headings: headings, language: language)),
             Entry(path: "OEBPS/style.css", text: stylesheet)
         ]
     }
 
-    private static func navigationDocument(title: String, headings: Headings) -> String {
+    private static func navigationDocument(title: String, headings: Headings, language: String) -> String {
         func item(_ index: Int) -> String {
             "<li><a href=\"text/\(fileName(index)).xhtml\">\(TextChapterXHTML.escape(headings.titles[index]))</a></li>"
         }
@@ -166,7 +170,7 @@ enum TXTEPUBExporter {
         }
         return """
         <?xml version="1.0" encoding="UTF-8"?>
-        <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="zh">
+        <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="\(language)" xml:lang="\(language)">
         <head><title>\(TextChapterXHTML.escape(title))</title></head>
         <body>
         <nav epub:type="toc" id="toc"><h1>目录</h1><ol>
@@ -177,7 +181,7 @@ enum TXTEPUBExporter {
         """
     }
 
-    private static func ncxDocument(title: String, identifier: String, headings: Headings) -> String {
+    private static func ncxDocument(title: String, identifier: String, headings: Headings, language: String) -> String {
         var points: [String] = []
         var order = 1
         var volumeNumber = 0, chapterNumber = 0
@@ -217,7 +221,7 @@ enum TXTEPUBExporter {
         } ? 2 : 1
         return """
         <?xml version="1.0" encoding="UTF-8"?>
-        <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="zh">
+        <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="\(language)">
         <head>
         <meta name="dtb:uid" content="\(TextChapterXHTML.escape(identifier))"/>
         <meta name="dtb:depth" content="\(depth)"/>
@@ -235,7 +239,7 @@ enum TXTEPUBExporter {
     // MARK: - 包文档与写入
 
     private static func contentOPF(title: String, author: String, identifier: String,
-                                   modified: Date, chapterCount: Int) -> String {
+                                   modified: Date, chapterCount: Int, language: String) -> String {
         let manifest = (0..<chapterCount).map {
             "<item id=\"c\($0 + 1)\" href=\"text/\(fileName($0)).xhtml\" media-type=\"application/xhtml+xml\"/>"
         }.joined(separator: "\n")
@@ -247,11 +251,11 @@ enum TXTEPUBExporter {
         formatter.formatOptions = [.withInternetDateTime]
         return """
         <?xml version="1.0" encoding="UTF-8"?>
-        <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="zh">
+        <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="\(language)">
         <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
             <dc:identifier id="bookid">\(TextChapterXHTML.escape(identifier))</dc:identifier>
             <dc:title>\(TextChapterXHTML.escape(title))</dc:title>
-            <dc:language>zh</dc:language>\(creator)
+            <dc:language>\(language)</dc:language>\(creator)
             <meta property="dcterms:modified">\(formatter.string(from: modified))</meta>
         </metadata>
         <manifest>

@@ -56,6 +56,11 @@ final class TXTEPUBExportTests: XCTestCase {
         let chapter = try XCTUnwrap(entries["OEBPS/text/0001.xhtml"])
         XCTAssertTrue(chapter.contains("新名正文"))
         XCTAssertTrue(chapter.contains("新名卷"))
+
+        projection.chinese = .simplified
+        let simplifiedEntries = try self.entries(chapters, projection: projection)
+        XCTAssertTrue(try XCTUnwrap(simplifiedEntries["OEBPS/content.opf"]).contains("<dc:language>zh-Hans</dc:language>"))
+        XCTAssertTrue(try XCTUnwrap(simplifiedEntries["OEBPS/text/0001.xhtml"]).contains(#"lang="zh-Hans" xml:lang="zh-Hans""#))
     }
 
     func testArchiveWritesMimetypeFirstAndReadable() async throws {
