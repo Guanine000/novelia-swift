@@ -36,6 +36,9 @@ final class ReadingTimeEstimateTests: XCTestCase {
         XCTAssertNil(sampler.observe(.init(resource: 2, fraction: 0.4, reason: .forward), metrics: metrics, now: 340, active: true))
         XCTAssertNil(sampler.observe(.init(resource: 2, fraction: 0.5, reason: .reset), metrics: metrics, now: 360, active: true))
         XCTAssertEqual(try XCTUnwrap(sampler.observe(.init(resource: 2, fraction: 0.6, reason: .forward), metrics: metrics, now: 380, active: true)), 300, accuracy: 0.01)
+        let shortChapterMetrics = try ReadingTimeMetrics(words: [600], chapterStarts: [0], language: .chinese)
+        XCTAssertNil(sampler.observe(.init(resource: 0, fraction: 0, reason: .reset), metrics: shortChapterMetrics, now: 400, active: true))
+        XCTAssertEqual(try XCTUnwrap(sampler.observe(.init(resource: 0, fraction: 0.55, reason: .forward), metrics: shortChapterMetrics, now: 466, active: true)), 300, accuracy: 0.01)
     }
 
     func testMedianRequiresFiveSamplesAndBoundsStorage() {

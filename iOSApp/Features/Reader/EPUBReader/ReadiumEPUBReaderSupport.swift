@@ -39,8 +39,15 @@ extension ReadiumEPUBReaderModel {
 
     var localRecapSource: LocalRecapSource? {
         guard status == .ready, let publication, publication.readingOrder.indices.contains(readingTimePoint.resource) else { return nil }
+        let pageUpper = min(1, max(0, currentPageRange?.range.upperBound ?? readingTimePoint.fraction))
         if let book = textBook?.localRecapBook, let source = textBook?.source as? TextChapterSource {
-            return .txt(book, title: source.bookTitle, chapter: source.tocEntry(containingUnit: readingTimePoint.resource) ?? 0, projection: settings.projection)
+            let unit = readingTimePoint.resource
+            let chapter = source.tocEntry(containingUnit: unit) ?? 0
+            let firstUnit = source.firstUnit(ofTOCEntry: chapter) ?? unit
+            return .txt(book, title: source.bookTitle, chapter: chapter,
+                        currentUnitInChapter: max(0, unit - firstUnit),
+                        currentUnitFraction: pageUpper, pagedUnits: true,
+                        projection: settings.projection)
         }
         guard let container = imageContainer, let hash = bookHash else { return nil }
         let href = publication.readingOrder[readingTimePoint.resource].href
@@ -49,7 +56,8 @@ extension ReadiumEPUBReaderModel {
             container.spine[$0].href == path || container.spine[$0].href.hasSuffix("/" + path) || path.hasSuffix("/" + container.spine[$0].href)
         }
         guard candidates.count == 1 else { return nil }
-        return .epub(container, hash: hash, currentSpine: candidates[0], projection: settings.projection)
+        return .epub(container, hash: hash, currentSpine: candidates[0],
+                     currentSpineProgression: pageUpper, projection: settings.projection)
     }
     var localTimeSource: LocalReadingTimeSource? {
         guard status == .ready else { return nil }

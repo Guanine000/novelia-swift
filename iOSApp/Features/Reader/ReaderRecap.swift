@@ -1,33 +1,120 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import SwiftUI
 
-/// 只暴露本地已解析 TXT 或 ZIP 内此前章节；读取与分页视图完全隔离，不改写阅读位置。
+/// 只暴露本地已解析 TXT 或 ZIP 内此前章节及当前章已读前缀；读取与分页视图完全隔离，不改写阅读位置。
 struct LocalRecapSource {
     let bookKey: String
     let identity: String
     let title: String
     let currentChapter: Int
     let load: @Sendable (Range<Int>) async throws -> [RecapChapter]
+    var hasCurrentChapterReadText = false
+    var loadCurrentChapterReadText: (@Sendable () async throws -> RecapChapter?)? = nil
 
-    static func txt(_ book: TXTParsedBook, title: String, chapter: Int, projection: ReadingTextProjection, maximumChapterBytes: Int = 96 * 1_024) -> Self {
-        .init(bookKey: "txt:" + book.contentHash, identity: FileContentHash.sha256(Data((book.contentHash + "|" + book.rulesFingerprint + "|" + projection.identity).utf8)),
-              title: title, currentChapter: chapter) { range in
-            guard range.lowerBound >= 0, range.upperBound <= chapter, range.upperBound <= book.chapters.count else { throw ReadingRecapError.invalidScope }
-            let task = Task.detached(priority: .utility) {
-                var totalBytes = 0
-                return try range.map { index in
-                    try Task.checkCancellation()
-                    let item = book.chapters[index], text = projection.apply(book.chapters[index].body)
-                    totalBytes += text.utf8.count
-                    guard totalBytes <= maximumChapterBytes else { throw ReadingRecapError.tooLarge }
-                    return RecapChapter(index: index, title: item.title, text: text)
-                }
-            }
-            return try await withTaskCancellationHandler(operation: { try await task.value }, onCancel: { task.cancel() })
+    private static let minimumPartialChapterCharacters = 30
+
+    /// 按当前页/可视位置比例截取已读前缀，确保落在合法字符边界且不泄露未读后文。
+    static func readPrefix(of text: String, fraction: Double) -> String {
+        let clamped = min(1, max(0, fraction))
+        guard clamped > 0, !text.isEmpty else { return "" }
+        if clamped >= 1 { return text }
+        let utf16 = text.utf16
+        let target = min(utf16.count, max(0, Int((Double(utf16.count) * clamped).rounded(.down))))
+        guard target > 0 else { return "" }
+        var utf16Index = utf16.index(utf16.startIndex, offsetBy: target)
+        if utf16Index.samePosition(in: text) == nil, utf16Index > utf16.startIndex {
+            utf16Index = utf16.index(before: utf16Index)
         }
+        guard let end = utf16Index.samePosition(in: text) else { return "" }
+        return String(text[..<end])
+    }
+
+    private static func makePartialRecapChapter(index: Int, title: String, text: String, maximumBytes: Int) -> RecapChapter? {
+        var slice = text
+        if slice.utf8.count > maximumBytes {
+            var kept = ""
+            var bytes = 0
+            for character in slice.reversed() {
+                let size = String(character).utf8.count
+                if bytes + size > maximumBytes { break }
+                kept.append(character)
+                bytes += size
+            }
+            slice = String(kept.reversed())
+        }
+        let trimmed = slice.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= minimumPartialChapterCharacters else { return nil }
+        let displayTitle = title.isEmpty ? "第 \(index + 1) 章（本章已读部分）" : "\(title)（本章已读部分）"
+        return RecapChapter(index: index, title: displayTitle, text: slice)
+    }
+
+    static func txt(_ book: TXTParsedBook, title: String, chapter: Int,
+                    currentUnitInChapter: Int = 0, currentUnitFraction: Double = 0, pagedUnits: Bool = false,
+                    projection: ReadingTextProjection, maximumChapterBytes: Int = 96 * 1_024) -> Self {
+        let hasCurrent = book.chapters.indices.contains(chapter) && (currentUnitInChapter > 0 || currentUnitFraction > 0)
+        let currentLoader: (@Sendable () async throws -> RecapChapter?)?
+        if hasCurrent {
+            currentLoader = {
+                let task = Task.detached(priority: .utility) { () -> RecapChapter? in
+                    guard book.chapters.indices.contains(chapter) else { return nil }
+                    try Task.checkCancellation()
+                    let item = book.chapters[chapter]
+                    var readText = ""
+                    if pagedUnits {
+                        let cuts = TXTTextUnitCuts.cuts(utf8: item.body.utf8, maximumUTF8: 36_000)
+                        let unitCount = max(0, cuts.count - 1)
+                        let fullUnits = min(max(0, currentUnitInChapter), unitCount)
+                        let bytes = item.body.utf8
+                        for unit in 0..<fullUnits {
+                            try Task.checkCancellation()
+                            let lower = bytes.index(bytes.startIndex, offsetBy: cuts[unit])
+                            let upper = bytes.index(bytes.startIndex, offsetBy: cuts[unit + 1])
+                            let rawUnit = String(decoding: bytes[lower..<upper], as: UTF8.self)
+                            readText += projection.apply(rawUnit) + "\n"
+                        }
+                        if fullUnits < unitCount, currentUnitFraction > 0 {
+                            let lower = bytes.index(bytes.startIndex, offsetBy: cuts[fullUnits])
+                            let upper = bytes.index(bytes.startIndex, offsetBy: cuts[fullUnits + 1])
+                            let rawUnit = String(decoding: bytes[lower..<upper], as: UTF8.self)
+                            readText += Self.readPrefix(of: projection.apply(rawUnit), fraction: currentUnitFraction)
+                        }
+                    } else {
+                        readText = Self.readPrefix(of: projection.apply(item.body), fraction: currentUnitFraction)
+                    }
+                    return Self.makePartialRecapChapter(index: chapter, title: item.title, text: readText, maximumBytes: maximumChapterBytes)
+                }
+                return try await withTaskCancellationHandler(operation: { try await task.value }, onCancel: { task.cancel() })
+            }
+        } else {
+            currentLoader = nil
+        }
+        return LocalRecapSource(
+            bookKey: "txt:" + book.contentHash,
+            identity: FileContentHash.sha256(Data((book.contentHash + "|" + book.rulesFingerprint + "|" + projection.identity).utf8)),
+            title: title,
+            currentChapter: chapter,
+            load: { range in
+                guard range.lowerBound >= 0, range.upperBound <= chapter, range.upperBound <= book.chapters.count else { throw ReadingRecapError.invalidScope }
+                let task = Task.detached(priority: .utility) {
+                    var totalBytes = 0
+                    return try range.map { index in
+                        try Task.checkCancellation()
+                        let item = book.chapters[index], text = projection.apply(book.chapters[index].body)
+                        totalBytes += text.utf8.count
+                        guard totalBytes <= maximumChapterBytes else { throw ReadingRecapError.tooLarge }
+                        return RecapChapter(index: index, title: item.title, text: text)
+                    }
+                }
+                return try await withTaskCancellationHandler(operation: { try await task.value }, onCancel: { task.cancel() })
+            },
+            hasCurrentChapterReadText: hasCurrent,
+            loadCurrentChapterReadText: currentLoader
+        )
     }
     @MainActor
-    static func epub(_ container: EPUBContainer, hash: String, currentSpine: Int, projection: ReadingTextProjection, completeVolume: Bool = false, maximumChapterBytes: Int = 96 * 1_024) -> Self? {
+    static func epub(_ container: EPUBContainer, hash: String, currentSpine: Int,
+                     currentSpineProgression: Double = 0,
+                     projection: ReadingTextProjection, completeVolume: Bool = false, maximumChapterBytes: Int = 96 * 1_024) -> Self? {
         guard container.spine.indices.contains(currentSpine) else { return nil }
         let entries = container.toc.filter { $0.spineIndex != nil }
         var starts = Array(Set(entries.compactMap(\.spineIndex).filter { container.spine.indices.contains($0) } + [0])).sorted()
@@ -36,30 +123,69 @@ struct LocalRecapSource {
         let chapter = completeVolume ? starts.count : current
         let titles = starts.enumerated().map { index, start in entries.first { $0.spineIndex == start }?.title ?? "第 \(index + 1) 章" }
         let url = container.fileURL, count = container.spine.count, chapterStarts = starts
-        return .init(bookKey: "epub:" + hash, identity: hash + projection.identity, title: container.bookTitle, currentChapter: chapter) { range in
-            guard range.lowerBound >= 0, range.upperBound <= chapter else { throw ReadingRecapError.invalidScope }
-            let task = Task.detached(priority: .utility) {
-                guard try FileContentHash.sha256(url) == hash else { throw ReadingRecapError.invalidScope }
-                let copy = try await EPUBContainer.open(fileURL: url)
-                copy.displayProjection = projection
-                var chapters = [RecapChapter](), totalBytes = 0
-                for index in range {
-                    try Task.checkCancellation()
-                    let end = index + 1 < chapterStarts.count ? chapterStarts[index + 1] : count
-                    var text = ""
-                    for spine in chapterStarts[index]..<end {
-                        try Task.checkCancellation()
-                        text += BookTextSearch.plainText(html: try await copy.chapterHTML(at: spine)) + "\n"
-                        guard text.utf8.count <= maximumChapterBytes else { throw ReadingRecapError.tooLarge }
+        let chapterStart = starts[current]
+        let chapterEnd = current + 1 < starts.count ? starts[current + 1] : count
+        let hasCurrent = !completeVolume && (currentSpine > chapterStart || currentSpineProgression > 0)
+        let currentTitle = titles[current]
+        let currentLoader: (@Sendable () async throws -> RecapChapter?)?
+        if hasCurrent {
+            currentLoader = {
+                let task = Task.detached(priority: .utility) { () -> RecapChapter? in
+                    guard try FileContentHash.sha256(url) == hash else { throw ReadingRecapError.invalidScope }
+                    let copy = try await EPUBContainer.open(fileURL: url)
+                    copy.displayProjection = projection
+                    let clampedSpine = min(max(chapterStart, currentSpine), max(chapterStart, chapterEnd - 1))
+                    var readText = ""
+                    if clampedSpine > chapterStart {
+                        for spine in chapterStart..<clampedSpine {
+                            try Task.checkCancellation()
+                            readText += BookTextSearch.plainText(html: try await copy.chapterHTML(at: spine)) + "\n"
+                        }
                     }
-                    totalBytes += text.utf8.count
-                    guard totalBytes <= maximumChapterBytes else { throw ReadingRecapError.tooLarge }
-                    chapters.append(.init(index: index, title: titles[index], text: text))
+                    if currentSpineProgression > 0, clampedSpine < chapterEnd {
+                        try Task.checkCancellation()
+                        let spineText = BookTextSearch.plainText(html: try await copy.chapterHTML(at: clampedSpine))
+                        readText += Self.readPrefix(of: spineText, fraction: currentSpineProgression)
+                    }
+                    return Self.makePartialRecapChapter(index: current, title: currentTitle, text: readText, maximumBytes: maximumChapterBytes)
                 }
-                return chapters
+                return try await withTaskCancellationHandler(operation: { try await task.value }, onCancel: { task.cancel() })
             }
-            return try await withTaskCancellationHandler(operation: { try await task.value }, onCancel: { task.cancel() })
+        } else {
+            currentLoader = nil
         }
+        return LocalRecapSource(
+            bookKey: "epub:" + hash,
+            identity: hash + projection.identity,
+            title: container.bookTitle,
+            currentChapter: chapter,
+            load: { range in
+                guard range.lowerBound >= 0, range.upperBound <= chapter else { throw ReadingRecapError.invalidScope }
+                let task = Task.detached(priority: .utility) {
+                    guard try FileContentHash.sha256(url) == hash else { throw ReadingRecapError.invalidScope }
+                    let copy = try await EPUBContainer.open(fileURL: url)
+                    copy.displayProjection = projection
+                    var chapters = [RecapChapter](), totalBytes = 0
+                    for index in range {
+                        try Task.checkCancellation()
+                        let end = index + 1 < chapterStarts.count ? chapterStarts[index + 1] : count
+                        var text = ""
+                        for spine in chapterStarts[index]..<end {
+                            try Task.checkCancellation()
+                            text += BookTextSearch.plainText(html: try await copy.chapterHTML(at: spine)) + "\n"
+                            guard text.utf8.count <= maximumChapterBytes else { throw ReadingRecapError.tooLarge }
+                        }
+                        totalBytes += text.utf8.count
+                        guard totalBytes <= maximumChapterBytes else { throw ReadingRecapError.tooLarge }
+                        chapters.append(.init(index: index, title: titles[index], text: text))
+                    }
+                    return chapters
+                }
+                return try await withTaskCancellationHandler(operation: { try await task.value }, onCancel: { task.cancel() })
+            },
+            hasCurrentChapterReadText: hasCurrent,
+            loadCurrentChapterReadText: currentLoader
+        )
     }
 }
 
@@ -130,7 +256,7 @@ struct ReaderRecapPresentation: ViewModifier {
     @State private var explainRequest: AIContextExplainRequest?
     private var activityID: String { active && scenePhase == .active && !prompts && !showing && !showingCharacters && explainRequest == nil ? source?.bookKey ?? "none" : "inactive" }
     private var openAction: (() -> Void)? {
-        guard let source, source.currentChapter > 0 else { return nil }
+        guard let source, source.currentChapter > 0 || source.hasCurrentChapterReadText else { return nil }
         return { showing = true }
     }
     func body(content: Content) -> some View {
@@ -475,6 +601,7 @@ private struct ReadingRecapSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var count = 3
     @State private var chapters = [RecapChapter]()
+    @State private var currentPartialChapter: RecapChapter?
     @State private var plan: ReadingRecapPlan?
     @State private var result: ReadingRecap?
     @State private var error: String?
@@ -512,13 +639,15 @@ private struct ReadingRecapSheet: View {
                     Picker("梗概覆盖范围", selection: $storyScope) {
                         ForEach(StoryScope.allCases) { Text($0.title).tag($0) }
                     }.disabled(storyProgress != nil)
-                    Text("当前第 \(source.currentChapter + 1) 章不纳入回顾；不检查此前章节是否逐章读过。")
+                    Text(currentPartialChapter != nil || source.hasCurrentChapterReadText
+                         ? "已纳入当前第 \(source.currentChapter + 1) 章的已读部分（未读后文不发送）；不检查此前章节是否逐章读过。"
+                         : "当前第 \(source.currentChapter + 1) 章尚无已读正文，仅纳入此前章节；不检查此前章节是否逐章读过。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section {
                     if let story {
                         Text(story.text)
-                        Text("已覆盖到第 \(story.coveredThrough) 章")
+                        Text(storyCoverageDescription(story))
                             .font(.caption).foregroundStyle(.secondary)
                     } else if storyProgress == nil {
                         Text("还没有故事梗概。隔了很久回到这本书时，先看这里的整体梗概比逐章细节更有用。")
@@ -529,13 +658,13 @@ private struct ReadingRecapSheet: View {
                         Button("取消") { store.cancelStory(book: source.bookKey) }
                     } else {
                         Button(story == nil ? "生成故事梗概" : "更新故事梗概") { generateStory() }
-                            .disabled(!ai.configuration.isEnabled || source.currentChapter == 0)
+                            .disabled(!ai.configuration.isEnabled || (source.currentChapter == 0 && !source.hasCurrentChapterReadText && currentPartialChapter == nil))
                         Text(storyHint)
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                     if let storyError { Text(storyError).foregroundStyle(NoveliaStyle.danger) }
                 } header: { Text("故事梗概") } footer: {
-                    Text("封面、版权页与当前章不纳入；首次会分章压缩再归并，之后只处理新增章节。")
+                    Text("封面、版权页与当前章未读后文不纳入；首次会分章压缩再归并，之后只处理新增已读部分。")
                 }
                 if let result {
                     Section {
@@ -556,18 +685,22 @@ private struct ReadingRecapSheet: View {
                             }
                         }
                     } header: { Text("AI 前情回顾") } footer: {
-                        Text("回顾只依据已读章节正文，AI 概括仍可能有误；查阅出处不改变续读位置。")
+                        Text("回顾只依据已读章节与本章已读正文，AI 概括仍可能有误；查阅出处不改变续读位置。")
                     }
                 }
                 Section {
-                    Picker("回看章节数", selection: $count) {
-                        ForEach(1...max(1, min(3, source.currentChapter)), id: \.self) { Text("最近 \($0) 章").tag($0) }
-                    }.disabled(progress != nil)
+                    if source.currentChapter > 0 {
+                        Picker("回看此前章节数", selection: $count) {
+                            ForEach(1...max(1, min(3, source.currentChapter)), id: \.self) {
+                                Text(currentPartialChapter != nil ? "最近 \($0) 章 + 本章已读" : "最近 \($0) 章").tag($0)
+                            }
+                        }.disabled(progress != nil)
+                    }
                     if let progress {
                         HStack { ProgressView(); Text(progress) }
                         Button("取消并继续阅读") { cancel(); dismiss() }
                     } else if let plan {
-                        Text("将向 \((try? ai.configuration.endpoint().host) ?? "所配置接口") 发送这 \(chapters.count) 章正文，共 \(plan.chunks.count) 个分块，可能产生模型费用。")
+                        Text("将向 \((try? ai.configuration.endpoint().host) ?? "所配置接口") 发送这 \(chapters.count) 段已读正文，共 \(plan.chunks.count) 个分块，可能产生模型费用。")
                             .font(.footnote)
                         Button(result == nil ? "发送并生成回顾" : "重新生成回顾") { generate(plan) }
                             .disabled(!ai.configuration.isEnabled)
@@ -575,7 +708,7 @@ private struct ReadingRecapSheet: View {
                     if !ai.configuration.isEnabled { Text("请先在“我的 → 高级 → AI 阅读辅助”配置并启用 AI。已有匹配缓存仍可查看。").font(.footnote) }
                     if let error { Text(error).foregroundStyle(NoveliaStyle.danger) }
                 } header: { Text("最近几章细节") } footer: {
-                    Text("只覆盖最近几章的具体情节，用来接上“上次停在哪”。")
+                    Text("覆盖最近几章及本章已读部分的具体情节，用来接上“上次停在哪”。")
                 }
             }
             .navigationTitle("前情回顾")
@@ -584,31 +717,68 @@ private struct ReadingRecapSheet: View {
             .onDisappear { cancel() }
         }
     }
+    private func storyCoverageDescription(_ story: BookStorySummary) -> String {
+        if let partial = story.partialChapterUTF16, partial > 0 {
+            return story.coveredThrough > 0
+                ? "已覆盖到第 \(story.coveredThrough) 章及第 \(story.coveredThrough + 1) 章已读部分"
+                : "已覆盖第 1 章已读部分"
+        }
+        return "已覆盖到第 \(story.coveredThrough) 章"
+    }
     private func prepare() async {
         cancel(); error = nil; result = nil; plan = nil; chapters = []
         let snapshot = run
         let selected = min(count, source.currentChapter)
         do {
-            let values = try await source.load((source.currentChapter - selected)..<source.currentChapter)
+            let previousValues = selected > 0
+                ? try await source.load((source.currentChapter - selected)..<source.currentChapter)
+                : []
+            let currentPartial = try await source.loadCurrentChapterReadText?()
             try Task.checkCancellation()
             guard snapshot == run else { return }
+            currentPartialChapter = currentPartial
             // 前言、人物表、目录、后记不是剧情，混进去只会让回顾变成书评；
             // 但这几章之外没有内容时仍要能用，所以过滤后为空就退回原样。
-            let filtered = values.filter { !CharacterExtractionPlan.isNonStoryTitle($0.title) }
-            let story = filtered.isEmpty ? values : filtered
-            let prepared = try ReadingRecapPlan(chapters: story, boundary: source.currentChapter, identity: source.identity, modelIdentity: modelIdentity)
+            let filtered = previousValues.filter { !CharacterExtractionPlan.isNonStoryTitle($0.title) }
+            var story = filtered.isEmpty ? previousValues : filtered
+            if let currentPartial {
+                story.append(currentPartial)
+                while story.count > 1,
+                      story.reduce(0, { $0 + $1.text.utf8.count }) > 96 * 1_024
+                        || story.reduce(0, { $0 + max(1, ($1.text.utf8.count + 9_999) / 10_000) }) > 12 {
+                    story.removeFirst()
+                }
+            }
+            let effectiveBoundary = currentPartial != nil ? source.currentChapter + 1 : source.currentChapter
+            let prepared = try ReadingRecapPlan(chapters: story, boundary: effectiveBoundary, identity: source.identity, modelIdentity: modelIdentity)
             chapters = story; plan = prepared; result = store.cached(plan: prepared, book: source.bookKey)
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
     /// 梗概从哪一章开始算：整本从第 1 章，最近范围从倒数第 30 章。
     private var storyStart: Int { storyScope == .whole ? 0 : max(0, source.currentChapter - 30) }
     private var storyHint: String {
-        guard source.currentChapter > 0 else { return "当前还没有可回顾的完整章节。" }
+        let completedBoundary = max(0, source.currentChapter)
+        let partialUTF16 = currentPartialChapter?.text.utf16.count ?? 0
+        guard completedBoundary > 0 || partialUTF16 > 0 || source.hasCurrentChapterReadText else {
+            return "当前还没有可回顾的已读正文。"
+        }
         let identity = (try? StorySummaryGenerator.fingerprint(identity: source.identity, configuration: ai.configuration)) ?? ""
-        let reusable = story?.fingerprint == identity && (story?.coveredThrough ?? 0) > storyStart
-        let covered = reusable ? max(storyStart, story?.coveredThrough ?? storyStart) : storyStart
-        guard covered < source.currentChapter else { return "梗概已覆盖到最新位置；读到新章节后可再次更新。" }
-        return "将处理第 \(covered + 1)–\(source.currentChapter) 章正文（\(source.currentChapter - covered) 章），可能产生模型费用。"
+        let reusable = story.flatMap {
+            $0.fingerprint == identity && ($0.coveredThrough > storyStart || ($0.coveredThrough == storyStart && ($0.partialChapterUTF16 ?? 0) > 0)) ? $0 : nil
+        }
+        let covered = reusable != nil ? max(storyStart, reusable!.coveredThrough) : storyStart
+        let hasNewCompleted = covered < completedBoundary
+        let hasNewPartial = partialUTF16 > 0 && (reusable == nil || reusable!.coveredThrough < completedBoundary || (reusable!.partialChapterUTF16 ?? 0) < partialUTF16)
+        guard hasNewCompleted || hasNewPartial else {
+            return "梗概已覆盖到最新位置；继续阅读后可再次更新。"
+        }
+        if hasNewCompleted && partialUTF16 > 0 {
+            return "将处理第 \(covered + 1)–\(completedBoundary) 章及第 \(completedBoundary + 1) 章已读部分，可能产生模型费用。"
+        } else if hasNewCompleted {
+            return "将处理第 \(covered + 1)–\(completedBoundary) 章正文（\(completedBoundary - covered) 章），可能产生模型费用。"
+        } else {
+            return "将处理第 \(completedBoundary + 1) 章已读部分，可能产生模型费用。"
+        }
     }
     /// 只负责挑出要处理的章节并把任务交给 Store；中断由 Store 管理。
     private func generateStory() {
@@ -623,22 +793,34 @@ private struct ReadingRecapSheet: View {
             return
         }
         let start = storyScope == .whole ? 0 : max(0, boundary - 30)
-        let reusable = story.flatMap { $0.fingerprint == identity && $0.coveredThrough > start ? $0 : nil }
-        let from = max(start, reusable?.coveredThrough ?? start)
-        guard from < boundary else {
-            store.reportStoryError("梗概已经覆盖到当前阅读位置；读到新章节后再更新。", book: source.bookKey)
-            return
+        let reusable = story.flatMap {
+            $0.fingerprint == identity && ($0.coveredThrough > start || ($0.coveredThrough == start && ($0.partialChapterUTF16 ?? 0) > 0)) ? $0 : nil
         }
+        let from = max(start, reusable?.coveredThrough ?? start)
         Task {
             do {
-                let values = try await source.load(from..<boundary)
+                var values = from < boundary ? try await source.load(from..<boundary) : []
+                let partial = try await source.loadCurrentChapterReadText?()
+                let partialUTF16 = partial?.text.utf16.count ?? 0
+                let hasNewPartial = partialUTF16 > 0 && (reusable == nil || reusable!.coveredThrough < boundary || (reusable!.partialChapterUTF16 ?? 0) < partialUTF16)
+                guard !values.isEmpty || hasNewPartial else {
+                    store.reportStoryError("梗概已经覆盖到当前阅读位置；继续阅读后再更新。", book: source.bookKey)
+                    return
+                }
+                if let partial {
+                    values.append(partial)
+                    while values.count > 1, values.reduce(0, { $0 + $1.text.utf8.count }) > 512 * 1_024 {
+                        values.removeFirst()
+                    }
+                }
                 guard !values.isEmpty else {
                     store.reportStoryError("这一范围内没有可取用的正文。", book: source.bookKey)
                     return
                 }
                 // 生成任务交给 Store 持有：关闭面板、离开阅读器都不会中断。
                 store.startStory(book: source.bookKey, chapters: values, previous: from > start ? reusable : nil,
-                                 identity: source.identity, coveredThrough: boundary, ai: ai)
+                                 identity: source.identity, coveredThrough: boundary,
+                                 partialChapterUTF16: partial?.text.utf16.count, ai: ai)
             } catch {
                 store.reportStoryError(error.localizedDescription, book: source.bookKey)
             }

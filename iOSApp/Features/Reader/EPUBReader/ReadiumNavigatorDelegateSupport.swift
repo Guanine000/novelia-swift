@@ -64,7 +64,6 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     /// Readium 每次应用设置都会把根视图涂成背景色；清空以露出宿主绘制的阅读背景。
     func navigator(_ navigator: VisualNavigator, presentationDidChange presentation: VisualNavigatorPresentation) {
         guard (navigator as AnyObject) === self.navigator else { return }
-        readingTimePoint.reason = .reset
         (navigator as? UIViewController)?.view.backgroundColor = .clear
         // 重开书时首次位置回报可能早于 WebView 完成排版，装饰会被随后加载的页面覆盖；排版变化后重套一次。
         refreshAnnotationDecorations(force: true)

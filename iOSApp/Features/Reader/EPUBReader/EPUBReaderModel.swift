@@ -77,11 +77,18 @@ final class EPUBReaderModel: ObservableObject {
     }
     var localRecapSource: LocalRecapSource? {
         guard status == .ready else { return nil }
+        let pageUpper = min(1, max(0, currentPageRange?.range.upperBound ?? 0))
         if let book = recapTXT, let source = source as? TextChapterSource {
-            return .txt(book, title: source.bookTitle, chapter: source.tocEntry(containingUnit: location.spineIndex) ?? 0, projection: settings.projection)
+            let chapter = source.tocEntry(containingUnit: location.spineIndex) ?? 0
+            let firstUnit = source.firstUnit(ofTOCEntry: chapter) ?? location.spineIndex
+            return .txt(book, title: source.bookTitle, chapter: chapter,
+                        currentUnitInChapter: max(0, location.spineIndex - firstUnit),
+                        currentUnitFraction: pageUpper, pagedUnits: true,
+                        projection: settings.projection)
         }
         guard let container, let hash = openedBookHash else { return nil }
-        return .epub(container, hash: hash, currentSpine: location.spineIndex, projection: settings.projection)
+        return .epub(container, hash: hash, currentSpine: location.spineIndex,
+                     currentSpineProgression: pageUpper, projection: settings.projection)
     }
     var localTimeSource: LocalReadingTimeSource? {
         guard status == .ready, let source else { return nil }

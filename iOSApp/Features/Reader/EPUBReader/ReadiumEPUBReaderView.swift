@@ -169,7 +169,7 @@ private struct ReadiumEPUBReaderViewContent: View {
         .statusBarHidden(true)
         .trackReadingTime(statisticsBook ?? ReadingBook(id: "epub:\(bookURL?.lastPathComponent ?? "text")",
                                                        title: bookURL?.deletingPathExtension().lastPathComponent ?? "阅读", kind: .epub),
-                          ready: model.status == .ready && !model.curlBusy)
+                          ready: model.status == .ready)
         .onAppear {
             wasBatteryMonitoringEnabled = UIDevice.current.isBatteryMonitoringEnabled
             UIDevice.current.isBatteryMonitoringEnabled = true
@@ -428,7 +428,7 @@ private struct ReadiumEPUBReaderViewContent: View {
             hiddenPercentText: showChrome ? nil : FractionText.percent(model.overallProgress),
             readingTime: AnyView(ReaderRemainingTimeView(store: settings.remainingTime,
                 source: model.localTimeSource, point: model.readingTimePoint, mode: "paged|" + settings.projection.identity,
-                active: model.status == .ready && !model.curlBusy && !isScrubbing && !model.speech.isActive
+                active: model.status == .ready && model.viewportRestoration == nil && !isScrubbing && !model.speech.isActive
                     && !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingAnnotations && !isShowingSpeech
                     && !isShowingBookPreferences && model.activeNote == nil, isListening: model.speech.isActive))
         ) {

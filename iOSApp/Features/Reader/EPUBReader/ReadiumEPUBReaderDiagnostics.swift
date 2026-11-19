@@ -306,8 +306,11 @@ extension ReadiumEPUBReaderModel {
         let kind = textBook == nil ? "epub" : (textBook?.bookmarkKey == nil ? "online" : "txt")
         func resource(_ locator: Locator?) -> Int { locator.flatMap { navigationIndex?.resourceIndex(for: $0.href) } ?? -1 }
         func permille(_ value: Double?) -> Int { value.map { Int((min(max($0, 0), 1) * 1000).rounded()) } ?? -1 }
-        readingTimePoint = .init(resource: resource(current), fraction: current.locations.progression ?? 0,
-            reason: ["turnForward", "swipe", "outerSwipe"].contains(cause) ? .forward : .reset)
+        let toResource = resource(current), toFraction = current.locations.progression ?? 0
+        if previous == nil || toResource != readingTimePoint.resource || abs(toFraction - readingTimePoint.fraction) >= 0.0000001 {
+            readingTimePoint = .init(resource: toResource, fraction: toFraction,
+                reason: ["turnForward", "tap", "swipe", "outerSwipe"].contains(cause) ? .forward : .reset)
+        }
         Self.shareable.notice(ReaderDiagnosticMessage.readiumPositionChanged(
             kind: kind, cause: cause, fromResource: resource(previous), fromProgress: permille(previous?.locations.progression),
             toResource: resource(current), toProgress: permille(current.locations.progression),

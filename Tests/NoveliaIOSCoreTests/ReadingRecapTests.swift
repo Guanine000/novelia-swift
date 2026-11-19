@@ -18,6 +18,21 @@ final class ReadingRecapTests: XCTestCase {
         let value = try plan()
         XCTAssertEqual(value.chunks.map(\.chapter), [1])
         XCTAssertFalse(value.chunks[0].request.input.contains("隐藏身份揭露"))
+        let firstChapterPartial = try ReadingRecapPlan(
+            chapters: [.init(index: 0, title: "第一章（本章已读部分）", text: text)],
+            boundary: 1, identity: "b", modelIdentity: "m"
+        )
+        XCTAssertEqual(firstChapterPartial.chunks.map(\.chapter), [0])
+        let withCurrentChapterPartial = try ReadingRecapPlan(
+            chapters: [
+                .init(index: 0, title: "第一章", text: text),
+                .init(index: 1, title: "第二章", text: text),
+                .init(index: 2, title: "第三章", text: text),
+                .init(index: 3, title: "第四章（本章已读部分）", text: text)
+            ],
+            boundary: 4, identity: "b", modelIdentity: "m"
+        )
+        XCTAssertEqual(withCurrentChapterPartial.chunks.map(\.chapter), [0, 1, 2, 3])
     }
     func testChunkBoundariesPreserveUnicodeAndEvidenceOffsets() throws {
         let original = String(repeating: "😀前文。", count: 1_000) + text
@@ -240,8 +255,23 @@ final class StoryStoreFlowTests: XCTestCase {
         XCTAssertFalse(store.isBuildingStory(book: "epub:test"))
         let saved = try XCTUnwrap(store.story(book: "epub:test"), "生成完成却没有保存")
         XCTAssertEqual(saved.coveredThrough, 3)
+        XCTAssertNil(saved.partialChapterUTF16)
         XCTAssertTrue(saved.text.contains("【一句话回顾】"))
         XCTAssertNil(store.storyErrors[FileContentHash.sha256(Data("epub:test".utf8))])
+
+        // 第一章尚在阅读途中（coveredThrough == 0，仅含本章已读前缀）也可生成并保存梗概。
+        let partialFirstChapter = [RecapChapter(index: 0, title: "第1章（本章已读部分）",
+            text: String(repeating: "江南冒雨赶到公寓，遇见了光明寺美琴。", count: 30))]
+        store.startStory(book: "epub:partial", chapters: partialFirstChapter, previous: nil,
+                         identity: "identity", coveredThrough: 0,
+                         partialChapterUTF16: partialFirstChapter[0].text.utf16.count, ai: ai)
+        for _ in 0..<200 {
+            if !store.isBuildingStory(book: "epub:partial") { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let savedPartial = try XCTUnwrap(store.story(book: "epub:partial"))
+        XCTAssertEqual(savedPartial.coveredThrough, 0)
+        XCTAssertEqual(savedPartial.partialChapterUTF16, partialFirstChapter[0].text.utf16.count)
     }
 }
 

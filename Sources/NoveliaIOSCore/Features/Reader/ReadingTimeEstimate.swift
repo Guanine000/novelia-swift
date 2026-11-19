@@ -90,7 +90,6 @@ struct ReadingSpeedSampler {
         // 大跳转、回读、空白/插图、快速连翻和长时间停留均重新建锚，不累计成一个大样本。
         guard (2...180).contains(elapsed), (5...1_800).contains(distance),
               point.resource >= previous.point.resource, point.resource <= previous.point.resource + 1 else { return nil }
-        if point.resource == previous.point.resource, point.fraction - previous.point.fraction > 0.5 { return nil }
         let speed = distance * 60 / elapsed
         return (25...3_000).contains(speed) ? speed : nil
     }

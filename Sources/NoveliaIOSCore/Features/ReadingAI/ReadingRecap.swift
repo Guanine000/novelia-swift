@@ -61,7 +61,7 @@ struct RecapChunk: Sendable {
     }
 }
 
-/// 只接受当前章之前的本地正文，先裁剪再分块；生成器永远看不到当前章及未来章。
+/// 只接受已读本地正文（此前完整章节及当前章已读前缀），先裁剪再分块；生成器永远看不到当前章未读后文及未来章。
 /// 回顾只要概括，不再要求模型抄原文：引文可选，给了就逐字核对，没给就用章节信息。
 struct ReadingRecapPlan: Sendable {
     static let instruction = """
@@ -76,7 +76,7 @@ struct ReadingRecapPlan: Sendable {
     let chunks: [RecapChunk]
 
     init(chapters: [RecapChapter], boundary: Int, identity: String, modelIdentity: String) throws {
-        guard boundary > 0, (1...3).contains(chapters.count) else { throw ReadingRecapError.invalidScope }
+        guard boundary > 0, (1...4).contains(chapters.count) else { throw ReadingRecapError.invalidScope }
         // 允许跳号：调用方会把前言、人物表、目录这类非剧情页筛掉，剩下章节可能不连续。
         let indices = chapters.map(\.index)
         guard indices == indices.sorted(), Set(indices).count == indices.count,
@@ -156,7 +156,7 @@ enum ReadingRecapError: LocalizedError {
     case invalidScope, tooLarge, invalidEvidence, noEvents
     var errorDescription: String? {
         switch self {
-        case .invalidScope: "没有可回顾的完整此前章节，或阅读位置已变化。"
+        case .invalidScope: "没有可回顾的已读正文，或阅读位置已变化。"
         case .tooLarge: "所选正文超过回顾预算，请减少章节数后重试。"
         case .invalidEvidence: "AI 返回的出处未通过原文校验，未展示该结果；可以重试。"
         case .noEvents: "AI 未找到有充分原文依据的事件，可以缩小范围后重试。"
@@ -190,8 +190,10 @@ enum ReadingRecapGenerator {
 /// 已读部分的故事梗概。分层压缩后保存在本机，边界推进时只处理新增章节再与旧梗概合并，
 /// 因此"隔很久回来"的场景第一次可能要几分钟，之后每次只要几十秒。
 struct BookStorySummary: Codable, Equatable, Sendable {
-    /// 已覆盖到的章号（不含），即第 0..<coveredThrough 章都在梗概里。
+    /// 已完整覆盖到的章号（不含），即第 0..<coveredThrough 章都已完整纳入梗概。
     var coveredThrough: Int
+    /// 若额外纳入了第 `coveredThrough` 章的已读前缀，记录其已纳入的 UTF-16 长度；nil 表示只含完整章节。
+    var partialChapterUTF16: Int? = nil
     var text: String
     /// 正文身份 + 模型配置 + 提示词代次；变化后旧梗概不再直接复用。
     var fingerprint: String

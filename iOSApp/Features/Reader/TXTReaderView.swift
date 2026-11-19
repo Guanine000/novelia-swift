@@ -55,7 +55,11 @@ struct DownloadedWebNovelTXTReader: View {
         } else {
             scrollReader
                 .modifier(ReaderRecapPresentation(store: settings.recaps,
-                    source: parsedBook.map { .txt($0, title: title, chapter: chapterIndex, projection: settings.projection) },
+                    source: parsedBook.map {
+                        .txt($0, title: title, chapter: chapterIndex,
+                             currentUnitFraction: currentChapterReadFraction,
+                             projection: settings.projection)
+                    },
                     active: bodyChunksChapterIndex == chapterIndex && !speech.isActive && !isShowingContents
                         && !isShowingSearch && !isShowingSpeech && !isShowingBookPreferences && !isShowingAdjustment,
                     libraryBookKey: statisticsID))
@@ -413,6 +417,17 @@ struct DownloadedWebNovelTXTReader: View {
         return .init(id: "txt:" + parsedBook.contentHash + "|" + parsedBook.rulesFingerprint + "|" + projection.identity) {
             try await ReadingTimeMetrics.loadTXT(parsedBook, projection: projection, paged: false)
         }
+    }
+
+    private var currentChapterReadFraction: Double {
+        guard bodyChunksChapterIndex == chapterIndex, !bodyChunks.isEmpty else {
+            return readingTimePoint.resource == chapterIndex ? readingTimePoint.fraction : 0
+        }
+        let anchorIndex = visibleAnchor
+            .flatMap { Int($0.replacingOccurrences(of: "text-chunk-", with: "")) } ?? 0
+        let visibleEndChunk = min(bodyChunks.count, max(1, anchorIndex + 4))
+        return min(1, max(readingTimePoint.resource == chapterIndex ? readingTimePoint.fraction : 0,
+                          Double(visibleEndChunk) / Double(bodyChunks.count)))
     }
 
     private func highlightedChunk(_ text: String, sourceRange: Range<Int>?) -> AttributedString {

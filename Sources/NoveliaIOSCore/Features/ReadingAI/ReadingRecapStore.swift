@@ -77,7 +77,7 @@ final class ReadingRecapStore: ObservableObject {
         storyProgress[id] = nil
     }
     func startStory(book: String, chapters: [RecapChapter], previous: BookStorySummary?,
-                    identity: String, coveredThrough: Int, ai: ReadingAIStore) {
+                    identity: String, coveredThrough: Int, partialChapterUTF16: Int? = nil, ai: ReadingAIStore) {
         let id = key(book)
         guard storyTasks[id] == nil else { return }
         storyErrors[id] = nil
@@ -90,7 +90,7 @@ final class ReadingRecapStore: ObservableObject {
                 }
                 try Task.checkCancellation()
                 if let fingerprint = try? StorySummaryGenerator.fingerprint(identity: identity, configuration: ai.configuration) {
-                    let value = BookStorySummary(coveredThrough: coveredThrough, text: text, fingerprint: fingerprint, updatedAt: Date())
+                    let value = BookStorySummary(coveredThrough: coveredThrough, partialChapterUTF16: partialChapterUTF16, text: text, fingerprint: fingerprint, updatedAt: Date())
                     self.saveStory(value, book: book)
                 }
             } catch is CancellationError {
@@ -102,7 +102,8 @@ final class ReadingRecapStore: ObservableObject {
         }
     }
     func saveStory(_ value: BookStorySummary, book: String) {
-        guard value.coveredThrough > 0, !value.text.isEmpty, value.text.utf16.count <= 4_000 else { return }
+        guard value.coveredThrough >= 0, value.coveredThrough > 0 || (value.partialChapterUTF16 ?? 0) > 0,
+              !value.text.isEmpty, value.text.utf16.count <= 4_000 else { return }
         let id = key(book)
         if stories[id] == nil, stories.count >= 64, let removed = stories.keys.sorted().first { stories.removeValue(forKey: removed) }
         stories[id] = value

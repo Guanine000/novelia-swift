@@ -781,7 +781,7 @@ python3 scripts/check_architecture_release.py '<Release Novelia.app 内的 Novel
 
 `ReaderSettings` 持有唯一 `ReadingTimeEstimateStore`，使用注入的 UserDefaults 保存显示／学习／手动速度设置和有界速率窗口，不依赖统计 Store 或同步实现。Core 的 `ReadingTimeMetrics` 按实际资源顺序累计字数，TXT 使用与分页一致的 36000 UTF-8 字节切分并保留逻辑章边界；`ReadingSpeedSampler` 用单调时钟，只接受前台自然前进的合理区间，每次无效区间重新建锚。每档最多 31 个速度，至少 5 个后用中位数；单书优先、语言与模式通用档兜底，档位最多 128 个。不保存原文、轨迹或历史时间戳。
 
-`ReaderRemainingTime.swift` 是共享 iOS 15 展示层，底栏常驻采样视图不随顶栏显隐销毁。`LocalReadingTimeSource` 只接受本地 EPUB 容器或已有 TXT，后台任务取消向内传播；Readium readingOrder 必须唯一映射至 ZIP spine，不通过 Publication 额外请求正文。没有完整字数或可用速度时明确提示，不把缺失章节当零字。布局、文字规则、前后台、弹层与听书切换会重建锚点。
+`ReaderRemainingTime.swift` 是共享 iOS 15 展示层，底栏常驻采样视图不随顶栏显隐销毁。`LocalReadingTimeSource` 只接受本地 EPUB 容器或已有 TXT，后台任务取消向内传播；Readium readingOrder 必须唯一映射至 ZIP spine，不通过 Publication 额外请求正文。没有完整字数或可用速度时明确提示，不把缺失章节当零字。布局/视口恢复、文字规则、前后台、弹层与听书切换会重建锚点；Readium 仿真卷页预取与落页事务不中断激活态，标准热区点按翻页与滑动/卷页一并计入前进采样。
 
 `SpeechPlaybackController.onProgressSave` 随真实收听续听点节流通知宿主，强制补存沿用暂停／停止／退出／后台路径。该回调与跟读开关独立；各本地宿主把实际章号、偏移／比例映射至既有进度存储，TXT 仍经过目录身份检查。滚动听书只有逻辑章号，同一章沿用 `movingToChapter`，不清除已有分页单元和偏移；换章后才丢弃旧单元。Readium 本地 Locator 同步写入本机恢复键，未提供 Locator 时由较新的通用位置恢复。听书暂停默读速度学习。`ReadingTimeEstimateTests` 覆盖逻辑章、无效位置、采样过滤、速率窗口与存储隔离；`scripts/test_speech_playback.py` 的真实控制器桩测试覆盖关闭跟读仍保存进度和重复补存去重。
 
@@ -805,9 +805,9 @@ python3 scripts/check_architecture_release.py '<Release Novelia.app 内的 Novel
 
 `ReaderSettings.recaps` 持有唯一 `ReadingRecapStore`，保存按书哈希隔离的最后实际阅读时间、提示间隔和最多 32 本的有界结果缓存，独立于统计／WebDAV。`ReaderRecapPresentation` 在本次打开的新日期写入前判断提示，前台正文连续可读 15 秒才更新日期。提示默认 7 天，只在ReadingAIStore的isReadyForGeneration为真（已启用、配置有效、当前接口存在非空可读取密钥）时认领；检查前刷新凭据状态，缺API或密钥不弹提示。实例内 30 分钟认领窗口避免引擎切换重建视图重复提示，第一章或 AI 关闭不自动询问；不从旧进度时间戳推断阅读间隔。
 
-`LocalRecapSource` 只接收已有 TXT 或本地 EPUB。原生／Readium 的 TXT 分页均用 `TextChapterSource.tocEntry` 把单元转为逻辑章；EPUB 按目录 spine 起点分组，Readium 当前资源必须唯一映射至包内 spine。读取闭包在创建时绑定当前章上界，范围越界直接拒绝；使用独立 ZIP 容器，不调用在线内容服务，不导航主阅读器。ZIP 条目消费回调通过加锁缓冲区累计正文，大小校验与追加在同一临界区完成，避免跨执行器共享可变局部变量。`PagedTextBook.localRecapBook` 仅本地 TXT 提供，在线正文不提供此能力。
+`LocalRecapSource` 只接收已有 TXT 或本地 EPUB。原生／Readium 的 TXT 分页均用 `TextChapterSource.tocEntry` 把单元转为逻辑章；EPUB 按目录 spine 起点分组，Readium 当前资源必须唯一映射至包内 spine。读取闭包在创建时绑定当前章上界，范围越界直接拒绝；同时提供 `loadCurrentChapterReadText` 按当前页上界比例／可视滚动范围截取当前章已读前缀（包含同逻辑章中此前已读完的 spine／分页单元及当前单元已读前缀，不含未读后文；跨卷人物词条的 `completeVolume` 仍保持整章边界不变）。使用独立 ZIP 容器，不调用在线内容服务，不导航主阅读器。ZIP 条目消费回调通过加锁缓冲区累计正文，大小校验与追加在同一临界区完成，避免跨执行器共享可变局部变量。`PagedTextBook.localRecapBook` 仅本地 TXT 提供，在线正文不提供此能力。
 
-Core 的 `ReadingRecapPlan` 要求输入为边界之前连续 1–3 章，正文总预算 96 KiB，按字符安全分块且最多 12 次顺序请求。`ReadingRecapGenerator` 每块发送前后核对配置，取消或任何块失败都不交付部分结果。模型只返回结构化事件，每条的章号、连续引文和源 UTF-16 偏移均校验；汇总不再引入第二次自由生成，去重后保留最多五件最近事件。校验限制证据边界，不等同语义正确率保证。
+Core 的 `ReadingRecapPlan` 接受此前 1–3 章及可选当前章已读部分（最多 4 段），正文总预算 96 KiB，按字符安全分块且最多 12 次顺序请求；`BookStorySummary` 区分已完整覆盖的章数 `coveredThrough` 与当前章已纳入的 UTF-16 长度 `partialChapterUTF16`，使第一章内阅读一半即可生成梗概，且后续继续阅读同一章或进入下一章时不会漏掉本章后半段。`ReadingRecapGenerator` 每块发送前后核对配置，取消或任何块失败都不交付部分结果。模型只返回结构化事件，每条的章号、连续引文和源 UTF-16 偏移均校验；汇总不再引入第二次自由生成，去重后保留最多五件最近事件。校验限制证据边界，不等同语义正确率保证。
 
 缓存键包含文件／目录／文字投影身份、实际正文哈希、当前边界、模型配置（不含启停开关）和提示词版本；从缓存恢复仍按本次正文与偏移重新验证。出处在独立只读页定位引文，不调用阅读位置／统计写入。`ReadingRecapTests` 覆盖未来章节排除、Unicode 分块、伪引文、异常偏移、预算拒绝、日期、回退缓存隔离与假模型生成；网络和 Keychain 回归沿用 AI 基础设施测试。
 
