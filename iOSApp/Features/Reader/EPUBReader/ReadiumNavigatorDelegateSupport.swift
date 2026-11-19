@@ -228,13 +228,16 @@ struct TransparentCSSColor: CSSColor {
 final class ReadiumGestureProbe: NSObject, UIGestureRecognizerDelegate {
     private let onBegan: (UIPanGestureRecognizer) -> Void
     private let onTapLocation: (CGRect) -> Void
+    private let onTapPoint: (CGPoint) -> Void
     private let attached = NSHashTable<UIGestureRecognizer>.weakObjects()
     private let tapAttachedViews = NSHashTable<UIView>.weakObjects()
 
     init(onBegan: @escaping (UIPanGestureRecognizer) -> Void,
-         onTapLocation: @escaping (CGRect) -> Void = { _ in }) {
+         onTapLocation: @escaping (CGRect) -> Void = { _ in },
+         onTapPoint: @escaping (CGPoint) -> Void = { _ in }) {
         self.onBegan = onBegan
         self.onTapLocation = onTapLocation
+        self.onTapPoint = onTapPoint
     }
 
     func attach(to recognizer: UIPanGestureRecognizer) {
@@ -263,6 +266,7 @@ final class ReadiumGestureProbe: NSObject, UIGestureRecognizerDelegate {
         let point = recognizer.location(in: view)
         let rect = view.convert(CGRect(origin: point, size: .zero).insetBy(dx: -8, dy: -10), to: nil)
         onTapLocation(rect)
+        onTapPoint(point)
     }
 
     nonisolated func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,

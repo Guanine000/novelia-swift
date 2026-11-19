@@ -664,6 +664,7 @@ final class ReadiumNavigatorContainer: UIViewController {
               let selection = navigator.currentSelection,
               let text = selection.locator.text.highlight else { return }
         navigator.clearSelection()
+        navigator.view.endEditing(true)
         onCharacterLookup?(text)
     }
     @objc func explainSelectionWithAI() {
@@ -674,6 +675,7 @@ final class ReadiumNavigatorContainer: UIViewController {
             .compactMap { $0 }
             .joined()
         navigator.clearSelection()
+        navigator.view.endEditing(true)
         onAIContextExplain?(text, context.isEmpty ? nil : context)
     }
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {

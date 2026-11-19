@@ -569,10 +569,24 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
+    private func isNearSelectionHandle(_ point: CGPoint) -> Bool {
+        guard let first = selectionBounds.first, let last = selectionBounds.last else { return false }
+        let start = CGPoint(x: first.minX, y: first.midY)
+        let end = CGPoint(x: last.maxX, y: last.midY)
+        let hitRadius: CGFloat = 44
+        return hypot(point.x - start.x, point.y - start.y) <= hitRadius
+            || hypot(point.x - end.x, point.y - end.y) <= hitRadius
+    }
+
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if gestureRecognizer === longPressGesture {
             // 已有选区时禁用长按，让 panGesture 立即接管首尾边界手柄拖动，避免长按抢断或重置选区。
             return selectionInitialRange == nil && !isAnimating && !isDragActive
+        }
+        if gestureRecognizer === panGesture, selectionInitialRange != nil {
+            // 已有选区时仅在首尾手柄热区内允许拖动边界；点按其他区域（即便手指轻微晃动）
+            // 必须让位给 tap 取消选择，避免 pan 抢走点击并把选区拖到点击处。
+            return isNearSelectionHandle(gestureRecognizer.location(in: self))
         }
         return true
     }

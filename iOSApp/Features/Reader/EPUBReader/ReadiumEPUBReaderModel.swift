@@ -822,6 +822,22 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     /// 章节 WebView 与章节间滚动视图的手势观察者（同时记录点按的窗口坐标供注脚气泡定位）。
     lazy var gestureProbe = ReadiumGestureProbe(
         onBegan: { [weak self] recognizer in self?.swipeBegan(recognizer) },
-        onTapLocation: { [weak self] windowRect in self?.lastTapWindowRect = windowRect }
+        onTapLocation: { [weak self] windowRect in self?.lastTapWindowRect = windowRect },
+        onTapPoint: { [weak self] point in self?.dismissStickySelectionIfNeeded(tappedAt: point) }
     )
+
+    /// Readium 的 WebKit 选区在点按上下边距或部分空白处时可能不会自动取消，
+    /// 而 `currentSelection != nil` 会让 Readium JS 吞掉所有后续点击与翻页。
+    /// 若轻点落在选区外扩热区之外，短延迟后若选区仍残留则主动清除。
+    private func dismissStickySelectionIfNeeded(tappedAt point: CGPoint) {
+        guard let navigator, let selection = navigator.currentSelection else { return }
+        if let frame = selection.frame, frame.insetBy(dx: -28, dy: -28).contains(point) { return }
+        let tappedLocator = selection.locator
+        Task { @MainActor [weak self, weak navigator] in
+            try? await Task.sleep(nanoseconds: 60_000_000)
+            guard self != nil, let navigator, navigator.currentSelection?.locator == tappedLocator else { return }
+            navigator.clearSelection()
+            navigator.view.endEditing(true)
+        }
+    }
 }
