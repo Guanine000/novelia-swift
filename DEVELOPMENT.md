@@ -90,7 +90,7 @@ Core 功能逻辑 → Domain 与通用 Support
 
 `NoveliaApp` 是 `@main` 入口，用 `@StateObject` 持有 `AppServices`。正常启动通过 `AppServices.novelia(configuration:)` 创建配置、账号与服务集合，再交给 `RootView`。Debug 启动可选择独立验证组装。
 
-`RootView` 构建底栏；iPhone 和“我的”标签页沿用 `CompatNavigationStack`，iPad 的书库、发现和社区交给 `App/Integrations/BrowseNavigation.swift` 中的 `BrowseNavigationRoot`。iOS 17+ 使用系统 `NavigationSplitView`，iOS 15/16 使用双列 `NavigationView`。尺寸变化不以 if/else 更换主列表视图树，由同一系统容器处理收起和展开。底栏顺序、启动页和上次选择由 `AppTabLayout` 与设置键控制；默认入口为书库、发现、社区和我的。修改导航时同时考虑用户保存的底栏配置和页面返回状态。
+`RootView` 构建底栏；iPhone 和“我的”标签页沿用 `CompatNavigationStack`，iPad 的书库、发现和社区交给 `App/Integrations/BrowseNavigation.swift` 中的 `BrowseNavigationRoot`。iOS 17+ 使用系统 `NavigationSplitView`，iOS 15/16 使用双列 `NavigationView`。iPad 竖屏（高度大于宽度）通过向同一系统分栏容器注入紧凑 `horizontalSizeClass` 收起为单栏（子视图仍保留原始 `horizontalSizeClass`），横屏保持左右两栏；尺寸与横竖屏变化不以 if/else 更换主列表视图树，由同一系统容器处理收起和展开。底栏顺序、启动页和上次选择由 `AppTabLayout` 与设置键控制；默认入口为书库、发现、社区和我的。修改导航时同时考虑用户保存的底栏配置和页面返回状态。
 
 `BrowseNavigationRoot` 仅持有当前标签的详情选择、全窗口阅读目标与阅读返回定位请求。页面通过可空环境动作提交浏览选择/发起阅读；未注入时 `BrowseDetailLink`、`BrowseReadingLink` 退回原导航链接，因此手机行为不变。列表点击与菜单阅读分开，云端下载仍走原 `LibraryBookActions`；阅读使用原 Root 注入的所有服务，关闭后刷新位置，`ScrollViewReader` 按书键定位，避免最近阅读排序变化使刚读的书离开视口。详情导航栈仅在选中目标标识变化时重建，旋转或内容宽度变化不重置它。浏览选择不进入磁盘或 WebDAV。
 

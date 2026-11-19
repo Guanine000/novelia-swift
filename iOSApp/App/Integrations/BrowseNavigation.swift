@@ -157,8 +157,10 @@ private struct BrowseDetailContent: View {
     }
 }
 
-/// 每个标签持有自己的选择和阅读展示；尺寸变化只交给系统分栏容器处理，不切换视图树。
+/// 每个标签持有自己的选择和阅读展示；尺寸与横竖屏变化只交给系统分栏容器处理，不切换视图树。
+/// iPad 竖屏（高度大于宽度）按紧凑单栏展示，避免左右并排挤压正文与列表；横屏恢复左右两栏。
 struct BrowseNavigationRoot<Master: View>: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @EnvironmentObject private var libraryState: LibraryStateStore
     @State private var selection: BrowseDestination?
     @State private var reading: BrowseReadingDestination?
@@ -171,14 +173,26 @@ struct BrowseNavigationRoot<Master: View>: View {
     let master: () -> Master
 
     var body: some View {
-        Group {
-            if #available(iOS 17, *) {
-                ModernBrowseSplit(selection: $selection, emptyTitle: emptyTitle, emptySystemImage: emptySystemImage,
-                                  emptyDescription: emptyDescription, navigationTitle: navigationTitle, master: master)
-            } else {
-                LegacyBrowseSplit(selection: $selection, emptyTitle: emptyTitle, emptySystemImage: emptySystemImage,
-                                  emptyDescription: emptyDescription, navigationTitle: navigationTitle, master: master)
+        GeometryReader { geometry in
+            let usesSingleColumn = horizontalSizeClass == .compact
+                || (geometry.size.width > 0 && geometry.size.height > geometry.size.width)
+            Group {
+                if #available(iOS 17, *) {
+                    ModernBrowseSplit(selection: $selection,
+                                      usesSingleColumn: usesSingleColumn,
+                                      contentSizeClass: horizontalSizeClass,
+                                      emptyTitle: emptyTitle, emptySystemImage: emptySystemImage,
+                                      emptyDescription: emptyDescription, navigationTitle: navigationTitle, master: master)
+                } else {
+                    LegacyBrowseSplit(selection: $selection,
+                                      usesSingleColumn: usesSingleColumn,
+                                      contentSizeClass: horizontalSizeClass,
+                                      emptyTitle: emptyTitle, emptySystemImage: emptySystemImage,
+                                      emptyDescription: emptyDescription, navigationTitle: navigationTitle, master: master)
+                }
             }
+            .environment(\.horizontalSizeClass, usesSingleColumn ? .compact : horizontalSizeClass)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .environment(\.browseReading, { destination in
@@ -205,6 +219,8 @@ struct BrowseNavigationRoot<Master: View>: View {
 @available(iOS 17, *)
 private struct ModernBrowseSplit<Master: View>: View {
     @Binding var selection: BrowseDestination?
+    let usesSingleColumn: Bool
+    let contentSizeClass: UserInterfaceSizeClass?
     @State private var visibility = NavigationSplitViewVisibility.all
     @State private var compactColumn = NavigationSplitViewColumn.sidebar
     let emptyTitle: String
@@ -216,8 +232,9 @@ private struct ModernBrowseSplit<Master: View>: View {
     var body: some View {
         NavigationSplitView(columnVisibility: $visibility, preferredCompactColumn: $compactColumn) {
             CompatNavigationStack { master() }
+                .environment(\.horizontalSizeClass, contentSizeClass)
                 .environment(\.browseSelection, { selection = $0; compactColumn = .detail })
-                .environment(\.browseSelectedID, selection?.id)
+                .environment(\.browseSelectedID, usesSingleColumn ? nil : selection?.id)
                 .navigationSplitViewColumnWidth(min: 280, ideal: 360, max: 440)
         } detail: {
             CompatNavigationStack {
@@ -225,6 +242,7 @@ private struct ModernBrowseSplit<Master: View>: View {
                                      emptyDescription: emptyDescription, navigationTitle: navigationTitle)
             }
             .id(selection?.id)
+            .environment(\.horizontalSizeClass, contentSizeClass)
             .environment(\.browseSelection, nil)
         }
         .navigationSplitViewStyle(.balanced)
@@ -235,6 +253,8 @@ private struct ModernBrowseSplit<Master: View>: View {
 private struct LegacyBrowseSplit<Master: View>: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Binding var selection: BrowseDestination?
+    let usesSingleColumn: Bool
+    let contentSizeClass: UserInterfaceSizeClass?
     @State private var showsDetail = false
     let emptyTitle: String
     let emptySystemImage: String
@@ -245,19 +265,22 @@ private struct LegacyBrowseSplit<Master: View>: View {
     var body: some View {
         NavigationView {
             master()
+                .environment(\.horizontalSizeClass, contentSizeClass)
                 .environment(\.browseSelection, { selection = $0; showsDetail = true })
-                .environment(\.browseSelectedID, selection?.id)
+                .environment(\.browseSelectedID, usesSingleColumn ? nil : selection?.id)
                 .background {
                     NavigationLink(isActive: $showsDetail) {
                         BrowseSelectedDetail(selection: selection, emptyTitle: emptyTitle, emptySystemImage: emptySystemImage,
                                              emptyDescription: emptyDescription, navigationTitle: navigationTitle)
                             .id(selection?.id)
+                            .environment(\.horizontalSizeClass, contentSizeClass)
                             .environment(\.browseSelection, nil)
                     } label: { EmptyView() }
                     .hidden()
                 }
             BrowseSelectedDetail(selection: nil, emptyTitle: emptyTitle, emptySystemImage: emptySystemImage,
                                  emptyDescription: emptyDescription, navigationTitle: navigationTitle)
+                .environment(\.horizontalSizeClass, contentSizeClass)
         }
         .navigationViewStyle(.columns)
         .onValueChange(of: horizontalSizeClass) { _, value in
