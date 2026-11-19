@@ -152,6 +152,7 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
         spinner.hidesWhenStopped = true; view.addSubview(spinner)
         canvas.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(blockedTap(_:))))
         selectionPress.minimumPressDuration = 0.35
+        selectionPress.allowableMovement = 14
         selectionPress.cancelsTouchesInView = false; selectionPress.delegate = self
         coldPan.maximumNumberOfTouches = 1; coldPan.delegate = self
         selectionGate.cancelsTouchesInView = false; selectionGate.delegate = self
@@ -181,6 +182,8 @@ final class ReadiumPageCurlController: UIViewController, UIGestureRecognizerDele
 
             host.view.addGestureRecognizer(pager.panGesture)
             pager.panGesture.require(toFail: selectionGate)
+            pager.panGesture.require(toFail: selectionPress)
+            coldPan.require(toFail: selectionPress)
         }
         model?.onCurlTurn = { [weak self] in self?.requestTurn(forward: $0) ?? false }
         model?.cancelCurl = { [weak self] in await self?.cancelAndWait() }

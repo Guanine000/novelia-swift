@@ -425,10 +425,18 @@ final class ReadiumEPUBReaderModel: ObservableObject {
                 manifest.metadata.languages = [languageTag]
             }
             let reflowable = manifest.metadata.layout != .fixed
+            let isHorizontalBook = manifest.metadata.readingProgression != .rtl
             container = container.map { href, resource in
                 let path = href.removingFragment().removingQuery().path
                 if disablesScripts, EPUBScriptRemoval.isScriptResource(path: path) {
                     return resource.map { _ in Data() }
+                }
+                if isHorizontalBook, EPUBHorizontalLayoutCompatibility.isCSSResource(path: path) {
+                    return resource.map { data in
+                        guard let css = String(data: data, encoding: .utf8) else { return data }
+                        let rewritten = EPUBHorizontalLayoutCompatibility.normalizingHangingIndentsForHorizontal(in: css)
+                        return rewritten == css ? data : Data(rewritten.utf8)
+                    }
                 }
                 guard EPUBScriptRemoval.isHTMLResource(path: path) else { return resource }
                 return resource.map { data in

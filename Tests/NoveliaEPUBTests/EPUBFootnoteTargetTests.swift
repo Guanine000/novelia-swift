@@ -40,4 +40,28 @@ final class EPUBFootnoteTargetTests: XCTestCase {
         XCTAssertNil(EPUBFootnoteTarget.noteHTML(id: "empty", inDocument: html))
         XCTAssertNil(EPUBFootnoteTarget.noteHTML(id: "missing", inDocument: html))
     }
+
+    func testHorizontalFakeVRTLHangingIndentConvertsPaddingTopToPaddingLeft() {
+        let css = """
+        .vrtl .h-indent-3em60 {
+            text-indent: -3.6em;
+            padding-top: 3.6em
+        }
+        .hltr .h-indent-2em {
+            text-indent: -2em;
+            padding-left: 2em
+        }
+        """
+        let rewritten = EPUBHorizontalLayoutCompatibility.normalizingHangingIndentsForHorizontal(in: css)
+        XCTAssertTrue(rewritten.contains("text-indent: -3.6em;"))
+        XCTAssertTrue(rewritten.contains("padding-left: 3.6em !important; padding-top: 0;"))
+        XCTAssertTrue(rewritten.contains("padding-left: 2em"))
+
+        let genuineVertical = """
+        html { -epub-writing-mode: vertical-rl; }
+        .vrtl .h-indent-3em60 { text-indent: -3.6em; padding-top: 3.6em; }
+        """
+        XCTAssertEqual(EPUBHorizontalLayoutCompatibility.normalizingHangingIndentsForHorizontal(in: genuineVertical),
+                       genuineVertical)
+    }
 }

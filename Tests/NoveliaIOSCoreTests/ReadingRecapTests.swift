@@ -244,3 +244,61 @@ final class StoryStoreFlowTests: XCTestCase {
         XCTAssertNil(store.storyErrors[FileContentHash.sha256(Data("epub:test".utf8))])
     }
 }
+
+final class ReadingAIExplainPromptTests: XCTestCase {
+    func testInitialRequestIncludesBookSelectionAndContext() throws {
+        let request = ReadingAIExplainPrompt.makeRequest(
+            bookTitle: "测试轻小说",
+            selection: "一石二鳥",
+            context: "前文提要。这是一石二鳥的策略。后文继续。"
+        )
+        try request.validate()
+        XCTAssertEqual(request.instruction, ReadingAIExplainPrompt.initialInstruction)
+        XCTAssertTrue(request.input.contains("书名：测试轻小说"))
+        XCTAssertTrue(request.input.contains("选中片段：\n一石二鳥"))
+        XCTAssertTrue(request.input.contains("所在上下文："))
+        XCTAssertFalse(request.input.contains("已有对话："))
+    }
+
+    func testFollowUpRequestPreservesDialogueOrderAndStaysWithinBudget() throws {
+        let history = [
+            ReadingAIExplainTurn(role: .user, text: "选区摘要", isSelectionHeader: true),
+            ReadingAIExplainTurn(role: .assistant, text: "这是“一举两得”的意思。"),
+            ReadingAIExplainTurn(role: .user, text: "为什么这里带有一点讽刺语气？"),
+            ReadingAIExplainTurn(role: .assistant, text: "因为说话人明知对方会吃亏。")
+        ]
+        let request = ReadingAIExplainPrompt.makeRequest(
+            bookTitle: "测试轻小说",
+            selection: "一石二鳥",
+            context: "上下文内容",
+            history: history,
+            followUp: "能举一个更贴合中文口语的译法吗？"
+        )
+        try request.validate()
+        XCTAssertEqual(request.instruction, ReadingAIExplainPrompt.followUpInstruction)
+        XCTAssertFalse(request.input.contains("选区摘要"))
+        XCTAssertTrue(request.input.contains("已有对话："))
+        XCTAssertTrue(request.input.contains("用户本次补充／追问：\n能举一个更贴合中文口语的译法吗？"))
+        let firstPos = try XCTUnwrap(request.input.range(of: "阅读助手：这是“一举两得”的意思。"))
+        let secondPos = try XCTUnwrap(request.input.range(of: "用户：为什么这里带有一点讽刺语气？"))
+        let thirdPos = try XCTUnwrap(request.input.range(of: "阅读助手：因为说话人明知对方会吃亏。"))
+        XCTAssertLessThan(firstPos.lowerBound, secondPos.lowerBound)
+        XCTAssertLessThan(secondPos.lowerBound, thirdPos.lowerBound)
+
+        // 超长历史应按字节上限裁剪最旧对话，确保请求始终合法。
+        let hugeHistory = (0..<30).map { index in
+            ReadingAIExplainTurn(role: index.isMultiple(of: 2) ? .assistant : .user,
+                                 text: "第\(index)轮：" + String(repeating: "解析内容", count: 600))
+        }
+        let bounded = ReadingAIExplainPrompt.makeRequest(
+            bookTitle: nil,
+            selection: "一石二鳥",
+            context: nil,
+            history: hugeHistory,
+            followUp: "继续解释"
+        )
+        try bounded.validate()
+        XCTAssertTrue(bounded.input.contains("第29轮："))
+        XCTAssertFalse(bounded.input.contains("第0轮："))
+    }
+}

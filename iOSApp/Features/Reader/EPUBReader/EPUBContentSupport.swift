@@ -296,6 +296,75 @@ enum EPUBFootnoteTarget {
     }
 }
 
+// MARK: - 横排假 vrtl 悬挂缩进兼容
+
+/// 部分由日文／台版竖排模板（如角川／电书协 EPUB 3）改成的横排书会删掉 `writing-mode: vertical-rl`，
+/// 但仍保留 `<html class="vrtl">` 与 `.vrtl .h-indent-* { text-indent: -X; padding-top: X; }`。
+/// 在横排模式下这会把行首（如注释编号「注1：」）拉出左边界，在多栏分页下溢到前一页右边缘。
+/// 当书籍本身不是竖排时，将此类 `.vrtl` 规则块的 `padding-top` 转为 `padding-left`，既消除溢出又保留悬挂缩进。
+enum EPUBHorizontalLayoutCompatibility {
+    private static let verticalWritingModeRegex = try! NSRegularExpression(
+        pattern: #"(?i)(?:-(?:epub|webkit)-)?writing-mode\s*:\s*vertical-(?:rl|lr)\b"#
+    )
+    private static let ruleBlockRegex = try! NSRegularExpression(
+        pattern: #"([^{}@]+)\{([^{}]*)\}"#
+    )
+    private static let vrtlSelectorRegex = try! NSRegularExpression(
+        pattern: #"(?i)\.vrtl(?![A-Za-z0-9_-])"#
+    )
+    private static let negativeIndentRegex = try! NSRegularExpression(
+        pattern: #"(?i)\btext-indent\s*:\s*-\s*(?:[0-9]*\.[0-9]+|[0-9]+)\s*(?:em|rem|px|pt|%)\b"#
+    )
+    private static let positivePaddingLeftRegex = try! NSRegularExpression(
+        pattern: #"(?i)\bpadding-left\s*:\s*(?:0*[1-9][0-9]*(?:\.[0-9]+)?|0*\.[0-9]*[1-9][0-9]*)\s*(?:em|rem|px|pt|%)\b"#
+    )
+    private static let positivePaddingTopRegex = try! NSRegularExpression(
+        pattern: #"(?i)\bpadding-top\s*:\s*((?:0*[1-9][0-9]*(?:\.[0-9]+)?|0*\.[0-9]*[1-9][0-9]*)\s*(?:em|rem|px|pt|%))(\s*!important)?\s*;?"#
+    )
+
+    static func isCSSResource(path: String) -> Bool {
+        (path as NSString).pathExtension.lowercased() == "css"
+    }
+
+    static func containsVerticalWritingMode(_ css: String) -> Bool {
+        let ns = css as NSString
+        return verticalWritingModeRegex.firstMatch(in: css, range: NSRange(location: 0, length: ns.length)) != nil
+    }
+
+    static func normalizingHangingIndentsForHorizontal(in css: String) -> String {
+        guard !css.isEmpty,
+              css.range(of: "vrtl", options: .caseInsensitive) != nil,
+              !containsVerticalWritingMode(css) else { return css }
+
+        let ns = css as NSString
+        let matches = ruleBlockRegex.matches(in: css, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return css }
+
+        var output = ""
+        var cursor = 0
+        for match in matches {
+            let selector = ns.substring(with: match.range(at: 1))
+            let body = ns.substring(with: match.range(at: 2))
+            let nsSelector = selector as NSString
+            let nsBody = body as NSString
+            guard vrtlSelectorRegex.firstMatch(in: selector, range: NSRange(location: 0, length: nsSelector.length)) != nil,
+                  negativeIndentRegex.firstMatch(in: body, range: NSRange(location: 0, length: nsBody.length)) != nil,
+                  positivePaddingLeftRegex.firstMatch(in: body, range: NSRange(location: 0, length: nsBody.length)) == nil,
+                  let topMatch = positivePaddingTopRegex.firstMatch(in: body, range: NSRange(location: 0, length: nsBody.length))
+            else { continue }
+
+            let value = nsBody.substring(with: topMatch.range(at: 1))
+            let replacement = "padding-left: \(value) !important; padding-top: 0;"
+            let rewrittenBody = nsBody.replacingCharacters(in: topMatch.range, with: replacement)
+
+            output += ns.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+            output += "\(selector){\(rewrittenBody)}"
+            cursor = match.range.location + match.range.length
+        }
+        return cursor == 0 ? css : output + ns.substring(from: cursor)
+    }
+}
+
 // MARK: - NCX 目录解析（XMLParser）
 
 enum NCXParser {

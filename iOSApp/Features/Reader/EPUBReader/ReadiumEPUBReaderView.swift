@@ -660,16 +660,20 @@ final class ReadiumNavigatorContainer: UIViewController {
     var onCharacterLookup: ((String) -> Void)?
     var onAIContextExplain: ((String, String?) -> Void)?
     @objc func lookupCharacterSelection() {
-        guard let selection = (embedded as? EPUBNavigatorViewController)?.currentSelection,
+        guard let navigator = embedded as? EPUBNavigatorViewController,
+              let selection = navigator.currentSelection,
               let text = selection.locator.text.highlight else { return }
+        navigator.clearSelection()
         onCharacterLookup?(text)
     }
     @objc func explainSelectionWithAI() {
-        guard let selection = (embedded as? EPUBNavigatorViewController)?.currentSelection,
+        guard let navigator = embedded as? EPUBNavigatorViewController,
+              let selection = navigator.currentSelection,
               let text = selection.locator.text.highlight else { return }
         let context = [selection.locator.text.before, text, selection.locator.text.after]
             .compactMap { $0 }
             .joined()
+        navigator.clearSelection()
         onAIContextExplain?(text, context.isEmpty ? nil : context)
     }
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {

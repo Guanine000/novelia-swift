@@ -210,13 +210,14 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
         addGestureRecognizer(tap)
 
         longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
-        longPressGesture.minimumPressDuration = 0.45
-        longPressGesture.allowableMovement = 28
+        longPressGesture.minimumPressDuration = 0.35
+        longPressGesture.allowableMovement = 14
         longPressGesture.delegate = self
         addGestureRecognizer(longPressGesture)
         tap.require(toFail: longPressGesture)
         // 让明确的长按手势接管本次触摸序列，避免分页拖动手势
-        // 在选择焦点移动之前消耗拖动事件。
+        // 在选择焦点移动之前消耗拖动事件；已有选区时长按自动退让，
+        // 保证拖动选区前后边界手柄无延迟响应。
         pan.require(toFail: longPressGesture)
 
         editMenuInteraction = UIEditMenuInteraction(delegate: self)
@@ -336,11 +337,11 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
         guard width > 0 else { return }
 
         if selectionInitialRange != nil, gesture.state != .began {
-            if gesture.state == .changed, let range = selectionRangeProvider?(gesture.location(in: self)) {
+            if gesture.state == .changed, let range = selectionRangeProvider?(gesture.location(in: self)), range.length > 0 {
                 if adjustingStart { selectionInitialRange = range }
                 else { selectionMovingRange = range }
                 updateSelectionHighlight()
-            } else if gesture.state == .ended || gesture.state == .cancelled {
+            } else if gesture.state == .ended || gesture.state == .cancelled || gesture.state == .failed {
                 presentCopyMenu(at: gesture.location(in: self))
             }
             return
@@ -350,10 +351,15 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
             if selectionInitialRange != nil {
                 guard let first = selectionBounds.first, let last = selectionBounds.last else { return }
                 let point = gesture.location(in: self)
-                let start = CGPoint(x: first.minX, y: first.minY)
-                let end = CGPoint(x: last.maxX, y: last.maxY)
+                let start = CGPoint(x: first.minX, y: first.midY)
+                let end = CGPoint(x: last.maxX, y: last.midY)
                 adjustingStart = hypot(point.x - start.x, point.y - start.y) < hypot(point.x - end.x, point.y - end.y)
                 editMenuInteraction.dismissMenu()
+                if let range = selectionRangeProvider?(point), range.length > 0 {
+                    if adjustingStart { selectionInitialRange = range }
+                    else { selectionMovingRange = range }
+                    updateSelectionHighlight()
+                }
                 return
             }
             if isAnimating {
@@ -380,8 +386,8 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
             offset = min(0, max(-2 * width, offset))
             strip.frame.origin.x = offset
 
-        case .ended, .cancelled:
-            guard !isAnimating, isDragActive else { return }
+        case .ended, .cancelled, .failed:
+            guard !isAnimating, isDragActive else { isDragActive = false; return }
             isDragActive = false
             let translation = gesture.translation(in: self).x
             let velocity = gesture.velocity(in: self).x
@@ -459,6 +465,7 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
             guard let range = selectionRangeProvider?(point), range.length > 0 else { return }
             selectionInitialRange = range
             selectionMovingRange = range
+            NoveliaHaptics.selection()
             updateSelectionHighlight()
         case .changed:
             guard selectionInitialRange != nil,
@@ -523,6 +530,7 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
         selectionLayer.path = nil
         handlesLayer.path = nil
         selectionBounds = []
+        isDragActive = false
         updateCurlSelection()
     }
 
@@ -559,6 +567,14 @@ final class EPUBPagerUIView: UIView, UIGestureRecognizerDelegate {
             // 保证 strip 归零（新旧中间槽位像素一致，不会闪）。
             self.apply(images: self.images)
         }
+    }
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer === longPressGesture {
+            // 已有选区时禁用长按，让 panGesture 立即接管首尾边界手柄拖动，避免长按抢断或重置选区。
+            return selectionInitialRange == nil && !isAnimating && !isDragActive
+        }
+        return true
     }
 
     func gestureRecognizer(
@@ -708,8 +724,9 @@ final class EPUBPagerContainer: UIViewController {
         view.insertSubview(controller.view, belowSubview: interaction)
         controller.didMove(toParent: self)
         pager = controller
-        // 迁移 pan 到共同祖先，让正文交互层与纸面共享拖动；不阻塞横向拖动起手，已进入选字时由 curlSelectionHandler 禁用。
+        // 迁移 pan 到共同祖先，让正文交互层与纸面共享拖动；等待长按失败避免长按起手微颤被抢断为卷页，已进入选字时由 curlSelectionHandler 禁用。
         view.addGestureRecognizer(controller.panGesture)
+        controller.panGesture.require(toFail: interaction.longPressGesture)
         interaction.curlTurnHandler = { [weak self] in self?.turn(forward: $0) }
         interaction.curlSelectionHandler = { [weak controller] selecting in
             controller?.panGesture.isEnabled = !selecting

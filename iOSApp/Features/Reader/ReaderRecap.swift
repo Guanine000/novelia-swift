@@ -208,134 +208,261 @@ private struct AIContextExplainRequest: Identifiable, Equatable {
     let bookTitle: String?
 }
 
-/// 选中正文后的 AI 语境解析面板：仅发送当前选区与前后少量上下文，流式展示解析结果。
+/// 选中正文后的 AI 语境解析对话面板：沿用阅读助手对话式气泡风格，
+/// 仅发送当前选区、前后少量上下文与本面板内的追问记录，关闭即清除。
 @MainActor
 private struct ReaderAIExplainSheet: View {
     let request: AIContextExplainRequest
     @ObservedObject var ai: ReadingAIStore
     @Environment(\.dismiss) private var dismiss
-    @State private var answer = ""
+    @State private var turns: [ReadingAIExplainTurn] = []
+    @State private var draft = ""
     @State private var errorMessage: String?
+    @State private var failedFollowUp: String?
     @State private var isLoading = false
-    @State private var copied = false
-    @State private var runID = UUID()
+    @State private var copiedTurnID: UUID?
+    @State private var activeTask: Task<Void, Never>?
+    @FocusState private var inputFocused: Bool
+
+    private var revision: String {
+        "\(turns.count)|\(isLoading ? 1 : 0)|\(ai.streamedCharacters)|\(errorMessage ?? "")"
+    }
+    private var canSendFollowUp: Bool {
+        !isLoading && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("选中片段")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                        Text(request.selection)
-                            .font(.callout)
-                            .lineLimit(6)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    }
+            VStack(spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 18) {
+                            bubble(request.selection, label: "你 · 选中片段", user: true)
 
-                    if let errorMessage {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label(errorMessage, systemImage: "exclamationmark.triangle")
-                                .font(.callout)
-                                .foregroundStyle(.orange)
-                            Button("重试") { runID = UUID() }
-                                .buttonStyle(.bordered)
+                            ForEach(turns) { turn in
+                                if turn.role == .user {
+                                    bubble(turn.text, label: "你", user: true)
+                                } else {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        bubble(turn.text, label: "阅读助手", user: false)
+                                        Button {
+                                            UIPasteboard.general.string = turn.text
+                                            copiedTurnID = turn.id
+                                        } label: {
+                                            Label(copiedTurnID == turn.id ? "已复制" : "复制",
+                                                  systemImage: copiedTurnID == turn.id ? "checkmark" : "doc.on.doc")
+                                                .font(.caption)
+                                        }
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                        .padding(.leading, 14)
+                                    }
+                                }
+                            }
+
+                            if isLoading {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    bubble(ai.streamedPreview.isEmpty ? "正在结合上下文解析…" : ai.streamedPreview,
+                                           label: "阅读助手", user: false)
+                                    HStack(spacing: 8) {
+                                        ProgressView()
+                                        Text(ai.streamedCharacters > 0 ? "正在解析（已收到 \(ai.streamedCharacters) 字）…" : "等待模型回复…")
+                                            .font(.caption)
+                                            .foregroundStyle(NoveliaStyle.muted)
+                                    }
+                                    .padding(.leading, 14)
+                                }
+                            }
+
+                            if let errorMessage {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Label(errorMessage, systemImage: "exclamationmark.triangle")
+                                        .font(.callout)
+                                        .foregroundStyle(.orange)
+                                    Button("重试") { retryLastRequest() }
+                                        .buttonStyle(.bordered)
+                                }
+                                .padding(14)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(NoveliaStyle.card)
+                                .clipShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
+                            }
+
+                            Color.clear.frame(height: 1).id("latest")
                         }
-                    } else if isLoading {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(spacing: 8) {
-                                ProgressView()
-                                Text(ai.streamedCharacters > 0 ? "正在解析（已收到 \(ai.streamedCharacters) 字）…" : "正在结合上下文解析…")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if !ai.streamedPreview.isEmpty {
-                                Text(ai.streamedPreview)
-                                    .font(.body)
-                                    .lineSpacing(5)
-                                    .textSelection(.enabled)
-                            }
-                        }
-                    } else if !answer.isEmpty {
-                        Text(answer)
-                            .font(.body)
-                            .lineSpacing(5)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        HStack(spacing: 12) {
-                            Button {
-                                UIPasteboard.general.string = answer
-                                copied = true
-                            } label: {
-                                Label(copied ? "已复制" : "复制解析", systemImage: copied ? "checkmark" : "doc.on.doc")
-                            }
-                            .buttonStyle(.bordered)
-                            Button {
-                                runID = UUID()
-                            } label: {
-                                Label("重新解析", systemImage: "arrow.clockwise")
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                        .padding(.top, 4)
+                        .padding(16)
+                    }
+                    .onAppear { proxy.scrollTo("latest", anchor: .bottom) }
+                    .onValueChange(of: revision) { _, _ in
+                        withAnimation { proxy.scrollTo("latest", anchor: .bottom) }
                     }
                 }
-                .padding(16)
+
+                Divider()
+
+                HStack(alignment: .bottom, spacing: 10) {
+                    followUpInputField
+                        .focused($inputFocused)
+                        .submitLabel(.send)
+                        .onSubmit { sendFollowUp() }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium, style: .continuous)
+                                .stroke(NoveliaStyle.hairline, lineWidth: 1)
+                        )
+                    Button {
+                        sendFollowUp()
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 30))
+                            .foregroundStyle(canSendFollowUp ? NoveliaStyle.brandGreen : NoveliaStyle.muted.opacity(0.45))
+                    }
+                    .disabled(!canSendFollowUp)
+                    .accessibilityLabel("发送补充问题")
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(NoveliaStyle.paper)
             }
+            .background(NoveliaStyle.paper.ignoresSafeArea())
             .navigationTitle("AI 语境解析")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ToolbarItem(placement: .compatTopBarLeading) {
+                    Button("重新解析") { restartExplain() }
+                        .disabled(isLoading)
+                }
+                ToolbarItem(placement: .compatTopBarTrailing) {
                     Button("关闭") { dismiss() }
                 }
             }
-            .task(id: runID) {
-                await runExplain()
+            .onAppear {
+                if turns.isEmpty && !isLoading && errorMessage == nil {
+                    startInitialExplain()
+                }
+            }
+            .onDisappear {
+                activeTask?.cancel()
+                activeTask = nil
             }
         }
     }
 
-    private func runExplain() async {
-        copied = false
+    @ViewBuilder
+    private var followUpInputField: some View {
+        if #available(iOS 16.0, *) {
+            TextField("补充想了解的点或继续追问…", text: $draft, axis: .vertical)
+                .lineLimit(1...4)
+                .font(.body)
+        } else {
+            TextField("补充想了解的点或继续追问…", text: $draft)
+                .font(.body)
+        }
+    }
+
+    private func bubble(_ text: String, label: String, user: Bool) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            if user { Spacer(minLength: 32) }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(NoveliaStyle.muted)
+                Text(text)
+                    .font(.body)
+                    .foregroundStyle(NoveliaStyle.ink)
+                    .lineSpacing(user ? 3 : 5)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            .padding(14)
+            .background(user ? NoveliaStyle.brandGreen.opacity(0.12) : NoveliaStyle.card)
+            .clipShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
+            if !user { Spacer(minLength: 16) }
+        }
+    }
+
+    private func restartExplain() {
+        activeTask?.cancel()
+        turns = []
+        draft = ""
         errorMessage = nil
-        answer = ""
+        failedFollowUp = nil
+        copiedTurnID = nil
+        startInitialExplain()
+    }
+
+    private func startInitialExplain() {
+        let aiRequest = ReadingAIExplainPrompt.makeRequest(
+            bookTitle: request.bookTitle,
+            selection: request.selection,
+            context: request.context
+        )
+        runRequest(aiRequest, followUpForRetry: nil)
+    }
+
+    private func sendFollowUp() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isLoading, !trimmed.isEmpty else { return }
+        let historySnapshot = turns
+        draft = ""
+        inputFocused = false
+        turns.append(ReadingAIExplainTurn(role: .user, text: trimmed))
+        let aiRequest = ReadingAIExplainPrompt.makeRequest(
+            bookTitle: request.bookTitle,
+            selection: request.selection,
+            context: request.context,
+            history: historySnapshot,
+            followUp: trimmed
+        )
+        runRequest(aiRequest, followUpForRetry: trimmed)
+    }
+
+    private func retryLastRequest() {
+        if let failedFollowUp {
+            // 历史中最后一条就是失败时追加的用户追问，取其之前的对话作为上下文。
+            let historyBeforeLast = turns.last?.role == .user ? Array(turns.dropLast()) : turns
+            let aiRequest = ReadingAIExplainPrompt.makeRequest(
+                bookTitle: request.bookTitle,
+                selection: request.selection,
+                context: request.context,
+                history: historyBeforeLast,
+                followUp: failedFollowUp
+            )
+            runRequest(aiRequest, followUpForRetry: failedFollowUp)
+        } else {
+            startInitialExplain()
+        }
+    }
+
+    private func runRequest(_ aiRequest: ReadingAIRequest, followUpForRetry: String?) {
+        activeTask?.cancel()
+        errorMessage = nil
+        failedFollowUp = followUpForRetry
         ai.refreshKeyStatus()
         guard ai.isReadyForGeneration else {
             errorMessage = "请先在「设置 → AI 阅读辅助」启用并配置模型与 API 密钥。"
             return
         }
         isLoading = true
-        defer { isLoading = false }
-        let selectedSnippet = String(request.selection.prefix(500))
-        var sections: [String] = []
-        if let title = request.bookTitle, !title.isEmpty {
-            sections.append("书名：\(title)")
-        }
-        sections.append("选中片段：\n\(selectedSnippet)")
-        if let context = request.context?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !context.isEmpty, context != selectedSnippet {
-            sections.append("所在上下文：\n\(String(context.prefix(1200)))")
-        }
-        let aiRequest = ReadingAIRequest(
-            instruction: "你是轻小说阅读助手。请用简洁清晰的中文，结合上下文语境解释用户选中的片段（包括日语表达、成语俗语、文化梗、专有名词含义、语气 nuance 或更自然的中文译法）。直接输出解析，不要复述指令，不要剧透后续剧情。",
-            input: sections.joined(separator: "\n\n")
-        )
-        do {
-            let response = try await ai.generate(aiRequest)
-            guard !Task.isCancelled else { return }
-            answer = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if answer.isEmpty {
-                errorMessage = "模型返回了空白内容，请重试。"
+        activeTask = Task { @MainActor in
+            defer { isLoading = false }
+            do {
+                let response = try await ai.generate(aiRequest)
+                guard !Task.isCancelled else { return }
+                let text = response.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if text.isEmpty {
+                    errorMessage = "模型返回了空白内容，请重试。"
+                } else {
+                    failedFollowUp = nil
+                    turns.append(ReadingAIExplainTurn(role: .assistant, text: text))
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                errorMessage = error.localizedDescription
             }
-        } catch is CancellationError {
-            return
-        } catch {
-            guard !Task.isCancelled else { return }
-            errorMessage = error.localizedDescription
         }
     }
 }

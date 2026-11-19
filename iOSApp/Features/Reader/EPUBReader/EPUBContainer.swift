@@ -417,6 +417,9 @@ final class EPUBContainer {
             cleaned = Self.rewriteUnsupportedPositioning(in: cleaned, counter: &positionRewriteCount)
             texts.append(Self.rewriteEightDigitColors(in: cleaned))
         }
+        if !texts.contains(where: EPUBHorizontalLayoutCompatibility.containsVerticalWritingMode) {
+            texts = texts.map(EPUBHorizontalLayoutCompatibility.normalizingHangingIndentsForHorizontal(in:))
+        }
         return texts
     }
 

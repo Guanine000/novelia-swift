@@ -420,3 +420,67 @@ enum StorySummaryGenerator {
         return try StorySummaryPlan.parseSummary(response, allowed: reduceRange)
     }
 }
+
+// MARK: - 选区语境解析与追问
+
+/// 单次「AI 语境解析」弹层内的对话消息；仅保留在当前面板内存中，关闭即清除。
+struct ReadingAIExplainTurn: Equatable, Identifiable, Sendable {
+    enum Role: String, Equatable, Sendable { case user, assistant }
+    let id: UUID
+    let role: Role
+    let text: String
+    /// 首条选区摘要标记，拼装追问上下文时不与「选中片段」段重复。
+    let isSelectionHeader: Bool
+
+    init(id: UUID = UUID(), role: Role, text: String, isSelectionHeader: Bool = false) {
+        self.id = id
+        self.role = role
+        self.text = text
+        self.isSelectionHeader = isSelectionHeader
+    }
+}
+
+/// 构造选区首轮解析及多轮补充追问的 `ReadingAIRequest`，复用既有单请求协议。
+enum ReadingAIExplainPrompt {
+    static let initialInstruction = "你是轻小说阅读助手。请用简洁清晰的中文，结合上下文语境解释用户选中的片段（包括日语表达、成语俗语、文化梗、专有名词含义、语气 nuance 或更自然的中文译法）。直接输出解析，不要复述指令，不要剧透后续剧情。"
+    static let followUpInstruction = "你是轻小说阅读助手。用户此前请求解析一段选中文本，现在根据你的解析补充了新的疑问或想了解的重点。请结合原文选中片段、所在上下文与已有对话，用简洁清晰的中文直接回答用户本次补充的问题，不要复述指令，不要剧透后续剧情。"
+    static let maximumHistoryTurns = 12
+    static let maximumHistoryUTF8Bytes = 24 * 1_024
+
+    static func makeRequest(bookTitle: String?, selection: String, context: String?,
+                            history: [ReadingAIExplainTurn] = [], followUp: String? = nil) -> ReadingAIRequest {
+        let selectedSnippet = String(selection.trimmingCharacters(in: .whitespacesAndNewlines).prefix(500))
+        var sections: [String] = []
+        if let title = bookTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+            sections.append("书名：\(title)")
+        }
+        sections.append("选中片段：\n\(selectedSnippet)")
+        if let context = context?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !context.isEmpty, context != selectedSnippet {
+            sections.append("所在上下文：\n\(String(context.prefix(1200)))")
+        }
+
+        let trimmedFollowUp = followUp?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmedFollowUp.isEmpty else {
+            return ReadingAIRequest(instruction: initialInstruction, input: sections.joined(separator: "\n\n"))
+        }
+
+        let dialogueTurns = history.filter { !$0.isSelectionHeader && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        var kept: [String] = []
+        var usedBytes = 0
+        for turn in dialogueTurns.reversed() {
+            if kept.count >= maximumHistoryTurns { break }
+            let speaker = turn.role == .user ? "用户" : "阅读助手"
+            let line = "\(speaker)：\(turn.text.trimmingCharacters(in: .whitespacesAndNewlines))"
+            let lineBytes = line.utf8.count + (kept.isEmpty ? 0 : 2)
+            if usedBytes + lineBytes > maximumHistoryUTF8Bytes { break }
+            kept.append(line)
+            usedBytes += lineBytes
+        }
+        if !kept.isEmpty {
+            sections.append("已有对话：\n" + kept.reversed().joined(separator: "\n\n"))
+        }
+        sections.append("用户本次补充／追问：\n\(String(trimmedFollowUp.prefix(2000)))")
+        return ReadingAIRequest(instruction: followUpInstruction, input: sections.joined(separator: "\n\n"))
+    }
+}
