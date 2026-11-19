@@ -356,11 +356,10 @@ struct LibraryBookActionDialogs: ViewModifier {
                 LibraryArchiveShareSheet(url: export.url)
                     .ignoresSafeArea()
             }
-            .confirmationDialog("《\(actions.missingCloudBook?.title ?? "")》的云端文件缺失",
-                                isPresented: .init(get: { actions.missingCloudBook != nil },
-                                                   set: { if !$0 { actions.missingCloudBook = nil } }),
-                                titleVisibility: .visible,
-                                presenting: actions.missingCloudBook) { book in
+            .alert("《\(actions.missingCloudBook?.title ?? "")》的云端文件缺失",
+                   isPresented: .init(get: { actions.missingCloudBook != nil },
+                                      set: { if !$0 { actions.missingCloudBook = nil } }),
+                   presenting: actions.missingCloudBook) { book in
                 Button("从云端删除", role: .destructive) {
                     actions.missingCloudBook = nil
                     delete([book], fromCloud: true)
@@ -370,11 +369,10 @@ struct LibraryBookActionDialogs: ViewModifier {
             } message: { _ in
                 Text("WebDAV 中已找不到这本书的文件，本机也没有。若其他设备仍有这本书，在那台设备上手动同步一次即可补传；不再需要时可从云端删除书目，阅读进度和统计会保留。")
             }
-            .confirmationDialog("下载《\(actions.pendingCloudDownload?.title ?? "")》？",
-                                isPresented: .init(get: { actions.pendingCloudDownload != nil },
-                                                   set: { if !$0 { actions.pendingCloudDownload = nil } }),
-                                titleVisibility: .visible,
-                                presenting: actions.pendingCloudDownload) { book in
+            .alert("下载《\(actions.pendingCloudDownload?.title ?? "")》？",
+                   isPresented: .init(get: { actions.pendingCloudDownload != nil },
+                                      set: { if !$0 { actions.pendingCloudDownload = nil } }),
+                   presenting: actions.pendingCloudDownload) { book in
                 Button("取消", role: .cancel) { actions.pendingCloudDownload = nil }
                 Button("下载") { download(book) }
             } message: { book in
@@ -520,10 +518,11 @@ struct LibraryBookActionDialogs: ViewModifier {
                     .background(.regularMaterial)
                 }
             }
-            .confirmationDialog("更新到最新章节？", isPresented: .init(get: { actions.pendingEPUBUpdate != nil },
-                set: { if !$0 { actions.pendingEPUBUpdate = nil } }), titleVisibility: .visible,
+            .alert("更新到最新章节？", isPresented: .init(get: { actions.pendingEPUBUpdate != nil },
+                set: { if !$0 { actions.pendingEPUBUpdate = nil } }),
                 presenting: actions.pendingEPUBUpdate) { book in
                 Button(book.epubUpdateConfiguration == nil ? "选择语言和译源" : "重新获取并更新 EPUB") { updateEPUB(book) }
+                Button("取消", role: .cancel) { actions.pendingEPUBUpdate = nil }
             } message: { book in
                 if book.epubUpdateConfiguration == nil {
                     Text("这本书缺少历史下载设置，下一步请选择语言模式和译源。确认后才会下载，取消不会修改原书。")
@@ -531,10 +530,11 @@ struct LibraryBookActionDialogs: ViewModifier {
                 Text("将按原来的\(book.resolvedDownloadMode.title)模式和译源重新获取整本 EPUB，成功后替换本机旧文件；失败或取消会保留旧文件。阅读位置和书签按章节路径尝试承接，目录被改动时可能需要重新定位。更新后可再进行 WebDAV 同步。")
                 }
             }
-            .confirmationDialog("从 WebDAV 获取新版 EPUB？", isPresented: .init(get: { actions.pendingCloudEPUBUpdate != nil },
-                set: { if !$0 { actions.pendingCloudEPUBUpdate = nil } }), titleVisibility: .visible,
+            .alert("从 WebDAV 获取新版 EPUB？", isPresented: .init(get: { actions.pendingCloudEPUBUpdate != nil },
+                set: { if !$0 { actions.pendingCloudEPUBUpdate = nil } }),
                 presenting: actions.pendingCloudEPUBUpdate) { book in
                 Button("取回云端 EPUB 并合并进度、书签") { updateEPUBFromCloud(book) }
+                Button("取消", role: .cancel) { actions.pendingCloudEPUBUpdate = nil }
             } message: { _ in
                 Text("请先在持有新版的设备上同步。将使用 WebDAV 保存的 EPUB、译源及语言模式，成功后替换本机旧版，按章节路径承接本机状态并合并云端进度和书签。更新后再手动同步一次，把本机承接的状态传回其他设备。")
             }

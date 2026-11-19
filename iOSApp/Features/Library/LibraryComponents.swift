@@ -37,27 +37,41 @@ struct NovelRow: View {
     let novel: Novel
 
     var body: some View {
-        HStack(spacing: 13) {
-            BookCover(novel: novel, width: 61, height: 82)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(novel.title)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(NoveliaStyle.ink)
-                    .lineLimit(2)
-                Text(novel.author)
-                    .font(NoveliaStyle.fontFootnote)
-                    .foregroundStyle(NoveliaStyle.muted)
+        HStack(alignment: .top, spacing: 14) {
+            BookCover(novel: novel, width: 56, height: 78)
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(novel.title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(NoveliaStyle.ink)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Text(novel.author)
+                        .font(.system(size: 13))
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 6)
                 Text(metadata(for: novel))
-                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .font(.system(size: 11).monospacedDigit())
                     .foregroundStyle(NoveliaStyle.muted.opacity(0.85))
+                    .lineLimit(1)
             }
-            Spacer()
+            .frame(minHeight: 78, alignment: .top)
+            .frame(maxWidth: .infinity, alignment: .leading)
             Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(NoveliaStyle.muted.opacity(0.5))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(NoveliaStyle.muted.opacity(0.45))
+                .padding(.top, 4)
         }
-        .padding(12)
-        .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
+        .padding(.vertical, 8)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(NoveliaStyle.hairline)
+                .frame(height: 0.5)
+                .padding(.leading, 70)
+                .allowsHitTesting(false)
+        }
     }
 
     private func metadata(for novel: Novel) -> String {
@@ -692,85 +706,6 @@ struct LibraryRecentCarousel: View {
             }
             .frame(height: 192)
         }
-    }
-}
-
-struct LibraryContinueReadingCard: View {
-    let book: LibraryBook
-    let open: () -> Void
-    @EnvironmentObject private var state: LibraryStateStore
-
-    var body: some View {
-        let status = state.status(for: book)
-        let shape = RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
-        Button {
-            NoveliaHaptics.light()
-            open()
-        } label: {
-            HStack(alignment: .top, spacing: 14) {
-                LibraryCoverView(book: book, width: 60, height: 84, elevated: false)
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 6) {
-                        Text("继续阅读")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(NoveliaStyle.brandGreen)
-                        Spacer(minLength: 4)
-                        if let lastReadAt = status.lastReadAt {
-                            Text(Self.relative(lastReadAt))
-                                .font(.system(size: 11))
-                                .foregroundStyle(NoveliaStyle.muted.opacity(0.85))
-                        }
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(NoveliaStyle.muted.opacity(0.55))
-                    }
-                    Text(book.title)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(NoveliaStyle.ink)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .padding(.top, 4)
-                    if !book.author.isEmpty {
-                        Text(book.author)
-                            .font(.system(size: 12))
-                            .foregroundStyle(NoveliaStyle.muted)
-                            .lineLimit(1)
-                            .padding(.top, 2)
-                    }
-                    Spacer(minLength: 8)
-                    HStack(spacing: 8) {
-                        if let fraction = status.fraction {
-                            GeometryReader { bar in
-                                ZStack(alignment: .leading) {
-                                    Capsule().fill(Color.primary.opacity(0.08))
-                                    Capsule()
-                                        .fill(NoveliaStyle.brandGreen)
-                                        .frame(width: bar.size.width * min(1, max(0, fraction)))
-                                }
-                            }
-                            .frame(height: 3)
-                        }
-                        Text(status.detail)
-                            .font(.system(size: 11, weight: .medium).monospacedDigit())
-                            .foregroundStyle(NoveliaStyle.muted)
-                            .fixedSize()
-                    }
-                }
-                .frame(minHeight: 84, alignment: .top)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(14)
-            .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
-            .contentShape(shape)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("继续阅读 \(book.title)，\(status.detail)")
-    }
-
-    private static func relative(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 

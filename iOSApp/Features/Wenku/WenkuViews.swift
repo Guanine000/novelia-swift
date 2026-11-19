@@ -278,25 +278,47 @@ struct WenkuNovelRow: View {
                 RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall).fill(NoveliaStyle.brandGreen.opacity(0.12))
                     .overlay(Image(systemName: "book.closed").foregroundStyle(NoveliaStyle.brandGreen))
             }
-            .frame(width: 72, height: 96).noveliaBookCoverStyle(cornerRadius: NoveliaStyle.radiusSmall, elevated: false)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(novel.displayTitle).font(.system(size: 16, weight: .bold, design: .rounded)).foregroundStyle(NoveliaStyle.ink).lineLimit(2)
-                if !novel.title.isEmpty && novel.title != novel.displayTitle {
-                    Text(novel.title).font(NoveliaStyle.fontFootnote).foregroundStyle(NoveliaStyle.muted).lineLimit(1)
+            .frame(width: 60, height: 84).noveliaBookCoverStyle(cornerRadius: NoveliaStyle.radiusSmall, elevated: false)
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(novel.displayTitle)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(NoveliaStyle.ink)
+                        .lineLimit(2)
+                    if !novel.title.isEmpty && novel.title != novel.displayTitle {
+                        Text(novel.title)
+                            .font(.system(size: 12))
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .lineLimit(1)
+                    }
                 }
-                if novel.favored != nil {
-                    Label("已收藏", systemImage: "heart.fill").font(.system(size: 11, weight: .medium)).foregroundStyle(NoveliaStyle.brandGreen)
+                Spacer(minLength: 6)
+                HStack(spacing: 8) {
+                    Text("文库小说")
+                        .font(.system(size: 11))
+                        .foregroundStyle(NoveliaStyle.muted.opacity(0.9))
+                    if novel.favored != nil {
+                        Label("已收藏", systemImage: "heart.fill")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                    }
                 }
-                Spacer(minLength: 0)
-                Text("文库小说").font(NoveliaStyle.fontCaption).foregroundStyle(NoveliaStyle.muted)
             }
+            .frame(minHeight: 84, alignment: .top)
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary).padding(.top, 8)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(NoveliaStyle.muted.opacity(0.45))
+                .padding(.top, 4)
         }
-        .frame(minHeight: 112)
-        .padding(12)
-        .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(NoveliaStyle.hairline)
+                .frame(height: 0.5)
+                .padding(.leading, 74)
+                .allowsHitTesting(false)
+        }
     }
 }
 

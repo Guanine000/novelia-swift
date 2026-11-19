@@ -168,22 +168,25 @@ enum NoveliaStyle {
         })
     }
 
-    /// 页面底色（浅色=按「我的 → 界面」的界面底色预设，深色=近黑）。
+    /// 页面底色（浅色=按「我的 → 界面」的界面底色预设，深色=近黑或纯黑 OLED）。
     static var paper: Color {
         Color(uiColor: UIColor { trait in
             guard trait.userInterfaceStyle == .dark else {
                 return AppPaperStyle.from(storedValue: UserDefaults.standard.string(forKey: SettingsKey.appPaperStyle)).lightPaper
             }
-            return UIColor(red: 0.10, green: 0.10, blue: 0.11, alpha: 1)
+            return UserDefaults.standard.bool(forKey: SettingsKey.appDarkOLED)
+                ? .black
+                : UIColor(red: 0.10, green: 0.10, blue: 0.11, alpha: 1)
         })
     }
 
-    /// 卡片/列表行底色（浅色=白，深色=深灰）；与两档纸面都能保持层次。
+    /// 卡片/列表行底色（浅色=白，深色=深灰或 OLED 极暗灰）；与两档纸面都能保持层次。
     static var card: Color {
         Color(uiColor: UIColor { trait in
-            trait.userInterfaceStyle == .dark
-                ? UIColor(red: 0.17, green: 0.17, blue: 0.18, alpha: 1)
-                : .white
+            guard trait.userInterfaceStyle == .dark else { return .white }
+            return UserDefaults.standard.bool(forKey: SettingsKey.appDarkOLED)
+                ? UIColor(red: 0.09, green: 0.09, blue: 0.10, alpha: 1)
+                : UIColor(red: 0.17, green: 0.17, blue: 0.18, alpha: 1)
         })
     }
 
@@ -326,6 +329,8 @@ struct RootView: View {
     )
     /// 界面底色预设。持有它让根视图在换档时重渲染，纸面与卡片的动态色随之刷新。
     @AppStorage(SettingsKey.appPaperStyle) private var paperStyleRaw = AppPaperStyle.cream.rawValue
+    /// 深色模式纯黑 OLED 开关；持有它使切换时立即重渲染动态纸面色。
+    @AppStorage(SettingsKey.appDarkOLED) private var appDarkOLED = false
 
     init(services: AppServices) {
         self.services = services

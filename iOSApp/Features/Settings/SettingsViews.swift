@@ -13,6 +13,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.appThemeColor) private var themeColorRaw = AppThemeColor.novelia.rawValue
     @AppStorage(SettingsKey.appThemeCustomHex) private var themeCustomHex = "559775"
     @AppStorage(SettingsKey.appPaperStyle) private var paperStyleRaw = AppPaperStyle.cream.rawValue
+    @AppStorage(SettingsKey.appDarkOLED) private var appDarkOLED = false
     #if !NOVELIA_READIUM_ONLY
     @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = false
     #endif
@@ -199,6 +200,9 @@ struct SettingsView: View {
                     }
                 } label: {
                     Label("界面底色", systemImage: "square.on.square")
+                }
+                Toggle(isOn: $appDarkOLED) {
+                    Label("深色使用纯黑（OLED）", systemImage: "moon.fill")
                 }
             }
             Section("同步") {

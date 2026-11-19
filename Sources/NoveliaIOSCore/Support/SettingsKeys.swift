@@ -25,6 +25,8 @@ enum SettingsKey {
     static let appThemeCustomHex = "appThemeCustomHex"
     /// 界面底色预设，值为 `AppPaperStyle` 原始值；只影响浅色模式，本机保存不参与同步。
     static let appPaperStyle = "appPaperStyle"
+    /// 深色模式使用纯黑（OLED）底色；仅影响深色模式，本机保存不参与同步。
+    static let appDarkOLED = "appDarkOLED"
     /// 朗读偏好，只存本机，不参与 WebDAV 同步；`SpeechSettingsStore` 负责读写与旧值兼容。
     enum Speech {
         static let edgeVoiceCatalog = "speech.edgeVoiceCatalog.v1"

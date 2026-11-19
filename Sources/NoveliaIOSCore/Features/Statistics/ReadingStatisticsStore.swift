@@ -125,6 +125,16 @@ final class ReadingStatisticsStore: ObservableObject, ReadingTimeRecording, Read
         devices = deviceList(currentSnapshots)
     }
 
+    /// 移除已退役或不再使用的其他设备统计记录（本机不可删除）。
+    func removeDevice(id: String) {
+        guard id != deviceID, synced.devices[id] != nil || synced.deviceInfo?[id] != nil else { return }
+        synced.devices.removeValue(forKey: id)
+        synced.deviceInfo?.removeValue(forKey: id)
+        files.write(synced, to: files.devicesURL)
+        statistics = synced.statistics
+        devices = deviceList(currentSnapshots)
+    }
+
     private func saveDeviceInfo() {
         if let data = try? JSONEncoder().encode(deviceInfo) { defaults.set(data, forKey: Self.deviceInfoKey) }
     }

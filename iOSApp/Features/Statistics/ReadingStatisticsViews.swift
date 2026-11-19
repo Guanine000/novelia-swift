@@ -26,6 +26,7 @@ struct ReadingStatisticsView: View {
     @State private var range = 7
     @State private var selectedDay: String?
     @State private var sortByTime = false
+    @State private var pendingRemoveDevice: ReadingDeviceStatistics?
     private var calendar: Calendar { Calendar.current }
 
     private var sortedBooks: [ReadingBookStatistics] {
@@ -77,6 +78,13 @@ struct ReadingStatisticsView: View {
                                 }
                                 Text("今日 \(ReadingDuration.text(device.statistics.seconds(days: [today]))) · 累计 \(ReadingDuration.text(device.statistics.seconds()))")
                                     .font(.subheadline).foregroundStyle(.secondary)
+                            }
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if !device.isCurrent {
+                                Button("删除", role: .destructive) {
+                                    pendingRemoveDevice = device
+                                }
                             }
                         }
                     }
@@ -150,6 +158,17 @@ struct ReadingStatisticsView: View {
             Button("暂不开启", role: .cancel) {}
         } message: {
             Text("你已开启 WebDAV 同步。是否同时开启阅读时长同步？之后各设备的阅读统计会随 WebDAV 同步合并。")
+        }
+        .alert("移除设备“\(pendingRemoveDevice?.name ?? "")”的统计？",
+               isPresented: .init(get: { pendingRemoveDevice != nil }, set: { if !$0 { pendingRemoveDevice = nil } }),
+               presenting: pendingRemoveDevice) { device in
+            Button("移除", role: .destructive) {
+                store.removeDevice(id: device.id)
+                pendingRemoveDevice = nil
+            }
+            Button("取消", role: .cancel) { pendingRemoveDevice = nil }
+        } message: { _ in
+            Text("将从本机移除该设备的阅读统计记录。若开启了 WebDAV 统计同步且云端仍保留该设备文件，下次同步可能会重新拉回。")
         }
         .navigationTitle("阅读统计")
         .navigationBarTitleDisplayMode(.inline)
