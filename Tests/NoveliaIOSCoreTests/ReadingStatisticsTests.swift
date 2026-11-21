@@ -160,4 +160,37 @@ extension ReadingStatisticsTests {
         tracker.end(id: id, date: now.addingTimeInterval(40), uptime: 40)
         XCTAssertEqual(tracker.statistics.seconds(), 60)
     }
+
+    func testStreakDaysAndHeatmapColumns() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let book = ReadingBook(id: "wenku:test", title: "测试书", kind: .epub)
+        var stats = ReadingStatistics()
+
+        // 构造连续 3 天阅读（今天 20 分钟、昨天 50 分钟、前天 100 分钟）
+        let today = calendar.date(from: DateComponents(year: 2026, month: 11, day: 21, hour: 12))!
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
+        let twoDaysAgo = calendar.date(byAdding: .day, value: -2, to: today)!
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+
+        stats.record(book: book, from: twoDaysAgo, to: twoDaysAgo.addingTimeInterval(100 * 60), duration: 100 * 60, calendar: calendar)
+        stats.record(book: book, from: yesterday, to: yesterday.addingTimeInterval(50 * 60), duration: 50 * 60, calendar: calendar)
+        XCTAssertEqual(stats.streakDays(asOf: today, calendar: calendar), 2)
+
+        stats.record(book: book, from: today, to: today.addingTimeInterval(20 * 60), duration: 20 * 60, calendar: calendar)
+        XCTAssertEqual(stats.streakDays(asOf: today, calendar: calendar), 3)
+        // 明天尚未阅读时，仍延续截至今天的 3 天连续阅读
+        XCTAssertEqual(stats.streakDays(asOf: tomorrow, calendar: calendar), 3)
+
+        let columns = stats.heatmapColumns(weeks: 4, endingAt: today, calendar: calendar)
+        XCTAssertEqual(columns.count, 4)
+        XCTAssertTrue(columns.allSatisfy { $0.count == 7 })
+        let flat = columns.flatMap { $0 }
+        let todayCell = flat.first { $0.dayKey == ReadingStatistics.dayKey(today, calendar: calendar) }
+        let yesterdayCell = flat.first { $0.dayKey == ReadingStatistics.dayKey(yesterday, calendar: calendar) }
+        let twoDaysAgoCell = flat.first { $0.dayKey == ReadingStatistics.dayKey(twoDaysAgo, calendar: calendar) }
+        XCTAssertEqual(todayCell?.level, 2)       // 20 分钟 -> level 2
+        XCTAssertEqual(yesterdayCell?.level, 3)   // 50 分钟 -> level 3
+        XCTAssertEqual(twoDaysAgoCell?.level, 4)  // 100 分钟 -> level 4
+    }
 }

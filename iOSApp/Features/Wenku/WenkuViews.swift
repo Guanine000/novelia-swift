@@ -5,6 +5,7 @@ struct WenkuView: View {
     @EnvironmentObject private var store: WenkuStore
     @State private var query = ""
     @FocusState private var searchFocused: Bool
+    @StateObject private var searchHistory = SearchHistoryStore(scope: .discoverWenku)
     /// 嵌入“发现”页时不设置自己的导航标题。
     private let embedded: Bool
 
@@ -29,7 +30,11 @@ struct WenkuView: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(NoveliaStyle.muted)
                 TextField("搜索文库作品", text: $query)
                     .focused($searchFocused)
-                    .onSubmit { searchFocused = false }
+                    .submitLabel(.search)
+                    .onSubmit {
+                        searchFocused = false
+                        searchHistory.record(query)
+                    }
                     .textInputAutocapitalization(.never)
                     .compatAutocorrectionDisabled()
                 if !query.isEmpty {
@@ -40,6 +45,15 @@ struct WenkuView: View {
             .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
             .padding(.horizontal, 16)
             .padding(.top, 4)
+            if searchFocused && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                SearchHistoryStrip(store: searchHistory) { term in
+                    query = term
+                    searchFocused = false
+                    searchHistory.record(term)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            }
             HStack(spacing: 8) {
                 BrowseListLink {
                     WenkuFavoritesView()

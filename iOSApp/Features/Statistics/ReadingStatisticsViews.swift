@@ -21,12 +21,21 @@ struct ReadingStatisticsView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var syncStore: WebDAVSyncStore
-    @State private var showsSyncOffer = false
     @EnvironmentObject private var store: ReadingStatisticsStore
+    @EnvironmentObject private var libraryState: LibraryStateStore
+    @EnvironmentObject private var webDownloads: WebNovelDownloadStore
+    @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
+    @EnvironmentObject private var cloudBooks: CloudBookStore
+
+    @State private var showsSyncOffer = false
     @State private var range = 7
     @State private var selectedDay: String?
-    @State private var sortByTime = false
+    @State private var sortByTime = true
+    @State private var showAllBooks = false
+    @State private var showAllCompleted = false
+    @State private var selectedYear = Calendar.current.component(.year, from: Date())
     @State private var pendingRemoveDevice: ReadingDeviceStatistics?
+
     private var calendar: Calendar { Calendar.current }
 
     private var sortedBooks: [ReadingBookStatistics] {
@@ -37,121 +46,84 @@ struct ReadingStatisticsView: View {
         }
     }
 
+    private var allLibraryBooks: [LibraryBook] {
+        libraryState.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks)
+    }
+
+    private var libraryBooksByKey: [String: LibraryBook] {
+        Dictionary(allLibraryBooks.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    private var completedRecords: [AnnualCompletedBook] {
+        let booksByKey = libraryBooksByKey
+        return libraryState.readingStatuses.statuses.compactMap { key, entry -> AnnualCompletedBook? in
+            guard entry.status == .completed else { return nil }
+            let libraryBook = booksByKey[key]
+            let statEntry = store.statistics.books[key]
+            let title = libraryBook?.title ?? statEntry?.book.title
+            guard let title, !title.isEmpty else { return nil }
+            let year = calendar.component(.year, from: entry.updatedAt)
+            return AnnualCompletedBook(
+                id: key,
+                title: title,
+                author: libraryBook?.author ?? "",
+                completedAt: entry.updatedAt,
+                year: year,
+                recordedSeconds: statEntry?.seconds ?? 0,
+                libraryBook: libraryBook
+            )
+        }
+        .sorted { $0.completedAt > $1.completedAt }
+    }
+
+    private var readingCount: Int {
+        let unique = libraryState.displayBooks(from: allLibraryBooks)
+        return unique.filter { libraryState.bookStatus(for: $0) == .reading }.count
+    }
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             let today = ReadingStatistics.dayKey(context.date, calendar: calendar)
             let dates = (0..<range).reversed().compactMap { calendar.date(byAdding: .day, value: -$0, to: context.date) }
-            List {
-                Section {
-                    Toggle("记录阅读时长", isOn: Binding(
-                        get: { store.isRecordingEnabled },
-                        set: { enabled in
-                            showsSyncOffer = store.setRecordingEnabled(enabled, webDAVEnabled: syncStore.isEnabled,
-                                                                        statisticsSyncEnabled: syncStore.syncStatistics)
-                        }))
-                } footer: {
-                    Text("默认关闭。开启后记录 EPUB、TXT 和在线阅读时长；关闭后暂停新增记录，已有统计保留。WebDAV 同步开关及按钮位于“我的 → WebDAV 同步”。")
-                }
-                Section("阅读概览") {
+            let isWide = horizontalSizeClass == .regular && !dynamicTypeSize.isAccessibilitySize
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    recordingHeaderCard
                     ReadingOverviewMetrics(
                         today: ReadingDuration.text(store.statistics.seconds(days: [today])),
                         week: ReadingDuration.text(ReadingDuration.weekSeconds(store.statistics, at: context.date)),
                         total: ReadingDuration.text(store.statistics.seconds()),
-                        days: "\(store.statistics.readingDays) 天",
-                        usesGrid: horizontalSizeClass == .regular && !dynamicTypeSize.isAccessibilitySize
+                        streak: store.statistics.streakDays(asOf: context.date, calendar: calendar),
+                        days: store.statistics.readingDays,
+                        isWide: isWide,
+                        isAccessibilitySize: dynamicTypeSize.isAccessibilitySize
                     )
+                    ReadingHeatmapCard(
+                        statistics: store.statistics,
+                        today: today,
+                        now: context.date,
+                        calendar: calendar,
+                        selectedDay: $selectedDay
+                    )
+                    AnnualCompletedCard(
+                        records: completedRecords,
+                        readingCount: readingCount,
+                        currentYear: calendar.component(.year, from: context.date),
+                        selectedYear: $selectedYear,
+                        showAll: $showAllCompleted
+                    )
+                    dailyTrendCard(dates: dates, today: today)
+                    ReadingKindDistributionCard(statistics: store.statistics)
+                    booksCard
+                    devicesCard(today: today)
+                    footnoteCard
                 }
-                Section {
-                    ForEach(store.devices) { device in
-                        NavigationLink {
-                            ReadingDeviceStatisticsView(deviceID: device.id)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: device.model == "iPad" ? "ipad" : "iphone")
-                                        .foregroundStyle(.secondary)
-                                    Text(device.name).lineLimit(1)
-                                    if device.isCurrent {
-                                        Text("本机").font(.caption2).padding(.horizontal, 5).padding(.vertical, 1)
-                                            .background(.quaternary, in: Capsule())
-                                    }
-                                }
-                                Text("今日 \(ReadingDuration.text(device.statistics.seconds(days: [today]))) · 累计 \(ReadingDuration.text(device.statistics.seconds()))")
-                                    .font(.subheadline).foregroundStyle(.secondary)
-                            }
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            if !device.isCurrent {
-                                Button("删除", role: .destructive) {
-                                    pendingRemoveDevice = device
-                                }
-                            }
-                        }
-                    }
-                } header: {
-                    Text("设备")
-                } footer: {
-                    Text(store.devices.count > 1
-                         ? "上方概览为所有设备合计。其他设备的时长在同步后更新。"
-                         : "开启 WebDAV 阅读时长同步后，这里会显示其他设备的阅读时长。")
-                }
-                Section("累计类型分布") {
-                    ForEach(ReadingKind.allCases) { kind in
-                        let seconds = store.statistics.seconds(kind: kind)
-                        let total = store.statistics.seconds()
-                        VStack(alignment: .leading, spacing: 6) {
-                            CompatLabeledContent(kind.title, value: ReadingDuration.text(seconds))
-                            HStack {
-                                ProgressView(value: total > 0 ? seconds / total : 0).tint(readingKindColor(kind))
-                                Text(total > 0 ? String(format: "%.1f%%", seconds / total * 100) : "0%")
-                                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-                Section("每日趋势") {
-                    Picker("时间范围", selection: $range) {
-                        Text("最近 7 天").tag(7)
-                        Text("最近 30 天").tag(30)
-                    }.pickerStyle(.segmented)
-                    ReadingDailyTrendChart(dates: dates, calendar: calendar, statistics: store.statistics, selectedDay: $selectedDay)
-                    Text("点击或拖动图表选择日期，查看当天三类阅读时长。")
-                        .font(.caption).foregroundStyle(.secondary)
-                    NavigationLink {
-                        ReadingDayStatisticsView(day: selectedDay ?? today)
-                    } label: {
-                        CompatLabeledContent(selectedDay ?? today,
-                                       value: ReadingDuration.text(store.statistics.seconds(days: [selectedDay ?? today])))
-                    }
-                }
-                Section("书籍明细") {
-                    Picker("排列方式", selection: $sortByTime) {
-                        Text("最近阅读").tag(false)
-                        Text("累计时长").tag(true)
-                    }.pickerStyle(.segmented)
-                    if sortedBooks.isEmpty {
-                        Text("还没有阅读记录。打开一本书开始阅读后，这里会显示统计。")
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach(sortedBooks) { entry in
-                        NavigationLink {
-                            ReadingBookStatisticsView(bookID: entry.id)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(entry.book.title).lineLimit(2)
-                                Text("\(entry.book.kind.title) · \(ReadingDuration.text(entry.seconds))")
-                                    .font(.subheadline).foregroundStyle(.secondary)
-                                Text("最后阅读：\(entry.lastReadAt.formatted(date: .abbreviated, time: .shortened))")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-                Section {
-                    Text("从启用此功能后开始记录。正文加载成功且阅读器处于前台时计时，无操作时继续累计；锁屏、后台或退出后暂停。当天累计达到 1 分钟计为一个阅读日。本周按系统日历计算，跨午夜按当天分配。删除书籍保留历史。开启阅读时长同步后，多设备统计随 WebDAV 同步合并，可在“设备”中分别查看；记录开关仅控制本机新增计时。")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .frame(maxWidth: 960)
+                .frame(maxWidth: .infinity)
             }
+            .background(NoveliaStyle.paper.ignoresSafeArea())
         }
         .confirmationDialog("开启阅读时长同步？", isPresented: $showsSyncOffer, titleVisibility: .visible) {
             Button("开启同步") { syncStore.syncStatistics = true }
@@ -174,60 +146,738 @@ struct ReadingStatisticsView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    private var recordingHeaderCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(store.isRecordingEnabled ? NoveliaStyle.brandGreen : NoveliaStyle.muted.opacity(0.45))
+                            .frame(width: 7, height: 7)
+                        Text("READING INSIGHTS")
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .compatTracking(1.2)
+                            .foregroundStyle(store.isRecordingEnabled ? NoveliaStyle.brandGreen : NoveliaStyle.muted)
+                    }
+                    Text("记录阅读时长")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(NoveliaStyle.ink)
+                }
+                Spacer(minLength: 8)
+                Toggle("", isOn: Binding(
+                    get: { store.isRecordingEnabled },
+                    set: { enabled in
+                        showsSyncOffer = store.setRecordingEnabled(enabled, webDAVEnabled: syncStore.isEnabled,
+                                                                    statisticsSyncEnabled: syncStore.syncStatistics)
+                    }))
+                    .labelsHidden()
+                    .tint(NoveliaStyle.brandGreen)
+                    .accessibilityLabel("记录阅读时长")
+            }
+            Text("开启后记录 EPUB、TXT 和在线阅读时长；关闭后暂停新增记录，已有统计保留。WebDAV 同步开关位于“我的 → WebDAV 同步”。")
+                .font(.caption)
+                .foregroundStyle(NoveliaStyle.muted)
+        }
+        .padding(16)
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
+                .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
+        )
+    }
+
+    private func dailyTrendCard(dates: [Date], today: String) -> some View {
+        let activeDay = selectedDay ?? today
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                StatisticsCardHeader(title: "每日趋势", systemImage: "chart.bar.fill", tint: .blue)
+                Spacer()
+                Picker("时间范围", selection: $range) {
+                    Text("7 天").tag(7)
+                    Text("30 天").tag(30)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 132)
+            }
+            ReadingDailyTrendChart(dates: dates, calendar: calendar, statistics: store.statistics, selectedDay: $selectedDay)
+            Divider()
+            NavigationLink {
+                ReadingDayStatisticsView(day: activeDay)
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(activeDay == today ? "今日（\(activeDay)）" : activeDay)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(NoveliaStyle.ink)
+                        Text("点击查看当日三类阅读明细")
+                            .font(.caption)
+                            .foregroundStyle(NoveliaStyle.muted)
+                    }
+                    Spacer()
+                    Text(ReadingDuration.text(store.statistics.seconds(days: [activeDay])))
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(NoveliaStyle.brandGreen)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(NoveliaStyle.muted.opacity(0.6))
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
+                .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
+        )
+    }
+
+    private var booksCard: some View {
+        let all = sortedBooks
+        let visible = showAllBooks ? all : Array(all.prefix(10))
+        let maxSeconds = max(all.map(\.seconds).max() ?? 0, 1)
+        let booksByKey = libraryBooksByKey
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                StatisticsCardHeader(title: "书籍排行", systemImage: "books.vertical.fill", tint: NoveliaStyle.brandGreen)
+                Spacer()
+                Picker("排列方式", selection: $sortByTime) {
+                    Text("时长").tag(true)
+                    Text("最近").tag(false)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 124)
+            }
+            if all.isEmpty {
+                Text("还没有阅读记录。打开一本书开始阅读后，这里会显示单书耗时排行。")
+                    .font(.subheadline)
+                    .foregroundStyle(NoveliaStyle.muted)
+                    .padding(.vertical, 8)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(Array(visible.enumerated()), id: \.element.id) { index, entry in
+                        let libraryBook = booksByKey[entry.id]
+                        let author = libraryBook?.author ?? ""
+                        NavigationLink {
+                            ReadingBookStatisticsView(bookID: entry.id)
+                        } label: {
+                            HStack(alignment: .center, spacing: 11) {
+                                StatisticsMiniCover(book: libraryBook, rank: sortByTime ? index + 1 : nil)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                        Text(entry.book.title)
+                                            .font(.subheadline.weight(.medium))
+                                            .foregroundStyle(NoveliaStyle.ink)
+                                            .lineLimit(1)
+                                        Spacer(minLength: 8)
+                                        Text(ReadingDuration.text(entry.seconds))
+                                            .font(.caption.weight(.semibold).monospacedDigit())
+                                            .foregroundStyle(NoveliaStyle.brandGreen)
+                                    }
+                                    if !author.isEmpty {
+                                        Text(author)
+                                            .font(.caption)
+                                            .foregroundStyle(NoveliaStyle.muted)
+                                            .lineLimit(1)
+                                    }
+                                    GeometryReader { geo in
+                                        let ratio = min(1, max(0.03, entry.seconds / maxSeconds))
+                                        ZStack(alignment: .leading) {
+                                            Capsule().fill(NoveliaStyle.paper)
+                                            Capsule().fill(readingKindColor(entry.book.kind).opacity(0.75))
+                                                .frame(width: geo.size.width * ratio)
+                                        }
+                                    }
+                                    .frame(height: 5)
+                                    HStack {
+                                        Text(entry.book.kind.title)
+                                        Text("·")
+                                        Text("最后阅读 \(entry.lastReadAt.formatted(date: .abbreviated, time: .shortened))")
+                                        Spacer()
+                                    }
+                                    .font(.caption2)
+                                    .foregroundStyle(NoveliaStyle.muted)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                        if index < visible.count - 1 {
+                            Divider()
+                        }
+                    }
+                }
+                if all.count > 10 {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { showAllBooks.toggle() }
+                    } label: {
+                        Text(showAllBooks ? "收起列表" : "展开全部 \(all.count) 本书")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 4)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(16)
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
+                .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
+        )
+    }
+
+    private func devicesCard(today: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            StatisticsCardHeader(title: "同步设备", systemImage: "laptopcomputer.and.iphone", tint: .purple)
+            VStack(spacing: 10) {
+                ForEach(Array(store.devices.enumerated()), id: \.element.id) { index, device in
+                    HStack(spacing: 10) {
+                        NavigationLink {
+                            ReadingDeviceStatisticsView(deviceID: device.id)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: device.model == "iPad" ? "ipad" : "iphone")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(NoveliaStyle.brandGreen)
+                                    .frame(width: 28, height: 28)
+                                    .background(NoveliaStyle.brandGreen.opacity(0.1), in: Circle())
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack(spacing: 6) {
+                                        Text(device.name)
+                                            .font(.subheadline.weight(.medium))
+                                            .foregroundStyle(NoveliaStyle.ink)
+                                            .lineLimit(1)
+                                        if device.isCurrent {
+                                            Text("本机")
+                                                .font(.caption2.weight(.semibold))
+                                                .foregroundStyle(NoveliaStyle.brandGreen)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 1)
+                                                .background(NoveliaStyle.brandGreen.opacity(0.12), in: Capsule())
+                                        }
+                                    }
+                                    Text("今日 \(ReadingDuration.text(device.statistics.seconds(days: [today]))) · 累计 \(ReadingDuration.text(device.statistics.seconds()))")
+                                        .font(.caption)
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(NoveliaStyle.muted.opacity(0.55))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        if !device.isCurrent {
+                            Button {
+                                pendingRemoveDevice = device
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.caption)
+                                    .foregroundStyle(NoveliaStyle.danger)
+                                    .padding(6)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("移除设备 \(device.name)")
+                        }
+                    }
+                    if index < store.devices.count - 1 {
+                        Divider()
+                    }
+                }
+            }
+            Text(store.devices.count > 1
+                 ? "上方概览为所有设备合计。其他设备的时长在 WebDAV 同步后更新。"
+                 : "开启 WebDAV 阅读时长同步后，这里会显示其他设备的阅读时长。")
+                .font(.caption)
+                .foregroundStyle(NoveliaStyle.muted)
+        }
+        .padding(16)
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
+                .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
+        )
+    }
+
+    private var footnoteCard: some View {
+        Text("正文加载成功且阅读器处于前台时计时；锁屏、后台或退出后暂停。当天累计满 1 分钟计为一个阅读日并点亮热力图。删除书籍保留历史统计；多设备统计随 WebDAV 同步合并。")
+            .font(.footnote)
+            .foregroundStyle(NoveliaStyle.muted)
+            .padding(.horizontal, 4)
+            .padding(.bottom, 12)
+    }
 }
 
-/// 宽窗口下将四项核心概览排成双列卡片网格，紧凑尺寸或无障碍大字号保持单列行视图。
+private struct StatisticsCardHeader: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(tint)
+            Text(title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(NoveliaStyle.ink)
+        }
+    }
+}
+
+/// 核心概览卡片网格：常规为 2×2，宽屏为 4 列，无障碍超大字号退化为单列。
 private struct ReadingOverviewMetrics: View {
     let today: String
     let week: String
     let total: String
-    let days: String
-    let usesGrid: Bool
+    let streak: Int
+    let days: Int
+    let isWide: Bool
+    let isAccessibilitySize: Bool
+
+    private var columns: [GridItem] {
+        if isAccessibilitySize {
+            return [GridItem(.flexible())]
+        }
+        let count = isWide ? 4 : 2
+        return Array(repeating: GridItem(.flexible(), spacing: 12), count: count)
+    }
 
     var body: some View {
-        if usesGrid {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                cell("今日", value: today, icon: "sun.max.fill", tint: NoveliaStyle.brandGreen)
-                cell("本周", value: week, icon: "calendar", tint: Color.blue)
-                cell("累计", value: total, icon: "clock.fill", tint: Color.purple)
-                cell("阅读天数", value: days, icon: "flame.fill", tint: Color.orange)
-            }
-            .padding(.vertical, 4)
-        } else {
-            CompatLabeledContent("今日", value: today)
-            CompatLabeledContent("本周", value: week)
-            CompatLabeledContent("累计", value: total)
-            CompatLabeledContent("阅读天数", value: days)
+        LazyVGrid(columns: columns, spacing: 12) {
+            cell("今日阅读", value: today, subtitle: nil, icon: "sun.max.fill", tint: NoveliaStyle.brandGreen)
+            cell("本周阅读", value: week, subtitle: nil, icon: "calendar", tint: .blue)
+            cell("累计时长", value: total, subtitle: nil, icon: "clock.fill", tint: .purple)
+            cell("连续阅读", value: "\(streak) 天", subtitle: "累计 \(days) 天", icon: "flame.fill", tint: .orange)
         }
     }
 
-    private func cell(_ title: String, value: String, icon: String, tint: Color) -> some View {
+    private func cell(_ title: String, value: String, subtitle: String?, icon: String, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(tint)
+                    .frame(width: 22, height: 22)
+                    .background(tint.opacity(0.12), in: Circle())
                 Text(title)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(NoveliaStyle.muted)
             }
             Text(value)
-                .font(.system(size: 18, weight: .bold, design: .rounded).monospacedDigit())
+                .font(.system(size: 19, weight: .bold, design: .rounded).monospacedDigit())
                 .foregroundStyle(NoveliaStyle.ink)
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .minimumScaleFactor(0.75)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(NoveliaStyle.muted)
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(NoveliaStyle.paper.opacity(0.75), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium, style: .continuous))
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium, style: .continuous)
+            RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
                 .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
-        .accessibilityValue(value)
+        .accessibilityValue(subtitle.map { "\(value)，\($0)" } ?? value)
+    }
+}
+
+/// GitHub 风格近 18 周每日阅读热力图，点按任意日期格可联动查看当日明细。
+private struct ReadingHeatmapCard: View {
+    let statistics: ReadingStatistics
+    let today: String
+    let now: Date
+    let calendar: Calendar
+    @Binding var selectedDay: String?
+
+    private static let monthFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "M月"
+        return f
+    }()
+
+    var body: some View {
+        let columns = statistics.heatmapColumns(weeks: 18, endingAt: now, calendar: calendar)
+        let activeDay = selectedDay ?? today
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                StatisticsCardHeader(title: "阅读热力图", systemImage: "square.grid.3x3.fill", tint: NoveliaStyle.brandGreen)
+                Spacer()
+                HStack(spacing: 4) {
+                    Text("少").font(.caption2).foregroundStyle(NoveliaStyle.muted)
+                    ForEach(0..<5, id: \.self) { level in
+                        RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                            .fill(cellColor(level: level, isFuture: false))
+                            .frame(width: 10, height: 10)
+                    }
+                    Text("多").font(.caption2).foregroundStyle(NoveliaStyle.muted)
+                }
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 4) {
+                    // 月份标记行
+                    HStack(spacing: 4) {
+                        Color.clear.frame(width: 16, height: 12)
+                        ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
+                            Text(monthLabel(for: index, in: columns))
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(NoveliaStyle.muted)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .frame(width: 13, alignment: .leading)
+                        }
+                    }
+                    HStack(alignment: .top, spacing: 4) {
+                        VStack(spacing: 4) {
+                            ForEach(0..<7, id: \.self) { row in
+                                Text(weekdayLabel(row))
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(NoveliaStyle.muted)
+                                    .frame(width: 16, height: 13)
+                            }
+                        }
+                        ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
+                            VStack(spacing: 4) {
+                                ForEach(column) { cell in
+                                    let isSelected = activeDay == cell.dayKey
+                                    Button {
+                                        guard !cell.isFuture else { return }
+                                        selectedDay = cell.dayKey
+                                    } label: {
+                                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                            .fill(cellColor(level: cell.level, isFuture: cell.isFuture))
+                                            .frame(width: 13, height: 13)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                                    .stroke(isSelected ? NoveliaStyle.ink : Color.clear, lineWidth: 1.4)
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(cell.isFuture)
+                                    .accessibilityLabel("\(cell.dayKey)，\(ReadingDuration.text(cell.seconds))")
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+
+            Divider()
+            NavigationLink {
+                ReadingDayStatisticsView(day: activeDay)
+            } label: {
+                HStack {
+                    Text(activeDay == today ? "今日 \(activeDay)" : activeDay)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(NoveliaStyle.ink)
+                    Spacer()
+                    Text(ReadingDuration.text(statistics.seconds(days: [activeDay])))
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(NoveliaStyle.brandGreen)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(NoveliaStyle.muted.opacity(0.6))
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
+                .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
+        )
+    }
+
+    private func cellColor(level: Int, isFuture: Bool) -> Color {
+        if isFuture { return Color.clear }
+        switch level {
+        case 0: return NoveliaStyle.paper
+        case 1: return NoveliaStyle.brandGreen.opacity(0.25)
+        case 2: return NoveliaStyle.brandGreen.opacity(0.5)
+        case 3: return NoveliaStyle.brandGreen.opacity(0.76)
+        default: return NoveliaStyle.brandGreen
+        }
+    }
+
+    private func monthLabel(for index: Int, in columns: [[ReadingHeatmapCell]]) -> String {
+        guard let first = columns[index].first?.date else { return "" }
+        let month = calendar.component(.month, from: first)
+        if index == 0 { return Self.monthFormatter.string(from: first) }
+        guard let prev = columns[index - 1].first?.date else { return "" }
+        return calendar.component(.month, from: prev) == month ? "" : Self.monthFormatter.string(from: first)
+    }
+
+    private func weekdayLabel(_ row: Int) -> String {
+        // 仅标注隔行星期，避免纵轴拥挤
+        switch row {
+        case 1: return "一"
+        case 3: return "三"
+        case 5: return "五"
+        default: return ""
+        }
+    }
+}
+
+private struct AnnualCompletedBook: Identifiable {
+    let id: String
+    let title: String
+    let author: String
+    let completedAt: Date
+    let year: Int
+    let recordedSeconds: TimeInterval
+    let libraryBook: LibraryBook?
+}
+
+/// 统计列表中的迷你封面：在书库中时直接复用 `LibraryCoverView`，已删除的历史书退化为柔和占位卡。
+private struct StatisticsMiniCover: View {
+    let book: LibraryBook?
+    var rank: Int? = nil
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if let book {
+                LibraryCoverView(book: book, width: 36, height: 50)
+            } else {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(NoveliaStyle.paper)
+                    .frame(width: 36, height: 50)
+                    .overlay(
+                        Image(systemName: "book.closed")
+                            .font(.system(size: 13))
+                            .foregroundStyle(NoveliaStyle.muted.opacity(0.7))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
+                    )
+            }
+            if let rank {
+                Text("\(rank)")
+                    .font(.system(size: 9, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(rank <= 3 ? Color.white : NoveliaStyle.ink)
+                    .frame(width: 16, height: 16)
+                    .background(
+                        Circle().fill(rank <= 3 ? NoveliaStyle.brandGreen.opacity(1.0 - Double(rank - 1) * 0.18) : NoveliaStyle.card)
+                    )
+                    .overlay(Circle().stroke(NoveliaStyle.card, lineWidth: 1))
+                    .offset(x: -5, y: -5)
+            }
+        }
+    }
+}
+
+/// 年度完读统计卡片：按书库“读过”状态与标记年份汇总本年完读书单。
+private struct AnnualCompletedCard: View {
+    let records: [AnnualCompletedBook]
+    let readingCount: Int
+    let currentYear: Int
+    @Binding var selectedYear: Int
+    @Binding var showAll: Bool
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd"
+        return f
+    }()
+
+    private var availableYears: [Int] {
+        var years = Set(records.map(\.year))
+        years.insert(currentYear)
+        return years.sorted(by: >)
+    }
+
+    var body: some View {
+        let yearBooks = records.filter { $0.year == selectedYear }
+        let visible = showAll ? yearBooks : Array(yearBooks.prefix(5))
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                StatisticsCardHeader(title: "年度完读统计", systemImage: "checkmark.seal.fill", tint: NoveliaStyle.brandGreen)
+                Spacer()
+                if availableYears.count > 1 {
+                    Menu {
+                        ForEach(availableYears, id: \.self) { year in
+                            let yearText = "\(String(year)) 年"
+                            Button {
+                                selectedYear = year
+                            } label: {
+                                if year == selectedYear {
+                                    Label(yearText, systemImage: "checkmark")
+                                } else {
+                                    Text(yearText)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("\(String(selectedYear)) 年")
+                            Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(NoveliaStyle.brandGreen)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(NoveliaStyle.brandGreen.opacity(0.1), in: Capsule())
+                    }
+                } else {
+                    Text("\(String(selectedYear)) 年")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(NoveliaStyle.muted)
+                }
+            }
+
+            HStack(alignment: .lastTextBaseline, spacing: 12) {
+                HStack(alignment: .lastTextBaseline, spacing: 4) {
+                    Text("\(yearBooks.count)")
+                        .font(.system(size: 32, weight: .bold, design: .rounded).monospacedDigit())
+                        .foregroundStyle(NoveliaStyle.ink)
+                    Text("本完读")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(NoveliaStyle.muted)
+                }
+                Spacer()
+                HStack(spacing: 8) {
+                    statPill("累计读过 \(records.count)")
+                    statPill("在读 \(readingCount)")
+                }
+            }
+
+            if yearBooks.isEmpty {
+                Text("在书库书籍菜单中将读完的书标记为“读过”，这里会自动汇总 \(String(selectedYear)) 年完读书单。")
+                    .font(.caption)
+                    .foregroundStyle(NoveliaStyle.muted)
+                    .padding(.vertical, 2)
+            } else {
+                Divider()
+                VStack(spacing: 10) {
+                    ForEach(visible) { item in
+                        HStack(alignment: .center, spacing: 11) {
+                            StatisticsMiniCover(book: item.libraryBook)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.title)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(NoveliaStyle.ink)
+                                    .lineLimit(1)
+                                if !item.author.isEmpty {
+                                    Text(item.author)
+                                        .font(.caption)
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                        .lineLimit(1)
+                                }
+                                HStack(spacing: 6) {
+                                    Text("完读于 \(Self.dateFormatter.string(from: item.completedAt))")
+                                    if item.recordedSeconds >= 60 {
+                                        Text("·")
+                                        Text(ReadingDuration.text(item.recordedSeconds))
+                                    }
+                                }
+                                .font(.caption2)
+                                .foregroundStyle(NoveliaStyle.muted)
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.subheadline)
+                                .foregroundStyle(NoveliaStyle.brandGreen)
+                        }
+                    }
+                }
+                if yearBooks.count > 5 {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { showAll.toggle() }
+                    } label: {
+                        Text(showAll ? "收起书单" : "查看全部 \(yearBooks.count) 本完读")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 2)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(16)
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
+                .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
+        )
+    }
+
+    private func statPill(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(NoveliaStyle.muted)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(NoveliaStyle.paper, in: Capsule())
+    }
+}
+
+/// 累计阅读类型分布卡片：顶部统一堆叠比例条 + 三类明细。
+private struct ReadingKindDistributionCard: View {
+    let statistics: ReadingStatistics
+
+    var body: some View {
+        let total = statistics.seconds()
+        VStack(alignment: .leading, spacing: 12) {
+            StatisticsCardHeader(title: "阅读类型分布", systemImage: "chart.pie.fill", tint: .orange)
+            GeometryReader { geo in
+                HStack(spacing: 2) {
+                    if total <= 0 {
+                        Capsule().fill(NoveliaStyle.paper)
+                    } else {
+                        ForEach(ReadingKind.allCases) { kind in
+                            let seconds = statistics.seconds(kind: kind)
+                            if seconds > 0 {
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .fill(readingKindColor(kind))
+                                    .frame(width: max(4, (geo.size.width - 4) * (seconds / total)))
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(height: 10)
+
+            VStack(spacing: 8) {
+                ForEach(ReadingKind.allCases) { kind in
+                    let seconds = statistics.seconds(kind: kind)
+                    let percent = total > 0 ? seconds / total * 100 : 0
+                    HStack(spacing: 8) {
+                        Circle().fill(readingKindColor(kind)).frame(width: 8, height: 8)
+                        Text(kind.title)
+                            .font(.subheadline)
+                            .foregroundStyle(NoveliaStyle.ink)
+                        Spacer()
+                        Text(ReadingDuration.text(seconds))
+                            .font(.subheadline.weight(.medium).monospacedDigit())
+                            .foregroundStyle(NoveliaStyle.ink)
+                        Text(String(format: "%.1f%%", percent))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .frame(width: 44, alignment: .trailing)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
+                .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
+        )
     }
 }
 
@@ -385,7 +1035,18 @@ private struct ReadingDailyTrendChartNative: View {
             }
         }
         .chartForegroundStyleScale(["EPUB": readingKindColor(.epub), "TXT": readingKindColor(.txt), "在线阅读": readingKindColor(.online)])
-        .chartXAxis { AxisMarks(values: .automatic(desiredCount: 3)) }
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 4)) { value in
+                AxisGridLine()
+                AxisTick()
+                AxisValueLabel {
+                    if let day = value.as(String.self) {
+                        Text(String(day.suffix(5)))
+                            .font(.caption2)
+                    }
+                }
+            }
+        }
         .chartYAxisLabel("分钟")
         .frame(height: 210)
 

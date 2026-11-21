@@ -672,3 +672,115 @@ private enum ActivityPresenter {
         return controller
     }
 }
+
+// MARK: - 搜索历史记录（书库 / 发现网文 / 发现文库）
+
+enum SearchHistoryScope: String {
+    case discoverWeb = "searchHistory.discoverWeb.v1"
+    case discoverWenku = "searchHistory.discoverWenku.v1"
+    case library = "searchHistory.library.v1"
+}
+
+/// 按模块隔离的本机最近搜索词存储；仅保存在 `UserDefaults`，不参与 WebDAV 同步。
+@MainActor
+final class SearchHistoryStore: ObservableObject {
+    @Published private(set) var items: [String] = []
+
+    private let key: String
+    private let defaults: UserDefaults
+    private let limit: Int
+
+    init(scope: SearchHistoryScope, defaults: UserDefaults = .standard, limit: Int = 12) {
+        self.key = scope.rawValue
+        self.defaults = defaults
+        self.limit = max(1, limit)
+        self.items = defaults.stringArray(forKey: key) ?? []
+    }
+
+    func record(_ rawQuery: String) {
+        let trimmed = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var updated = items.filter { $0.compare(trimmed, options: [.caseInsensitive, .diacriticInsensitive]) != .orderedSame }
+        updated.insert(trimmed, at: 0)
+        if updated.count > limit { updated = Array(updated.prefix(limit)) }
+        guard updated != items else { return }
+        items = updated
+        defaults.set(updated, forKey: key)
+    }
+
+    func remove(_ item: String) {
+        let updated = items.filter { $0 != item }
+        guard updated != items else { return }
+        items = updated
+        defaults.set(updated, forKey: key)
+    }
+
+    func clear() {
+        guard !items.isEmpty else { return }
+        items = []
+        defaults.removeObject(forKey: key)
+    }
+}
+
+/// 搜索框下方的最近搜索词胶囊栏，支持点选填充、单条删除与一键清空。
+struct SearchHistoryStrip: View {
+    @ObservedObject var store: SearchHistoryStore
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        if !store.items.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("最近搜索")
+                        .font(.system(size: 12, weight: .medium))
+                    Spacer()
+                    Button("清空") {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            store.clear()
+                        }
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(NoveliaStyle.muted)
+                }
+                .foregroundStyle(NoveliaStyle.muted)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(store.items, id: \.self) { term in
+                            HStack(spacing: 4) {
+                                Button {
+                                    onSelect(term)
+                                } label: {
+                                    Text(term)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(NoveliaStyle.ink)
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                        store.remove(term)
+                                    }
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                        .padding(2)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("删除搜索历史“\(term)”")
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(NoveliaStyle.card, in: Capsule())
+                            .overlay(Capsule().strokeBorder(NoveliaStyle.hairline, lineWidth: 0.8))
+                        }
+                    }
+                    .padding(.vertical, 1)
+                }
+            }
+        }
+    }
+}

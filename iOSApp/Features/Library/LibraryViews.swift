@@ -30,6 +30,7 @@ struct LibraryView: View {
     @StateObject private var importer = LibraryImportModel()
     @StateObject private var bookActions = LibraryBookActions()
     @StateObject private var shelfUpdates = LibraryShelfUpdateStore()
+    @StateObject private var searchHistory = SearchHistoryStore(scope: .library)
     @State private var segment = Segment.all
     @State private var sourceFilter = LibrarySourceFilter.all
     @State private var query = ""
@@ -193,7 +194,8 @@ struct LibraryView: View {
                             ForEach(booksToShow) { book in
                                 LibraryBookRow(book: book, actions: bookActions, open: open,
                                                isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
-                                               isSelected: bookActions.selectedKeys.contains(book.key))
+                                               isSelected: bookActions.selectedKeys.contains(book.key),
+                                               showStatusBadge: statusFilter == .all)
                                     .libraryListRow()
                             }
                         }
@@ -356,6 +358,7 @@ struct LibraryView: View {
             onRecheckAll: { shelfUpdates.startCheck(books: webDownloads.books, catalog: services.api.catalog) },
             onRetryFailed: { shelfUpdates.retryFailed(books: webDownloads.books, catalog: services.api.catalog) },
             onOpenBook: { open($0) },
+            onUpdateBook: { bookActions.pendingEPUBUpdate = $0 },
             onClose: { shelfUpdates.isShowingDetails = false }
         )
     }
@@ -381,9 +384,23 @@ struct LibraryView: View {
     @ViewBuilder
     private var searchBar: some View {
         if isSearching {
-            LibrarySearchField(query: $query, prompt: "搜索书名或作者", focusRequest: searchFocusRequest) {
-                isSearching = false
-                query = ""
+            VStack(spacing: 8) {
+                LibrarySearchField(
+                    query: $query,
+                    prompt: "搜索书名或作者",
+                    focusRequest: searchFocusRequest,
+                    onSubmit: { searchHistory.record(query) },
+                    onCancel: {
+                        isSearching = false
+                        query = ""
+                    }
+                )
+                if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    SearchHistoryStrip(store: searchHistory) { term in
+                        query = term
+                        searchHistory.record(term)
+                    }
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -509,7 +526,8 @@ struct LibraryView: View {
             ForEach(sorted(matches, options: sortOptions)) { book in
                 LibraryBookRow(book: book, actions: bookActions, open: open,
                                isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
-                               isSelected: bookActions.selectedKeys.contains(book.key))
+                               isSelected: bookActions.selectedKeys.contains(book.key),
+                               showStatusBadge: true)
                     .libraryListRow()
             }
         }

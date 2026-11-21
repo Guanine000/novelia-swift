@@ -391,8 +391,12 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
     }
 
     func setBookStatus(_ status: LibraryBookStatus, for book: LibraryBook) {
+        setBookStatus(status, forKey: book.key)
+    }
+
+    func setBookStatus(_ status: LibraryBookStatus, forKey key: String) {
         var updated = readingStatuses
-        updated.setStatus(status, forBook: book.key)
+        updated.setStatus(status, forBook: key)
         save(updated)
     }
 

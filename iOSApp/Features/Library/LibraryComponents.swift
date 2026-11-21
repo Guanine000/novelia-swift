@@ -143,6 +143,8 @@ struct LibraryBookRow: View {
     /// 多选状态由页面传入：多选时点击切换选择，长按进入多选。
     var isSelecting = false
     var isSelected = false
+    /// 在「全部」或搜索结果中展示阅读状态小标签。
+    var showStatusBadge = false
 
     @EnvironmentObject private var webDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
@@ -154,6 +156,7 @@ struct LibraryBookRow: View {
         let isSplitSelected = !isSelecting && browseSelectedID == "library:" + book.key
         HStack(alignment: .top, spacing: 6) {
             LibraryBookRowContent(book: book, status: state.status(for: book),
+                                  bookStatus: showStatusBadge ? state.bookStatus(for: book) : nil,
                                   wordCount: wordCounts.total(hash: hash))
                 .contentShape(Rectangle())
                 // 点击负责打开或切换选择；页面的长按桥接负责连续拖选。
@@ -511,6 +514,8 @@ private struct LibraryBookGridCell: View {
 private struct LibraryBookRowContent: View {
     let book: LibraryBook
     let status: LibraryReadingStatus
+    /// 传入时在元信息栏展示阅读分类标签（用于“全部”视图与搜索结果）。
+    var bookStatus: LibraryBookStatus? = nil
     /// 全书字数；尚未统计或无法统计时不显示。
     let wordCount: Int?
 
@@ -549,6 +554,17 @@ private struct LibraryBookRowContent: View {
                         }
                         Text(metaLine)
                             .lineLimit(1)
+                        if let bookStatus {
+                            Text(bookStatus.title)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(bookStatus == .reading ? NoveliaStyle.brandGreen : NoveliaStyle.muted)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(
+                                    (bookStatus == .reading ? NoveliaStyle.brandGreen : NoveliaStyle.muted).opacity(0.12),
+                                    in: Capsule()
+                                )
+                        }
                         Spacer(minLength: 6)
                         Text(status.detail)
                             .font(.system(size: 11, weight: status.isUnread ? .regular : .medium).monospacedDigit())
@@ -1139,6 +1155,7 @@ struct LibraryShelfUpdateDetailSheet: View {
     let onRecheckAll: () -> Void
     let onRetryFailed: () -> Void
     let onOpenBook: (LibraryBook) -> Void
+    let onUpdateBook: (DownloadedWebNovel) -> Void
     let onClose: () -> Void
 
     private static let timeFormatter: DateFormatter = {
@@ -1168,32 +1185,45 @@ struct LibraryShelfUpdateDetailSheet: View {
                 if !store.summary.updatedBooks.isEmpty {
                     Section("有更新的书籍（\(store.summary.updatedBooks.count)）") {
                         ForEach(store.summary.updatedBooks) { item in
-                            Button {
-                                if let book = booksByID[item.bookID] {
-                                    onClose()
-                                    onOpenBook(book)
+                            HStack(spacing: 10) {
+                                Button {
+                                    if let book = booksByID[item.bookID] {
+                                        onClose()
+                                        onOpenBook(book)
+                                    }
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text(item.title)
+                                                .font(.body.weight(.medium))
+                                                .foregroundStyle(NoveliaStyle.ink)
+                                                .lineLimit(1)
+                                            Spacer()
+                                            Text("+\(item.newChapterCount) 章")
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(NoveliaStyle.brandGreen)
+                                        }
+                                        if let latest = item.latestChapterTitle, !latest.isEmpty {
+                                            Text("最新：\(latest)")
+                                                .font(.caption)
+                                                .foregroundStyle(NoveliaStyle.muted)
+                                                .lineLimit(1)
+                                        }
+                                    }
                                 }
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(item.title)
-                                            .font(.body.weight(.medium))
-                                            .foregroundStyle(NoveliaStyle.ink)
-                                            .lineLimit(1)
-                                        Spacer()
-                                        Text("+\(item.newChapterCount) 章")
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(NoveliaStyle.brandGreen)
+                                .buttonStyle(.plain)
+                                if let book = booksByID[item.bookID],
+                                   case .webNovel(let record) = book.origin,
+                                   !book.isCloudOnly {
+                                    Button("更新") {
+                                        onClose()
+                                        onUpdateBook(record)
                                     }
-                                    if let latest = item.latestChapterTitle, !latest.isEmpty {
-                                        Text("最新：\(latest)")
-                                            .font(.caption)
-                                            .foregroundStyle(NoveliaStyle.muted)
-                                            .lineLimit(1)
-                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .buttonStyle(.bordered)
+                                    .tint(NoveliaStyle.brandGreen)
                                 }
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }

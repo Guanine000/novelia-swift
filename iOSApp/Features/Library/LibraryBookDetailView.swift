@@ -90,7 +90,15 @@ struct LibraryBookDetailView: View {
                     CompatLabeledContent("字数", value: wordCounts.total(hash: hash).map(BookWordCount.format) ?? "正在统计…")
                 }
                 Section("阅读") {
-                    CompatLabeledContent("状态", value: status.detail)
+                    Picker("阅读分类", selection: Binding(
+                        get: { state.bookStatus(for: book) },
+                        set: { state.setBookStatus($0, for: book) }
+                    )) {
+                        ForEach(LibraryBookStatus.allCases) { item in
+                            Label(item.title, systemImage: item.systemImage).tag(item)
+                        }
+                    }
+                    CompatLabeledContent("进度", value: status.detail)
                     CompatLabeledContent("最近阅读", value: status.lastReadAt.map { Self.dateFormatter.string(from: $0) } ?? "尚未阅读")
                 }
                 Section("文件") {

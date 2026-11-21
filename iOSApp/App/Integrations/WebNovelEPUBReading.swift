@@ -352,6 +352,7 @@ private final class WebNovelEPUBReadingModel: ObservableObject {
 
 private struct WebNovelEPUBReaderContent: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var libraryState: LibraryStateStore
     let managementOnly: Bool
     @StateObject private var model: WebNovelEPUBReadingModel
     @State private var showingPanel = false
@@ -395,7 +396,24 @@ private struct WebNovelEPUBReaderContent: View {
                     ProgressView("正在准备本机目录…")
                     if let error = model.error { Text(error).foregroundStyle(NoveliaStyle.danger) }
                 } else {
-                if atEnd { Section { Text("已读完本机已下载章节").font(.title3.bold()); Text(model.book.novel.title) } }
+                if atEnd {
+                    Section {
+                        Text("已读完本机已下载章节").font(.title3.bold())
+                        Text(model.book.novel.title)
+                        let bookKey = "web:" + model.book.id
+                        if libraryState.bookStatus(forKey: bookKey) == .completed {
+                            Label("已标记为“读过”", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(NoveliaStyle.brandGreen)
+                        } else {
+                            Button {
+                                libraryState.setBookStatus(.completed, forKey: bookKey)
+                            } label: {
+                                Label("标记为“读过”", systemImage: "checkmark.circle")
+                            }
+                            .tint(NoveliaStyle.brandGreen)
+                        }
+                    }
+                }
                 if model.missing { Section { Text("本机版本未包含同步位置的章节，或该章节尚未核对。请核对章节对应或更新 EPUB。") } }
                 Section("章节更新") {
                     if model.checking { ProgressView("正在检查最新目录…") }

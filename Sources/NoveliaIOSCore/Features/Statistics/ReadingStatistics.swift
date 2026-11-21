@@ -94,6 +94,79 @@ struct ReadingStatistics: Codable, Equatable, Sendable {
     }
 
     var readingDays: Int { dailyTotals.values.filter { $0 >= 60 }.count }
+
+    /// 截至指定日期的连续阅读天数（当天未满 1 分钟时从昨天起算，避免清晨显示断签）。
+    func streakDays(asOf date: Date, calendar: Calendar = .current) -> Int {
+        let totals = dailyTotals
+        let todayKey = Self.dayKey(date, calendar: calendar)
+        var cursor: Date
+        if (totals[todayKey] ?? 0) >= 60 {
+            cursor = date
+        } else if let yesterday = calendar.date(byAdding: .day, value: -1, to: date),
+                  (totals[Self.dayKey(yesterday, calendar: calendar)] ?? 0) >= 60 {
+            cursor = yesterday
+        } else {
+            return 0
+        }
+        var streak = 0
+        while (totals[Self.dayKey(cursor, calendar: calendar)] ?? 0) >= 60 {
+            streak += 1
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
+            cursor = previous
+        }
+        return streak
+    }
+
+    /// 生成近 `weeks` 周的每日阅读热力图网格（外层按周列，内层按 7 天行）。
+    func heatmapColumns(weeks: Int = 18, endingAt date: Date, calendar: Calendar = .current) -> [[ReadingHeatmapCell]] {
+        let safeWeeks = max(1, weeks)
+        let todayStart = calendar.startOfDay(for: date)
+        let totals = dailyTotals
+        // 对齐到包含 `date` 的那一周末，使最后一列包含今天，且每天所在行固定对应星期几。
+        guard let currentWeek = calendar.dateInterval(of: .weekOfYear, for: todayStart),
+              let firstDay = calendar.date(byAdding: .day, value: -(safeWeeks - 1) * 7, to: currentWeek.start) else {
+            return []
+        }
+        var columns: [[ReadingHeatmapCell]] = []
+        columns.reserveCapacity(safeWeeks)
+        for week in 0..<safeWeeks {
+            var column: [ReadingHeatmapCell] = []
+            column.reserveCapacity(7)
+            for dayOffset in 0..<7 {
+                guard let dayDate = calendar.date(byAdding: .day, value: week * 7 + dayOffset, to: firstDay) else { continue }
+                let key = Self.dayKey(dayDate, calendar: calendar)
+                let isFuture = dayDate > todayStart
+                let seconds = isFuture ? 0 : (totals[key] ?? 0)
+                column.append(ReadingHeatmapCell(
+                    dayKey: key,
+                    date: dayDate,
+                    seconds: seconds,
+                    level: Self.heatmapLevel(for: seconds),
+                    isFuture: isFuture
+                ))
+            }
+            columns.append(column)
+        }
+        return columns
+    }
+
+    static func heatmapLevel(for seconds: TimeInterval) -> Int {
+        if seconds < 60 { return 0 }
+        if seconds < 15 * 60 { return 1 }
+        if seconds < 45 * 60 { return 2 }
+        if seconds < 90 * 60 { return 3 }
+        return 4
+    }
+}
+
+/// 阅读热力图单个日期格。
+struct ReadingHeatmapCell: Identifiable, Equatable, Sendable {
+    let dayKey: String
+    let date: Date
+    let seconds: TimeInterval
+    let level: Int
+    let isFuture: Bool
+    var id: String { dayKey }
 }
 
 /// 一个应用只拥有一个计时会话；重复开始、过期回调和切换阅读器都不会重复累计。

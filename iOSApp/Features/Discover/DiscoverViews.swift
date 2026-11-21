@@ -226,6 +226,7 @@ private struct DiscoverContentView: View {
     @Environment(\.browseSelectedID) private var keyboardSelectedID
     @Environment(\.browseReading) private var keyboardRead
     @FocusState private var searchFocused: Bool
+    @StateObject private var searchHistory = SearchHistoryStore(scope: .discoverWeb)
     @EnvironmentObject private var blocked: BlockedTagsStore
     @State private var query = ""
     @State private var filter = NovelCatalogFilter.standard
@@ -287,12 +288,31 @@ private struct DiscoverContentView: View {
                         .foregroundStyle(NoveliaStyle.muted)
                     TextField("搜索书名、作者或题材", text: $query)
                         .focused($searchFocused)
-                        .onSubmit { searchFocused = false }
+                        .submitLabel(.search)
+                        .onSubmit {
+                            searchFocused = false
+                            searchHistory.record(query)
+                        }
                         .font(.system(size: 15))
                         .compatAutocorrectionDisabled()
+                    if !query.isEmpty {
+                        Button { query = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(NoveliaStyle.muted)
+                        }
+                        .accessibilityLabel("清空搜索词")
+                    }
                 }
                 .padding(14)
                 .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
+
+                if searchFocused && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    SearchHistoryStrip(store: searchHistory) { term in
+                        query = term
+                        searchFocused = false
+                        searchHistory.record(term)
+                    }
+                }
 
                 // 与网页端一致的列表筛选：类型、分级和排序；默认组合保持原有“全部/一般向/更新”。
                 ScrollView(.horizontal, showsIndicators: false) {
