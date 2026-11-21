@@ -20,6 +20,17 @@ struct LibraryView: View {
         var id: String { rawValue }
     }
 
+    private enum ActiveSheet: Identifiable {
+        case syncProgress
+        case shelfUpdates
+        var id: Int {
+            switch self {
+            case .syncProgress: 1
+            case .shelfUpdates: 2
+            }
+        }
+    }
+
     @EnvironmentObject private var webDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
     @EnvironmentObject private var webDAVSync: WebDAVSyncStore
@@ -123,224 +134,257 @@ struct LibraryView: View {
         return counts
     }
 
+    private var activeLibrarySheet: Binding<ActiveSheet?> {
+        Binding(
+            get: {
+                if isShowingSyncProgress { return .syncProgress }
+                if shelfUpdates.isShowingDetails { return .shelfUpdates }
+                return nil
+            },
+            set: { newValue in
+                guard newValue == nil else { return }
+                if isShowingSyncProgress { isShowingSyncProgress = false }
+                else if shelfUpdates.isShowingDetails { shelfUpdates.isShowingDetails = false }
+            }
+        )
+    }
+
     var body: some View {
         let sourceBooks = allBooks
         let sourceFiltered = state.displayBooks(from: sourceBooks).filter { sourceFilter.includes(isWenku: $0.isWenku) }
         let books = sourceFiltered.filter { statusFilter.includes(state.bookStatus(for: $0)) }
         let selectable = selectableBooks
         ScrollViewReader { browserScroll in
-        List {
-            if shelfUpdates.isChecking || shelfUpdates.isBannerVisible {
-                LibraryShelfUpdateBanner(store: shelfUpdates) {
-                    shelfUpdates.isShowingDetails = true
-                }
-                .libraryListRow()
+            List {
+                libraryListContent(sourceBooks: sourceBooks, sourceFiltered: sourceFiltered, books: books)
             }
-            if !sourceBooks.isEmpty, let error = webDownloads.storageError ?? wenkuDownloads.storageError {
-                VStack(alignment: .leading) {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                    Button("重试读取") { Task { try? await webDownloads.loadIfNeeded(); await wenkuDownloads.refreshMissingMetadata() } }
+            .libraryListStyle()
+            .modifier(LibraryDragSelectionModifier(books: sorted(selectable, options: sortOptions), actions: bookActions))
+            .pageKeyboardActions(enabled: !bookActions.isSelecting && !bookActions.isDraggingSelection,
+                browseKeyboardActions(destinations: sorted(selectable, options: sortOptions).map(BrowseDestination.library),
+                    selectedID: keyboardSelectedID, select: keyboardSelect, read: browseReading,
+                    search: { isSearching = true; searchFocusRequest += 1 },
+                    scrollTo: { id in withAnimation { browserScroll.scrollTo(String(id.dropFirst("library:".count)), anchor: .center) } }))
+            .overlay { libraryEmptyOrLoadingOverlay(sourceBooks: sourceBooks) }
+            .safeAreaInset(edge: .bottom) {
+                if bookActions.isSelecting || bookActions.isDraggingSelection { LibrarySelectionBar(books: selectable, actions: bookActions) }
+            }
+            .onValueChange(of: segment) { _, _ in bookActions.endSelection() }
+            .compatScrollDismissesKeyboardInteractively()
+            .safeAreaInset(edge: .top) { searchBar }
+            .background(NoveliaStyle.paper.ignoresSafeArea())
+            .navigationTitle("书库")
+            // 搜索时改为行内标题，避免大标题区域在搜索栏上方留下空白。
+            .navigationBarTitleDisplayMode(isSearching ? .inline : .large)
+            .modifier(ExclusiveToolbar(
+                useFirst: bookActions.isSelecting,
+                first: LibrarySelectionToolbar(books: selectable, actions: bookActions),
+                second: toolbarContent
+            ))
+            .compatNavigationDestination(item: $readerTarget) { book in
+                LibraryReaderDestination(book: book)
+            }
+            .onValueChange(of: readerTarget) { _, target in
+                if target == nil { state.reloadPositions() }
+            }
+            // 迷你条请求回到朗读处：按书籍身份找到书并打开，阅读器起来后从该位置继续朗读。
+            .onReceive(services.speechHandoff.$openRequest) { request in openSpeechBook(request) }
+            .onValueChange(of: sourceBooks) { _, _ in openSpeechBook(services.speechHandoff.openRequest) }
+            .onValueChange(of: state.hashByBook) { _, _ in openSpeechBook(services.speechHandoff.openRequest) }
+            .compatNavigationDestination(item: $onlineSpeechTarget) { request in
+                if case .online(let novel) = request.route {
+                    ReaderView(novel: novel, startingAt: services.speechHandoff.pendingResume?.chapterIndex ?? 0)
                 }
             }
-            if sourceBooks.isEmpty {
-                // 空状态放在 overlay 中显示；CompatUnavailable 作为 List 行时操作按钮会被压成细长色条。
-            } else if isSearching && !LibraryOrganizer.normalized(query).isEmpty {
-                searchResults(sourceFiltered)
-            } else {
-                if statusFilter == .all || statusFilter == .reading {
-                    let recent = recentBooks(in: books)
-                    if !recent.isEmpty {
-                        LibraryRecentCarousel(books: recent) { open($0) }
-                            .frame(maxWidth: 1120)
-                            .frame(maxWidth: .infinity)
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 10, trailing: 0))
+            .onValueChange(of: webDAVSync.isSyncing) { _, syncing in
+                if !syncing { state.reloadPositions() }
+            }
+            .onValueChange(of: webDAVSync.isEnabled) { _, isEnabled in
+                if !isEnabled { syncTask?.cancel() }
+            }
+            .onAppear {
+                state.reloadPositions()
+                handleIncomingDocuments()
+            }
+            .onValueChange(of: incomingDocuments.pending) { _, _ in handleIncomingDocuments() }
+            .onValueChange(of: importer.isBusy) { _, importing in
+                if !importing { handleIncomingDocuments() }
+            }
+            .task { importer.attach(wenkuDownloads) }
+            .task { await wenkuDownloads.refreshMissingMetadata() }
+            .task(id: sourceBooks) {
+                state.associateVolumes(sourceBooks)
+                await state.refreshHashes(for: sourceBooks, librariesReady: webDownloads.isReady && wenkuDownloads.isReady)
+            }
+            .fullScreenCover(isPresented: $importer.isShowingFileImporter) {
+                EPUBFilePicker(contentTypes: importContentTypes, allowsMultipleSelection: true) { urls in
+                    Task { await importer.handlePickedFiles(urls) }
+                }
+                .ignoresSafeArea()
+            }
+            .sheet(item: activeLibrarySheet) { sheet in
+                switch sheet {
+                case .syncProgress:
+                    WebDAVSyncProgressPanel(onCancel: {
+                        syncTask?.cancel()
+                        webDAVSync.cancelAutomaticSync()
+                    }) {
+                        syncTask = Task { await webDAVSync.sync(web: webDownloads, wenku: wenkuDownloads) }
                     }
+                    .compatPresentationDetents(.height(280))
+                    .compatPresentationDragIndicatorVisible()
+                case .shelfUpdates:
+                    shelfUpdateDetailSheet(sourceBooks: sourceBooks)
                 }
-                LibraryReadingStatusBar(selection: $statusFilter, counts: readingStatusCounts(in: sourceFiltered))
+            }
+            .alert("导入", isPresented: .init(
+                get: { importer.importError != nil },
+                set: { if !$0 { importer.importError = nil } }
+            )) {
+                Button("好", role: .cancel) { importer.importError = nil }
+            } message: {
+                Text(importer.importError ?? "")
+            }
+            .alert("转换为 EPUB 后导入", isPresented: .init(
+                get: { importer.pendingKindleImport != nil },
+                // 提示框只能通过按钮关闭，由按钮处理待确认的文件。
+                set: { _ in }
+            ), presenting: importer.pendingKindleImport) { _ in
+                Button("转换并导入") { Task { await importer.resolvePendingKindleImport(convert: true) } }
+                Button("取消", role: .cancel) { Task { await importer.resolvePendingKindleImport(convert: false) } }
+            } message: { pending in
+                Text(LibraryImportModel.kindleConversionNotice(for: pending.kindleFilenames))
+            }
+            .alert("新建系列", isPresented: $isCreatingSeries) {
+                TextField("系列名称", text: $newSeriesName)
+                Button("取消", role: .cancel) {}
+                Button("创建") { state.createSeries(named: newSeriesName) }
+            } message: {
+                Text("创建后，可在书籍的“更多”菜单中移入系列。")
+            }
+            .overlay { LibraryImportProgressOverlay(model: importer) }
+            .overlay {
+                if isDropTargeted {
+                    RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
+                        .stroke(NoveliaStyle.brandGreen, lineWidth: 3)
+                        .padding(6)
+                        .allowsHitTesting(false)
+                }
+            }
+            .onDrop(of: importContentTypes + [.fileURL], isTargeted: $isDropTargeted) { providers in
+                importer.attach(wenkuDownloads)
+                return importer.handleDroppedProviders(providers, contentTypes: importContentTypes)
+            }
+            .modifier(LibraryBookActionDialogs(actions: bookActions))
+            .onValueChange(of: bookActions.downloadedBookKey) { _, key in
+                guard let key else { return }
+                bookActions.downloadedBookKey = nil
+                if let book = state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks).first(where: { $0.key == key }) {
+                    open(book)
+                }
+            }
+            .onValueChange(of: browseReadingReturn) { _, request in
+                guard let request, selectable.contains(where: { $0.key == request.bookKey }) else { return }
+                browserScroll.scrollTo(request.bookKey, anchor: .center)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func libraryListContent(sourceBooks: [LibraryBook], sourceFiltered: [LibraryBook], books: [LibraryBook]) -> some View {
+        if shelfUpdates.isChecking || shelfUpdates.isBannerVisible {
+            LibraryShelfUpdateBanner(store: shelfUpdates) {
+                shelfUpdates.isShowingDetails = true
+            }
+            .libraryListRow()
+        }
+        if !sourceBooks.isEmpty, let error = webDownloads.storageError ?? wenkuDownloads.storageError {
+            VStack(alignment: .leading) {
+                Label(error, systemImage: "exclamationmark.triangle")
+                Button("重试读取") { Task { try? await webDownloads.loadIfNeeded(); await wenkuDownloads.refreshMissingMetadata() } }
+            }
+        }
+        if sourceBooks.isEmpty {
+            // 空状态放在 overlay 中显示；CompatUnavailable 作为 List 行时操作按钮会被压成细长色条。
+        } else if isSearching && !LibraryOrganizer.normalized(query).isEmpty {
+            searchResults(sourceFiltered)
+        } else {
+            if statusFilter == .all || statusFilter == .reading {
+                let recent = recentBooks(in: books)
+                if !recent.isEmpty {
+                    LibraryRecentCarousel(books: recent) { open($0) }
+                        .frame(maxWidth: 1120)
+                        .frame(maxWidth: .infinity)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 10, trailing: 0))
+                }
+            }
+            LibraryReadingStatusBar(selection: $statusFilter, counts: readingStatusCounts(in: sourceFiltered))
+                .libraryListRow()
+            // 全部包含已归入系列的书；未分组只列出没有系列归属的书。
+            let ungrouped = books.filter { state.series.seriesID(forBook: $0.key) == nil }
+            Picker("书库内容", selection: $segment) {
+                Text("全部 \(books.count)").tag(Segment.all)
+                Text("未分组 \(ungrouped.count)").tag(Segment.books)
+                Text("系列 \(visibleSeries(in: books).count)").tag(Segment.series)
+            }
+            .pickerStyle(.segmented)
+            .libraryListRow()
+            librarySegmentContent(books: books, ungrouped: ungrouped)
+        }
+    }
+
+    @ViewBuilder
+    private func librarySegmentContent(books: [LibraryBook], ungrouped: [LibraryBook]) -> some View {
+        switch segment {
+        case .all, .books:
+            let listedBooks = segment == .all ? books : ungrouped
+            if listedBooks.isEmpty {
+                sourceFilterMenu.libraryListRow()
+                emptyFilteredState
+                    .padding(.top, 20)
                     .libraryListRow()
-                // 全部包含已归入系列的书；未分组只列出没有系列归属的书。
-                let ungrouped = books.filter { state.series.seriesID(forBook: $0.key) == nil }
-                Picker("书库内容", selection: $segment) {
-                    Text("全部 \(books.count)").tag(Segment.all)
-                    Text("未分组 \(ungrouped.count)").tag(Segment.books)
-                    Text("系列 \(visibleSeries(in: books).count)").tag(Segment.series)
+            } else {
+                HStack {
+                    sourceFilterMenu
+                    Spacer()
+                    LibrarySortSummary(options: sortOptions) { state.setSortOptions($0, scope: nil) }
                 }
-                .pickerStyle(.segmented)
                 .libraryListRow()
-                switch segment {
-                case .all, .books:
-                    let listedBooks = segment == .all ? books : ungrouped
-                    if listedBooks.isEmpty {
-                        sourceFilterMenu.libraryListRow()
-                        emptyFilteredState
-                            .padding(.top, 20)
-                            .libraryListRow()
-                    } else {
-                        HStack {
-                            sourceFilterMenu
-                            Spacer()
-                            LibrarySortSummary(options: sortOptions) { state.setSortOptions($0, scope: nil) }
-                        }
+                let booksToShow = sorted(listedBooks, options: sortOptions)
+                if booksLayout == .grid {
+                    LibraryBooksGrid(books: booksToShow, actions: bookActions, open: open,
+                                     isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
+                                     selectedKeys: bookActions.selectedKeys)
                         .libraryListRow()
-                        let booksToShow = sorted(listedBooks, options: sortOptions)
-                        if booksLayout == .grid {
-                            LibraryBooksGrid(books: booksToShow, actions: bookActions, open: open,
-                                             isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
-                                             selectedKeys: bookActions.selectedKeys)
-                                .libraryListRow()
-                        } else {
-                            ForEach(booksToShow) { book in
-                                LibraryBookRow(book: book, actions: bookActions, open: open,
-                                               isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
-                                               isSelected: bookActions.selectedKeys.contains(book.key),
-                                               showStatusBadge: statusFilter == .all)
-                                    .libraryListRow()
-                            }
-                        }
+                } else {
+                    ForEach(booksToShow) { book in
+                        LibraryBookRow(book: book, actions: bookActions, open: open,
+                                       isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
+                                       isSelected: bookActions.selectedKeys.contains(book.key),
+                                       showStatusBadge: statusFilter == .all)
+                            .libraryListRow()
                     }
-                case .series:
-                    seriesList(books)
                 }
             }
+        case .series:
+            seriesList(books)
         }
-        .libraryListStyle()
-        .modifier(LibraryDragSelectionModifier(books: sorted(selectable, options: sortOptions), actions: bookActions))
-        .pageKeyboardActions(enabled: !bookActions.isSelecting && !bookActions.isDraggingSelection,
-            browseKeyboardActions(destinations: sorted(selectable, options: sortOptions).map(BrowseDestination.library),
-                selectedID: keyboardSelectedID, select: keyboardSelect, read: browseReading,
-                search: { isSearching = true; searchFocusRequest += 1 },
-                scrollTo: { id in withAnimation { browserScroll.scrollTo(String(id.dropFirst("library:".count)), anchor: .center) } }))
-        .overlay {
-            if webDownloads.isLoading || wenkuDownloads.isLoading { ProgressView("正在读取书库…") }
-            else if sourceBooks.isEmpty, let error = webDownloads.storageError ?? wenkuDownloads.storageError {
-                CompatUnavailable {
-                    Label("无法读取书库", systemImage: "exclamationmark.triangle")
-                } description: { Text(error) } actions: {
-                    Button("重试") { Task { try? await webDownloads.loadIfNeeded(); await wenkuDownloads.refreshMissingMetadata() } }
-                }
-            } else if sourceBooks.isEmpty { emptyLibrary }
-        }
-        .safeAreaInset(edge: .bottom) {
-            if bookActions.isSelecting || bookActions.isDraggingSelection { LibrarySelectionBar(books: selectable, actions: bookActions) }
-        }
-        .onValueChange(of: segment) { _, _ in bookActions.endSelection() }
-        .compatScrollDismissesKeyboardInteractively()
-        .safeAreaInset(edge: .top) { searchBar }
-        .background(NoveliaStyle.paper.ignoresSafeArea())
-        .navigationTitle("书库")
-        // 搜索时改为行内标题，避免大标题区域在搜索栏上方留下空白。
-        .navigationBarTitleDisplayMode(isSearching ? .inline : .large)
-        .modifier(ExclusiveToolbar(
-            useFirst: bookActions.isSelecting,
-            first: LibrarySelectionToolbar(books: selectable, actions: bookActions),
-            second: toolbarContent
-        ))
-        .compatNavigationDestination(item: $readerTarget) { book in
-            LibraryReaderDestination(book: book)
-        }
-        .onValueChange(of: readerTarget) { _, target in
-            if target == nil { state.reloadPositions() }
-        }
-        // 迷你条请求回到朗读处：按书籍身份找到书并打开，阅读器起来后从该位置继续朗读。
-        .onReceive(services.speechHandoff.$openRequest) { request in openSpeechBook(request) }
-        .onValueChange(of: sourceBooks) { _, _ in openSpeechBook(services.speechHandoff.openRequest) }
-        .onValueChange(of: state.hashByBook) { _, _ in openSpeechBook(services.speechHandoff.openRequest) }
-        .compatNavigationDestination(item: $onlineSpeechTarget) { request in
-            if case .online(let novel) = request.route {
-                ReaderView(novel: novel, startingAt: services.speechHandoff.pendingResume?.chapterIndex ?? 0)
+    }
+
+    @ViewBuilder
+    private func libraryEmptyOrLoadingOverlay(sourceBooks: [LibraryBook]) -> some View {
+        if webDownloads.isLoading || wenkuDownloads.isLoading {
+            ProgressView("正在读取书库…")
+        } else if sourceBooks.isEmpty, let error = webDownloads.storageError ?? wenkuDownloads.storageError {
+            CompatUnavailable {
+                Label("无法读取书库", systemImage: "exclamationmark.triangle")
+            } description: { Text(error) } actions: {
+                Button("重试") { Task { try? await webDownloads.loadIfNeeded(); await wenkuDownloads.refreshMissingMetadata() } }
             }
-        }
-        .onValueChange(of: webDAVSync.isSyncing) { _, syncing in
-            if !syncing { state.reloadPositions() }
-        }
-        .onValueChange(of: webDAVSync.isEnabled) { _, isEnabled in
-            if !isEnabled { syncTask?.cancel() }
-        }
-        .onAppear {
-            state.reloadPositions()
-            handleIncomingDocuments()
-        }
-        .onValueChange(of: incomingDocuments.pending) { _, _ in handleIncomingDocuments() }
-        .onValueChange(of: importer.isBusy) { _, importing in
-            if !importing { handleIncomingDocuments() }
-        }
-        .task { importer.attach(wenkuDownloads) }
-        .task { await wenkuDownloads.refreshMissingMetadata() }
-        .task(id: sourceBooks) {
-            state.associateVolumes(sourceBooks)
-            await state.refreshHashes(for: sourceBooks, librariesReady: webDownloads.isReady && wenkuDownloads.isReady)
-        }
-        .fullScreenCover(isPresented: $importer.isShowingFileImporter) {
-            EPUBFilePicker(contentTypes: importContentTypes, allowsMultipleSelection: true) { urls in
-                Task { await importer.handlePickedFiles(urls) }
-            }
-            .ignoresSafeArea()
-        }
-        .sheet(isPresented: $isShowingSyncProgress) {
-            WebDAVSyncProgressPanel(onCancel: {
-                syncTask?.cancel()
-                webDAVSync.cancelAutomaticSync()
-            }) {
-                syncTask = Task { await webDAVSync.sync(web: webDownloads, wenku: wenkuDownloads) }
-            }
-            .compatPresentationDetents(.height(280))
-            .compatPresentationDragIndicatorVisible()
-        }
-        .alert("导入", isPresented: .init(
-            get: { importer.importError != nil },
-            set: { if !$0 { importer.importError = nil } }
-        )) {
-            Button("好", role: .cancel) { importer.importError = nil }
-        } message: {
-            Text(importer.importError ?? "")
-        }
-        .alert("转换为 EPUB 后导入", isPresented: .init(
-            get: { importer.pendingKindleImport != nil },
-            // 提示框只能通过按钮关闭，由按钮处理待确认的文件。
-            set: { _ in }
-        ), presenting: importer.pendingKindleImport) { _ in
-            Button("转换并导入") { Task { await importer.resolvePendingKindleImport(convert: true) } }
-            Button("取消", role: .cancel) { Task { await importer.resolvePendingKindleImport(convert: false) } }
-        } message: { pending in
-            Text(LibraryImportModel.kindleConversionNotice(for: pending.kindleFilenames))
-        }
-        .alert("新建系列", isPresented: $isCreatingSeries) {
-            TextField("系列名称", text: $newSeriesName)
-            Button("取消", role: .cancel) {}
-            Button("创建") { state.createSeries(named: newSeriesName) }
-        } message: {
-            Text("创建后，可在书籍的“更多”菜单中移入系列。")
-        }
-        .overlay { LibraryImportProgressOverlay(model: importer) }
-        .overlay {
-            if isDropTargeted {
-                RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
-                    .stroke(NoveliaStyle.brandGreen, lineWidth: 3)
-                    .padding(6)
-                    .allowsHitTesting(false)
-            }
-        }
-        .onDrop(of: importContentTypes + [.fileURL], isTargeted: $isDropTargeted) { providers in
-            importer.attach(wenkuDownloads)
-            return importer.handleDroppedProviders(providers, contentTypes: importContentTypes)
-        }
-        .modifier(LibraryBookActionDialogs(actions: bookActions))
-        .sheet(isPresented: $shelfUpdates.isShowingDetails) {
-            shelfUpdateDetailSheet(sourceBooks: sourceBooks)
-        }
-        .onValueChange(of: bookActions.downloadedBookKey) { _, key in
-            guard let key else { return }
-            bookActions.downloadedBookKey = nil
-            if let book = state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks).first(where: { $0.key == key }) {
-                open(book)
-            }
-        }
-        .onValueChange(of: browseReadingReturn) { _, request in
-            guard let request, selectable.contains(where: { $0.key == request.bookKey }) else { return }
-            browserScroll.scrollTo(request.bookKey, anchor: .center)
-        }
+        } else if sourceBooks.isEmpty {
+            emptyLibrary
         }
     }
 

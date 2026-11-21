@@ -319,6 +319,29 @@ struct LibrarySeriesTarget: Identifiable, Equatable {
     let name: String
 }
 
+/// 收拢书籍操作页的全部弹窗状态，避免同一视图堆叠多个 `.sheet(item:)` 引发跨系统版本时序竞争。
+private enum LibraryBookActiveSheet: Identifiable {
+    case updateConfiguration(DownloadedWebNovel)
+    case chapterUpdate(DownloadedWebNovel)
+    case editInfo(LibraryBook)
+    case associateWenku(LibraryBook)
+    case detail(LibraryBook)
+    case shareArchive(LibraryArchiveShare)
+    case shareExport(LibraryFileShare)
+
+    var id: String {
+        switch self {
+        case .updateConfiguration(let book): "updateConfig:" + book.id
+        case .chapterUpdate(let book): "chapterUpdate:" + book.id
+        case .editInfo(let book): "edit:" + book.key
+        case .associateWenku(let book): "associate:" + book.key
+        case .detail(let book): "detail:" + book.key
+        case .shareArchive(let archive): "archive:" + archive.id.uuidString
+        case .shareExport(let export): "export:" + export.id.uuidString
+        }
+    }
+}
+
 /// 在页面层级挂载书籍操作的确认框与提示。
 struct LibraryBookActionDialogs: ViewModifier {
     @EnvironmentObject private var state: LibraryStateStore
@@ -329,45 +352,72 @@ struct LibraryBookActionDialogs: ViewModifier {
     @EnvironmentObject private var readerSettings: ReaderSettings
     @EnvironmentObject private var services: AppServices
 
+    private var activeSheet: Binding<LibraryBookActiveSheet?> {
+        Binding(
+            get: {
+                if let book = actions.updateConfigurationBook { return .updateConfiguration(book) }
+                if let book = actions.chapterUpdateBook { return .chapterUpdate(book) }
+                if let book = actions.editingBook { return .editInfo(book) }
+                if let book = actions.associatingBook { return .associateWenku(book) }
+                if let book = actions.detailBook { return .detail(book) }
+                if let archive = actions.shareArchive { return .shareArchive(archive) }
+                if let export = actions.shareExport { return .shareExport(export) }
+                return nil
+            },
+            set: { newValue in
+                guard newValue == nil else { return }
+                if actions.updateConfigurationBook != nil { actions.updateConfigurationBook = nil }
+                else if actions.chapterUpdateBook != nil { actions.chapterUpdateBook = nil }
+                else if actions.editingBook != nil { actions.editingBook = nil }
+                else if actions.associatingBook != nil { actions.associatingBook = nil }
+                else if actions.detailBook != nil { actions.detailBook = nil }
+                else if actions.shareArchive != nil { actions.shareArchive = nil }
+                else if actions.shareExport != nil { actions.dismissExportShare() }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func sheetContent(for sheet: LibraryBookActiveSheet) -> some View {
+        switch sheet {
+        case .updateConfiguration(let book):
+            WebNovelEPUBUpdateOptionsSheet(book: book) { configuration in
+                actions.updateConfigurationBook = nil
+                updateEPUB(book, configuration: configuration)
+            }
+        case .chapterUpdate(let book):
+            WebNovelEPUBReader(book: book, managementOnly: true)
+        case .editInfo(let book):
+            if case .wenku(let record) = book.origin,
+               let current = wenkuDownloads.books.first(where: { $0.id == record.id }) {
+                LibraryBookInfoEditor(record: current, coverURL: wenkuDownloads.coverURL(for: current)) { title, author, description, cover in
+                    try await wenkuDownloads.updateMetadata(id: current.id, title: title, author: author,
+                                                      description: description, cover: cover)
+                }
+            }
+        case .associateWenku(let book):
+            if case .wenku(let record) = book.origin {
+                LibraryWenkuAssociationEditor(book: book, record: record)
+            }
+        case .detail(let book):
+            LibraryBookDetailView(book: book)
+        case .shareArchive(let archive):
+            LibraryArchiveShareSheet(url: archive.url)
+                .ignoresSafeArea()
+        case .shareExport(let export):
+            LibraryArchiveShareSheet(url: export.url)
+                .ignoresSafeArea()
+        }
+    }
+
     func body(content: Content) -> some View {
         content
             .compatNavigationDestination(item: $actions.wenkuDetail) { outline in WenkuDetailView(outline: outline) }
             .compatNavigationDestination(item: $actions.characterBook) { book in
                 characterEntry(for: book)
             }
-            .sheet(item: $actions.updateConfigurationBook) { book in
-                WebNovelEPUBUpdateOptionsSheet(book: book) { configuration in
-                    actions.updateConfigurationBook = nil
-                    updateEPUB(book, configuration: configuration)
-                }
-            }
-            .sheet(item: $actions.chapterUpdateBook) { book in
-                WebNovelEPUBReader(book: book, managementOnly: true)
-            }
-            .sheet(item: $actions.editingBook) { book in
-                if case .wenku(let record) = book.origin,
-                   let current = wenkuDownloads.books.first(where: { $0.id == record.id }) {
-                    LibraryBookInfoEditor(record: current, coverURL: wenkuDownloads.coverURL(for: current)) { title, author, description, cover in
-                        try await wenkuDownloads.updateMetadata(id: current.id, title: title, author: author,
-                                                          description: description, cover: cover)
-                    }
-                }
-            }
-            .sheet(item: $actions.associatingBook) { book in
-                if case .wenku(let record) = book.origin {
-                    LibraryWenkuAssociationEditor(book: book, record: record)
-                }
-            }
-            .sheet(item: $actions.detailBook) { book in
-                LibraryBookDetailView(book: book)
-            }
-            .sheet(item: $actions.shareArchive, onDismiss: { actions.shareArchive = nil }) { archive in
-                LibraryArchiveShareSheet(url: archive.url)
-                    .ignoresSafeArea()
-            }
-            .sheet(item: $actions.shareExport, onDismiss: { actions.dismissExportShare() }) { export in
-                LibraryArchiveShareSheet(url: export.url)
-                    .ignoresSafeArea()
+            .sheet(item: activeSheet) { sheet in
+                sheetContent(for: sheet)
             }
             .alert("《\(actions.missingCloudBook?.title ?? "")》的云端文件缺失",
                    isPresented: .init(get: { actions.missingCloudBook != nil },

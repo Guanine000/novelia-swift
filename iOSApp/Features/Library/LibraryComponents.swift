@@ -146,10 +146,7 @@ struct LibraryBookRow: View {
     /// 在「全部」或搜索结果中展示阅读状态小标签。
     var showStatusBadge = false
 
-    @EnvironmentObject private var webDownloads: WebNovelDownloadStore
-    @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
     @EnvironmentObject private var state: LibraryStateStore
-    @EnvironmentObject private var wordCounts: LibraryWordCountStore
 
     var body: some View {
         let hash = state.hashByBook[book.key] ?? book.cloudFileHash
@@ -157,7 +154,7 @@ struct LibraryBookRow: View {
         HStack(alignment: .top, spacing: 6) {
             LibraryBookRowContent(book: book, status: state.status(for: book),
                                   bookStatus: showStatusBadge ? state.bookStatus(for: book) : nil,
-                                  wordCount: wordCounts.total(hash: hash))
+                                  hash: hash)
                 .contentShape(Rectangle())
                 // 点击负责打开或切换选择；页面的长按桥接负责连续拖选。
                 .background(GeometryReader { geometry in
@@ -176,9 +173,6 @@ struct LibraryBookRow: View {
                 .accessibilityAction(named: "多选") { actions.beginSelection(with: book) }
                 .accessibilityIdentifier("library-book-\(book.key)")
                 .hoverEffect(.highlight)
-                .onAppear { if let hash { wordCounts.request(book, hash: hash) } }
-                .onValueChange(of: hash) { _, hash in if let hash { wordCounts.request(book, hash: hash) } }
-                .onDisappear { if let hash { wordCounts.cancel(hash: hash) } }
             if isSelecting {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
@@ -451,22 +445,20 @@ private struct LibraryBookGridCell: View {
         let status = state.status(for: book)
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topTrailing) {
-                GeometryReader { geometry in
-                    ZStack(alignment: .bottom) {
-                        LibraryCoverView(book: book, width: geometry.size.width,
-                                         height: geometry.size.height, elevated: false)
-                        if let fraction = status.fraction, fraction > 0.005 {
-                            Capsule()
-                                .fill(Color.black.opacity(0.28))
-                                .overlay {
-                                    Capsule()
-                                        .fill(NoveliaStyle.brandGreen)
-                                        .scaleEffect(x: min(1, max(0, fraction)), y: 1, anchor: .leading)
-                                }
-                                .frame(height: 3.5)
-                                .padding(.horizontal, 6)
-                                .padding(.bottom, 6)
-                        }
+                ZStack(alignment: .bottom) {
+                    LibraryCoverView(book: book, width: nil, height: nil, elevated: false)
+                        .equatable()
+                    if let fraction = status.fraction, fraction > 0.005 {
+                        Capsule()
+                            .fill(Color.black.opacity(0.28))
+                            .overlay {
+                                Capsule()
+                                    .fill(NoveliaStyle.brandGreen)
+                                    .scaleEffect(x: min(1, max(0, fraction)), y: 1, anchor: .leading)
+                            }
+                            .frame(height: 3.5)
+                            .padding(.horizontal, 6)
+                            .padding(.bottom, 6)
                     }
                 }
                 .aspectRatio(96.0 / 134.0, contentMode: .fit)
@@ -511,23 +503,40 @@ private struct LibraryBookGridCell: View {
     }
 }
 
+/// 叶子视图独立订阅字数统计，避免单本书字数回填时触发整行封面与菜单重绘。
+private struct LibraryBookMetaText: View {
+    let book: LibraryBook
+    let hash: String?
+    @EnvironmentObject private var wordCounts: LibraryWordCountStore
+
+    private var metaLine: String {
+        var parts = [book.format.title]
+        if let wordCount = wordCounts.total(hash: hash) {
+            parts.append(BookWordCount.format(wordCount))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        Text(metaLine)
+            .lineLimit(1)
+            .onAppear { if let hash { wordCounts.request(book, hash: hash) } }
+            .onValueChange(of: hash) { _, hash in if let hash { wordCounts.request(book, hash: hash) } }
+            .onDisappear { if let hash { wordCounts.cancel(hash: hash) } }
+    }
+}
+
 private struct LibraryBookRowContent: View {
     let book: LibraryBook
     let status: LibraryReadingStatus
     /// 传入时在元信息栏展示阅读分类标签（用于“全部”视图与搜索结果）。
     var bookStatus: LibraryBookStatus? = nil
-    /// 全书字数；尚未统计或无法统计时不显示。
-    let wordCount: Int?
-
-    private var metaLine: String {
-        var parts = [book.format.title]
-        if let wordCount { parts.append(BookWordCount.format(wordCount)) }
-        return parts.joined(separator: " · ")
-    }
+    let hash: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             LibraryCoverView(book: book, width: 56, height: 78)
+                .equatable()
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(book.title)
@@ -552,8 +561,7 @@ private struct LibraryBookRowContent: View {
                                 .foregroundStyle(NoveliaStyle.muted)
                                 .accessibilityLabel("未下载")
                         }
-                        Text(metaLine)
-                            .lineLimit(1)
+                        LibraryBookMetaText(book: book, hash: hash)
                         if let bookStatus {
                             Text(bookStatus.title)
                                 .font(.system(size: 10, weight: .medium))
@@ -593,11 +601,22 @@ private struct LibraryBookRowContent: View {
 }
 
 /// 封面；缺少封面时按书名哈希生成带书脊与衬线排版的纸质书封面，避免书架出现大片重复图标。
-struct LibraryCoverView: View {
+struct LibraryCoverView: View, Equatable {
     let book: LibraryBook
-    var width: CGFloat
-    var height: CGFloat
+    /// 为 `nil` 时填满父容器，避免在封面网格内为每张卡片套 `GeometryReader`。
+    var width: CGFloat? = nil
+    var height: CGFloat? = nil
     var elevated = false
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.book.key == rhs.book.key
+            && lhs.book.title == rhs.book.title
+            && lhs.book.author == rhs.book.author
+            && lhs.book.coverURL == rhs.book.coverURL
+            && lhs.width == rhs.width
+            && lhs.height == rhs.height
+            && lhs.elevated == rhs.elevated
+    }
 
     private static let generatedPalettes: [(top: Color, bottom: Color, ink: Color)] = [
         (Color(red: 0.24, green: 0.34, blue: 0.31), Color(red: 0.14, green: 0.21, blue: 0.19), Color(white: 0.95)), // 青瓷深绿
@@ -613,6 +632,9 @@ struct LibraryCoverView: View {
         return Self.generatedPalettes[abs(hash) % Self.generatedPalettes.count]
     }
 
+    private var referenceWidth: CGFloat { width ?? 108 }
+    private var referenceHeight: CGFloat { height ?? 150 }
+
     var body: some View {
         Group {
             if let url = book.coverURL {
@@ -622,12 +644,15 @@ struct LibraryCoverView: View {
             }
         }
         .frame(width: width, height: height)
+        .frame(maxWidth: width == nil ? .infinity : nil, maxHeight: height == nil ? .infinity : nil)
         .noveliaBookCoverStyle(cornerRadius: NoveliaStyle.radiusSmall, elevated: elevated)
         .accessibilityHidden(true)
     }
 
     private var placeholder: some View {
         let theme = palette
+        let w = referenceWidth
+        let h = referenceHeight
         return ZStack(alignment: .topLeading) {
             LinearGradient(
                 colors: [theme.top, theme.bottom],
@@ -638,31 +663,31 @@ struct LibraryCoverView: View {
             Rectangle()
                 .fill(theme.ink.opacity(0.18))
                 .frame(width: 1)
-                .padding(.leading, max(6, width * 0.12))
-            VStack(alignment: .leading, spacing: max(2, height * 0.03)) {
+                .padding(.leading, max(6, w * 0.12))
+            VStack(alignment: .leading, spacing: max(2, h * 0.03)) {
                 Text(book.title)
-                    .font(.system(size: max(8, min(14, width * 0.145)), weight: .semibold, design: .serif))
+                    .font(.system(size: max(8, min(14, w * 0.145)), weight: .semibold, design: .serif))
                     .foregroundStyle(theme.ink)
-                    .lineLimit(width < 56 ? 2 : 3)
+                    .lineLimit(w < 56 ? 2 : 3)
                     .multilineTextAlignment(.leading)
                     .minimumScaleFactor(0.75)
-                if width >= 62, !book.author.isEmpty {
+                if w >= 62, !book.author.isEmpty {
                     Text(book.author)
-                        .font(.system(size: max(7, min(10, width * 0.10)), weight: .regular))
+                        .font(.system(size: max(7, min(10, w * 0.10)), weight: .regular))
                         .foregroundStyle(theme.ink.opacity(0.68))
                         .lineLimit(1)
                 }
                 Spacer(minLength: 2)
                 Text(book.format.title)
-                    .font(.system(size: max(7, min(9, width * 0.12)), weight: .bold, design: .monospaced))
+                    .font(.system(size: max(7, min(9, w * 0.12)), weight: .bold, design: .monospaced))
                     .foregroundStyle(theme.ink.opacity(0.82))
-                    .padding(.horizontal, max(3, width * 0.05))
+                    .padding(.horizontal, max(3, w * 0.05))
                     .padding(.vertical, 1.5)
                     .background(theme.ink.opacity(0.14), in: RoundedRectangle(cornerRadius: 3, style: .continuous))
             }
-            .padding(.leading, max(9, width * 0.18))
-            .padding(.trailing, max(5, width * 0.10))
-            .padding(.vertical, max(6, height * 0.10))
+            .padding(.leading, max(9, w * 0.18))
+            .padding(.trailing, max(5, w * 0.10))
+            .padding(.vertical, max(6, h * 0.10))
         }
     }
 }
