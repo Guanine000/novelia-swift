@@ -365,6 +365,259 @@ enum EPUBHorizontalLayoutCompatibility {
     }
 }
 
+// MARK: - 按章裁剪未使用的 CSS 类规则
+//
+// 日本 EBPAJ / 角川 / Play Books 及 Calibre 转换的 EPUB 样式表常含上千条全局工具类规则，
+// 而单个章节通常只用到其中几个 class。YueduCoreText 的样式级联会对每个 DOM 节点线性遍历全部规则，
+// 提前移除“要求了本章 HTML 中根本不存在的 `.class`”的普通规则，可显著降低大章首开耗时。
+// 规则：
+// - 仅对顶层普通样式规则做保守裁剪；`@font-face`、`@media`、`@page`、`@import` 等 `@` 规则原样保留；
+// - 含 `:not(`、`:is(`、`:where(`、`:has(` 或反斜杠转义的选择器保守保留；
+// - 方括号属性选择器（如 `[href="a.html"]`）和括号内的 `.` 不当作类名；
+// - 逗号分隔的选择器列表中只要有任意一项可能命中，即保留命中的子项。
+enum EPUBCSSPruning {
+    private static let classAttributeRegex = try! NSRegularExpression(
+        pattern: #"(?i)\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>`]+))"#
+    )
+
+    static func usedClasses(in html: String) -> Set<String> {
+        let ns = html as NSString
+        let matches = classAttributeRegex.matches(in: html, range: NSRange(location: 0, length: ns.length))
+        var result: Set<String> = []
+        result.reserveCapacity(matches.count)
+        for match in matches {
+            for group in 1...3 {
+                let range = match.range(at: group)
+                guard range.location != NSNotFound else { continue }
+                let value = ns.substring(with: range)
+                for token in value.split(whereSeparator: { $0.isWhitespace }) {
+                    result.insert(String(token))
+                }
+                break
+            }
+        }
+        return result
+    }
+
+    static func pruningUnusedClassRules(in css: String, html: String) -> String {
+        pruningUnusedClassRules(in: css, usedClasses: usedClasses(in: html))
+    }
+
+    static func pruningUnusedClassRules(in css: String, usedClasses: Set<String>) -> String {
+        guard css.utf8.count > 256 else { return css }
+        let bytes = Array(css.utf8)
+        let count = bytes.count
+        var output: [UInt8] = []
+        output.reserveCapacity(min(count, 8192))
+
+        var i = 0
+        while i < count {
+            // 跳过空白与注释
+            if isASCIIWhitespace(bytes[i]) {
+                i += 1
+                continue
+            }
+            if bytes[i] == 0x2F, i + 1 < count, bytes[i + 1] == 0x2A { // /*
+                i += 2
+                while i + 1 < count, !(bytes[i] == 0x2A && bytes[i + 1] == 0x2F) { i += 1 }
+                i = min(count, i + 2)
+                continue
+            }
+
+            // `@` 规则：原样保留整个声明（直到 `;`）或整个块（直到配对 `}`）
+            if bytes[i] == 0x40 { // @
+                let start = i
+                var depth = 0
+                var quote: UInt8 = 0
+                while i < count {
+                    let b = bytes[i]
+                    if quote != 0 {
+                        if b == 0x5C { i = min(count, i + 2); continue } // \
+                        if b == quote { quote = 0 }
+                        i += 1
+                        continue
+                    }
+                    if b == 0x2F, i + 1 < count, bytes[i + 1] == 0x2A {
+                        i += 2
+                        while i + 1 < count, !(bytes[i] == 0x2A && bytes[i + 1] == 0x2F) { i += 1 }
+                        i = min(count, i + 2)
+                        continue
+                    }
+                    if b == 0x22 || b == 0x27 { quote = b; i += 1; continue }
+                    if b == 0x7B { depth += 1; i += 1; continue } // {
+                    if b == 0x7D { // }
+                        depth -= 1
+                        i += 1
+                        if depth <= 0 { break }
+                        continue
+                    }
+                    if b == 0x3B, depth == 0 { i += 1; break } // ;
+                    i += 1
+                }
+                output.append(contentsOf: bytes[start..<i])
+                output.append(0x0A)
+                continue
+            }
+
+            // 普通样式规则：selectorList { body }
+            let selectorStart = i
+            var quote: UInt8 = 0
+            while i < count {
+                let b = bytes[i]
+                if quote != 0 {
+                    if b == 0x5C { i = min(count, i + 2); continue }
+                    if b == quote { quote = 0 }
+                    i += 1
+                    continue
+                }
+                if b == 0x2F, i + 1 < count, bytes[i + 1] == 0x2A {
+                    i += 2
+                    while i + 1 < count, !(bytes[i] == 0x2A && bytes[i + 1] == 0x2F) { i += 1 }
+                    i = min(count, i + 2)
+                    continue
+                }
+                if b == 0x22 || b == 0x27 { quote = b; i += 1; continue }
+                if b == 0x7B || b == 0x7D { break } // { or stray }
+                i += 1
+            }
+            guard i < count, bytes[i] == 0x7B else {
+                // 异常未闭合尾部，保守原样保留
+                output.append(contentsOf: bytes[selectorStart..<count])
+                break
+            }
+            let selectorEnd = i
+            let blockStart = i
+            var depth = 0
+            quote = 0
+            while i < count {
+                let b = bytes[i]
+                if quote != 0 {
+                    if b == 0x5C { i = min(count, i + 2); continue }
+                    if b == quote { quote = 0 }
+                    i += 1
+                    continue
+                }
+                if b == 0x2F, i + 1 < count, bytes[i + 1] == 0x2A {
+                    i += 2
+                    while i + 1 < count, !(bytes[i] == 0x2A && bytes[i + 1] == 0x2F) { i += 1 }
+                    i = min(count, i + 2)
+                    continue
+                }
+                if b == 0x22 || b == 0x27 { quote = b; i += 1; continue }
+                if b == 0x7B { depth += 1 }
+                else if b == 0x7D {
+                    depth -= 1
+                    i += 1
+                    if depth <= 0 { break }
+                    continue
+                }
+                i += 1
+            }
+            let blockEnd = i
+
+            let selectorText = String(decoding: bytes[selectorStart..<selectorEnd], as: UTF8.self)
+            let keptSelectors = splitSelectors(selectorText).filter { selectorCouldMatch($0, usedClasses: usedClasses) }
+            if !keptSelectors.isEmpty {
+                let joined = keptSelectors.joined(separator: ", ")
+                output.append(contentsOf: joined.utf8)
+                output.append(contentsOf: bytes[blockStart..<blockEnd])
+                output.append(0x0A)
+            }
+        }
+        return String(decoding: output, as: UTF8.self)
+    }
+
+    private static func isASCIIWhitespace(_ b: UInt8) -> Bool {
+        b == 0x20 || b == 0x09 || b == 0x0A || b == 0x0D || b == 0x0C
+    }
+
+    private static func splitSelectors(_ text: String) -> [String] {
+        var result: [String] = []
+        var current = ""
+        var parenDepth = 0
+        var bracketDepth = 0
+        var quote: Character? = nil
+        var escaped = false
+        for ch in text {
+            if escaped { current.append(ch); escaped = false; continue }
+            if let q = quote {
+                current.append(ch)
+                if ch == "\\" { escaped = true }
+                else if ch == q { quote = nil }
+                continue
+            }
+            if ch == "\"" || ch == "'" { quote = ch; current.append(ch); continue }
+            if ch == "(" { parenDepth += 1; current.append(ch); continue }
+            if ch == ")" { parenDepth = max(0, parenDepth - 1); current.append(ch); continue }
+            if ch == "[" { bracketDepth += 1; current.append(ch); continue }
+            if ch == "]" { bracketDepth = max(0, bracketDepth - 1); current.append(ch); continue }
+            if ch == ",", parenDepth == 0, bracketDepth == 0 {
+                let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { result.append(trimmed) }
+                current = ""
+            } else {
+                current.append(ch)
+            }
+        }
+        let trimmed = current.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { result.append(trimmed) }
+        return result
+    }
+
+    private static func selectorCouldMatch(_ selector: String, usedClasses: Set<String>) -> Bool {
+        let lower = selector.lowercased()
+        // 含转义或逻辑伪类选择器时保守保留，避免误删。
+        if selector.contains("\\") || lower.contains(":not(") || lower.contains(":is(")
+            || lower.contains(":where(") || lower.contains(":has(") {
+            return true
+        }
+        let bytes = Array(selector.utf8)
+        let count = bytes.count
+        var i = 0
+        var parenDepth = 0
+        var bracketDepth = 0
+        var quote: UInt8 = 0
+        while i < count {
+            let b = bytes[i]
+            if quote != 0 {
+                if b == 0x5C { i = min(count, i + 2); continue }
+                if b == quote { quote = 0 }
+                i += 1
+                continue
+            }
+            if b == 0x22 || b == 0x27 { quote = b; i += 1; continue }
+            if b == 0x28 { parenDepth += 1; i += 1; continue } // (
+            if b == 0x29 { parenDepth = max(0, parenDepth - 1); i += 1; continue } // )
+            if b == 0x5B { bracketDepth += 1; i += 1; continue } // [
+            if b == 0x5D { bracketDepth = max(0, bracketDepth - 1); i += 1; continue } // ]
+            if b == 0x2E, parenDepth == 0, bracketDepth == 0 { // .
+                let start = i + 1
+                var end = start
+                while end < count, isClassIdentByte(bytes[end]) { end += 1 }
+                if end > start {
+                    // 未转义数字开头的 `.1` 不是合法类名，保守保留。
+                    let first = bytes[start]
+                    if first >= 0x30 && first <= 0x39 { return true }
+                    let name = String(decoding: bytes[start..<end], as: UTF8.self)
+                    if !usedClasses.contains(name) { return false }
+                }
+                i = end
+                continue
+            }
+            i += 1
+        }
+        return true
+    }
+
+    private static func isClassIdentByte(_ b: UInt8) -> Bool {
+        (b >= 0x41 && b <= 0x5A) // A-Z
+            || (b >= 0x61 && b <= 0x7A) // a-z
+            || (b >= 0x30 && b <= 0x39) // 0-9
+            || b == 0x5F || b == 0x2D // _ -
+            || b >= 0x80 // non-ASCII UTF-8
+    }
+}
+
 // MARK: - NCX 目录解析（XMLParser）
 
 enum NCXParser {

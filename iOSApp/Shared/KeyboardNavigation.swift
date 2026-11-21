@@ -15,9 +15,9 @@ struct PageKeyAction {
         [.init(input: UIKeyCommand.inputEscape, title: "关闭或返回", perform: { _ in action() }),
          .command("w", "关闭或返回", action: action)]
     }
-    static func pages(previous: @escaping () -> Void, next: @escaping () -> Void) -> [Self] {
-        [.init(input: UIKeyCommand.inputLeftArrow, title: "上一页", perform: { _ in previous() }),
-         .init(input: UIKeyCommand.inputRightArrow, title: "下一页", perform: { _ in next() }),
+    static func pages(previous: @escaping () -> Void, next: @escaping () -> Void, isRightToLeft: Bool = false) -> [Self] {
+        [.init(input: UIKeyCommand.inputLeftArrow, title: isRightToLeft ? "下一页" : "上一页", perform: { _ in isRightToLeft ? next() : previous() }),
+         .init(input: UIKeyCommand.inputRightArrow, title: isRightToLeft ? "上一页" : "下一页", perform: { _ in isRightToLeft ? previous() : next() }),
          .init(input: " ", title: "下一页", perform: { _ in next() }),
          .init(input: " ", modifiers: .shift, title: "上一页", perform: { _ in previous() })]
     }

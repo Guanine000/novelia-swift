@@ -219,7 +219,7 @@ private struct EPUBReaderViewContent: View {
         .modifier(ReaderRecapPresentation(store: settings.recaps, source: model.localRecapSource,
             active: model.status == .ready && !model.isLayingOut && !speech.isActive
                 && !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingAnnotations && !isShowingSpeech
-                && !isShowingBookPreferences && model.activeNote == nil && model.plainLinkMessage == nil,
+                && !isShowingBookPreferences && model.activeNote == nil && model.plainLinkMessage == nil && model.verticalFallbackMessage == nil,
             libraryBookKey: statisticsBook?.id))
         .modifier(ReaderSpeechPresentation(controller: speech, isPresented: $isShowingSpeech,
                                   anchor: { model.speechAnchor },
@@ -294,6 +294,14 @@ private struct EPUBReaderViewContent: View {
         } message: {
             Text(model.plainLinkMessage ?? "")
         }
+        .alert("已自动回退横排", isPresented: .init(
+            get: { model.verticalFallbackMessage != nil },
+            set: { if !$0 { model.verticalFallbackMessage = nil } }
+        )) {
+            Button("好", role: .cancel) { model.verticalFallbackMessage = nil }
+        } message: {
+            Text(model.verticalFallbackMessage ?? "")
+        }
     }
 
     /// 从上次收听位置继续：先跳到该章，再按当前阅读位置起播。
@@ -366,14 +374,19 @@ private struct EPUBReaderViewContent: View {
 
     private var keyboardEnabled: Bool {
         !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingAnnotations
-            && !isShowingSpeech && !isShowingBookPreferences && model.activeNote == nil && model.plainLinkMessage == nil
+            && !isShowingSpeech && !isShowingBookPreferences && model.activeNote == nil
+            && model.plainLinkMessage == nil && model.verticalFallbackMessage == nil
     }
     private var keyboardActions: [PageKeyAction] {
         var actions = readerKeyboardActions(search: { bookmarksTab = .search; isShowingBookmarks = true },
             contents: { isShowingTOC = true }, settings: { draftStyle = model.style; isShowingStyle = true },
             close: { if let readerCloseAction { readerCloseAction() } else { dismiss() } })
         if model.status == .ready {
-            actions += PageKeyAction.pages(previous: { speech.suspendFollow(true); model.commitTurn(forward: false) }, next: { speech.suspendFollow(true); model.commitTurn(forward: true) })
+            actions += PageKeyAction.pages(
+                previous: { speech.suspendFollow(true); model.commitTurn(forward: false) },
+                next: { speech.suspendFollow(true); model.commitTurn(forward: true) },
+                isRightToLeft: model.isCurrentChapterRightToLeft
+            )
             let currentChapter = model.currentPageRange?.chapter ?? 0
             actions += readerExtendedKeyboardActions(
                 bookmarks: model.bookmarkKey != nil ? { bookmarksTab = .bookmarks; isShowingBookmarks = true } : nil,
@@ -408,7 +421,7 @@ private struct EPUBReaderViewContent: View {
                 source: model.localTimeSource, point: model.readingTimePoint, mode: "paged|" + settings.projection.identity,
                 active: model.status == .ready && !model.isLayingOut && !isScrubbing && !speech.isActive
                     && !isShowingTOC && !isShowingStyle && !isShowingBookmarks && !isShowingAnnotations && !isShowingSpeech
-                    && !isShowingBookPreferences && model.activeNote == nil && model.plainLinkMessage == nil,
+                    && !isShowingBookPreferences && model.activeNote == nil && model.plainLinkMessage == nil && model.verticalFallbackMessage == nil,
                 isListening: speech.isActive))
         ) {
             positionAndScrub
@@ -707,7 +720,7 @@ private struct EPUBReaderPageSurface: View, Equatable {
                 annotationEditor = .init(range: range, quote: quote, annotation: nil)
             },
             curlEnabled: curlEnabled,
-            isRightToLeft: false,
+            isRightToLeft: model.isCurrentChapterRightToLeft,
             paperInsets: UIEdgeInsets(top: pageInsets.top, left: pageInsets.leading, bottom: pageInsets.bottom, right: pageInsets.trailing),
             paperColor: UIColor(model.pageBackgroundColor),
             paperBackground: settings.backgrounds.image(dark: model.isDarkMode, landscape: size.width > size.height),

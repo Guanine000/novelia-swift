@@ -51,6 +51,7 @@ final class EPUBReaderModel: ObservableObject {
             refreshAnnotationHighlights()
             trimPageCaches()
             logLocationChange(from: oldValue)
+            notifyVerticalFallbackIfNeeded(spineIndex: location.spineIndex)
             readingTimePoint = .init(resource: location.spineIndex,
                 fraction: currentPageRange?.range.lowerBound ?? 0,
                 reason: locationCause == "turnForward" && !isRestoringPosition && activeRelayouts == 0 ? .forward : .reset)
@@ -138,6 +139,9 @@ final class EPUBReaderModel: ObservableObject {
     let imageLibrary = ReaderImageLibrary()
     /// 普通链接点击提示（本轮不导航）。
     @Published var plainLinkMessage: String?
+    /// 当前章原计划竖排但因包含竖排暂不支持的版式而回退横排时的提示文本；每代次每章最多提示一次。
+    @Published var verticalFallbackMessage: String?
+    private var notifiedVerticalFallbackSpines = Set<Int>()
     @Published var isShowingTOCDiagnosticsPrompt = false
     @Published var isTOCDiagnosticsExpanded = false {
         didSet {
@@ -169,6 +173,52 @@ final class EPUBReaderModel: ObservableObject {
     var usesDoublePage: Bool { style.doublePage == true }
     var leafWidth: CGFloat { viewportSize.width / (usesDoublePage ? 2 : 1) }
     var pageStride: Int { usesDoublePage ? 2 : 1 }
+
+    var writingDirectionRequest: EPUBWritingDirectionRequest {
+        switch style.writingDirection ?? .bookDefault {
+        case .bookDefault: .bookDefault
+        case .horizontal: .horizontal
+        case .verticalRTL: .verticalRTL
+        }
+    }
+
+    /// 指定章节是否采用从右向左翻页（竖排模式）。已排版时以实际生效方向为准（含单章回退横排）。
+    func isRightToLeft(spineIndex: Int) -> Bool {
+        if let effective = pageBook?.writingMode(spineIndex: spineIndex) {
+            return effective == .verticalRTL
+        }
+        switch writingDirectionRequest {
+        case .verticalRTL: return true
+        case .horizontal: return false
+        case .bookDefault: return source?.prefersVerticalByDefault == true
+        }
+    }
+
+    var isCurrentChapterRightToLeft: Bool {
+        isRightToLeft(spineIndex: location.spineIndex)
+    }
+
+    /// 双页模式下，第 `leaf`（0 为当前页，1 为下一页）在视口中的水平起点。
+    /// 竖排（右翻左）时第 0 页在右半屏、第 1 页在左半屏。
+    func leafOriginX(for leaf: Int, spineIndex: Int) -> CGFloat {
+        guard usesDoublePage else { return 0 }
+        return isRightToLeft(spineIndex: spineIndex) ? CGFloat(1 - leaf) * leafWidth : CGFloat(leaf) * leafWidth
+    }
+
+    /// 视口水平坐标 `x` 命中的双页序号（0 为当前页，1 为下一页）。
+    func leafIndex(atX x: CGFloat, spineIndex: Int) -> Int {
+        guard usesDoublePage else { return 0 }
+        return isRightToLeft(spineIndex: spineIndex) ? (x < leafWidth ? 1 : 0) : (x >= leafWidth ? 1 : 0)
+    }
+
+    /// 用户打开或翻入因竖排准入限制自动回退为横排的正文章节时弹窗提示（纯 SVG 封面/彩插静默回退；同一代次每章仅提示一次）。
+    func notifyVerticalFallbackIfNeeded(spineIndex: Int) {
+        guard status == .ready, activeRelayouts == 0,
+              !notifiedVerticalFallbackSpines.contains(spineIndex),
+              pageBook?.shouldAlertVerticalFallback(spineIndex: spineIndex) == true else { return }
+        notifiedVerticalFallbackSpines.insert(spineIndex)
+        verticalFallbackMessage = "本章包含竖排排版暂不支持的版式，已自动回退为横排显示。"
+    }
     var selectionLeaf = 0
     struct SpreadCacheEntry {
         let secondLeafAvailable: Bool
@@ -307,9 +357,9 @@ final class EPUBReaderModel: ObservableObject {
     /// 点按位置是正文图片时打开查看器并返回 true（只用于页面中部，左右两侧仍翻页）。
     func openImage(at point: CGPoint) -> Bool {
         guard let pageBook, let container else { return false }
-        let leaf = usesDoublePage && point.x >= leafWidth ? 1 : 0
+        let leaf = leafIndex(atX: point.x, spineIndex: location.spineIndex)
         let id = pageID(location.spineIndex, location.pageIndex + leaf)
-        let localPoint = CGPoint(x: point.x - CGFloat(leaf) * leafWidth, y: point.y)
+        let localPoint = CGPoint(x: point.x - leafOriginX(for: leaf, spineIndex: location.spineIndex), y: point.y)
         guard let source = pageBook.imageSource(at: localPoint, for: id),
               let path = EPUBContainer.resolveImagePath(src: source, chapterHref: container.chapterHref(at: id.spineIndex))
         else { return false }
@@ -319,9 +369,9 @@ final class EPUBReaderModel: ObservableObject {
 
     func linkHit(at point: CGPoint) -> EPUBLinkHit? {
         guard let pageBook else { return nil }
-        let leaf = usesDoublePage && point.x >= leafWidth ? 1 : 0
+        let leaf = leafIndex(atX: point.x, spineIndex: location.spineIndex)
         let id = pageID(location.spineIndex, location.pageIndex + leaf)
-        let localPoint = CGPoint(x: point.x - CGFloat(leaf) * leafWidth, y: point.y)
+        let localPoint = CGPoint(x: point.x - leafOriginX(for: leaf, spineIndex: location.spineIndex), y: point.y)
         guard let region = pageBook.linkRegion(at: localPoint, for: id) else { return nil }
         switch region.semantic {
         case .noteref:
@@ -676,7 +726,12 @@ final class EPUBReaderModel: ObservableObject {
                           target: (spine: Int, offset: Int?)? = nil, targetProgression: Double? = nil) async {
         guard let container = source else { return }
         activeRelayouts += 1
-        defer { activeRelayouts -= 1 }
+        defer {
+            activeRelayouts -= 1
+            if activeRelayouts == 0 {
+                notifyVerticalFallbackIfNeeded(spineIndex: location.spineIndex)
+            }
+        }
         container.themeTextColor = pageTextColor
         // 预取和跳转任务属于即将被替换的代次。
         for task in prefetchTasks.values { task.cancel() }
@@ -713,6 +768,8 @@ final class EPUBReaderModel: ObservableObject {
         let previousOffset = anchor.offset
         spreadCache.removeAll()
         failedChapters.removeAll()
+        notifiedVerticalFallbackSpines.removeAll()
+        verticalFallbackMessage = nil
         generation += 1
         let book = EPUBPageBook(generation: generation, coordinator: layoutCoordinator,
                                 ignoresNearWhite: bookBackgroundFollow == .ignoreNearWhite)
@@ -728,6 +785,7 @@ final class EPUBReaderModel: ObservableObject {
         do {
             try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
                                          aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
+                                         writingDirection: writingDirectionRequest,
                                          context: layoutContext(reason))
             if book.generation == generation {
                 pendingRelayoutAnchor = nil
@@ -789,6 +847,7 @@ final class EPUBReaderModel: ObservableObject {
             guard let book = pageBook, !book.isChapterComplete(target) else { return }
             try? await book.layoutChapter(target, container: container, config: makeConfig(),
                                           aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
+                                          writingDirection: writingDirectionRequest,
                                           context: layoutContext(.navigate))
         }
         prefetchNeighbors(of: target)
@@ -809,12 +868,14 @@ final class EPUBReaderModel: ObservableObject {
         for neighbor in neighbors {
             guard !book.isChapterComplete(neighbor), prefetchTasks[neighbor] == nil else { continue }
             let config = makeConfig()
+            let direction = writingDirectionRequest
             let context = layoutContext(.prefetch)
             prefetchTasks[neighbor] = Task { [weak self] in
                 guard let self else { return }
                 do {
                     try await book.layoutChapter(neighbor, container: container, config: config,
                                                  aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
+                                                 writingDirection: direction,
                                                  context: context)
                     failedChapters.remove(neighbor)
                 } catch {

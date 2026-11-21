@@ -109,6 +109,8 @@ final class EPUBContainer {
     let bookTitle: String
     let author: String?
     let spine: [EPUBSpineItem]
+    /// OPF `<spine page-progression-direction="rtl">` 是否声明从右向左翻页（竖排日文/中文书常见）。
+    let isSpineRTL: Bool
     var toc: [EPUBTOCEntry] = []
 
     let archive: Archive
@@ -121,6 +123,7 @@ final class EPUBContainer {
 
     private init(fileURL: URL, archive: Archive, opfDirectory: String,
                  bookTitle: String, author: String?, spine: [EPUBSpineItem],
+                 isSpineRTL: Bool,
                  manifestByID: [String: EPUBSpineItem]) {
         self.fileURL = fileURL
         self.archive = archive
@@ -128,6 +131,7 @@ final class EPUBContainer {
         self.bookTitle = bookTitle
         self.author = author
         self.spine = spine
+        self.isSpineRTL = isSpineRTL
         self.manifestByID = manifestByID
     }
 
@@ -166,10 +170,16 @@ final class EPUBContainer {
         }
         guard !readable.isEmpty else { throw EPUBError.emptySpine }
 
+        let isSpineRTL = XMLValueParser.openTagAttributes("spine", in: opfXML)
+            .first?["page-progression-direction"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() == "rtl"
+
         let container = EPUBContainer(
             fileURL: fileURL, archive: archive, opfDirectory: opfDirectory,
             bookTitle: bookTitle ?? fileURL.deletingPathExtension().lastPathComponent,
             author: author, spine: readable,
+            isSpineRTL: isSpineRTL,
             manifestByID: manifest
         )
         await container.buildTOC()

@@ -121,7 +121,9 @@ extension EPUBReaderModel {
                 do {
                     try await book.layoutChapter(spineIndex, container: container,
                                                  config: makeConfig(), aspectRatio: viewportAspectRatio,
-                                                 readerCSS: effectiveReaderCSS, context: layoutContext(.seek))
+                                                 readerCSS: effectiveReaderCSS,
+                                                 writingDirection: writingDirectionRequest,
+                                                 context: layoutContext(.seek))
                 } catch {
                     if EPUBLayoutLog.failure(error).kind != "cancelled", pageBook === book {
                         status = .failed(describeLayoutError(error))
@@ -213,8 +215,9 @@ extension EPUBReaderModel {
         for annotation in annotations {
             guard let range = ReaderAnnotationResolver.resolve(annotation, in: text) else { continue }
             for leaf in 0..<leafCount {
+                let offsetX = leafOriginX(for: leaf, spineIndex: spineIndex)
                 for rect in pageBook.selectionRects(for: range, on: pageID(spineIndex, pageIndex + leaf)) {
-                    result.append(.init(rect: rect.offsetBy(dx: CGFloat(leaf) * leafWidth, dy: 0),
+                    result.append(.init(rect: rect.offsetBy(dx: offsetX, dy: 0),
                                         color: annotation.color))
                 }
             }
@@ -243,8 +246,9 @@ extension EPUBReaderModel {
             context.fill(CGRect(origin: .zero, size: viewportSize))
             for (index, image) in leaves.enumerated() {
                 if let image {
+                    let originX = leafOriginX(for: index, spineIndex: target.spineIndex)
                     UIImage(cgImage: image, scale: displayScale, orientation: .up)
-                        .draw(in: CGRect(x: CGFloat(index) * leafWidth, y: 0, width: leafWidth, height: viewportSize.height))
+                        .draw(in: CGRect(x: originX, y: 0, width: leafWidth, height: viewportSize.height))
                 }
             }
         }.cgImage
@@ -259,16 +263,18 @@ extension EPUBReaderModel {
 
     func selectionRange(at point: CGPoint) -> NSRange? {
         // 两个页面共用章节 UTF-16 偏移量，因此选择范围可以跨越中缝。
-        let leaf = usesDoublePage && point.x >= leafWidth ? 1 : 0
+        let leaf = leafIndex(atX: point.x, spineIndex: location.spineIndex)
         selectionLeaf = leaf
-        return pageBook?.selectionRange(at: CGPoint(x: point.x - CGFloat(leaf) * leafWidth, y: point.y),
+        let originX = leafOriginX(for: leaf, spineIndex: location.spineIndex)
+        return pageBook?.selectionRange(at: CGPoint(x: point.x - originX, y: point.y),
                                        for: pageID(location.spineIndex, location.pageIndex + leaf))
     }
 
     func selectionRects(for range: NSRange) -> [CGRect] {
         (0..<(usesDoublePage ? 2 : 1)).flatMap { leaf in
-            (pageBook?.selectionRects(for: range, on: pageID(location.spineIndex, location.pageIndex + leaf)) ?? [])
-                .map { $0.offsetBy(dx: CGFloat(leaf) * leafWidth, dy: 0) }
+            let originX = leafOriginX(for: leaf, spineIndex: location.spineIndex)
+            return (pageBook?.selectionRects(for: range, on: pageID(location.spineIndex, location.pageIndex + leaf)) ?? [])
+                .map { $0.offsetBy(dx: originX, dy: 0) }
         }
     }
 

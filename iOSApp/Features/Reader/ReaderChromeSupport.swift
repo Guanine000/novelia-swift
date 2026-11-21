@@ -535,6 +535,17 @@ struct ReaderStyleSheet: View {
                         .accessibilityIdentifier("reader-native-page-turn")
                         Text("即时生效，仅用于原生分页。")
                             .font(.caption).foregroundStyle(.secondary)
+                        Picker("排版方向", selection: Binding(
+                            get: { draftStyle.writingDirection ?? .bookDefault },
+                            set: { draftStyle.writingDirection = $0 == .bookDefault ? nil : $0 }
+                        )) {
+                            ForEach(EPUBWritingDirectionOption.allCases) { option in
+                                Text(option.title).tag(option)
+                            }
+                        }
+                        .accessibilityIdentifier("reader-writing-direction")
+                        Text("「跟随书籍」按书籍原版式自动选择横竖排；仅用于原生分页，点击「应用」后生效。竖排暂不支持的章节将自动回退为横排。")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     if supportsReadiumPageTurn {
                         Picker("翻页动画", selection: $settings.readiumPageCurlEnabled) {

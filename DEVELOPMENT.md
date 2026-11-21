@@ -247,7 +247,7 @@ Debug 独立验证 App 可用 `-architectureBrowseResize` 将同一个 Root 内�
 | `ReadiumEPUBReaderModel.swift`、`ReadiumEPUBReaderSupport.swift`、`ReadiumNavigatorDelegateSupport.swift`、`ReadiumEPUBReaderDiagnostics.swift`、`ReadiumEPUBReaderView.swift` | Readium 内容加载、导航、代理回调、书签/搜索/手势与拟真翻页快照、全书诊断与插图收集、显示和位置连接 |
 | `ReaderSettings.swift`、`ReaderSettingsAdapters.swift` | 持久化阅读偏好及引擎/界面适配 |
 
-EPUB 默认采用 YueduCoreText 分页；实验性 Readium 开关可用于 EPUB、TXT 和在线分页，开关默认关闭，已有选择继续保留。TXT 和在线内容也支持滚动模式。引擎选择属于 Reader 内部，API 消费方不根据引擎切换后台实现。
+EPUB 默认采用 YueduCoreText 分页；实验性 Readium 开关可用于 EPUB、TXT 和在线分页，开关默认关闭，已有选择继续保留。TXT 和在线内容也支持滚动模式。引擎选择属于 Reader 内部，API 消费方不根据引擎切换后台实现。原生分页引擎支持“跟随书籍／横排／竖排”三档排版方向（保存在 `EPUBReaderStyle.writingDirection`，缺省按跟随书籍处理；仅原生引擎在设置面板展示，Readium 3.11.0 在 `EPUBSettings` 中强制竖排走滚动，因此 Readium 与 iOS 15 目标不提供竖排分页）：`EPUBBackgroundLayout` 按 `BrowserChapterDocument.principalWritingMode` 与 `EPUBContainer.isSpineRTL` 解析跟随书籍方向，必要时清理冲突的 `writing-mode` / 宽高约束，若竖排准入仍拒绝则单章自动回退横排并由模型在用户打开/翻入该章时弹窗提示（每代次每章一次）；`EPUBReaderModel` 按当前章实际生效方向驱动 `EPUBPagerView`、`MetalPageCurlViewController`、硬件键盘及 iPad 双页（RTL 时第 0 页在右、第 1 页在左）的绘制与命中坐标。
 
 分页起播优先传递 `SpeechAnchor.sourceUTF16Offset` 并标记 `startsAtVisibleOffset`，长句页首在 `SpeechText` 拆分后起播，上一句仍可回退前缀。原生读取 pageBook 页首源偏移；Readium 的 Edge 起播读取实际可见 DOM 文本字符，按去空白 UTF-16 映射并核对引文，匹配失败明确报错，不用排版页比例猜字符位置。本地 Readium 保留官方可见 Locator。底部听书条（`ReaderSpeechBar`）由控制器的会话显示状态管理，准备/暂停/结束/失败均保留，明确停止或离开才收起；根视图另有跨页迷你条 `SpeechMiniBarHost`，观察 `AppServices.speechHandoff`，只在阅读器之外出现。
 

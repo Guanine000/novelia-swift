@@ -17,15 +17,26 @@ protocol EPUBChapterSource: AnyObject {
     var toc: [EPUBTOCEntry] { get }
     /// 主题正文颜色；排版前由阅读模型同步。
     var themeTextColor: UIColor { get set }
+    /// 书籍元数据是否默认声明竖排（如 OPF `<spine page-progression-direction="rtl">`）。
+    var prefersVerticalByDefault: Bool { get }
     func chapterHref(at index: Int) -> String
     func chapterHTML(at index: Int) async throws -> String
     func cssTexts(forChapterHTML html: String, chapterHref: String, aspectRatio: CGFloat) async -> [String]
+    func cssTexts(forChapterHTML html: String, chapterHref: String, aspectRatio: CGFloat, vertical: Bool) async -> [String]
     func images(forChapterHTML html: String, chapterHref: String) async -> [String: UIImage]
     func spineIndex(forLinkHref href: String, relativeTo chapterHref: String) -> Int?
 }
 
+extension EPUBChapterSource {
+    var prefersVerticalByDefault: Bool { false }
+    func cssTexts(forChapterHTML html: String, chapterHref: String, aspectRatio: CGFloat, vertical: Bool) async -> [String] {
+        await cssTexts(forChapterHTML: html, chapterHref: chapterHref, aspectRatio: aspectRatio)
+    }
+}
+
 extension EPUBContainer: EPUBChapterSource {
     var chapterCount: Int { spine.count }
+    var prefersVerticalByDefault: Bool { isSpineRTL }
     func chapterHref(at index: Int) -> String { spine[index].href }
 }
 
@@ -113,17 +124,21 @@ enum TextChapterXHTML {
     }
 
     /// 生成章节使用的阅读器样式表，颜色跟随主题文字色。
-    static func css(textColor: UIColor) -> String {
+    /// 竖排模式下把段落块级外边距改到物理左/右侧（对应 vertical-rl 的块轴起止），避免变成列底留白。
+    static func css(textColor: UIColor, vertical: Bool = false) -> String {
         let (r, g, b) = textColor.rgbComponents
         let isLightText = 0.299 * Double(r) + 0.587 * Double(g) + 0.114 * Double(b) > 127.5
         let secondary = isLightText ? "#ADADB5" : "#6B6B70"
+        let h1Margin = vertical ? "0 0.4em 0 1.2em" : "0.4em 0 1.2em 0"
+        let pMargin = vertical ? "0 0 0 0.55em" : "0 0 0.55em 0"
+        let noteMargin = vertical ? "0 1em" : "1em 0"
         return """
         body { color: \(String(format: "#%02X%02X%02X", r, g, b)); }
-        h1 { font-size: 1.35em; font-weight: bold; line-height: 1.4; margin: 0.4em 0 1.2em 0; text-indent: 0; }
-        p { text-indent: 2em; line-height: 1.75; margin: 0 0 0.55em 0; text-align: justify; }
+        h1 { font-size: 1.35em; font-weight: bold; line-height: 1.4; margin: \(h1Margin); text-indent: 0; }
+        p { text-indent: 2em; line-height: 1.75; margin: \(pMargin); text-align: justify; }
         p.subtitle { font-size: 0.75em; color: #3C8F68; text-indent: 0; margin: 0; }
         p.secondary { color: \(secondary); }
-        p.note { color: \(secondary); font-size: 0.85em; text-indent: 0; text-align: center; margin: 1em 0; }
+        p.note { color: \(secondary); font-size: 0.85em; text-indent: 0; text-align: center; margin: \(noteMargin); }
         a { color: \(isLightText ? "#64A8F0" : "#1F6FC5"); text-decoration: underline; }
         """
     }
@@ -178,7 +193,11 @@ final class TextChapterSource: EPUBChapterSource {
     }
 
     func cssTexts(forChapterHTML html: String, chapterHref: String, aspectRatio: CGFloat) async -> [String] {
-        [TextChapterXHTML.css(textColor: themeTextColor)]
+        [TextChapterXHTML.css(textColor: themeTextColor, vertical: false)]
+    }
+
+    func cssTexts(forChapterHTML html: String, chapterHref: String, aspectRatio: CGFloat, vertical: Bool) async -> [String] {
+        [TextChapterXHTML.css(textColor: themeTextColor, vertical: vertical)]
     }
 
     func images(forChapterHTML html: String, chapterHref: String) async -> [String: UIImage] { [:] }

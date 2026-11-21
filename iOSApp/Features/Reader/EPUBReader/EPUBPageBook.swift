@@ -85,7 +85,9 @@ final class EPUBPageBook {
     /// 后台 actor 准备与分页；主线程只构建显示列表并逐页发布，不持有可变会话。
     func layoutChapter(_ spineIndex: Int, container: any EPUBChapterSource,
                        config: BrowserLayoutConfig, aspectRatio: CGFloat = 0.5,
-                       readerCSS: String? = nil, context: EPUBLayoutContext = EPUBLayoutContext()) async throws {
+                       readerCSS: String? = nil,
+                       writingDirection: EPUBWritingDirectionRequest = .horizontal,
+                       context: EPUBLayoutContext = EPUBLayoutContext()) async throws {
         let start = ContinuousClock.now
         let book = DiagnosticContext.bookTag(context.bookID ?? privateBookID)
         let label = EPUBLayoutLog.label(kind: context.kind)
@@ -106,7 +108,8 @@ final class EPUBPageBook {
         }
         let key = EPUBLayoutCoordinator.Key(
             bookID: context.bookID ?? privateBookID, spine: spineIndex,
-            parameters: EPUBLayoutParameters(config: config, aspectRatio: aspectRatio, readerCSS: readerCSS))
+            parameters: EPUBLayoutParameters(config: config, aspectRatio: aspectRatio, readerCSS: readerCSS,
+                                             writingDirection: writingDirection))
         let runConfig = config
         do {
             let (layout, outcome) = try await coordinator.layout(
@@ -120,7 +123,8 @@ final class EPUBPageBook {
                 },
                 work: { publish in
                     try await Self.performLayout(spineIndex, container: container, config: runConfig,
-                                                 aspectRatio: aspectRatio, readerCSS: readerCSS, publish: publish)
+                                                 aspectRatio: aspectRatio, readerCSS: readerCSS,
+                                                 writingDirection: writingDirection, publish: publish)
                 })
             chapters[spineIndex] = layout
             completedChapters.insert(spineIndex)
@@ -151,22 +155,34 @@ final class EPUBPageBook {
     private static func performLayout(_ spineIndex: Int, container: any EPUBChapterSource,
                                       config: BrowserLayoutConfig, aspectRatio: CGFloat,
                                       readerCSS: String?,
+                                      writingDirection: EPUBWritingDirectionRequest,
                                       publish: (EPUBChapterLayout) -> Void) async throws -> EPUBChapterLayout {
         let html = try await container.chapterHTML(at: spineIndex)
         try Task.checkCancellation()
         let chapterHref = container.chapterHref(at: spineIndex)
-        var css = await container.cssTexts(forChapterHTML: html, chapterHref: chapterHref,
-                                           aspectRatio: aspectRatio)
+        let requestsVerticalCSS = writingDirection == .verticalRTL
+            || (writingDirection == .bookDefault && container.prefersVerticalByDefault)
+        let rawCSS = await container.cssTexts(forChapterHTML: html, chapterHref: chapterHref,
+                                              aspectRatio: aspectRatio, vertical: requestsVerticalCSS)
+        let usedClasses = EPUBCSSPruning.usedClasses(in: html)
+        var css = rawCSS.map { EPUBCSSPruning.pruningUnusedClassRules(in: $0, usedClasses: usedClasses) }
         if let readerCSS { css.append(readerCSS) }
         let images = await container.images(forChapterHTML: html, chapterHref: chapterHref)
         try Task.checkCancellation()
 
         let worker = EPUBBackgroundLayout()
-        let prepared = try await worker.prepare(html: html, css: css, config: config, images: images)
+        let prepared = try await worker.prepare(
+            html: html, css: css, config: config, images: images,
+            writingDirection: writingDirection, bookPrefersVertical: container.prefersVerticalByDefault)
         let owner = prepared.owner
         var layout = EPUBChapterLayout(
             pages: [], sourceText: prepared.facts.sourceText, displayLists: [], linkRegions: [], footnotes: prepared.facts.footnotes,
-            positionMap: prepared.positionMap, tableFallback: prepared.tableFallback, sourceHash: SHA256.hash(data: Data(prepared.facts.sourceText.utf8)).map { String(format: "%02x", $0) }.joined()
+            positionMap: prepared.positionMap, tableFallback: prepared.tableFallback,
+            effectiveWritingMode: prepared.effectiveWritingMode,
+            verticalFallback: prepared.verticalFallback,
+            verticalFallbackNeedsAlert: prepared.verticalFallbackNeedsAlert,
+            verticalFallbackFeatures: prepared.verticalFallbackFeatures,
+            sourceHash: SHA256.hash(data: Data(prepared.facts.sourceText.utf8)).map { String(format: "%02x", $0) }.joined()
         )
         return try await withTaskCancellationHandler {
             while let page = try await owner.layoutNextPage() {
@@ -273,6 +289,18 @@ final class EPUBPageBook {
     }
 
     var tableFallbackChapterCount: Int { chapters.values.filter(\.tableFallback).count }
+
+    /// 本章最终生效的书写方向；未排版时为 nil。
+    func writingMode(spineIndex: Int) -> ReaderWritingMode? { chapters[spineIndex]?.effectiveWritingMode }
+    /// 本章原计划竖排但自动回退横排时，返回触发回退的不支持特性列表；未回退时为 nil。
+    func verticalFallbackFeatures(spineIndex: Int) -> [String]? {
+        guard let chapter = chapters[spineIndex], chapter.verticalFallback else { return nil }
+        return chapter.verticalFallbackFeatures
+    }
+    /// 本章回退横排后是否需要弹窗提示（纯 `<svg>` 封面/插图页静默回退返回 false）。
+    func shouldAlertVerticalFallback(spineIndex: Int) -> Bool {
+        chapters[spineIndex]?.verticalFallbackNeedsAlert == true
+    }
 
     func sourceHash(spineIndex: Int) -> String? { chapters[spineIndex]?.sourceHash }
     func mainThreadLayoutSteps(spineIndex: Int) -> Int? { chapters[spineIndex]?.mainThreadLayoutSteps }
@@ -609,6 +637,10 @@ private actor EPUBBackgroundLayout {
         let facts: BrowserPageChapterFacts
         let positionMap: EPUBSourcePositionMap
         let tableFallback: Bool
+        let effectiveWritingMode: ReaderWritingMode
+        let verticalFallback: Bool
+        let verticalFallbackNeedsAlert: Bool
+        let verticalFallbackFeatures: [String]
     }
 
     private static func blockTableDisplay(_ css: String) -> String {
@@ -616,15 +648,258 @@ private actor EPUBBackgroundLayout {
                                  with: "display: block", options: .regularExpression)
     }
 
-    func prepare(html: String, css: [String], config: BrowserLayoutConfig,
-                 images: [String: UIImage]) async throws -> Prepared {
-        try Task.checkCancellation()
-        var layoutHTML = html, layoutCSS = css
-        var input = CSSFrontendInput.currentCompatibility(html: layoutHTML, cssTexts: layoutCSS)
-        var evaluation = try BrowserChapterDocument(input: input).evaluate(configuration: config)
+    /// Google Play Books 导出的日文竖排 EPUB 会把 `.tcy` 纵中横改写为
+    /// `-playbooks-start-tcy-workaround: true; display: inline-block; -epub-writing-mode: horizontal-tb; ... -playbooks-end-tcy-workaround: true;`，
+    /// 这会触发 YueduCoreText 竖排对 `inline-block` 和 `horizontal-tb` 的准入拒绝。
+    /// 将其还原为标准 `text-combine-upright: all;` 可让引擎原生绘制纵中横，并避免整章回退横排。
+    private static func normalizingPlayBooksTCYWorkaround(_ css: String) -> String {
+        guard css.localizedCaseInsensitiveContains("-playbooks-start-tcy-workaround") else { return css }
+        return css.replacingOccurrences(
+            of: #"(?i)-playbooks-start-tcy-workaround\s*:\s*true\s*;[\s\S]*?-playbooks-end-tcy-workaround\s*:\s*true\s*;?"#,
+            with: "text-combine-upright: all;",
+            options: .regularExpression
+        )
+    }
+
+    /// 竖排准入因横排/受限样式声明被拒时，移除与竖排准入直接冲突的声明后重试：
+    /// - 显式 `writing-mode: horizontal-tb`、`min-width`/`min-height`/`max-width`、`text-orientation`；
+    /// - 非 `auto`/`px` 的块轴 `width`（如 `width: 100%`、`width: 2.5em`）；
+    /// - 容器元素上的 `display: inline-block`（改写为 `display: block`，常见于日轻插图居中容器）。
+    private static func stripVerticalConflictingCSS(_ css: String) -> String {
+        var result = normalizingPlayBooksTCYWorkaround(css)
+        let removalPatterns = [
+            #"(?i)(?:-(?:epub|webkit)-)?writing-mode\s*:\s*horizontal-tb\s*(?:!important\s*)?;?"#,
+            #"(?i)\b(?:min-width|min-height|max-width)\s*:[^;{}]+;?"#,
+            #"(?i)(?:-(?:epub|webkit)-)?text-orientation\s*:[^;{}]+;?"#,
+            #"(?i)(?<![a-z-])width\s*:\s*(?!auto\b)(?![0-9.]+px\b)[^;{}]+;?"#,
+        ]
+        for pattern in removalPatterns {
+            result = result.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        }
+        result = result.replacingOccurrences(
+            of: #"(?i)\bdisplay\s*:\s*inline-block\b"#,
+            with: "display: block",
+            options: .regularExpression
+        )
+        return result
+    }
+
+    /// 强行以横排渲染竖排书（或竖排单章自动回退横排）时，移除 `writing-mode: vertical-*`，
+    /// 避免能力扫描器在横排模式下因残留的竖排声明再次拒绝本章。
+    private static func stripHorizontalConflictingCSS(_ css: String) -> String {
+        css.replacingOccurrences(
+            of: #"(?i)(?:-(?:epub|webkit)-)?writing-mode\s*:\s*(?:vertical-(?:rl|lr)|sideways-(?:rl|lr)|tb-rl|tb)\s*(?:!important\s*)?;?"#,
+            with: "",
+            options: .regularExpression
+        )
+    }
+
+    private static func sanitizeHTML(_ html: String, transform: (String) -> String) throws -> String {
+        let document = try SwiftSoup.parse(html)
+        document.outputSettings().prettyPrint(pretty: false)
+        for element in try document.select("[style]").array() {
+            try element.attr("style", transform(try element.attr("style")))
+        }
+        for element in try document.select("style").array() {
+            try element.html(transform(try element.html()))
+        }
+        return try document.outerHtml()
+    }
+
+    private struct EvaluatedChapter {
+        let evaluation: BrowserChapterEvaluation
+        let layoutHTML: String
+        let layoutCSS: [String]
+        let images: [String: UIImage]
+        let tableFallback: Bool
+        let effectiveConfig: BrowserLayoutConfig
+    }
+
+    /// 竖排模式下将单个受横排引擎支持的 `<table>` 离屏渲染为透明底横排图片，以块级 `<img>` 嵌回原位，
+    /// 使包含简短表格的竖排章节无需整章回退横排；若表格跨多页或横排引擎也不支持，则保留原标签走整章回退。
+    private static func rasterizeTablesForVertical(
+        html: String,
+        css: [String],
+        baseConfig: BrowserLayoutConfig,
+        images: [String: UIImage]
+    ) async throws -> (html: String, images: [String: UIImage], replaced: Bool) {
+        guard html.range(of: "<table", options: .caseInsensitive) != nil else {
+            return (html, images, false)
+        }
+        let document = try SwiftSoup.parse(html)
+        document.outputSettings().prettyPrint(pretty: false)
+        let allTables = try document.select("table").array()
+        // 只处理顶层表格；嵌套表格交由后续回退流程处理。
+        let topLevelTables = allTables.filter { table in
+            var parent = table.parent()
+            while let current = parent {
+                if current.tagName().lowercased() == "table" { return false }
+                parent = current.parent()
+            }
+            return true
+        }
+        guard !topLevelTables.isEmpty else { return (html, images, false) }
+
+        let horizontalCSS = css.map(stripHorizontalConflictingCSS)
+        var tableConfig = baseConfig
+        tableConfig.writingMode = .horizontal
+        tableConfig.contentInsets = .zero
+        // 留出左右块轴余量，确保嵌入竖排页后不会紧贴或溢出页边距。
+        tableConfig.renderWidth = max(120, baseConfig.renderWidth - baseConfig.rootFontSize * 2)
+        tableConfig.renderHeight = max(120, baseConfig.renderHeight)
+        tableConfig.backgroundColor = .clear
+
+        var updatedImages = images
+        var replacedAny = false
+        for (index, table) in topLevelTables.enumerated() {
+            let tableMarkup = try table.outerHtml()
+            let snippetHTML = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml"><head></head><body style="margin:0;padding:0;">\(tableMarkup)</body></html>
+            """
+            guard let image = await renderHorizontalTableImage(
+                html: snippetHTML, css: horizontalCSS, config: tableConfig, images: images
+            ) else { continue }
+            let key = "__novelia_vertical_table_\(index).png"
+            updatedImages[key] = image
+            try table.before("<p style=\"text-indent:0;margin:0 0.5em;text-align:center;\"><img src=\"\(key)\" alt=\"表格\" style=\"display:block;\"/></p>")
+            try table.remove()
+            replacedAny = true
+        }
+        guard replacedAny else { return (html, images, false) }
+        return (try document.outerHtml(), updatedImages, true)
+    }
+
+    private static func renderHorizontalTableImage(
+        html: String,
+        css: [String],
+        config: BrowserLayoutConfig,
+        images: [String: UIImage]
+    ) async -> UIImage? {
+        let input = CSSFrontendInput.currentCompatibility(html: html, cssTexts: css)
+        guard let doc = try? BrowserChapterDocument(input: input) else { return nil }
+        let evaluation = doc.evaluate(configuration: config, writingMode: .horizontal)
+        guard evaluation.capabilities.supported,
+              let owner = try? BrowserPageLayoutOwner(
+                evaluation: evaluation, imageLoader: { images[$0] }, generation: 0
+              ),
+              let facts = try? await owner.prepare(),
+              let firstPage = try? await owner.layoutNextPage(),
+              (try? await owner.layoutNextPage()) == nil else {
+            // 超过一页的超长表格不强行缩成单图，交由整章回退横排正常分页。
+            return nil
+        }
+        let list = DisplayListBuilder.build(for: firstPage, sourceText: facts.sourceText)
+        var bounds = CGRect.null
+        for item in list.items {
+            switch item {
+            case .fill(let fill): bounds = bounds.union(fill.rect.rawValue)
+            case .text(let text): bounds = bounds.union(text.rect.rawValue)
+            case .image(let img): bounds = bounds.union(img.rect.rawValue)
+            }
+        }
+        guard !bounds.isNull, bounds.width > 1, bounds.height > 1 else { return nil }
+        let padding: CGFloat = 4
+        let size = CGSize(width: ceil(bounds.width + padding * 2), height: ceil(bounds.height + padding * 2))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 3
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            let cg = context.cgContext
+            cg.translateBy(x: padding - bounds.minX, y: padding - bounds.minY)
+            list.draw(in: cg)
+        }
+    }
+
+    /// 用已排版章节的 `sourceText` 与引擎产出的 `pronunciationHints` 线性还原旧版「底文（读音）」无图文本，
+    /// 避免为计算旧版偏移映射再跑一次完整的 HTML/CSS 解析、级联与 CoreText 排版。
+    static func legacyOffsetText(sourceText: String, pronunciationHints: [TTSPronunciationHint]) -> String {
+        let units = Array(sourceText.utf16)
+        let insertions: [(offset: Int, reading: String)] = pronunciationHints
+            .compactMap { hint in
+                guard let reading = hint.reading, !reading.isEmpty,
+                      hint.range.location >= 0,
+                      NSMaxRange(hint.range) <= units.count else { return nil }
+                return (NSMaxRange(hint.range), reading)
+            }
+            .enumerated()
+            .sorted { a, b in
+                a.element.offset == b.element.offset ? a.offset < b.offset : a.element.offset < b.element.offset
+            }
+            .map(\.element)
+
+        guard !insertions.isEmpty else {
+            return sourceText.replacingOccurrences(of: "\u{FFFC}", with: "")
+        }
+
+        var output: [UInt16] = []
+        output.reserveCapacity(units.count + insertions.count * 6)
+        var insertionIndex = 0
+        for index in 0...units.count {
+            while insertionIndex < insertions.count, insertions[insertionIndex].offset == index {
+                output.append(0xFF08) // （
+                output.append(contentsOf: insertions[insertionIndex].reading.utf16)
+                output.append(0xFF09) // ）
+                insertionIndex += 1
+            }
+            if index < units.count, units[index] != 0xFFFC {
+                output.append(units[index])
+            }
+        }
+        return String(utf16CodeUnits: output, count: output.count)
+    }
+
+    private func evaluateChapter(
+        html: String,
+        css: [String],
+        baseConfig: BrowserLayoutConfig,
+        images: [String: UIImage],
+        writingMode: ReaderWritingMode,
+        initialDocument: BrowserChapterDocument? = nil
+    ) async throws -> EvaluatedChapter {
+        var effectiveConfig = baseConfig
+        effectiveConfig.writingMode = writingMode
+        var layoutHTML = html, layoutCSS = css, layoutImages = images
+        let firstDoc: BrowserChapterDocument
+        if let initialDocument {
+            firstDoc = initialDocument
+        } else {
+            let input = CSSFrontendInput.currentCompatibility(html: layoutHTML, cssTexts: layoutCSS)
+            firstDoc = try BrowserChapterDocument(input: input)
+        }
+        var evaluation = firstDoc.evaluate(configuration: effectiveConfig, writingMode: writingMode)
+
+        if !evaluation.capabilities.supported,
+           evaluation.capabilities.unsupportedFeatures.contains(.verticalWritingMode) {
+            let transform = writingMode == .verticalRTL ? Self.stripVerticalConflictingCSS : Self.stripHorizontalConflictingCSS
+            let cleanedHTML = try Self.sanitizeHTML(layoutHTML, transform: transform)
+            let cleanedCSS = layoutCSS.map(transform)
+            if cleanedHTML != layoutHTML || cleanedCSS != layoutCSS {
+                layoutHTML = cleanedHTML
+                layoutCSS = cleanedCSS
+                let input = CSSFrontendInput.currentCompatibility(html: layoutHTML, cssTexts: layoutCSS)
+                evaluation = try BrowserChapterDocument(input: input).evaluate(configuration: effectiveConfig, writingMode: writingMode)
+            }
+        }
+
+        if writingMode == .verticalRTL,
+           !evaluation.capabilities.supported,
+           (evaluation.capabilities.unsupportedFeatures.contains(.table)
+            || evaluation.capabilities.unsupportedFeatures.contains(.verticalWritingMode)) {
+            let rasterized = try await Self.rasterizeTablesForVertical(
+                html: layoutHTML, css: layoutCSS, baseConfig: effectiveConfig, images: layoutImages
+            )
+            if rasterized.replaced {
+                layoutHTML = rasterized.html
+                layoutImages = rasterized.images
+                let input = CSSFrontendInput.currentCompatibility(html: layoutHTML, cssTexts: layoutCSS)
+                evaluation = try BrowserChapterDocument(input: input).evaluate(configuration: effectiveConfig, writingMode: writingMode)
+            }
+        }
+
         var tableFallback = false
         if evaluation.capabilities.unsupportedFeatures.contains(.table) {
-            let document = try SwiftSoup.parse(html)
+            let document = try SwiftSoup.parse(layoutHTML)
             // 真正的 table 保留原结构与错误；只恢复旧书以 div 模拟居中表格的兼容路径。
             if try document.select("table").isEmpty() {
                 document.outputSettings().prettyPrint(pretty: false)
@@ -635,36 +910,90 @@ private actor EPUBBackgroundLayout {
                     try element.html(Self.blockTableDisplay(try element.html()))
                 }
                 layoutHTML = try document.outerHtml()
-                layoutCSS = css.map(Self.blockTableDisplay)
+                layoutCSS = layoutCSS.map(Self.blockTableDisplay)
                 tableFallback = true
-                input = .currentCompatibility(html: layoutHTML, cssTexts: layoutCSS)
-                evaluation = try BrowserChapterDocument(input: input).evaluate(configuration: config)
+                let input = CSSFrontendInput.currentCompatibility(html: layoutHTML, cssTexts: layoutCSS)
+                evaluation = try BrowserChapterDocument(input: input).evaluate(configuration: effectiveConfig, writingMode: writingMode)
             }
         }
-        let legacyHTML = try EPUBPageBook.rubyParentheticalText(layoutHTML)
+
         if evaluation.capabilities.unsupportedFeatures.contains(.ruby) {
             EPUBLayoutLog.logger.notice("Unsupported ruby rendered as parenthetical text; source file preserved")
-            input = .currentCompatibility(html: legacyHTML, cssTexts: layoutCSS)
-            evaluation = try BrowserChapterDocument(input: input).evaluate(configuration: config)
+            let convertedHTML = try EPUBPageBook.rubyParentheticalText(layoutHTML)
+            layoutHTML = convertedHTML
+            let input = CSSFrontendInput.currentCompatibility(html: layoutHTML, cssTexts: layoutCSS)
+            evaluation = try BrowserChapterDocument(input: input).evaluate(configuration: effectiveConfig, writingMode: writingMode)
         }
-        guard evaluation.capabilities.supported else {
-            throw HTMLLayoutError.unsupported(evaluation.capabilities.unsupportedFeatures)
+
+        return EvaluatedChapter(
+            evaluation: evaluation,
+            layoutHTML: layoutHTML,
+            layoutCSS: layoutCSS,
+            images: layoutImages,
+            tableFallback: tableFallback,
+            effectiveConfig: effectiveConfig
+        )
+    }
+
+    func prepare(html: String, css: [String], config: BrowserLayoutConfig,
+                 images: [String: UIImage],
+                 writingDirection: EPUBWritingDirectionRequest,
+                 bookPrefersVertical: Bool) async throws -> Prepared {
+        try Task.checkCancellation()
+        let normalizedCSS = css.map(Self.normalizingPlayBooksTCYWorkaround)
+        let initialInput = CSSFrontendInput.currentCompatibility(html: html, cssTexts: normalizedCSS)
+        let initialDocument = try BrowserChapterDocument(input: initialInput)
+
+        let desiredMode: ReaderWritingMode = switch writingDirection {
+        case .horizontal:
+            .horizontal
+        case .verticalRTL:
+            .verticalRTL
+        case .bookDefault:
+            initialDocument.principalWritingMode ?? (bookPrefersVertical ? .verticalRTL : .horizontal)
         }
-        let owner = try BrowserPageLayoutOwner(evaluation: evaluation, imageLoader: { images[$0] }, generation: 0)
+
+        var result = try await evaluateChapter(
+            html: html, css: normalizedCSS, baseConfig: config, images: images,
+            writingMode: desiredMode, initialDocument: initialDocument)
+        var effectiveMode = desiredMode
+        var verticalFallback = false
+        var verticalFallbackFeatures: [String] = []
+
+        if desiredMode == .verticalRTL, !result.evaluation.capabilities.supported {
+            verticalFallbackFeatures = result.evaluation.capabilities.unsupportedFeatures.map(\.description)
+            EPUBLayoutLog.logger.notice("Vertical chapter unsupported (\(verticalFallbackFeatures.joined(separator: ", "), privacy: .public)); falling back to horizontal")
+            let horizontalResult = try await evaluateChapter(
+                html: html, css: normalizedCSS, baseConfig: config, images: images,
+                writingMode: .horizontal, initialDocument: initialDocument)
+            result = horizontalResult
+            effectiveMode = .horizontal
+            verticalFallback = true
+        }
+
+        guard result.evaluation.capabilities.supported else {
+            throw HTMLLayoutError.unsupported(result.evaluation.capabilities.unsupportedFeatures)
+        }
+        let chapterImages = result.images
+        let owner = try BrowserPageLayoutOwner(evaluation: result.evaluation, imageLoader: { chapterImages[$0] }, generation: 0)
         let facts = try await withTaskCancellationHandler {
             try await owner.prepare()
         } onCancel: { owner.cancel() }
         try Task.checkCancellation()
-        let legacyText: String
-        if legacyHTML != layoutHTML {
-            let session = try HTMLLayoutDocument(html: legacyHTML, css: layoutCSS, configuration: config, images: images).makePageSession()
-            _ = try session.prepare()
-            legacyText = session.sourceText.replacingOccurrences(of: "\u{FFFC}", with: "")
-        } else {
-            legacyText = facts.sourceText.replacingOccurrences(of: "\u{FFFC}", with: "")
-        }
-        return Prepared(owner: owner, facts: facts,
-                        positionMap: EPUBSourcePositionMap(legacy: legacyText, current: facts.sourceText), tableFallback: tableFallback)
+        let legacyText = Self.legacyOffsetText(sourceText: facts.sourceText, pronunciationHints: facts.pronunciationHints)
+        let isPureSVGIllustration = verticalFallback
+            && html.range(of: "<svg", options: .caseInsensitive) != nil
+            && facts.sourceText.replacingOccurrences(of: "\u{FFFC}", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return Prepared(
+            owner: owner, facts: facts,
+            positionMap: EPUBSourcePositionMap(legacy: legacyText, current: facts.sourceText),
+            tableFallback: result.tableFallback,
+            effectiveWritingMode: effectiveMode,
+            verticalFallback: verticalFallback,
+            verticalFallbackNeedsAlert: verticalFallback && !isPureSVGIllustration,
+            verticalFallbackFeatures: verticalFallbackFeatures
+        )
     }
 }
 

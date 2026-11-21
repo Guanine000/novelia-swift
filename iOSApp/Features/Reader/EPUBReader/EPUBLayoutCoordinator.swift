@@ -18,10 +18,18 @@ enum EPUBLayoutReason: String {
     case resize, rotate, fontChange, styleChange, themeChange, backgroundChange
 }
 
+/// 分页排版请求的书写方向策略（不依赖 App 层样式类型，供 `NoveliaEPUB` 测试目标直接消费）。
+enum EPUBWritingDirectionRequest: String, Hashable, Sendable {
+    /// 跟随书籍自身声明（章节 `writing-mode` 优先，其次 OPF `page-progression-direction`，均无则横排）。
+    case bookDefault
+    case horizontal
+    case verticalRTL
+}
+
 /// `BrowserLayoutConfig` 与章节请求中所有会影响分页的内容。
 struct EPUBLayoutParameters: Hashable {
     /// 相同输入对应的阅读器排版结果发生变化时递增（例如 CSS 或兼容处理变化）。
-    static let layoutVersion = 5
+    static let layoutVersion = 6
 
     let renderWidth: CGFloat
     let renderHeight: CGFloat
@@ -40,7 +48,8 @@ struct EPUBLayoutParameters: Hashable {
     let readerCSS: String?
     let version: Int
 
-    init(config: BrowserLayoutConfig, aspectRatio: CGFloat, readerCSS: String?) {
+    init(config: BrowserLayoutConfig, aspectRatio: CGFloat, readerCSS: String?,
+         writingDirection: EPUBWritingDirectionRequest? = nil) {
         renderWidth = config.renderWidth
         renderHeight = config.renderHeight
         rootFontSize = config.rootFontSize
@@ -54,7 +63,7 @@ struct EPUBLayoutParameters: Hashable {
         textColor = Self.components(config.textColor)
         backgroundColor = Self.components(config.backgroundColor)
         alignment = config.defaultTextAlignment.rawValue
-        writingMode = config.writingMode.rawValue
+        writingMode = writingDirection?.rawValue ?? config.writingMode.rawValue
         self.aspectRatio = aspectRatio
         self.readerCSS = readerCSS
         version = Self.layoutVersion
@@ -79,6 +88,14 @@ struct EPUBChapterLayout {
     var footnotes: [String: String]
     var positionMap = EPUBSourcePositionMap(legacy: "", current: "")
     var tableFallback = false
+    /// 本章最终生效的书写方向（当竖排章节因引擎准入限制回退时为 `.horizontal`）。
+    var effectiveWritingMode: ReaderWritingMode = .horizontal
+    /// 本章原计划竖排，但因包含竖排暂不支持的版式而自动回退横排。
+    var verticalFallback = false
+    /// 本章回退横排后是否需要向用户弹窗提示（纯 `<svg>` 封面/插图页静默回退，不打扰翻阅）。
+    var verticalFallbackNeedsAlert = false
+    /// 触发竖排回退横排的不支持特性名（仅用于诊断日志）。
+    var verticalFallbackFeatures: [String] = []
     var sourceHash = ""
     var mainThreadLayoutSteps = 0
     var pageRanges: [NSRange] = []

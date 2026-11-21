@@ -27,10 +27,29 @@ enum EPUBTextAlignmentOption: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+/// 分页阅读排版方向；nil 或 `.bookDefault` 跟随书籍声明（无声明时横排）。
+/// 仅原生分页引擎（YueduCoreText）支持竖排分页；Readium 引擎忽略此选项。
+enum EPUBWritingDirectionOption: String, CaseIterable, Identifiable, Codable {
+    case bookDefault
+    case horizontal
+    case verticalRTL
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .bookDefault: "跟随书籍"
+        case .horizontal: "横排"
+        case .verticalRTL: "竖排"
+        }
+    }
+}
+
 /// 分页阅读器的排版样式；同时由默认引擎（YueduCoreText）与实验性 Readium 消费。
 /// 字段按旧存储键兼容持久化，新增字段一律使用可缺省值。
 struct EPUBReaderStyle: Codable, Equatable {
     var doublePage: Bool? = false
+    /// nil 或 `.bookDefault` 跟随书籍声明（原生分页）；可手动切换横排或竖排。
+    var writingDirection: EPUBWritingDirectionOption? = nil
     var fontSize: CGFloat = 21
     var fontFamily: String? = nil
     var lineSpacing: CGFloat = 0
