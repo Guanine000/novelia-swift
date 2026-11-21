@@ -239,3 +239,50 @@ struct LibrarySeriesState: Codable, Equatable, Sendable {
         return trimmed.isEmpty ? "未命名系列" : String(trimmed.prefix(60))
     }
 }
+
+// MARK: - 书架更新检查聚合模型
+
+/// 单本网络小说检查更新的命中结果。
+struct ShelfUpdateBookResult: Identifiable, Equatable, Sendable {
+    let bookID: String
+    let title: String
+    let newChapterCount: Int
+    let latestChapterTitle: String?
+    var id: String { bookID }
+}
+
+/// 单本网络小说检查更新失败记录。
+struct ShelfUpdateFailure: Identifiable, Equatable, Sendable {
+    let bookID: String
+    let title: String
+    let message: String
+    var id: String { bookID }
+}
+
+/// 书架批量检查更新的聚合状态（总本数、已完成数、更新列表、失败列表与最近检查时间）。
+struct ShelfUpdateSummary: Equatable, Sendable {
+    var totalCount: Int = 0
+    var completedCount: Int = 0
+    var updatedBooks: [ShelfUpdateBookResult] = []
+    var failedBooks: [ShelfUpdateFailure] = []
+    var checkedAt: Date? = nil
+
+    var hasResults: Bool { totalCount > 0 || checkedAt != nil }
+
+    /// 比较本地已下载网络小说与远端目录；仅当远端章节比本地多出新章节 ID 或总章数增加时视为有更新。
+    static func diff(local: DownloadedWebNovel, remote: Novel) -> ShelfUpdateBookResult? {
+        guard let provider = local.novel.providerId, let novelID = local.novel.novelId,
+              remote.providerId == provider, remote.novelId == novelID else { return nil }
+        let localIDs = Set(local.novel.chapters.map(\.id))
+        let newChapters = remote.chapters.filter { !localIDs.contains($0.id) }
+        let count = max(newChapters.count, remote.chapters.count - local.novel.chapters.count)
+        guard count > 0 else { return nil }
+        let latestTitle = newChapters.last?.title ?? remote.chapters.last?.title
+        return ShelfUpdateBookResult(
+            bookID: local.id,
+            title: local.novel.title,
+            newChapterCount: count,
+            latestChapterTitle: latestTitle
+        )
+    }
+}

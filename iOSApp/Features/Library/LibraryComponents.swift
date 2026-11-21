@@ -900,4 +900,318 @@ extension View {
     }
 }
 
+// MARK: - 书架更新检查状态与展示
+
+/// 书架批量检查网络小说更新的界面状态对象；仅调用注入的 `NovelCatalogService`，
+/// 不直接引用具体 API 客户端，并在本机持久化最近一次完成检查时间。
+@MainActor
+final class LibraryShelfUpdateStore: ObservableObject {
+    @Published private(set) var isChecking = false
+    @Published private(set) var summary: ShelfUpdateSummary
+    @Published var isBannerVisible = false
+    @Published var isShowingDetails = false
+
+    private let defaults: UserDefaults
+    private static let lastCheckedKey = "library.shelfUpdateLastCheckedAt.v1"
+    private var checkTask: Task<Void, Never>?
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let saved = defaults.object(forKey: Self.lastCheckedKey) as? Date
+        self.summary = ShelfUpdateSummary(checkedAt: saved)
+    }
+
+    func checkableBooks(from books: [DownloadedWebNovel]) -> [DownloadedWebNovel] {
+        books.filter { $0.novel.providerId != nil && $0.novel.novelId != nil }
+    }
+
+    func startCheck(books: [DownloadedWebNovel], catalog: any NovelCatalogService) {
+        let targets = checkableBooks(from: books)
+        guard !targets.isEmpty else { return }
+        checkTask?.cancel()
+        isChecking = true
+        isBannerVisible = true
+        summary = ShelfUpdateSummary(totalCount: targets.count, completedCount: 0,
+                                     updatedBooks: [], failedBooks: [], checkedAt: summary.checkedAt)
+        runCheck(targets: targets, catalog: catalog, replacingFailuresOnly: false)
+    }
+
+    func retryFailed(books: [DownloadedWebNovel], catalog: any NovelCatalogService) {
+        let failedIDs = Set(summary.failedBooks.map(\.bookID))
+        let targets = checkableBooks(from: books).filter { failedIDs.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        checkTask?.cancel()
+        isChecking = true
+        isBannerVisible = true
+        let keptUpdated = summary.updatedBooks
+        summary = ShelfUpdateSummary(totalCount: targets.count, completedCount: 0,
+                                     updatedBooks: keptUpdated, failedBooks: [], checkedAt: summary.checkedAt)
+        runCheck(targets: targets, catalog: catalog, replacingFailuresOnly: true)
+    }
+
+    func cancel() {
+        checkTask?.cancel()
+        checkTask = nil
+        isChecking = false
+    }
+
+    func dismissBanner() {
+        isBannerVisible = false
+    }
+
+    private enum ItemOutcome: Sendable {
+        case updated(ShelfUpdateBookResult)
+        case upToDate
+        case failed(ShelfUpdateFailure)
+    }
+
+    private func runCheck(targets: [DownloadedWebNovel], catalog: any NovelCatalogService, replacingFailuresOnly: Bool) {
+        let maxConcurrency = 3
+        checkTask = Task { [weak self] in
+            guard let self else { return }
+            await withTaskGroup(of: ItemOutcome.self) { group in
+                var iterator = targets.makeIterator()
+                for _ in 0..<min(maxConcurrency, targets.count) {
+                    if let next = iterator.next() {
+                        group.addTask { await Self.checkSingle(next, catalog: catalog) }
+                    }
+                }
+                for await outcome in group {
+                    if Task.isCancelled { break }
+                    self.summary.completedCount += 1
+                    switch outcome {
+                    case .updated(let result):
+                        if let existingIndex = self.summary.updatedBooks.firstIndex(where: { $0.bookID == result.bookID }) {
+                            self.summary.updatedBooks[existingIndex] = result
+                        } else {
+                            self.summary.updatedBooks.append(result)
+                        }
+                    case .upToDate:
+                        break
+                    case .failed(let failure):
+                        self.summary.failedBooks.append(failure)
+                    }
+                    if let next = iterator.next() {
+                        group.addTask { await Self.checkSingle(next, catalog: catalog) }
+                    }
+                }
+            }
+            let cancelled = Task.isCancelled
+            self.isChecking = false
+            self.checkTask = nil
+            if !cancelled {
+                let now = Date()
+                self.summary.checkedAt = now
+                self.defaults.set(now, forKey: Self.lastCheckedKey)
+            }
+        }
+    }
+
+    private static func checkSingle(_ book: DownloadedWebNovel, catalog: any NovelCatalogService) async -> ItemOutcome {
+        guard let provider = book.novel.providerId, let novelID = book.novel.novelId else { return .upToDate }
+        do {
+            let remote = try await catalog.novel(providerId: provider, novelId: novelID)
+            if let diff = ShelfUpdateSummary.diff(local: book, remote: remote) {
+                return .updated(diff)
+            }
+            return .upToDate
+        } catch is CancellationError {
+            return .upToDate
+        } catch {
+            return .failed(ShelfUpdateFailure(bookID: book.id, title: book.novel.title, message: error.localizedDescription))
+        }
+    }
+}
+
+/// 书库顶部的更新检查聚合反馈条：展示检查进度、更新本数、失败本数和最近检查时间。
+struct LibraryShelfUpdateBanner: View {
+    @ObservedObject var store: LibraryShelfUpdateStore
+    let onShowDetails: () -> Void
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MM-dd HH:mm"
+        return f
+    }()
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            if store.isChecking {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: store.summary.updatedBooks.isEmpty
+                      ? (store.summary.failedBooks.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                      : "arrow.down.circle.fill")
+                    .foregroundStyle(store.summary.updatedBooks.isEmpty
+                                     ? (store.summary.failedBooks.isEmpty ? NoveliaStyle.brandGreen : NoveliaStyle.warning)
+                                     : NoveliaStyle.brandGreen)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                if store.isChecking {
+                    Text("正在检查书架更新 \(store.summary.completedCount)/\(store.summary.totalCount)")
+                        .font(NoveliaStyle.fontBody.weight(.semibold))
+                        .foregroundStyle(NoveliaStyle.ink)
+                    Text("已发现 \(store.summary.updatedBooks.count) 本更新 · \(store.summary.failedBooks.count) 本失败")
+                        .font(NoveliaStyle.fontCaption)
+                        .foregroundStyle(NoveliaStyle.muted)
+                } else {
+                    Text(completedHeadline)
+                        .font(NoveliaStyle.fontBody.weight(.semibold))
+                        .foregroundStyle(NoveliaStyle.ink)
+                    Text(completedSubtitle)
+                        .font(NoveliaStyle.fontCaption)
+                        .foregroundStyle(NoveliaStyle.muted)
+                }
+            }
+            Spacer(minLength: 6)
+            if store.isChecking {
+                Button("取消") { store.cancel() }
+                    .font(NoveliaStyle.fontFootnote.weight(.medium))
+                    .buttonStyle(.borderless)
+            } else {
+                Button("详情") { onShowDetails() }
+                    .font(NoveliaStyle.fontFootnote.weight(.semibold))
+                    .foregroundStyle(NoveliaStyle.brandGreen)
+                    .buttonStyle(.borderless)
+                Button {
+                    store.dismissBanner()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("关闭更新提示")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium)
+        .accessibilityIdentifier("library-shelf-update-banner")
+    }
+
+    private var completedHeadline: String {
+        let updated = store.summary.updatedBooks.count
+        let failed = store.summary.failedBooks.count
+        if updated > 0 {
+            return "发现 \(updated) 本书有更新" + (failed > 0 ? "（\(failed) 本失败）" : "")
+        }
+        if failed > 0 {
+            return "检查完成，\(failed) 本失败"
+        }
+        return "书架已是最新（共检查 \(store.summary.totalCount) 本）"
+    }
+
+    private var completedSubtitle: String {
+        var parts: [String] = []
+        if store.summary.totalCount > 0 {
+            parts.append("共 \(store.summary.totalCount) 本")
+        }
+        if let checkedAt = store.summary.checkedAt {
+            parts.append("最近检查 \(Self.timeFormatter.string(from: checkedAt))")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// 书架更新检查结果详情页：列出有更新的书与失败记录，支持重新检查或重试失败项。
+struct LibraryShelfUpdateDetailSheet: View {
+    @ObservedObject var store: LibraryShelfUpdateStore
+    let booksByID: [String: LibraryBook]
+    let onRecheckAll: () -> Void
+    let onRetryFailed: () -> Void
+    let onOpenBook: (LibraryBook) -> Void
+    let onClose: () -> Void
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f
+    }()
+
+    var body: some View {
+        CompatNavigationStack {
+            List {
+                Section("检查概览") {
+                    CompatLabeledContent("检查进度", value: "\(store.summary.completedCount)/\(store.summary.totalCount)")
+                    CompatLabeledContent("发现更新", value: "\(store.summary.updatedBooks.count) 本")
+                    CompatLabeledContent("检查失败", value: "\(store.summary.failedBooks.count) 本")
+                    if let checkedAt = store.summary.checkedAt {
+                        CompatLabeledContent("最近检查", value: Self.timeFormatter.string(from: checkedAt))
+                    }
+                    Button {
+                        onRecheckAll()
+                    } label: {
+                        Label(store.isChecking ? "正在检查…" : "重新检查全部", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(store.isChecking)
+                }
+
+                if !store.summary.updatedBooks.isEmpty {
+                    Section("有更新的书籍（\(store.summary.updatedBooks.count)）") {
+                        ForEach(store.summary.updatedBooks) { item in
+                            Button {
+                                if let book = booksByID[item.bookID] {
+                                    onClose()
+                                    onOpenBook(book)
+                                }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(item.title)
+                                            .font(.body.weight(.medium))
+                                            .foregroundStyle(NoveliaStyle.ink)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Text("+\(item.newChapterCount) 章")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(NoveliaStyle.brandGreen)
+                                    }
+                                    if let latest = item.latestChapterTitle, !latest.isEmpty {
+                                        Text("最新：\(latest)")
+                                            .font(.caption)
+                                            .foregroundStyle(NoveliaStyle.muted)
+                                            .lineLimit(1)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                if !store.summary.failedBooks.isEmpty {
+                    Section("检查失败（\(store.summary.failedBooks.count)）") {
+                        Button {
+                            onRetryFailed()
+                        } label: {
+                            Label("重试失败项", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(store.isChecking)
+                        ForEach(store.summary.failedBooks) { failure in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(failure.title)
+                                    .font(.body.weight(.medium))
+                                    .foregroundStyle(NoveliaStyle.ink)
+                                Text(failure.message)
+                                    .font(.caption)
+                                    .foregroundStyle(NoveliaStyle.danger)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("书架更新检查")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { onClose() }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - 打开阅读

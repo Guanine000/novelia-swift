@@ -29,6 +29,10 @@ extension SyncBookLibrary {
 protocol WebDAVSyncLocalState {
     var characterSync: (any CharacterSyncLocal)? { get }
     var readingPositions: [String: SyncedReadingPosition] { get }
+    var dirtyReadingPositionKeys: Set<String> { get }
+    var hasSyncedReadingPositionBaseline: Bool { get }
+    func markReadingPositionsSynced(_ syncedTimestamps: [String: Date])
+    func resetReadingPositionSyncBaseline()
     func mergeReadingPositions(_ remote: [String: SyncedReadingPosition], webBooks: [DownloadedWebNovel])
     var librarySeries: LibrarySeriesState { get }
     func applyLibrarySeries(_ series: LibrarySeriesState)
@@ -61,6 +65,10 @@ protocol WebDAVSyncLocalState {
 
 extension WebDAVSyncLocalState {
     var characterSync: (any CharacterSyncLocal)? { nil }
+    var dirtyReadingPositionKeys: Set<String> { Set(readingPositions.keys) }
+    var hasSyncedReadingPositionBaseline: Bool { false }
+    func markReadingPositionsSynced(_ syncedTimestamps: [String: Date]) {}
+    func resetReadingPositionSyncBaseline() {}
     var webEPUBMaps: [String: WebNovelEPUBMap] { [:] }
     func applyWebEPUBMaps(_ maps: [String: WebNovelEPUBMap]) throws {}
     var bookmarks: [String: ReaderBookmark] { [:] }
@@ -187,6 +195,7 @@ final class WebDAVSyncEngine {
             }
         }
         var imported = 0
+        var syncedPositionTimestamps: [String: Date]?
         if options.books {
             manifest.webBooks = WebDAVSyncPlanner.uniqueBooks(manifest.webBooks)
             manifest.wenkuBooks = WebDAVSyncPlanner.uniqueBooks(manifest.wenkuBooks)
@@ -242,7 +251,16 @@ final class WebDAVSyncEngine {
             progress.detail = "正在整理书目…"
             try await fillMissingSizes(&manifest.webBooks, from: web)
             try await fillMissingSizes(&manifest.wenkuBooks, from: wenku)
-            manifest.positions = WebDAVSyncPlanner.positionsToSync(local.readingPositions, in: manifest)
+            let localPositions = local.readingPositions
+            let dirtyPositionKeys = local.dirtyReadingPositionKeys
+            manifest.positions = WebDAVSyncPlanner.positionsToSyncIncremental(
+                local: localPositions,
+                dirtyKeys: dirtyPositionKeys,
+                hasSyncedBaseline: local.hasSyncedReadingPositionBaseline,
+                remote: manifest.positions,
+                in: manifest
+            )
+            syncedPositionTimestamps = Dictionary(uniqueKeysWithValues: manifest.positions.map { ($0.key, $0.value.updatedAt) })
             manifest.librarySeries = LibrarySeriesState.merged(local.librarySeries, manifest.librarySeries ?? LibrarySeriesState())
             let bookmarks = WebDAVSyncPlanner.bookmarksToSync(
                 ReaderBookmark.merged(local.bookmarks, manifest.bookmarks ?? [:]), in: manifest)
@@ -323,6 +341,9 @@ final class WebDAVSyncEngine {
         // 清单与读取时完全相同就不再写入：没有改动的同步只需读取一次清单。
         if !existed || !Self.sameContent(manifest, fetchedManifest) {
             try await remote.putManifest(manifest, etag: etag, existed: existed)
+        }
+        if let syncedPositionTimestamps {
+            local.markReadingPositionsSynced(syncedPositionTimestamps)
         }
         for book in deletedLocalWeb { try await web.removeFromSync(book) }
         for book in deletedLocalWenku { try await wenku.removeFromSync(book) }

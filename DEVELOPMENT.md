@@ -213,7 +213,7 @@ Debug 独立验证 App 可用 `-architectureBrowseResize` 将同一个 Root 内�
 
 `WebDAVSyncStore` 的设置、自动状态、目录缓存、统计缓存及引擎哈希缓存使用注入的 defaults；密码读写经 `WebDAVPasswordStore`，生产为原 Keychain 适配，测试可注入内存闭包。独立 Debug 验证 App 使用显式组装及内存设备身份／同步密码，不进入生产 Keychain 入口。
 
-不得恢复 `ReaderSettings.shared`、`LibraryStateStore.shared`、`ReadingStatisticsStore.shared`，不得在子页面创建第二套生产状态。`ReadingPositionStore` 与书库排序设置在内存缓存已读取的数据（进度写入仍立即落盘），同一偏好存储出现第二个实例会读到过期进度。测试可使用隔离 `UserDefaults` 构造独立服务；阅读设置与进度应使用相同的注入存储。
+不得恢复 `ReaderSettings.shared`、`LibraryStateStore.shared`、`ReadingStatisticsStore.shared`，不得在子页面创建第二套生产状态。`ReadingPositionStore` 与书库排序设置在内存缓存已读取的数据（进度写入仍立即落盘），同一偏好存储出现第二个实例会读到过期进度；`ReadingPositionStore` 同时持久化本地脏进度键（`readingPositions.dirtyKeys.v1`）与基线标记（`readingPositions.syncedBaseline.v1`），供 `WebDAVSyncEngine` 通过 `WebDAVSyncPlanner.positionsToSyncIncremental` 按脏键与远端差异增量同步进度，并在清单写入成功后按时间戳守卫清除已同步脏键（不影响远端清单格式兼容；整库备份恢复后自动重置基线）。测试可使用隔离 `UserDefaults` 构造独立服务；阅读设置与进度应使用相同的注入存储。
 
 | 功能关系 | 应使用的边界 |
 |---|---|

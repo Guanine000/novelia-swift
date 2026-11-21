@@ -40,6 +40,22 @@ extension ReadingPositionProviding {
 @MainActor
 protocol ReadingPositionSynchronizing: ReadingPositionProviding {
     func merge(_ remote: [String: SyncedReadingPosition], webBooks: [DownloadedWebNovel])
+    /// 自上次成功同步以来发生本地改动的进度键（`web:` / `epub:` / `txt:`）。
+    var dirtyPositionKeys: Set<String> { get }
+    /// 是否已与远端完成过至少一次完整进度基线对齐；未对齐前执行全量核对以避免升级漏传。
+    var hasSyncedPositionBaseline: Bool { get }
+    /// 远端清单写入成功后调用：仅清除时间戳未再推进的脏键，并标记基线已建立。
+    func markPositionsSynced(_ syncedTimestamps: [String: Date])
+    /// 切换同步服务器或恢复整库备份后重置基线，促使下次同步全量核对一次。
+    func resetSyncBaseline()
+}
+
+@MainActor
+extension ReadingPositionSynchronizing {
+    var dirtyPositionKeys: Set<String> { Set(all().keys) }
+    var hasSyncedPositionBaseline: Bool { false }
+    func markPositionsSynced(_ syncedTimestamps: [String: Date]) {}
+    func resetSyncBaseline() {}
 }
 
 /// 同步仅访问书库系列快照和应用入口，不读取具体书库 Store 的内部状态。

@@ -133,4 +133,54 @@ final class LibraryOrganizerTests: XCTestCase {
         let roundTrip = try! JSONDecoder().decode(LibrarySeriesState.self, from: JSONEncoder().encode(afterDelete))
         XCTAssertEqual(roundTrip, afterDelete)
     }
+
+    func testShelfUpdateSummaryDiffDetectsNewChaptersAndRejectsMismatchedNovel() {
+        let localChapters = [
+            NovelChapter(id: "c1", title: "第一章", originalText: "", translatedText: ""),
+            NovelChapter(id: "c2", title: "第二章", originalText: "", translatedText: ""),
+        ]
+        let localNovel = Novel(
+            id: "syosetu:n1234",
+            title: "测试网文",
+            author: "作者",
+            summary: "",
+            genres: [],
+            chapters: localChapters,
+            accent: .plum,
+            providerId: "syosetu",
+            novelId: "n1234"
+        )
+        let downloaded = DownloadedWebNovel(
+            novel: localNovel,
+            fileFilename: "n1234.epub",
+            downloadedAt: Date(timeIntervalSince1970: 1000),
+            translationSource: nil,
+            downloadMode: nil,
+            fileFormat: nil
+        )
+
+        // 章节一致时无更新
+        XCTAssertNil(ShelfUpdateSummary.diff(local: downloaded, remote: localNovel))
+
+        // 远端新增两章时返回增量数与最新章节名
+        let remoteChapters = localChapters + [
+            NovelChapter(id: "c3", title: "第三章", originalText: "", translatedText: ""),
+            NovelChapter(id: "c4", title: "第四章 终幕", originalText: "", translatedText: ""),
+        ]
+        let remoteUpdated = Novel(
+            id: "syosetu:n1234", title: "测试网文", author: "作者", summary: "", genres: [],
+            chapters: remoteChapters, accent: .plum, providerId: "syosetu", novelId: "n1234"
+        )
+        let diff = ShelfUpdateSummary.diff(local: downloaded, remote: remoteUpdated)
+        XCTAssertEqual(diff?.bookID, "syosetu:n1234")
+        XCTAssertEqual(diff?.newChapterCount, 2)
+        XCTAssertEqual(diff?.latestChapterTitle, "第四章 终幕")
+
+        // providerId / novelId 不匹配时忽略
+        let mismatched = Novel(
+            id: "syosetu:other", title: "测试网文", author: "作者", summary: "", genres: [],
+            chapters: remoteChapters, accent: .plum, providerId: "syosetu", novelId: "other"
+        )
+        XCTAssertNil(ShelfUpdateSummary.diff(local: downloaded, remote: mismatched))
+    }
 }

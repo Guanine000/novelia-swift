@@ -29,6 +29,7 @@ struct LibraryView: View {
     @EnvironmentObject private var incomingDocuments: IncomingDocumentCoordinator
     @StateObject private var importer = LibraryImportModel()
     @StateObject private var bookActions = LibraryBookActions()
+    @StateObject private var shelfUpdates = LibraryShelfUpdateStore()
     @State private var segment = Segment.all
     @State private var sourceFilter = LibrarySourceFilter.all
     @State private var query = ""
@@ -110,6 +111,12 @@ struct LibraryView: View {
         let selectable = selectableBooks
         ScrollViewReader { browserScroll in
         List {
+            if shelfUpdates.isChecking || shelfUpdates.isBannerVisible {
+                LibraryShelfUpdateBanner(store: shelfUpdates) {
+                    shelfUpdates.isShowingDetails = true
+                }
+                .libraryListRow()
+            }
             if !sourceBooks.isEmpty, let error = webDownloads.storageError ?? wenkuDownloads.storageError {
                 VStack(alignment: .leading) {
                     Label(error, systemImage: "exclamationmark.triangle")
@@ -300,6 +307,9 @@ struct LibraryView: View {
             return importer.handleDroppedProviders(providers, contentTypes: importContentTypes)
         }
         .modifier(LibraryBookActionDialogs(actions: bookActions))
+        .sheet(isPresented: $shelfUpdates.isShowingDetails) {
+            shelfUpdateDetailSheet(sourceBooks: sourceBooks)
+        }
         .onValueChange(of: bookActions.downloadedBookKey) { _, key in
             guard let key else { return }
             bookActions.downloadedBookKey = nil
@@ -312,6 +322,24 @@ struct LibraryView: View {
             browserScroll.scrollTo(request.bookKey, anchor: .center)
         }
         }
+    }
+
+    private func shelfUpdateDetailSheet(sourceBooks: [LibraryBook]) -> some View {
+        let webBooksByID = Dictionary(
+            sourceBooks.compactMap { book -> (String, LibraryBook)? in
+                guard case .webNovel(let record) = book.origin else { return nil }
+                return (record.id, book)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return LibraryShelfUpdateDetailSheet(
+            store: shelfUpdates,
+            booksByID: webBooksByID,
+            onRecheckAll: { shelfUpdates.startCheck(books: webDownloads.books, catalog: services.api.catalog) },
+            onRetryFailed: { shelfUpdates.retryFailed(books: webDownloads.books, catalog: services.api.catalog) },
+            onOpenBook: { open($0) },
+            onClose: { shelfUpdates.isShowingDetails = false }
+        )
     }
 
     private var sourceFilterMenu: some View {
@@ -402,6 +430,22 @@ struct LibraryView: View {
                 }
                 Button { isCreatingSeries = true; newSeriesName = "" } label: {
                     Label("新建系列", systemImage: "rectangle.stack.badge.plus")
+                }
+                if !shelfUpdates.checkableBooks(from: webDownloads.books).isEmpty {
+                    Button {
+                        shelfUpdates.startCheck(books: webDownloads.books, catalog: services.api.catalog)
+                    } label: {
+                        Label(shelfUpdates.isChecking ? "正在检查书架更新…" : "检查书架更新",
+                              systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(shelfUpdates.isChecking)
+                    if shelfUpdates.summary.hasResults, !shelfUpdates.isBannerVisible, !shelfUpdates.isChecking {
+                        Button {
+                            shelfUpdates.isShowingDetails = true
+                        } label: {
+                            Label("查看上次更新检查", systemImage: "clock.arrow.circlepath")
+                        }
+                    }
                 }
                 Divider()
                 Picker("书库布局", selection: $booksLayout) {

@@ -100,13 +100,52 @@ enum WebDAVSyncPlanner {
         return hashes
     }
 
+    /// 清单中仍有书籍的有效阅读位置键集合：网络小说按 id，EPUB/TXT 按文件哈希。
+    static func validPositionKeys(in manifest: WebDAVManifest) -> Set<String> {
+        let webKeys = manifest.webBooks.map { "web:\($0.record.id)" }
+        let assetHashes = (manifest.webBooks.flatMap(\.assets) + manifest.wenkuBooks.flatMap(\.assets)).map(\.hash)
+        var keys = Set(webKeys)
+        keys.reserveCapacity(webKeys.count + assetHashes.count * 2)
+        for hash in assetHashes {
+            keys.insert("epub:\(hash)")
+            keys.insert("txt:\(hash)")
+        }
+        return keys
+    }
+
     /// 只保留清单中仍有书籍的阅读位置：网络小说按 id，EPUB/TXT 按文件哈希。
     static func positionsToSync(_ positions: [String: SyncedReadingPosition],
                                 in manifest: WebDAVManifest) -> [String: SyncedReadingPosition] {
-        let webKeys = Set(manifest.webBooks.map { "web:\($0.record.id)" })
-        let assetHashes = (manifest.webBooks.flatMap(\.assets) + manifest.wenkuBooks.flatMap(\.assets)).map(\.hash)
-        let fileKeys = Set(assetHashes.map { "epub:\($0)" } + assetHashes.map { "txt:\($0)" })
-        return positions.filter { webKeys.contains($0.key) || fileKeys.contains($0.key) }
+        let validKeys = validPositionKeys(in: manifest)
+        return positions.filter { validKeys.contains($0.key) }
+    }
+
+    /// 增量计算写入远端清单的阅读位置：
+    /// - 未建立基线（首次同步、切换服务器或升级后首次同步）时，与全量 `positionsToSync` 完全一致；
+    /// - 已建立基线时，以远端清单已有进度为基础，仅裁剪已删书目并合入本机脏键及新入库书目。
+    static func positionsToSyncIncremental(
+        local: [String: SyncedReadingPosition],
+        dirtyKeys: Set<String>,
+        hasSyncedBaseline: Bool,
+        remote: [String: SyncedReadingPosition],
+        in manifest: WebDAVManifest
+    ) -> [String: SyncedReadingPosition] {
+        let validKeys = validPositionKeys(in: manifest)
+        guard hasSyncedBaseline else {
+            return local.filter { validKeys.contains($0.key) }
+        }
+        var result = remote.filter { validKeys.contains($0.key) }
+        for key in dirtyKeys where validKeys.contains(key) {
+            if let value = local[key] {
+                result[key] = value
+            }
+        }
+        for key in validKeys where result[key] == nil {
+            if let value = local[key] {
+                result[key] = value
+            }
+        }
+        return result
     }
 
     /// 只同步清单中书籍的书签（含墓碑）；本机已删除、也不在云端的书的书签留在本机。

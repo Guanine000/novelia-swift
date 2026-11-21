@@ -66,6 +66,14 @@ struct AppWebDAVSyncLocalState: WebDAVSyncLocalState {
     var webEPUBMaps: [String: WebNovelEPUBMap] { identityMaps.maps }
     func applyWebEPUBMaps(_ maps: [String: WebNovelEPUBMap]) throws { try identityMaps.merge(maps) }
     var readingPositions: [String: SyncedReadingPosition] { positions.all() }
+    var dirtyReadingPositionKeys: Set<String> { positions.dirtyPositionKeys }
+    var hasSyncedReadingPositionBaseline: Bool { positions.hasSyncedPositionBaseline }
+    func markReadingPositionsSynced(_ syncedTimestamps: [String: Date]) {
+        positions.markPositionsSynced(syncedTimestamps)
+    }
+    func resetReadingPositionSyncBaseline() {
+        positions.resetSyncBaseline()
+    }
     func mergeReadingPositions(_ remote: [String: SyncedReadingPosition], webBooks: [DownloadedWebNovel]) {
         positions.merge(remote, webBooks: webBooks)
     }

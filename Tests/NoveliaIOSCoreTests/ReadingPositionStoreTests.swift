@@ -162,4 +162,68 @@ extension ReadingPositionStoreTests {
         XCTAssertEqual(saved.nativeSourceHash, "text")
         XCTAssertLessThan(saved.updatedAt, Date().addingTimeInterval(1))
     }
+
+    func testDirtyPositionKeysTrackLocalMutationsAndRespectTimestampGuard() throws {
+        let defaults = preferences()
+        let store = ReadingPositionStore(defaults: defaults)
+        XCTAssertFalse(store.hasSyncedPositionBaseline)
+        XCTAssertTrue(store.dirtyPositionKeys.isEmpty)
+
+        store.recordEPUB(hash: "a", fraction: 0.2, spineIndex: 1, chapterOffset: 10, chapterProgression: 0.1)
+        store.recordWeb(id: "syosetu:n1", chapterIndex: 3)
+        XCTAssertEqual(store.dirtyPositionKeys, ["epub:a", "web:syosetu:n1"])
+
+        // 模拟同步前快照时间戳；若同步期间 epub:a 又翻页推进了时间，markPositionsSynced 不得清掉 epub:a。
+        let syncedAtA = try XCTUnwrap(store.epubPosition(hash: "a")?.updatedAt)
+        let syncedAtWeb = try XCTUnwrap(store.all()["web:syosetu:n1"]?.updatedAt)
+        let newerA = SyncedReadingPosition(chapterIndex: 2, fraction: 0.4, updatedAt: syncedAtA.addingTimeInterval(5), chapterOffset: 20)
+        store.mergePosition(key: "epub:a", position: newerA, replacingEqualTimestamp: false)
+
+        store.markPositionsSynced(["epub:a": syncedAtA, "web:syosetu:n1": syncedAtWeb])
+        XCTAssertTrue(store.hasSyncedPositionBaseline)
+        XCTAssertEqual(store.dirtyPositionKeys, ["epub:a"], "同步期间被推进的脏键必须保留待下次同步")
+
+        // 新实例重新加载应保留持久化脏键与基线状态。
+        let reloaded = ReadingPositionStore(defaults: defaults)
+        XCTAssertTrue(reloaded.hasSyncedPositionBaseline)
+        XCTAssertEqual(reloaded.dirtyPositionKeys, ["epub:a"])
+
+        // 远端合并进来的新书进度不应被标记为本地脏键。
+        let remotePos = SyncedReadingPosition(chapterIndex: 5, fraction: 0.5, updatedAt: Date(), chapterOffset: 99)
+        reloaded.merge(["epub:remote": remotePos], webBooks: [])
+        XCTAssertEqual(reloaded.dirtyPositionKeys, ["epub:a"])
+
+        // 重置基线后，所有本地进度都会重新进入脏键集合。
+        reloaded.resetSyncBaseline()
+        XCTAssertFalse(reloaded.hasSyncedPositionBaseline)
+        XCTAssertTrue(reloaded.dirtyPositionKeys.isSuperset(of: ["epub:a", "epub:remote", "web:syosetu:n1"]))
+    }
+
+    func testIncrementalPositionsToSyncAppliesOnlyDirtyAndNewManifestBooks() {
+        let t1 = Date(timeIntervalSince1970: 1000)
+        let t2 = Date(timeIntervalSince1970: 2000)
+        let bookA = LocalWenkuEPUB(id: UUID(), title: "A", filename: "a.epub", addedAt: t1, coverFilename: nil)
+        let bookB = LocalWenkuEPUB(id: UUID(), title: "B", filename: "b.epub", addedAt: t1, coverFilename: nil)
+        var manifest = WebDAVManifest()
+        manifest.wenkuBooks = [
+            WebDAVBook(record: bookA, assets: [WebDAVAsset(filename: "a.epub", hash: "hashA", size: 10)]),
+            WebDAVBook(record: bookB, assets: [WebDAVAsset(filename: "b.epub", hash: "hashB", size: 10)]),
+        ]
+        let remote: [String: SyncedReadingPosition] = [
+            "epub:hashA": SyncedReadingPosition(chapterIndex: 1, fraction: 0.1, updatedAt: t1),
+            "epub:deleted": SyncedReadingPosition(chapterIndex: 9, fraction: 0.9, updatedAt: t1),
+        ]
+        let local: [String: SyncedReadingPosition] = [
+            "epub:hashA": SyncedReadingPosition(chapterIndex: 2, fraction: 0.3, updatedAt: t2),
+            "epub:hashB": SyncedReadingPosition(chapterIndex: 4, fraction: 0.5, updatedAt: t2),
+        ]
+
+        // 已建立基线且仅 hashA 为脏键：保留 hashA 更新、补齐远端缺失的新书 hashB、裁剪已删的 deleted。
+        let incremental = WebDAVSyncPlanner.positionsToSyncIncremental(
+            local: local, dirtyKeys: ["epub:hashA"], hasSyncedBaseline: true, remote: remote, in: manifest
+        )
+        XCTAssertEqual(incremental["epub:hashA"]?.chapterIndex, 2)
+        XCTAssertEqual(incremental["epub:hashB"]?.chapterIndex, 4)
+        XCTAssertNil(incremental["epub:deleted"])
+    }
 }

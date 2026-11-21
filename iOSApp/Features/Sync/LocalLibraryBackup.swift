@@ -292,6 +292,7 @@ enum LocalLibraryBackupService {
         progress("正在合并阅读进度与书签…")
         if !manifest.positions.isEmpty {
             local.mergeReadingPositions(manifest.positions, webBooks: web.books)
+            local.resetReadingPositionSyncBaseline()
             summary.mergedPositions = manifest.positions.count
         }
         if let series = manifest.librarySeries {

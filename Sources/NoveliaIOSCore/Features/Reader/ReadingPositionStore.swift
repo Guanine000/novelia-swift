@@ -12,9 +12,42 @@ final class ReadingPositionStore: ReadingPositionSynchronizing {
     var changes: AnyPublisher<Void, Never> { changeSubject.eraseToAnyPublisher() }
     private let defaults: UserDefaults
     private var cache: [String: SyncedReadingPosition]?
+    private var dirtyKeysCache: Set<String>?
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
     private static let key = "readingPositions.v1"
+    private static let dirtyKeysStorageKey = "readingPositions.dirtyKeys.v1"
+    private static let syncedBaselineKey = "readingPositions.syncedBaseline.v1"
+
+    var dirtyPositionKeys: Set<String> {
+        if let dirtyKeysCache { return dirtyKeysCache }
+        let loaded = Set(defaults.stringArray(forKey: Self.dirtyKeysStorageKey) ?? [])
+        dirtyKeysCache = loaded
+        return loaded
+    }
+
+    var hasSyncedPositionBaseline: Bool {
+        defaults.bool(forKey: Self.syncedBaselineKey)
+    }
+
+    func markPositionsSynced(_ syncedTimestamps: [String: Date]) {
+        var remaining = dirtyPositionKeys
+        let current = all()
+        for (key, syncedAt) in syncedTimestamps {
+            // 若同步期间用户又翻页推进了 updatedAt，则保留该键待下次同步。
+            if let latest = current[key], latest.updatedAt > syncedAt { continue }
+            remaining.remove(key)
+        }
+        saveDirtyKeys(remaining)
+        if !defaults.bool(forKey: Self.syncedBaselineKey) {
+            defaults.set(true, forKey: Self.syncedBaselineKey)
+        }
+    }
+
+    func resetSyncBaseline() {
+        defaults.set(false, forKey: Self.syncedBaselineKey)
+        saveDirtyKeys(Set(all().keys))
+    }
 
     func all() -> [String: SyncedReadingPosition] {
         if let cache { return cache }
@@ -28,13 +61,14 @@ final class ReadingPositionStore: ReadingPositionSynchronizing {
         var next = all()
         guard position.updatedAt > (next[key]?.updatedAt ?? .distantPast) || (replacingEqualTimestamp && position.updatedAt == next[key]?.updatedAt) else { return }
         next[key] = position
-        save(next)
+        save(next, dirtyKeysToMark: [key])
     }
 
     func recordWeb(id: String, chapterIndex: Int) {
+        let positionKey = "web:\(id)"
         var positions = all()
-        positions["web:\(id)"] = SyncedReadingPosition(chapterIndex: chapterIndex, fraction: nil, updatedAt: Date())
-        save(positions)
+        positions[positionKey] = SyncedReadingPosition(chapterIndex: chapterIndex, fraction: nil, updatedAt: Date())
+        save(positions, dirtyKeysToMark: [positionKey])
     }
 
     func recordEPUB(hash: String, fraction: Double, spineIndex: Int, chapterOffset: Int?, chapterProgression: Double?) {
@@ -44,21 +78,23 @@ final class ReadingPositionStore: ReadingPositionSynchronizing {
 
     func recordEPUB(hash: String, fraction: Double, spineIndex: Int, chapterOffset: Int?, chapterProgression: Double?,
                     nativeChapterOffset: Int?, nativeSourceHash: String?) {
+        let positionKey = "epub:\(hash)"
         var positions = all()
-        positions["epub:\(hash)"] = SyncedReadingPosition(chapterIndex: spineIndex,
+        positions[positionKey] = SyncedReadingPosition(chapterIndex: spineIndex,
             fraction: min(1, max(0, fraction)), updatedAt: Date(), chapterOffset: chapterOffset,
             nativeChapterOffset: nativeChapterOffset, nativeSourceHash: nativeSourceHash, chapterProgression: chapterProgression.map { min(1, max(0, $0)) })
-        save(positions)
+        save(positions, dirtyKeysToMark: [positionKey])
     }
 
     func epubPosition(hash: String) -> SyncedReadingPosition? { all()["epub:\(hash)"] }
 
     /// 滚动和分页阅读器共用的 TXT 阅读位置，以书籍文件哈希同步。
     func recordTXT(hash: String, position: TXTReadingPosition) {
+        let positionKey = "txt:\(hash)"
         var positions = all()
-        positions["txt:\(hash)"] = SyncedReadingPosition(chapterIndex: position.chapter, fraction: nil, updatedAt: Date(),
+        positions[positionKey] = SyncedReadingPosition(chapterIndex: position.chapter, fraction: nil, updatedAt: Date(),
             chapterOffset: position.offset, unit: position.unit, unitCount: position.unitCount)
-        save(positions)
+        save(positions, dirtyKeysToMark: [positionKey])
     }
 
     func txtPosition(hash: String) -> TXTReadingPosition? {
@@ -72,11 +108,17 @@ final class ReadingPositionStore: ReadingPositionSynchronizing {
     @discardableResult
     func pruneFilePositions(keepingHashes: Set<String>, olderThan cutoff: Date) -> Int {
         let positions = all()
+        var removedKeys: Set<String> = []
         let kept = positions.filter { key, position in
             guard let hash = Self.fileHash(fromKey: key) else { return true }
-            return keepingHashes.contains(hash) || position.updatedAt >= cutoff
+            let keep = keepingHashes.contains(hash) || position.updatedAt >= cutoff
+            if !keep { removedKeys.insert(key) }
+            return keep
         }
         save(kept)
+        if !removedKeys.isEmpty {
+            saveDirtyKeys(dirtyPositionKeys.subtracting(removedKeys))
+        }
         return positions.count - kept.count
     }
 
@@ -89,29 +131,64 @@ final class ReadingPositionStore: ReadingPositionSynchronizing {
     func merge(_ remote: [String: SyncedReadingPosition], webBooks: [DownloadedWebNovel]) {
         var positions = all()
         let progress = ReadingProgressStore(defaults: defaults)
+        var locallyBackfilled: Set<String> = []
+        var changedWebBookIDs: Set<String> = []
+
         for book in webBooks {
             let key = "web:\(book.id)"
             if positions[key] == nil, let index = progress.chapterIndex(novelID: book.id) {
                 positions[key] = SyncedReadingPosition(
                     chapterIndex: index, fraction: nil,
                     updatedAt: progress.updatedAt(novelID: book.id) ?? .distantPast)
+                locallyBackfilled.insert(key)
             }
         }
-        positions = SyncedReadingPosition.merged(positions, remote)
-        for book in webBooks {
-            if let position = positions["web:\(book.id)"], let index = position.chapterIndex {
-                progress.save(chapterIndex: index, updatedAt: position.updatedAt, novelID: book.id)
+
+        // 只逐键比较远端有值且发生实际变更的条目，避免每次同步无差别回写全部书目的进度。
+        for (key, remotePosition) in remote {
+            let localPosition = positions[key]
+            if let localPosition {
+                if localPosition == remotePosition { continue }
+                let winner = SyncedReadingPosition.merged([key: localPosition], [key: remotePosition])[key]
+                if let winner, winner != localPosition {
+                    positions[key] = winner
+                    if key.hasPrefix("web:") { changedWebBookIDs.insert(String(key.dropFirst(4))) }
+                }
+            } else {
+                positions[key] = remotePosition
+                if key.hasPrefix("web:") { changedWebBookIDs.insert(String(key.dropFirst(4))) }
             }
         }
-        save(positions)
+
+        if !changedWebBookIDs.isEmpty {
+            for book in webBooks where changedWebBookIDs.contains(book.id) {
+                if let position = positions["web:\(book.id)"], let index = position.chapterIndex {
+                    progress.save(chapterIndex: index, updatedAt: position.updatedAt, novelID: book.id)
+                }
+            }
+        }
+        save(positions, dirtyKeysToMark: locallyBackfilled)
     }
 
-    private func save(_ positions: [String: SyncedReadingPosition]) {
+    private func save(_ positions: [String: SyncedReadingPosition], dirtyKeysToMark: Set<String> = []) {
+        if !dirtyKeysToMark.isEmpty {
+            saveDirtyKeys(dirtyPositionKeys.union(dirtyKeysToMark))
+        }
         guard positions != cache else { return }
         if let data = try? JSONEncoder().encode(positions) {
             defaults.set(data, forKey: Self.key)
             cache = positions
             changeSubject.send()
+        }
+    }
+
+    private func saveDirtyKeys(_ keys: Set<String>) {
+        guard keys != dirtyKeysCache else { return }
+        dirtyKeysCache = keys
+        if keys.isEmpty {
+            defaults.removeObject(forKey: Self.dirtyKeysStorageKey)
+        } else {
+            defaults.set(Array(keys).sorted(), forKey: Self.dirtyKeysStorageKey)
         }
     }
 }
