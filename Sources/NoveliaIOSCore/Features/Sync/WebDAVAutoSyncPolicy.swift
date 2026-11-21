@@ -120,6 +120,7 @@ enum WebDAVAutoSyncPolicy {
             hasher.add("wenku", wenku.books)
             hasher.add("positions", local.readingPositions)
             hasher.add("series", local.librarySeries)
+            hasher.add("readingStatuses", local.libraryReadingStatuses)
             hasher.add("bookmarks", local.bookmarks)
             hasher.add("textProjections", local.textProjections)
             hasher.add("annotations", local.annotations)

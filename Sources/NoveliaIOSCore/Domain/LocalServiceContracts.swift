@@ -63,6 +63,13 @@ extension ReadingPositionSynchronizing {
 protocol LibrarySeriesManaging: AnyObject {
     var series: LibrarySeriesState { get }
     func applySynced(_ state: LibrarySeriesState)
+    var readingStatuses: LibraryBookStatusState { get }
+    func applySynced(_ state: LibraryBookStatusState)
+}
+
+extension LibrarySeriesManaging {
+    var readingStatuses: LibraryBookStatusState { LibraryBookStatusState() }
+    func applySynced(_ state: LibraryBookStatusState) {}
 }
 
 /// 阅读计时事件与开关；由 App 连接记录实现，阅读 UI 不依赖具体统计 Store。

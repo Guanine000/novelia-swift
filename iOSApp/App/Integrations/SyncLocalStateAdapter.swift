@@ -79,6 +79,8 @@ struct AppWebDAVSyncLocalState: WebDAVSyncLocalState {
     }
     var librarySeries: LibrarySeriesState { library.series }
     func applyLibrarySeries(_ series: LibrarySeriesState) { library.applySynced(series) }
+    var libraryReadingStatuses: LibraryBookStatusState { library.readingStatuses }
+    func applyLibraryReadingStatuses(_ statuses: LibraryBookStatusState) { library.applySynced(statuses) }
     var bookmarks: [String: ReaderBookmark] { bookmarkStore.records }
     func applyBookmarks(_ bookmarks: [String: ReaderBookmark]) throws { try bookmarkStore.applySynced(bookmarks) }
     var textProjections: [String: ReaderTextProjectionRecord] { readerSettings.textProjectionRecords }

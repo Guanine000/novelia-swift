@@ -36,6 +36,8 @@ protocol WebDAVSyncLocalState {
     func mergeReadingPositions(_ remote: [String: SyncedReadingPosition], webBooks: [DownloadedWebNovel])
     var librarySeries: LibrarySeriesState { get }
     func applyLibrarySeries(_ series: LibrarySeriesState)
+    var libraryReadingStatuses: LibraryBookStatusState { get }
+    func applyLibraryReadingStatuses(_ statuses: LibraryBookStatusState)
     /// 阅读器书签（含删除墓碑），随书籍同步。
     var webEPUBMaps: [String: WebNovelEPUBMap] { get }
     func applyWebEPUBMaps(_ maps: [String: WebNovelEPUBMap]) throws
@@ -69,6 +71,8 @@ extension WebDAVSyncLocalState {
     var hasSyncedReadingPositionBaseline: Bool { false }
     func markReadingPositionsSynced(_ syncedTimestamps: [String: Date]) {}
     func resetReadingPositionSyncBaseline() {}
+    var libraryReadingStatuses: LibraryBookStatusState { LibraryBookStatusState() }
+    func applyLibraryReadingStatuses(_ statuses: LibraryBookStatusState) {}
     var webEPUBMaps: [String: WebNovelEPUBMap] { [:] }
     func applyWebEPUBMaps(_ maps: [String: WebNovelEPUBMap]) throws {}
     var bookmarks: [String: ReaderBookmark] { [:] }
@@ -262,6 +266,13 @@ final class WebDAVSyncEngine {
             )
             syncedPositionTimestamps = Dictionary(uniqueKeysWithValues: manifest.positions.map { ($0.key, $0.value.updatedAt) })
             manifest.librarySeries = LibrarySeriesState.merged(local.librarySeries, manifest.librarySeries ?? LibrarySeriesState())
+            let mergedReadingStatuses = LibraryBookStatusState.merged(
+                local.libraryReadingStatuses,
+                manifest.libraryReadingStatuses ?? LibraryBookStatusState()
+            )
+            if manifest.libraryReadingStatuses != nil || !mergedReadingStatuses.statuses.isEmpty {
+                manifest.libraryReadingStatuses = mergedReadingStatuses
+            }
             let bookmarks = WebDAVSyncPlanner.bookmarksToSync(
                 ReaderBookmark.merged(local.bookmarks, manifest.bookmarks ?? [:]), in: manifest)
             if manifest.bookmarks != nil || !bookmarks.isEmpty { manifest.bookmarks = bookmarks }
@@ -361,6 +372,7 @@ final class WebDAVSyncEngine {
         }
         if options.tags { local.applyBlockedTags(manifest.blockedTags ?? [:]) }
         if options.books, let series = manifest.librarySeries { local.applyLibrarySeries(series) }
+        if options.books, let statuses = manifest.libraryReadingStatuses { local.applyLibraryReadingStatuses(statuses) }
         if options.books, let bookmarks = manifest.bookmarks { try local.applyBookmarks(bookmarks) }
         if options.books, let projections = manifest.textProjections { local.applyTextProjections(projections) }
         if options.books, let annotations = manifest.annotations { try local.applyAnnotations(annotations) }

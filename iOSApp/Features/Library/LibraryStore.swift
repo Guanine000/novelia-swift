@@ -144,6 +144,7 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
     }
 
     @Published private(set) var series: LibrarySeriesState
+    @Published private(set) var readingStatuses: LibraryBookStatusState
     @Published private(set) var positions: [String: SyncedReadingPosition] = [:]
     @Published private(set) var lastOpened: [String: Date]
     /// 书籍标识 → 文件内容哈希，由 `refreshHashes` 更新。
@@ -154,6 +155,7 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
     private let readingPositions: any ReadingPositionProviding
     private let defaults: UserDefaults
     private let seriesURL: URL
+    private let readingStatusesURL: URL
     private var hashRefreshGeneration = 0
 
     private enum Key {
@@ -169,7 +171,9 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
         let directory = support.appendingPathComponent("Library", isDirectory: true)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         seriesURL = directory.appendingPathComponent("series.json")
+        readingStatusesURL = directory.appendingPathComponent("readingStatuses.json")
         series = (try? Data(contentsOf: seriesURL)).flatMap { try? JSONDecoder().decode(LibrarySeriesState.self, from: $0) } ?? LibrarySeriesState()
+        readingStatuses = (try? Data(contentsOf: readingStatusesURL)).flatMap { try? JSONDecoder().decode(LibraryBookStatusState.self, from: $0) } ?? LibraryBookStatusState()
         hashes = defaults.dictionary(forKey: Key.hashes) as? [String: String] ?? [:]
         lastOpened = (defaults.data(forKey: Key.lastOpened)).flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
         self.positions = readingPositions.all()
@@ -378,23 +382,53 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
         save(state)
     }
 
-    /// 书籍在“网络小说/文库”之间移动后，系列归属与最近打开时间随新标识转移。
+    func bookStatus(for book: LibraryBook) -> LibraryBookStatus {
+        readingStatuses.status(forBook: book.key)
+    }
+
+    func bookStatus(forKey key: String) -> LibraryBookStatus {
+        readingStatuses.status(forBook: key)
+    }
+
+    func setBookStatus(_ status: LibraryBookStatus, for book: LibraryBook) {
+        var updated = readingStatuses
+        updated.setStatus(status, forBook: book.key)
+        save(updated)
+    }
+
+    func setBookStatus(_ status: LibraryBookStatus, for books: [LibraryBook]) {
+        guard !books.isEmpty else { return }
+        var updated = readingStatuses
+        let now = Date()
+        for book in books {
+            updated.setStatus(status, forBook: book.key, now: now)
+        }
+        save(updated)
+    }
+
+    /// 书籍在“网络小说/文库”之间移动后，系列归属、阅读状态与最近打开时间随新标识转移。
     func transfer(from oldKey: String, to newKey: String) {
         var state = series
         state.transfer(from: oldKey, to: newKey)
         save(state)
+        var statuses = readingStatuses
+        statuses.transfer(from: oldKey, to: newKey)
+        save(statuses)
         if let opened = lastOpened.removeValue(forKey: oldKey) {
             lastOpened[newKey] = opened
             persistLastOpened()
         }
     }
 
-    /// 书籍已从本机和云端一并删除：移出系列（移出记录带时间，随同步传播）并清除最近打开时间。
+    /// 书籍已从本机和云端一并删除：移出系列（移出记录带时间，随同步传播）并清除阅读状态与最近打开时间。
     /// 只删除本机文件时不调用：同一本书之后可能作为云端书籍显示或被重新下载，应保留原归属。
     func forget(keys: Set<String>) {
         var state = series
         for key in keys { state.assign(book: key, to: nil) }
         save(state)
+        var statuses = readingStatuses
+        statuses.remove(keys: keys)
+        save(statuses)
         let opened = lastOpened.filter { !keys.contains($0.key) }
         if opened.count != lastOpened.count {
             lastOpened = opened
@@ -405,6 +439,11 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
     /// WebDAV 合并后的系列状态。
     func applySynced(_ state: LibrarySeriesState) {
         save(LibrarySeriesState.merged(series, state))
+    }
+
+    /// WebDAV 合并后的阅读状态分类。
+    func applySynced(_ state: LibraryBookStatusState) {
+        save(LibraryBookStatusState.merged(readingStatuses, state))
     }
 
     // MARK: 已删除书籍的残留
@@ -438,6 +477,14 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
         series = state
         if let data = try? JSONEncoder().encode(state) {
             try? data.write(to: seriesURL, options: .atomic)
+        }
+    }
+
+    private func save(_ state: LibraryBookStatusState) {
+        guard state != readingStatuses else { return }
+        readingStatuses = state
+        if let data = try? JSONEncoder().encode(state) {
+            try? data.write(to: readingStatusesURL, options: .atomic)
         }
     }
 

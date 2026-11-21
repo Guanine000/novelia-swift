@@ -240,6 +240,112 @@ struct LibrarySeriesState: Codable, Equatable, Sendable {
     }
 }
 
+// MARK: - Bangumi 风格阅读状态分类
+
+/// 书库书籍的阅读状态分类；未显式设置或新导入的书默认归入「在读」。
+enum LibraryBookStatus: String, Codable, CaseIterable, Identifiable, Sendable {
+    case reading
+    case wantToRead
+    case completed
+    case onHold
+    case dropped
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .reading: "在读"
+        case .wantToRead: "想读"
+        case .completed: "读过"
+        case .onHold: "搁置"
+        case .dropped: "抛弃"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .reading: "book"
+        case .wantToRead: "bookmark"
+        case .completed: "checkmark.circle"
+        case .onHold: "pause.circle"
+        case .dropped: "xmark.circle"
+        }
+    }
+}
+
+/// 书库顶部的阅读状态筛选，包含「全部」与五种具体状态。
+enum LibraryBookStatusFilter: String, CaseIterable, Identifiable, Sendable {
+    case all
+    case reading
+    case wantToRead
+    case completed
+    case onHold
+    case dropped
+
+    var id: String { rawValue }
+
+    var title: String {
+        status?.title ?? "全部"
+    }
+
+    var status: LibraryBookStatus? {
+        switch self {
+        case .all: nil
+        case .reading: .reading
+        case .wantToRead: .wantToRead
+        case .completed: .completed
+        case .onHold: .onHold
+        case .dropped: .dropped
+        }
+    }
+
+    func includes(_ value: LibraryBookStatus) -> Bool {
+        guard let status else { return true }
+        return status == value
+    }
+}
+
+/// 单本书的阅读状态记录；带更新时间以便 WebDAV 多设备按较新时间合并。
+struct LibraryBookStatusEntry: Codable, Equatable, Sendable {
+    var status: LibraryBookStatus
+    var updatedAt: Date
+}
+
+/// 书库书籍阅读状态表，按键（`web:<作品 ID>` 或 `wenku:<UUID>`）保存；未记录的书默认视为「在读」。
+struct LibraryBookStatusState: Codable, Equatable, Sendable {
+    var statuses: [String: LibraryBookStatusEntry] = [:]
+
+    func status(forBook key: String) -> LibraryBookStatus {
+        statuses[key]?.status ?? .reading
+    }
+
+    /// 设置书籍阅读状态；即使切回默认的「在读」也写入时间戳，确保多设备同步时能覆盖远端旧状态。
+    mutating func setStatus(_ status: LibraryBookStatus, forBook key: String, now: Date = Date()) {
+        if let existing = statuses[key], existing.status == status { return }
+        statuses[key] = LibraryBookStatusEntry(status: status, updatedAt: now)
+    }
+
+    /// 书籍在“网络小说/文库”之间移动后标识改变，阅读状态随之转移。
+    mutating func transfer(from oldKey: String, to newKey: String, now: Date = Date()) {
+        guard oldKey != newKey, let entry = statuses.removeValue(forKey: oldKey) else { return }
+        statuses[newKey] = LibraryBookStatusEntry(status: entry.status, updatedAt: max(entry.updatedAt, now))
+    }
+
+    /// 书籍已从本机和云端一并删除时清理本地状态记录。
+    mutating func remove(keys: Set<String>) {
+        for key in keys { statuses.removeValue(forKey: key) }
+    }
+
+    /// 按键比较更新时间，较新的一方胜出；时间相同时保留本地。
+    static func merged(_ local: Self, _ remote: Self) -> Self {
+        var result = local
+        for (key, item) in remote.statuses where item.updatedAt > (result.statuses[key]?.updatedAt ?? .distantPast) {
+            result.statuses[key] = item
+        }
+        return result
+    }
+}
+
 // MARK: - 书架更新检查聚合模型
 
 /// 单本网络小说检查更新的命中结果。

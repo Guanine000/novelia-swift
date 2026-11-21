@@ -45,6 +45,8 @@ struct LibraryView: View {
     @State private var isDropTargeted = false
     /// 列表与封面网格之间切换；选择记在偏好里，下次打开书库沿用。
     @AppStorage("library.booksLayout") private var booksLayout: LibraryBooksLayout = .list
+    /// 阅读状态筛选；首次默认选中「在读」，之后记住上次选择。
+    @AppStorage("library.readingStatusFilter") private var statusFilter: LibraryBookStatusFilter = .reading
 
     private var allBooks: [LibraryBook] {
         // 只给哈希／孤立状态清理完整书库，不能把尚未读取的另一库误判为已删除。
@@ -94,10 +96,11 @@ struct LibraryView: View {
 
     /// 多选范围与当前列表一致：全部、未分组，或统一搜索结果。
     private var selectableBooks: [LibraryBook] {
-        let books = state.displayBooks(from: allBooks).filter { sourceFilter.includes(isWenku: $0.isWenku) }
+        let sourceFiltered = state.displayBooks(from: allBooks).filter { sourceFilter.includes(isWenku: $0.isWenku) }
         if isSearching, !LibraryOrganizer.normalized(query).isEmpty {
-            return books.filter { LibraryOrganizer.matches(title: $0.title, author: $0.author, query: query) }
+            return sourceFiltered.filter { LibraryOrganizer.matches(title: $0.title, author: $0.author, query: query) }
         }
+        let books = sourceFiltered.filter { statusFilter.includes(state.bookStatus(for: $0)) }
         switch segment {
         case .all: return books
         case .books: return books.filter { state.series.seriesID(forBook: $0.key) == nil }
@@ -105,9 +108,24 @@ struct LibraryView: View {
         }
     }
 
+    private func readingStatusCounts(in books: [LibraryBook]) -> [LibraryBookStatusFilter: Int] {
+        var counts: [LibraryBookStatusFilter: Int] = [.all: books.count]
+        for book in books {
+            switch state.bookStatus(for: book) {
+            case .reading: counts[.reading, default: 0] += 1
+            case .wantToRead: counts[.wantToRead, default: 0] += 1
+            case .completed: counts[.completed, default: 0] += 1
+            case .onHold: counts[.onHold, default: 0] += 1
+            case .dropped: counts[.dropped, default: 0] += 1
+            }
+        }
+        return counts
+    }
+
     var body: some View {
         let sourceBooks = allBooks
-        let books = state.displayBooks(from: sourceBooks).filter { sourceFilter.includes(isWenku: $0.isWenku) }
+        let sourceFiltered = state.displayBooks(from: sourceBooks).filter { sourceFilter.includes(isWenku: $0.isWenku) }
+        let books = sourceFiltered.filter { statusFilter.includes(state.bookStatus(for: $0)) }
         let selectable = selectableBooks
         ScrollViewReader { browserScroll in
         List {
@@ -126,17 +144,21 @@ struct LibraryView: View {
             if sourceBooks.isEmpty {
                 // 空状态放在 overlay 中显示；CompatUnavailable 作为 List 行时操作按钮会被压成细长色条。
             } else if isSearching && !LibraryOrganizer.normalized(query).isEmpty {
-                searchResults(books)
+                searchResults(sourceFiltered)
             } else {
-                let recent = recentBooks(in: books)
-                if !recent.isEmpty {
-                    LibraryRecentCarousel(books: recent) { open($0) }
-                        .frame(maxWidth: 1120)
-                        .frame(maxWidth: .infinity)
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 10, trailing: 0))
+                if statusFilter == .all || statusFilter == .reading {
+                    let recent = recentBooks(in: books)
+                    if !recent.isEmpty {
+                        LibraryRecentCarousel(books: recent) { open($0) }
+                            .frame(maxWidth: 1120)
+                            .frame(maxWidth: .infinity)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 10, trailing: 0))
+                    }
                 }
+                LibraryReadingStatusBar(selection: $statusFilter, counts: readingStatusCounts(in: sourceFiltered))
+                    .libraryListRow()
                 // 全部包含已归入系列的书；未分组只列出没有系列归属的书。
                 let ungrouped = books.filter { state.series.seriesID(forBook: $0.key) == nil }
                 Picker("书库内容", selection: $segment) {
@@ -151,13 +173,9 @@ struct LibraryView: View {
                     let listedBooks = segment == .all ? books : ungrouped
                     if listedBooks.isEmpty {
                         sourceFilterMenu.libraryListRow()
-                        CompatUnavailable {
-                            Label("没有可显示的书籍", systemImage: "books.vertical")
-                        } description: {
-                            Text(segment == .books ? "可以切换来源筛选，或到“全部”中查看已归类的书籍。" : "可以切换来源筛选，查看其他来源的书籍。")
-                        }
-                        .padding(.top, 20)
-                        .libraryListRow()
+                        emptyFilteredState
+                            .padding(.top, 20)
+                            .libraryListRow()
                     } else {
                         HStack {
                             sourceFilterMenu
@@ -497,9 +515,34 @@ struct LibraryView: View {
         }
     }
 
+    private var emptyFilteredState: some View {
+        CompatUnavailable {
+            Label(
+                statusFilter == .all ? "没有可显示的书籍" : "“\(statusFilter.title)”中暂无书籍",
+                systemImage: statusFilter.status?.systemImage ?? "books.vertical"
+            )
+        } description: {
+            Text(
+                statusFilter == .all
+                    ? (segment == .books ? "可以切换来源筛选，或到“全部”中查看已归类的书籍。" : "可以切换来源筛选，查看其他来源的书籍。")
+                    : "可在书籍菜单或长按封面中切换阅读状态，或切回“全部”查看所有书籍。"
+            )
+        } actions: {
+            if statusFilter != .all {
+                Button("查看全部书籍") {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        statusFilter = .all
+                    }
+                }
+                .buttonStyle(.bordered)
+                .tint(NoveliaStyle.brandGreen)
+            }
+        }
+    }
+
     private func visibleSeries(in books: [LibraryBook]) -> [LibrarySeries] {
         state.series.activeSeries.filter { series in
-            sourceFilter == .all || books.contains { state.series.seriesID(forBook: $0.key) == series.id }
+            (sourceFilter == .all && statusFilter == .all) || books.contains { state.series.seriesID(forBook: $0.key) == series.id }
         }
     }
 
@@ -828,6 +871,7 @@ private struct LibraryAddToSeriesSheet: View {
 /// 系列的重命名与解散菜单项；用于系列行的长按菜单和系列详情的“更多”菜单。
 /// 菜单关闭后才能弹出对话框，所以对话框由页面上的 `LibraryBookActionDialogs` 统一显示。
 private struct LibrarySeriesMenuItems: View {
+    @EnvironmentObject private var state: LibraryStateStore
     let seriesID: String
     let name: String
     /// 系列中的书；压缩后分享整卷时使用。
@@ -837,6 +881,19 @@ private struct LibrarySeriesMenuItems: View {
     private var shareableCount: Int { books.filter { !$0.isCloudOnly }.count }
 
     var body: some View {
+        if !books.isEmpty {
+            Menu {
+                ForEach(LibraryBookStatus.allCases) { status in
+                    Button {
+                        state.setBookStatus(status, for: books)
+                    } label: {
+                        Label(status.title, systemImage: status.systemImage)
+                    }
+                }
+            } label: {
+                Label("批量设置阅读状态", systemImage: "bookmark")
+            }
+        }
         Button {
             actions.prepareArchiveShare(books: books, title: "\(name) \(books.count) 本")
         } label: {

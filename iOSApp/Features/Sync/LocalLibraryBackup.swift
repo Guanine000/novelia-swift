@@ -86,6 +86,9 @@ enum LocalLibraryBackupService {
         progress("正在收集阅读进度与偏好…")
         manifest.positions = local.readingPositions
         manifest.librarySeries = local.librarySeries
+        if !local.libraryReadingStatuses.statuses.isEmpty {
+            manifest.libraryReadingStatuses = local.libraryReadingStatuses
+        }
         manifest.bookmarks = local.bookmarks
         manifest.textProjections = local.textProjections
         manifest.annotations = local.annotations
@@ -297,6 +300,9 @@ enum LocalLibraryBackupService {
         }
         if let series = manifest.librarySeries {
             local.applyLibrarySeries(LibrarySeriesState.merged(local.librarySeries, series))
+        }
+        if let statuses = manifest.libraryReadingStatuses {
+            local.applyLibraryReadingStatuses(LibraryBookStatusState.merged(local.libraryReadingStatuses, statuses))
         }
         if let bookmarks = manifest.bookmarks, !bookmarks.isEmpty {
             try local.applyBookmarks(ReaderBookmark.merged(local.bookmarks, bookmarks))

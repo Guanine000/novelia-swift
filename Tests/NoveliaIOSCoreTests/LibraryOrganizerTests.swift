@@ -183,4 +183,37 @@ final class LibraryOrganizerTests: XCTestCase {
         )
         XCTAssertNil(ShelfUpdateSummary.diff(local: downloaded, remote: mismatched))
     }
+
+    func testReadingStatusStateDefaultsAndMergesByLatestTimestamp() {
+        let t1 = Date(timeIntervalSince1970: 1_000)
+        let t2 = Date(timeIntervalSince1970: 2_000)
+        let t3 = Date(timeIntervalSince1970: 3_000)
+
+        var local = LibraryBookStatusState()
+        // 未显式设置的书默认归入「在读」
+        XCTAssertEqual(local.status(forBook: "wenku:a"), .reading)
+
+        local.setStatus(.completed, forBook: "wenku:a", now: t1)
+        local.setStatus(.onHold, forBook: "web:b", now: t2)
+        XCTAssertEqual(local.status(forBook: "wenku:a"), .completed)
+        XCTAssertEqual(local.status(forBook: "web:b"), .onHold)
+
+        var remote = LibraryBookStatusState()
+        // 远端把 wenku:a 切回默认的「在读」且时间更新，合并后应覆盖本地的「读过」
+        remote.setStatus(.reading, forBook: "wenku:a", now: t3)
+        // 远端对 web:b 的状态较旧，合并后保留本地的「搁置」
+        remote.setStatus(.dropped, forBook: "web:b", now: t1)
+        remote.setStatus(.wantToRead, forBook: "wenku:c", now: t2)
+
+        let merged = LibraryBookStatusState.merged(local, remote)
+        XCTAssertEqual(merged.status(forBook: "wenku:a"), .reading)
+        XCTAssertEqual(merged.status(forBook: "web:b"), .onHold)
+        XCTAssertEqual(merged.status(forBook: "wenku:c"), .wantToRead)
+
+        // 移动书籍键时同步转移状态
+        var moved = merged
+        moved.transfer(from: "wenku:c", to: "web:c", now: t3)
+        XCTAssertEqual(moved.status(forBook: "web:c"), .wantToRead)
+        XCTAssertNil(moved.statuses["wenku:c"])
+    }
 }

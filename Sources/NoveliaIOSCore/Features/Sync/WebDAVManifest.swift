@@ -99,6 +99,8 @@ struct WebDAVManifest: Codable {
     var fonts: [String: SyncedImportedFont]? = nil
     /// 书库系列与书籍归属；随书籍同步，旧版应用解码时忽略。
     var librarySeries: LibrarySeriesState? = nil
+    /// 书库书籍的阅读状态分类（在读/想读/读过/搁置/抛弃）；随书籍同步，旧版应用解码时忽略。
+    var libraryReadingStatuses: LibraryBookStatusState? = nil
     /// 最近三十天从云端删除的书 `[书库键: 删除时间]`，见 `WebDAVDeletedBooks`。过期后旧设备可能再次上传这些书。
     var deletedBooks: [String: Date]? = nil
     /// 阅读器书签 `[书签 ID: 书签]`，含删除墓碑；随书籍同步。0.22.0 之前的版本不识别，写回清单时会丢弃。

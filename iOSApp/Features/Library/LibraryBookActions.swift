@@ -247,6 +247,19 @@ struct LibrarySelectionBar: View {
         let selected = selected
         let inSeries = selected.filter { state.series.seriesID(forBook: $0.key) != nil }
         Menu {
+            ForEach(LibraryBookStatus.allCases) { status in
+                Button {
+                    state.setBookStatus(status, for: selected)
+                    actions.endSelection()
+                } label: {
+                    Label(status.title, systemImage: status.systemImage)
+                }
+            }
+        } label: {
+            barLabel("状态", systemImage: "bookmark", expanded: expanded)
+        }
+        .disabled(selected.isEmpty)
+        Menu {
             ForEach(state.series.activeSeries) { series in
                 Button(series.name) {
                     selected.forEach {

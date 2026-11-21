@@ -238,6 +238,7 @@ struct LibraryBookMenuItems: View {
 
     var body: some View {
         let currentSeries = state.series.seriesID(forBook: book.key)
+        let currentStatus = state.bookStatus(for: book)
         Button { actions.detailBook = book } label: {
             Label("显示详细信息", systemImage: "info.circle")
         }
@@ -258,6 +259,21 @@ struct LibraryBookMenuItems: View {
             Label("AI 人物词条", systemImage: "person.text.rectangle")
         }
         Divider()
+        Menu {
+            ForEach(LibraryBookStatus.allCases) { status in
+                Button {
+                    state.setBookStatus(status, for: book)
+                } label: {
+                    if currentStatus == status {
+                        Label(status.title, systemImage: "checkmark")
+                    } else {
+                        Label(status.title, systemImage: status.systemImage)
+                    }
+                }
+            }
+        } label: {
+            Label("阅读状态：\(currentStatus.title)", systemImage: currentStatus.systemImage)
+        }
         if case .wenku = book.origin, !book.isCloudOnly {
             Button { actions.editingBook = book } label: {
                 Label("编辑信息", systemImage: "pencil")
@@ -1210,6 +1226,53 @@ struct LibraryShelfUpdateDetailSheet: View {
                     Button("关闭") { onClose() }
                 }
             }
+        }
+    }
+}
+
+// MARK: - Bangumi 风格阅读状态筛选条
+
+/// 书库顶部的五态阅读状态筛选胶囊栏（全部 / 在读 / 想读 / 读过 / 搁置 / 抛弃）。
+struct LibraryReadingStatusBar: View {
+    @Binding var selection: LibraryBookStatusFilter
+    let counts: [LibraryBookStatusFilter: Int]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(LibraryBookStatusFilter.allCases) { filter in
+                    let isSelected = selection == filter
+                    let count = counts[filter] ?? 0
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            selection = filter
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(filter.title)
+                                .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                            Text("\(count)")
+                                .font(.system(size: 11, weight: .medium))
+                                .opacity(isSelected ? 0.9 : 0.7)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .foregroundStyle(isSelected ? Color.white : NoveliaStyle.ink)
+                        .background(
+                            Capsule()
+                                .fill(isSelected ? NoveliaStyle.brandGreen : NoveliaStyle.paper)
+                        )
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(isSelected ? Color.clear : NoveliaStyle.hairline, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(filter.title)，\(count) 本")
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                }
+            }
+            .padding(.vertical, 2)
         }
     }
 }
