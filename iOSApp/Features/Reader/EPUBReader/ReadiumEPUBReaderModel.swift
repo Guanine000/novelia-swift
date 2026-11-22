@@ -163,6 +163,10 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     var publication: Publication?
     var navigationIndex: ReadiumNavigationIndex?
     @Published var currentTOCIndex: Int?
+    /// 当前资源上一次成功的锚点前缘进度。滚动不改变它们；字体、视口或图片引起的重排会清掉。
+    var tocMeasuredResource: Int?
+    var tocMeasuredAnchors: [String: Double] = [:]
+    var tocMeasureGeneration = 0
     var textBook: PagedTextBook?
     var textPositionTask: Task<Void, Never>?
     /// 翻页换算与听书进度共用代次。后发起的写入生效，先完成的过期任务不能把进度写回去。
@@ -251,9 +255,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             toc = await preferGeneratedTOCIfSparse(embedded, publication: publication)
             navigationIndex = ReadiumNavigationIndex(readingOrder: publication.readingOrder,
                                                      tableOfContents: toc.map(\.link))
-            if let index = navigationIndex {
-                navigationIndex = await index.locatingTOCProgressions(in: publication)
-            }
+            resetTOCGeometry()
             let initial = await savedLocator(publication: publication, hash: hash)
             try makeNavigator(initialLocation: initial)
             status = .ready
@@ -295,9 +297,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             positionCount = source.chapterCount
             navigationIndex = ReadiumNavigationIndex(readingOrder: publication.readingOrder,
                                                      tableOfContents: toc.map(\.link))
-            if let index = navigationIndex {
-                navigationIndex = await index.locatingTOCProgressions(in: publication)
-            }
+            resetTOCGeometry()
             guard !publication.readingOrder.isEmpty else { throw ReadiumOpenError.parse("没有可阅读的章节。") }
             let unit = min(max(0, textBook.startUnit), source.chapterCount - 1)
             let initial = try await ReadiumTextPublication.initialLocation(

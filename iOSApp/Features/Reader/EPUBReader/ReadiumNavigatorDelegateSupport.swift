@@ -24,9 +24,8 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         }
         let previous = self.locator
         logLocationChange(from: previous, to: locator)
-        let current = navigationIndex?.tocIndex(for: locator)
-        if currentTOCIndex != current { currentTOCIndex = current }
         self.locator = locator
+        refreshReadiumTOCHighlight(for: locator, measure: true)
         if let chapter = navigationIndex?.resourceIndex(for: locator.href), chapter != annotationDecorationChapter {
             refreshAnnotationDecorations()
         }
@@ -47,6 +46,82 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
 #endif
     }
 
+    /// 丢掉上一轮排版的锚点几何，并让还在飞的脚本结果失效。
+    func invalidateTOCGeometry() {
+        tocMeasuredResource = nil
+        tocMeasuredAnchors = [:]
+        tocMeasureGeneration += 1
+    }
+
+    func resetTOCGeometry() {
+        invalidateTOCGeometry()
+        currentTOCIndex = nil
+    }
+
+    /// 页首语义：用当前资源已测到的锚点前缘，和这次位置回报的视口起点比较。
+    /// 几何尚未返回时回退到该文件第一项。同一资源只有一项时不读 DOM。
+    func refreshReadiumTOCHighlight(for locator: Locator, measure: Bool) {
+        guard let index = navigationIndex, let resource = index.resourceIndex(for: locator.href) else {
+            currentTOCIndex = navigationIndex?.tocIndex(for: locator.href)
+            return
+        }
+        let needsMeasure = index.needsLayoutMeasurement(resource: resource)
+        let measurements: [String: Double]? = needsMeasure
+            ? (tocMeasuredResource == resource ? tocMeasuredAnchors : nil)
+            : [:]
+        let viewport: Double? = needsMeasure
+            ? (measurements == nil ? nil : (locator.locations.progression ?? 0))
+            : (locator.locations.progression ?? 0)
+        if let current = index.highlightIndex(resource: resource, viewportProgression: viewport, measurements: measurements),
+           currentTOCIndex != current {
+            currentTOCIndex = current
+        }
+        guard measure, needsMeasure else { return }
+        scheduleTOCGeometryMeasure(resource: resource)
+    }
+
+    /// 只查询真实导航器当前已加载的 spread。仿真翻页快照、视口恢复和过期代次的结果不写回。
+    func scheduleTOCGeometryMeasure(resource: Int) {
+        guard let index = navigationIndex else { return }
+        let ids = index.fragmentIDs(inResource: resource)
+        guard !ids.isEmpty, let script = ReadiumTOCGeometryScript.source(fragmentIDs: ids) else { return }
+        tocMeasureGeneration += 1
+        let token = ReadiumTOCMeasureToken(generation: tocMeasureGeneration, resource: resource)
+        Task { @MainActor [weak self] in
+            guard let self, self.acceptsTOCMeasure(token), let navigator = self.navigator else { return }
+            let result = await navigator.evaluateJavaScript(script)
+            guard self.acceptsTOCMeasure(token) else { return }
+            let json: String?
+            if case .success(let value) = result {
+                json = value as? String ?? (value as? NSString).map { $0 as String }
+            } else {
+                json = nil
+            }
+            guard let json, let snapshot = ReadiumTOCGeometryScript.parse(jsonString: json),
+                  self.acceptsTOCMeasure(token),
+                  let href = AnyURL(string: snapshot.href),
+                  self.navigationIndex?.resourceIndex(for: href) == token.resource else { return }
+            self.tocMeasuredResource = token.resource
+            self.tocMeasuredAnchors = snapshot.found
+            guard let index = self.navigationIndex,
+                  let current = index.highlightIndex(resource: token.resource,
+                                                     viewportProgression: snapshot.viewportProgression,
+                                                     measurements: snapshot.found),
+                  self.currentTOCIndex != current else { return }
+            self.currentTOCIndex = current
+        }
+    }
+
+    func acceptsTOCMeasure(_ token: ReadiumTOCMeasureToken) -> Bool {
+        guard let locator, let resource = navigationIndex?.resourceIndex(for: locator.href) else { return false }
+        let realNavigator = (curlPreview == nil || curlPreview?.committing == true) && viewportRestoration == nil
+        return ReadiumTOCMeasureGate.shouldApply(
+            requested: token,
+            latest: ReadiumTOCMeasureToken(generation: tocMeasureGeneration, resource: resource),
+            queriedRealNavigator: realNavigator
+        )
+    }
+
     /// 上下边距从安全区边缘起算，与 YueduCoreText 阅读器一致，章节名与正文不再重叠。
     /// Readium 默认取安全区与配置边距的较大值，会让正文顶到章节名所在位置。
     func navigatorContentInset(_ navigator: VisualNavigator) -> UIEdgeInsets? {
@@ -65,6 +140,9 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
     func navigator(_ navigator: VisualNavigator, presentationDidChange presentation: VisualNavigatorPresentation) {
         guard (navigator as AnyObject) === self.navigator else { return }
         (navigator as? UIViewController)?.view.backgroundColor = .clear
+        // 字号、边距或滚动/分页切换会改变栏宽，旧的锚点前缘进度不能再和页首进度比较。
+        invalidateTOCGeometry()
+        if let locator { refreshReadiumTOCHighlight(for: locator, measure: true) }
         // 重开书时首次位置回报可能早于 WebView 完成排版，装饰会被随后加载的页面覆盖；排版变化后重套一次。
         refreshAnnotationDecorations(force: true)
     }

@@ -1,6 +1,5 @@
 import Foundation
 import ReadiumShared
-import SwiftSoup
 #if canImport(NoveliaIOSCore)
 import NoveliaIOSCore
 #endif
@@ -112,7 +111,6 @@ struct ReadiumNavigationIndex {
     }
 
     private let resources: [String: Int]
-    private let tocLinks: [Link]
     /// 只持有资源 href、没有章内位置时使用：每个资源向前填充「最后一个不晚于该资源的目录项」。
     /// 阅读时长分段依赖这个稳定分组，不能改成「该文件的第一项」。
     private let tocByResource: [Int?]
@@ -151,7 +149,6 @@ struct ReadiumNavigationIndex {
             starts[resource] = best
         }
         self.resources = resources
-        tocLinks = tableOfContents
         tocByResource = starts
         tocByHref = byHref
         self.anchors = anchors
@@ -162,7 +159,33 @@ struct ReadiumNavigationIndex {
         anchors.filter { $0.resource == resource }.map(\.fragment)
     }
 
-    /// 写入已经算好的 progression，并标记目录位置可用。键是目录序号。
+    /// 同一资源里需要测量的锚点 id。没有 fragment 的项是文件开头，不查 DOM。
+    func fragmentIDs(inResource resource: Int) -> [String] {
+        anchors.compactMap { anchor in
+            guard anchor.resource == resource, let fragment = anchor.fragment, !fragment.isEmpty else { return nil }
+            return fragment
+        }
+    }
+
+    /// 同一资源有多项且至少有一个章内锚点时，才需要读当前页的几何。
+    func needsLayoutMeasurement(resource: Int) -> Bool {
+        let items = anchors.filter { $0.resource == resource }
+        return items.count > 1 && items.contains { $0.fragment?.isEmpty == false }
+    }
+
+    /// 用一次 DOM 测量决定高亮。`measurements == nil` 表示几何还不可用，当前文件回退到第一项。
+    func highlightIndex(resource: Int, viewportProgression: Double?, measurements: [String: Double]?) -> Int? {
+        ReadiumTOCGeometrySelection.index(
+            anchors: anchors.map {
+                ReadiumTOCGeometrySelection.Anchor(tocIndex: $0.tocIndex, resource: $0.resource, fragment: $0.fragment)
+            },
+            resource: resource,
+            viewportProgression: viewportProgression,
+            measurements: measurements
+        )
+    }
+
+    /// 测试注入已知的布局 progression。打开书籍不再按正文字数估算这些值。
     func applying(progressions: [Int: Double]) -> ReadiumNavigationIndex {
         var copy = self
         for index in copy.anchors.indices {
@@ -172,50 +195,6 @@ struct ReadiumNavigationIndex {
         }
         copy.progressionsReady = true
         return copy
-    }
-
-    /// 打开书籍时为每条目录调用 `publication.locate`。
-    /// Readium 3.11 的 `DefaultLocatorService.locate(_:Link)` 只在没有 fragment 时给出 progression 0，
-    /// 带 fragment 时把 progression 留空。空值和 0 都无法区分同一文件里的锚点，
-    /// 因此同一资源有多项且 locate 没有 progression 时，按正文里该锚点之前的可见文本比例补上。
-    /// 一个资源只有一条目录时不读正文：整章都高亮这一项。
-    func locatingTOCProgressions(in publication: Publication) async -> ReadiumNavigationIndex {
-        var copy = self
-        var perResource: [Int: Int] = [:]
-        for anchor in copy.anchors {
-            if let resource = anchor.resource { perResource[resource, default: 0] += 1 }
-        }
-        var htmlByResource: [Int: String] = [:]
-        for index in copy.anchors.indices {
-            let anchor = copy.anchors[index]
-            guard tocLinks.indices.contains(anchor.tocIndex) else { continue }
-            let link = tocLinks[anchor.tocIndex]
-            let located = await publication.locate(link)
-            if let progression = located?.locations.progression {
-                copy.anchors[index].progression = progression
-                continue
-            }
-            let siblings = anchor.resource.flatMap { perResource[$0] } ?? 0
-            guard let fragment = anchor.fragment, !fragment.isEmpty, siblings > 1,
-                  let resource = anchor.resource else {
-                copy.anchors[index].progression = 0
-                continue
-            }
-            if htmlByResource[resource] == nil {
-                htmlByResource[resource] = await Self.resourceHTML(resource, in: publication) ?? ""
-            }
-            copy.anchors[index].progression = ReadiumTOCFragmentProgression.progression(
-                fragment: fragment, html: htmlByResource[resource] ?? "")
-        }
-        copy.progressionsReady = true
-        return copy
-    }
-
-    private static func resourceHTML(_ resource: Int, in publication: Publication) async -> String? {
-        guard publication.readingOrder.indices.contains(resource),
-              let item = publication.get(publication.readingOrder[resource]),
-              case .success(let html) = await item.read().asString() else { return nil }
-        return html
     }
 
     func resourceIndex(for href: AnyURL) -> Int? {
@@ -281,38 +260,112 @@ struct ReadiumNavigationIndex {
     }
 }
 
-/// 用锚点之前的可见文本 UTF-16 长度占全文的比例，近似 Readium 的资源内 progression。
-/// 跳过 script / style。找不到锚点时返回 nil，不能把失败记成 0，否则又会落到最后一项。
-enum ReadiumTOCFragmentProgression {
-    static func progression(fragment: String?, html: String) -> Double? {
-        guard let wanted = EPUBTOCHighlight.normalizedFragment(fragment) else { return 0 }
-        guard let document = try? SwiftSoup.parse(html), let body = document.body() else { return nil }
-        var total = 0
-        var before: Int?
-        func walk(_ node: Node) {
-            if let element = node as? Element {
-                let name = element.tagName().lowercased()
-                if name == "script" || name == "style" { return }
-                if before == nil, matches(element, wanted) { before = total }
-            }
-            if let text = node as? TextNode {
-                total += text.text().utf16.count
-                return
-            }
-            for child in node.getChildNodes() { walk(child) }
-        }
-        walk(body)
-        guard let before else { return nil }
-        guard total > 0 else { return 0 }
-        return min(1, max(0, Double(before) / Double(total)))
+/// 同一资源内，按锚点前缘的布局进度（不是正文字数比例）选择目录项。
+/// 进度与 Readium 3.11 上报的 `locations.progression` 同一量纲：视口起点。
+/// 一页或双页里同时能看见多节时，只高亮页首已经到达的最后一节；右栏才开始的下一节还不算当前。
+enum ReadiumTOCGeometrySelection {
+    struct Anchor {
+        var tocIndex: Int
+        var resource: Int?
+        var fragment: String?
     }
 
-    private static func matches(_ element: Element, _ fragment: String) -> Bool {
-        for attribute in ["id", "name"] {
-            guard let value = try? element.attr(attribute), !value.isEmpty,
-                  let key = EPUBTOCHighlight.normalizedFragment(value) else { continue }
-            if key == fragment { return true }
+    static func index(anchors: [Anchor], resource: Int, viewportProgression: Double?,
+                      measurements: [String: Double]?) -> Int? {
+        let ready = measurements != nil && viewportProgression != nil
+        let positions: [Double?] = anchors.map { anchor in
+            guard let measurements else { return nil }
+            guard let fragment = anchor.fragment, !fragment.isEmpty else { return 0 }
+            return measurements[fragment]
         }
-        return false
+        guard let selected = InFileTOCSelection.currentIndex(
+            resources: anchors.map(\.resource),
+            positions: positions,
+            resource: resource,
+            position: viewportProgression,
+            positionsReady: ready
+        ), anchors.indices.contains(selected) else { return nil }
+        return anchors[selected].tocIndex
+    }
+}
+
+/// 一次几何查询的身份。代次或资源变了，或者查的不是真实导航器，结果都必须丢掉。
+struct ReadiumTOCMeasureToken: Equatable {
+    var generation: Int
+    var resource: Int
+}
+
+enum ReadiumTOCMeasureGate {
+    static func shouldApply(requested: ReadiumTOCMeasureToken, latest: ReadiumTOCMeasureToken,
+                            queriedRealNavigator: Bool) -> Bool {
+        queriedRealNavigator && requested == latest
+    }
+}
+
+/// 在当前可见文档里测量目录锚点。脚本是自有的，只调用 DOM 的公开几何；
+/// 轴向与 Readium 3.11 `onScroll` 一致：非竖排滚动用 `scrollY / scrollHeight`，
+/// 其余（分栏，以及竖排滚动）用带 RTL 符号的 `scrollX / scrollWidth`。
+enum ReadiumTOCGeometryScript {
+    struct Snapshot: Equatable {
+        /// `readium.link.href`，用来确认量到的是当前资源，而不是还没换掉的上一章。
+        var href: String
+        var viewportProgression: Double
+        var found: [String: Double]
+    }
+
+    static func source(fragmentIDs: [String]) -> String? {
+        guard JSONSerialization.isValidJSONObject(fragmentIDs),
+              let data = try? JSONSerialization.data(withJSONObject: fragmentIDs),
+              let literal = String(data: data, encoding: .utf8) else { return nil }
+        return """
+        (function() {
+          var ids = \(literal);
+          var root = document.scrollingElement || document.documentElement;
+          var style = window.getComputedStyle(document.documentElement);
+          var writingMode = style.writingMode || "";
+          var vertical = writingMode.indexOf("vertical") === 0;
+          var scrollOn = (document.documentElement.style.getPropertyValue("--USER__view") || "").trim() === "readium-scroll-on";
+          var rtl = style.direction === "rtl" || writingMode === "vertical-rl";
+          function progression(rect) {
+            if (scrollOn && !vertical) {
+              var height = root.scrollHeight;
+              if (!(height > 0)) return null;
+              return (rect.top + window.scrollY) / height;
+            }
+            var width = root.scrollWidth;
+            if (!(width > 0)) return null;
+            var raw = rect.left + window.scrollX;
+            return (rtl ? -raw : raw) / width;
+          }
+          var viewport = progression({ top: 0, left: 0 });
+          var href = (typeof readium !== "undefined" && readium.link && typeof readium.link.href === "string") ? readium.link.href : "";
+          var found = {};
+          var missing = [];
+          for (var i = 0; i < ids.length; i++) {
+            var id = ids[i];
+            var element = document.getElementById(id);
+            if (!element) { missing.push(id); continue; }
+            var value = progression(element.getBoundingClientRect());
+            if (value == null || !isFinite(value)) { missing.push(id); continue; }
+            found[id] = value;
+          }
+          return JSON.stringify({ href: href, viewport: viewport, found: found, missing: missing });
+        })()
+        """
+    }
+
+    static func parse(jsonString: String) -> Snapshot? {
+        guard let data = jsonString.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let viewport = (object["viewport"] as? NSNumber)?.doubleValue
+        guard let href = object["href"] as? String, !href.isEmpty,
+              let viewport, viewport.isFinite, object["found"] is [String: Any] else { return nil }
+        let foundObject = object["found"] as? [String: Any] ?? [:]
+        var found: [String: Double] = [:]
+        for (key, value) in foundObject {
+            guard let number = (value as? NSNumber)?.doubleValue, number.isFinite else { continue }
+            found[key] = number
+        }
+        return Snapshot(href: href, viewportProgression: viewport, found: found)
     }
 }

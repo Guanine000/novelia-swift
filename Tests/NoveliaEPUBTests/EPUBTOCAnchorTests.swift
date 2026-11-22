@@ -37,32 +37,55 @@ final class EPUBTOCAnchorTests: XCTestCase {
                                               pageSourceOffset: 0, anchorOffsets: [:])
         XCTAssertEqual(nextFile, 10, "进入后一个没有目录项的文件时，高亮前一文件已经开始的最后一节")
 
-        let html = chapterHTML()
-        var progressions: [Int: Double] = [0: try XCTUnwrap(ReadiumTOCFragmentProgression.progression(fragment: nil, html: html))]
-        for index in 0..<10 {
-            let value = try XCTUnwrap(ReadiumTOCFragmentProgression.progression(fragment: "id\(index)", html: html))
-            if index > 0 { XCTAssertGreaterThan(value, progressions[index]!) }
-            progressions[index + 1] = value
-        }
         let readingOrder = [Link(href: "Section0005.xhtml", mediaType: .xhtml)]
         var links = [Link(href: "Section0005.xhtml", mediaType: .xhtml, title: "file")]
         links += (0..<10).map { Link(href: "Section0005.xhtml#id\($0)", mediaType: .xhtml, title: "id\($0)") }
-        let pending = ReadiumNavigationIndex(readingOrder: readingOrder, tableOfContents: links)
+        let index = ReadiumNavigationIndex(readingOrder: readingOrder, tableOfContents: links)
         var expectedFragments: [String?] = [nil]
         expectedFragments.append(contentsOf: (0..<10).map { "id\($0)" })
-        XCTAssertEqual(pending.fragments(inResource: 0), expectedFragments)
-        let href = readingOrder[0].url()
-        XCTAssertEqual(pending.tocIndex(for: Locator(href: href, mediaType: .xhtml, locations: .init(progression: 0.99))), 0,
-                       "progression 尚未就绪时回退到该文件第一项")
+        XCTAssertEqual(index.fragments(inResource: 0), expectedFragments)
+        XCTAssertTrue(index.needsLayoutMeasurement(resource: 0))
+        XCTAssertEqual(index.fragmentIDs(inResource: 0), (0..<10).map { "id\($0)" })
+        XCTAssertEqual(index.highlightIndex(resource: 0, viewportProgression: 0.99, measurements: nil), 0,
+                       "几何尚未量到时回退到该文件第一项")
 
-        let index = pending.applying(progressions: progressions)
-        let atReadium0 = index.tocIndex(for: Locator(href: href, mediaType: .xhtml,
-                                                     locations: .init(progression: progressions[1])))
-        let atReadium9 = index.tocIndex(for: Locator(href: href, mediaType: .xhtml,
-                                                     locations: .init(progression: progressions[10])))
-        XCTAssertEqual(atReadium0, 1)
-        XCTAssertEqual(atReadium9, 10)
-        XCTAssertNotEqual(atReadium0, atReadium9)
+        var layout: [String: Double] = [:]
+        for number in 0..<10 { layout["id\(number)"] = Double(number + 1) / 10 }
+        XCTAssertEqual(index.highlightIndex(resource: 0, viewportProgression: layout["id0"], measurements: layout), 1)
+        XCTAssertEqual(index.highlightIndex(resource: 0, viewportProgression: layout["id9"], measurements: layout), 10)
+        XCTAssertEqual(index.highlightIndex(resource: 0, viewportProgression: (layout["id0"] ?? 0) - 0.01, measurements: layout), 0,
+                       "页首还没到 #id0 时不高亮它；右栏里才出现的下一节同样要等页首到达")
+        var withoutLast = layout
+        withoutLast["id9"] = nil
+        XCTAssertEqual(index.highlightIndex(resource: 0, viewportProgression: 0.99, measurements: withoutLast), 9,
+                       "找不到的 id 跳过，不能因此改成最后一项")
+    }
+
+    func testReadiumGeometrySnapshotAndStaleMeasureAreDistinct() throws {
+        let json = #"{"href":"Section0005.xhtml","viewport":0.42,"found":{"id0":0.1,"id9":0.9},"missing":["gone"]}"#
+        let snapshot = try XCTUnwrap(ReadiumTOCGeometryScript.parse(jsonString: json))
+        XCTAssertEqual(snapshot.href, "Section0005.xhtml")
+        XCTAssertEqual(snapshot.viewportProgression, 0.42)
+        XCTAssertEqual(snapshot.found["id0"], 0.1)
+        XCTAssertEqual(snapshot.found["id9"], 0.9)
+        XCTAssertNil(snapshot.found["gone"])
+        XCTAssertNil(ReadiumTOCGeometryScript.parse(jsonString: #"{"href":"Section0005.xhtml","viewport":null,"found":{}}"#))
+        XCTAssertNil(ReadiumTOCGeometryScript.parse(jsonString: #"{"href":"","viewport":0.1,"found":{}}"#))
+
+        let script = try XCTUnwrap(ReadiumTOCGeometryScript.source(fragmentIDs: ["id0", "id9"]))
+        XCTAssertTrue(script.contains(#"["id0","id9"]"#))
+        XCTAssertTrue(script.contains("readium-scroll-on"))
+        XCTAssertTrue(script.contains("vertical-rl"))
+        XCTAssertFalse(script.contains("innerHTML"))
+
+        let current = ReadiumTOCMeasureToken(generation: 3, resource: 1)
+        XCTAssertTrue(ReadiumTOCMeasureGate.shouldApply(requested: current, latest: current, queriedRealNavigator: true))
+        XCTAssertFalse(ReadiumTOCMeasureGate.shouldApply(
+            requested: ReadiumTOCMeasureToken(generation: 2, resource: 1), latest: current, queriedRealNavigator: true))
+        XCTAssertFalse(ReadiumTOCMeasureGate.shouldApply(
+            requested: ReadiumTOCMeasureToken(generation: 3, resource: 0), latest: current, queriedRealNavigator: true))
+        XCTAssertFalse(ReadiumTOCMeasureGate.shouldApply(requested: current, latest: current, queriedRealNavigator: false),
+                       "仿真翻页快照上的测量不能写回")
     }
 
     func testSpineMatchKeepsFragmentSeparateFromFile() {
@@ -92,13 +115,5 @@ final class EPUBTOCAnchorTests: XCTestCase {
 
     private func anchorOffsets() -> [String: Int] {
         Dictionary(uniqueKeysWithValues: (0..<10).map { ("id\($0)", ($0 + 1) * 1000) })
-    }
-
-    private func chapterHTML() -> String {
-        var body = "<h1 id=\"file\">文件</h1><p>\(String(repeating: "甲", count: 40))</p>"
-        for index in 0..<10 {
-            body += "<h2 id=\"id\(index)\">第\(index)节</h2><p>\(String(repeating: "乙", count: 80))</p>"
-        }
-        return "<html><body>\(body)</body></html>"
     }
 }
