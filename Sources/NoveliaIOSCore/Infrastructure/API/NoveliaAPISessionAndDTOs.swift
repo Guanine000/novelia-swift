@@ -249,6 +249,8 @@ struct APITocItem: Decodable {
     let titleJp: String?
     let titleZh: String?
     let chapterId: String?
+    let createAt: Int64?
+    let updateAt: Int64?
 }
 
 struct APIChapter: Decodable {
@@ -308,7 +310,8 @@ extension APIWebDetail {
                 originalText: "",
                 translatedText: "",
                 originalTitle: item.titleJp?.nonEmpty,
-                volumeTitle: volumeTitle, originalVolumeTitle: originalVolumeTitle
+                volumeTitle: volumeTitle, originalVolumeTitle: originalVolumeTitle,
+                updatedAt: item.updateAt ?? item.createAt
             )
         }
         let author = (authors ?? []).compactMap { $0.name?.nonEmpty }.joined(separator: "、")

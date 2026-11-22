@@ -88,6 +88,8 @@ public struct NovelChapter: Identifiable, Hashable, Codable, Sendable {
     /// 网站目录中的卷/分组标题；只用于网络EPUB目录对应，历史记录可缺省。
     public let volumeTitle: String?
     public let originalVolumeTitle: String?
+    /// 网站目录返回的章节发布／更新时间戳（秒级 Unix 时间戳）；旧缓存或无日期来源为 nil。
+    public let updatedAt: Int64?
     public let originalText: String
     public let translatedText: String
     public let bilingualParagraphs: [NovelBilingualParagraph]?
@@ -102,13 +104,15 @@ public struct NovelChapter: Identifiable, Hashable, Codable, Sendable {
         translationsBySource: [NovelTranslationSource: [String]]? = nil,
         originalTitle: String? = nil,
         volumeTitle: String? = nil,
-        originalVolumeTitle: String? = nil
+        originalVolumeTitle: String? = nil,
+        updatedAt: Int64? = nil
     ) {
         self.id = id
         self.title = title
         self.originalTitle = originalTitle
         self.volumeTitle = volumeTitle
         self.originalVolumeTitle = originalVolumeTitle
+        self.updatedAt = updatedAt
         self.originalText = originalText
         self.translatedText = translatedText
         self.bilingualParagraphs = bilingualParagraphs
@@ -117,6 +121,16 @@ public struct NovelChapter: Identifiable, Hashable, Codable, Sendable {
 
     public func translation(for source: NovelTranslationSource) -> [String]? {
         translationsBySource?[source]
+    }
+
+    /// 章节更新日期（`yyyy-MM-dd`）；兼容秒级与毫秒级时间戳，无效或缺失时返回 nil。
+    public var formattedUpdateDate: String? {
+        guard let updatedAt, updatedAt > 0 else { return nil }
+        let seconds = updatedAt >= 10_000_000_000 ? Double(updatedAt) / 1_000.0 : Double(updatedAt)
+        let date = Date(timeIntervalSince1970: seconds)
+        let comps = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        guard let year = comps.year, let month = comps.month, let day = comps.day else { return nil }
+        return String(format: "%04d-%02d-%02d", year, month, day)
     }
 }
 

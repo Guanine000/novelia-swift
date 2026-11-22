@@ -371,9 +371,16 @@ struct NovelDetailView: View {
                                     .foregroundStyle(NoveliaStyle.brandGreen)
                                     .frame(width: 35, height: 35)
                                     .background(NoveliaStyle.brandGreen.opacity(0.09), in: Circle())
-                                Text(chapter.title)
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(NoveliaStyle.ink)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(chapter.title)
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(NoveliaStyle.ink)
+                                    if let updateDate = chapter.formattedUpdateDate {
+                                        Text(updateDate)
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(NoveliaStyle.muted)
+                                    }
+                                }
                                 Spacer()
                                 Image(systemName: "chevron.right")
                                     .font(.system(size: 12, weight: .bold))

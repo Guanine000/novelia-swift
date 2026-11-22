@@ -172,4 +172,28 @@ final class APIServiceTests: XCTestCase {
         XCTAssertEqual(configuration.origin.absoluteString, "https://login.example.test")
         XCTAssertTrue(configuration.trusts(scheme: "https", host: "login.example.test", port: 443))
     }
+
+    func testWebDetailDecodesChapterUpdateDateFromCreateAtAndUpdateAt() throws {
+        let json = """
+        {
+          "titleJp": "テスト小説",
+          "titleZh": "测试小说",
+          "toc": [
+            {"titleJp": "第一部", "titleZh": "第一部"},
+            {"titleJp": "第1話", "titleZh": "第1话", "chapterId": "c1", "createAt": 1704067200},
+            {"titleJp": "第2話", "titleZh": "第2话", "chapterId": "c2", "createAt": 1704067200, "updateAt": 1704153600},
+            {"titleJp": "第3話", "titleZh": "第3话", "chapterId": "c3"}
+          ]
+        }
+        """
+        let detail = try JSONDecoder().decode(APIWebDetail.self, from: Data(json.utf8))
+        let novel = detail.asNovel(providerId: "syosetu", novelId: "n1")
+        XCTAssertEqual(novel.chapters.count, 3)
+        XCTAssertEqual(novel.chapters[0].updatedAt, 1_704_067_200)
+        XCTAssertNotNil(novel.chapters[0].formattedUpdateDate)
+        XCTAssertEqual(novel.chapters[1].updatedAt, 1_704_153_600)
+        XCTAssertNotNil(novel.chapters[1].formattedUpdateDate)
+        XCTAssertNil(novel.chapters[2].updatedAt)
+        XCTAssertNil(novel.chapters[2].formattedUpdateDate)
+    }
 }

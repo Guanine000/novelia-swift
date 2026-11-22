@@ -145,7 +145,8 @@ struct ReaderView: View {
                             .font(.system(size: 27, weight: .bold, design: .rounded))
                             .lineSpacing(4)
                             .foregroundStyle(readerPrimaryText)
-                        Text("著 · \(novel.author)")
+                        let chapterUpdateDate = chapter.formattedUpdateDate ?? novel.chapters[chapterIndex].formattedUpdateDate
+                        Text("著 · \(novel.author)" + (chapterUpdateDate.map { "  ·  更新于 \($0)" } ?? ""))
                             .font(NoveliaStyle.fontBody)
                             .foregroundStyle(readerSecondaryText)
                     }
@@ -640,8 +641,12 @@ private struct ChapterDirectoryView: View {
             ScrollViewReader { proxy in
                 List(rows, id: \.chapter.id) { row in
                     let chapter = row.chapter
+                    let tocSubtitle = [
+                        chapter.formattedUpdateDate,
+                        cachedIDs.contains(chapter.id) ? "已缓存，可离线阅读" : nil
+                    ].compactMap { $0 }.joined(separator: " · ")
                     ReaderTOCRow(title: chapter.title, level: 0,
-                                 subtitle: cachedIDs.contains(chapter.id) ? "已缓存，可离线阅读" : nil,
+                                 subtitle: tocSubtitle.isEmpty ? nil : tocSubtitle,
                                  isCurrent: row.index == selectedIndex,
                                  showsDisclosureColumn: false,
                                  titleColor: appearance.primaryText(system: systemColorScheme)) {
