@@ -24,18 +24,43 @@ final class LibraryImportModel: ObservableObject {
         let kindleFilenames: [String]
     }
 
+    /// 轻量体检发现结构/目录/封面异常的一批 EPUB，等待用户确认是否修复并标准化后再导入。
+    struct PendingEPUBRepair: Identifiable {
+        struct Item: Equatable {
+            let url: URL
+            let filename: String
+            let summary: String
+        }
+        let id = UUID()
+        let urls: [URL]
+        let problematicItems: [Item]
+        var problematicURLSet: Set<URL> { Set(problematicItems.map(\.url)) }
+    }
+
+    enum EPUBRepairDecision {
+        case repairAndImport
+        case importOriginal
+        case skipProblematic
+    }
+
     @Published var isShowingFileImporter = false
     @Published var pendingKindleImport: PendingKindleImport?
+    @Published var pendingEPUBRepair: PendingEPUBRepair?
+    @Published private(set) var isInspectingEPUB = false
     @Published private(set) var isImporting = false
     @Published private(set) var isConvertingKindle = false
+    @Published private(set) var isRepairingEPUB = false
     @Published private(set) var importCompletedCount = 0
     @Published private(set) var importTotalCount = 0
     @Published var importError: String?
 
     private var library: WenkuLocalLibraryStore!
     @Published private(set) var isStagingDrop = false
-    /// 从接收拖放到转换确认、实际导入结束，共用同一入口互斥状态。
-    var isBusy: Bool { isStagingDrop || isImporting || pendingKindleImport != nil }
+    /// 从接收拖放到转换/体检确认、实际导入结束，共用同一入口互斥状态。
+    var isBusy: Bool {
+        isStagingDrop || isInspectingEPUB || isImporting
+            || pendingKindleImport != nil || pendingEPUBRepair != nil
+    }
     private var dropStagingDirectory: URL?
 
     func attach(_ library: WenkuLocalLibraryStore) {
@@ -59,7 +84,21 @@ final class LibraryImportModel: ObservableObject {
         #endif
     }
 
-    /// 选择器回调：含 AZW3／MOBI 时先请用户确认转换，否则直接导入。
+    /// 导入前 EPUB 轻量结构体检的汇总提示。
+    static func epubRepairNotice(for items: [PendingEPUBRepair.Item]) -> String {
+        let listed = items.prefix(5).map { "\($0.filename)：\($0.summary)" }.joined(separator: "\n")
+        let more = items.count > 5 ? "\n等 \(items.count) 个 EPUB 文件" : ""
+        return "\(listed)\(more)\n\n是否使用 EPUB 工具箱执行目录结构标准化、XHTML 良构修复、OPF/目录/封面修复与冗余资源清理后再导入？（不会修改原始文件）"
+    }
+
+    private static var shouldInspectEPUBOnImport: Bool {
+        if UserDefaults.standard.object(forKey: SettingsKey.libraryAutoInspectEPUBOnImport) == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: SettingsKey.libraryAutoInspectEPUBOnImport)
+    }
+
+    /// 选择器回调：含 AZW3／MOBI 时先请用户确认转换，再按设置对 EPUB 执行轻量结构体检。
     func handlePickedFiles(_ pickedURLs: [URL]) async {
         guard !pickedURLs.isEmpty, !isBusy else { return }
         let kindle = pickedURLs.filter(Self.isKindleFile)
@@ -67,7 +106,7 @@ final class LibraryImportModel: ObservableObject {
             pendingKindleImport = PendingKindleImport(urls: pickedURLs, kindleFilenames: kindle.map(\.lastPathComponent))
             return
         }
-        await importFiles(pickedURLs)
+        await inspectEPUBsOrImport(pickedURLs)
     }
 
     /// 接收 iPad 分屏或文件拖放：将拖入项复制到临时目录后复用统一导入管线，导入结束后清理临时目录。
@@ -99,19 +138,80 @@ final class LibraryImportModel: ObservableObject {
             // 同一主执行器上交接状态，中间没有挂起点，外部入口无法插入。
             isStagingDrop = false
             await handlePickedFiles(stagedURLs)
-            if pendingKindleImport == nil {
+            if pendingKindleImport == nil && pendingEPUBRepair == nil {
                 cleanupDropStagingDirectory()
             }
         }
         return true
     }
 
-    /// 用户对转换确认的回应；取消时只跳过 Kindle 文件，同批的 EPUB／TXT 照常导入。
+    /// 用户对转换确认的回应；取消时只跳过 Kindle 文件，同批的 EPUB／TXT 照常进入后续体检与导入。
     func resolvePendingKindleImport(convert: Bool) async {
         guard let pending = pendingKindleImport else { return }
         pendingKindleImport = nil
+        let nextURLs = convert ? pending.urls : pending.urls.filter { !Self.isKindleFile($0) }
+        await inspectEPUBsOrImport(nextURLs)
+        if pendingEPUBRepair == nil {
+            cleanupDropStagingDirectory()
+        }
+    }
+
+    /// 对本批中的 `.epub` 执行轻量结构体检（不解压正文与图片）；若发现异常则弹出一次汇总确认。
+    private func inspectEPUBsOrImport(_ urls: [URL]) async {
+        guard !urls.isEmpty else { return }
+        let epubURLs = urls.filter { $0.pathExtension.lowercased() == "epub" }
+        guard Self.shouldInspectEPUBOnImport, !epubURLs.isEmpty else {
+            await importFiles(urls)
+            return
+        }
+
+        isInspectingEPUB = true
+        let problematic: [PendingEPUBRepair.Item] = await Task.detached(priority: .userInitiated) {
+            var found: [PendingEPUBRepair.Item] = []
+            for url in epubURLs {
+                let accessed = url.startAccessingSecurityScopedResource()
+                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                var coordError: NSError?
+                var readableTarget: URL?
+                NSFileCoordinator().coordinate(readingItemAt: url, options: .withoutChanges, error: &coordError) { readableURL in
+                    readableTarget = readableURL
+                }
+                let targetURL = readableTarget ?? url
+                if let report = try? await EPUBToolboxInspector.inspect(url: targetURL, mode: .lightweight),
+                   report.hasActionableIssues {
+                    found.append(PendingEPUBRepair.Item(
+                        url: url,
+                        filename: url.lastPathComponent,
+                        summary: report.shortSummary
+                    ))
+                }
+            }
+            return found
+        }.value
+        isInspectingEPUB = false
+
+        if !problematic.isEmpty {
+            pendingEPUBRepair = PendingEPUBRepair(urls: urls, problematicItems: problematic)
+            return
+        }
+        await importFiles(urls)
+    }
+
+    /// 用户对 EPUB 体检弹窗的回应。
+    func resolvePendingEPUBRepair(decision: EPUBRepairDecision) async {
+        guard let pending = pendingEPUBRepair else { return }
+        pendingEPUBRepair = nil
         defer { cleanupDropStagingDirectory() }
-        await importFiles(convert ? pending.urls : pending.urls.filter { !Self.isKindleFile($0) })
+        switch decision {
+        case .repairAndImport:
+            await importFiles(pending.urls, epubRepairTargets: pending.problematicURLSet)
+        case .importOriginal:
+            await importFiles(pending.urls)
+        case .skipProblematic:
+            let targets = pending.problematicURLSet
+            let remaining = pending.urls.filter { !targets.contains($0) }
+            await importFiles(remaining)
+        }
     }
 
     private func cleanupDropStagingDirectory() {
@@ -156,7 +256,7 @@ final class LibraryImportModel: ObservableObject {
     }
 
     /// 从“文件”批量导入：逐项复制并登记到本地书库。
-    func importFiles(_ pickedURLs: [URL]) async {
+    func importFiles(_ pickedURLs: [URL], epubRepairTargets: Set<URL> = []) async {
         // 一次只执行一个导入：复制期间再次收到选择器回调会重复登记相同文件。
         guard !pickedURLs.isEmpty, !isBusy else { return }
         isImporting = true
@@ -169,12 +269,15 @@ final class LibraryImportModel: ObservableObject {
         // 同一批次重复选择的文件只导入一次。
         var seenPaths = Set<String>()
         var converted = 0
+        var repaired = 0
         for (index, pickedURL) in pickedURLs.enumerated() {
             defer { importCompletedCount = index + 1 }
             guard seenPaths.insert(pickedURL.standardizedFileURL.path).inserted else { continue }
+            let shouldRepair = epubRepairTargets.contains(pickedURL)
             do {
-                try await importFile(pickedURL)
+                try await importFile(pickedURL, repairEPUB: shouldRepair)
                 if Self.isKindleFile(pickedURL) { converted += 1 }
+                if shouldRepair { repaired += 1 }
             } catch let duplicate as LocalLibraryDuplicateError {
                 duplicates.append("\(pickedURL.lastPathComponent)：已存在（《\(duplicate.existingTitle)》）")
             } catch {
@@ -185,14 +288,17 @@ final class LibraryImportModel: ObservableObject {
         let succeeded = seenPaths.count - failures.count - duplicates.count
         if !failures.isEmpty || !duplicates.isEmpty {
             var summary = "批量导入完成：成功 \(succeeded) 个"
-            if converted > 0 { summary += "（其中 \(converted) 个已转换为 EPUB）" }
+            var notes: [String] = []
+            if converted > 0 { notes.append("\(converted) 个已转换为 EPUB") }
+            if repaired > 0 { notes.append("\(repaired) 个已标准化修复") }
+            if !notes.isEmpty { summary += "（其中 " + notes.joined(separator: "，") + "）" }
             if !duplicates.isEmpty { summary += "，已存在 \(duplicates.count) 个" }
             if !failures.isEmpty { summary += "，失败 \(failures.count) 个" }
             importError = summary + "。\n" + (duplicates + failures).joined(separator: "\n")
         }
     }
 
-    private func importFile(_ pickedURL: URL) async throws {
+    private func importFile(_ pickedURL: URL, repairEPUB: Bool = false) async throws {
         try await library.loadIfNeeded()
         let extensionName = pickedURL.pathExtension.lowercased()
         let start = MonotonicInstant.now
@@ -218,6 +324,8 @@ final class LibraryImportModel: ObservableObject {
             #else
             try await convertKindleFile(pickedURL, to: destination, start: start)
             #endif
+        } else if repairEPUB && extensionName == "epub" {
+            try await repairAndStandardizeEPUB(pickedURL, to: destination, start: start)
         } else {
             let copyResult = await Task.detached(priority: .userInitiated) {
                 Result { try Self.coordinatedCopy(from: pickedURL, to: destination) }
@@ -257,6 +365,29 @@ final class LibraryImportModel: ObservableObject {
         } else {
             let bytes = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             epubImportLog.info("EPUB import completed; bytes=\(bytes, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")
+        }
+    }
+
+    /// 先协调复制原 EPUB 到临时文件，再在后台运行 EPUB 工具箱标准化修复并写入目标路径。
+    private func repairAndStandardizeEPUB(_ pickedURL: URL, to destination: URL, start: MonotonicInstant) async throws {
+        isRepairingEPUB = true
+        defer { isRepairingEPUB = false }
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent("epub-repair-\(UUID().uuidString).epub")
+        let result: Result<Void, Error> = await Task.detached(priority: .userInitiated) {
+            defer { try? FileManager.default.removeItem(at: staging) }
+            do {
+                try Self.coordinatedCopy(from: pickedURL, to: staging)
+                _ = try await EPUBToolboxProcessor.process(source: staging, destination: destination, options: .all)
+                return .success(())
+            } catch {
+                return .failure(error)
+            }
+        }.value
+        if case .failure(let error) = result {
+            try? FileManager.default.removeItem(at: destination)
+            logEPUBImportFailure(error, stage: "repair", start: start)
+            throw error
         }
     }
 
@@ -337,17 +468,31 @@ struct LibraryImportProgressOverlay: View {
     @ObservedObject var model: LibraryImportModel
 
     var body: some View {
-        if model.isImporting {
+        if model.isImporting || model.isInspectingEPUB {
             ZStack {
                 Color.black.opacity(0.12).ignoresSafeArea()
                 VStack(alignment: .leading, spacing: 12) {
-                    Label(model.isConvertingKindle ? "正在转换为 EPUB" : "正在导入书籍", systemImage: "books.vertical")
+                    let title: String = {
+                        if model.isInspectingEPUB { return "正在检查 EPUB 结构" }
+                        if model.isConvertingKindle { return "正在转换为 EPUB" }
+                        if model.isRepairingEPUB { return "正在修复并标准化 EPUB" }
+                        return "正在导入书籍"
+                    }()
+                    Label(title, systemImage: "books.vertical")
                         .font(.system(size: 16, weight: .semibold))
-                    ProgressView(value: Double(model.importCompletedCount), total: Double(max(model.importTotalCount, 1)))
-                        .tint(NoveliaStyle.brandGreen)
-                    Text("已处理 \(model.importCompletedCount) / \(model.importTotalCount) 个文件")
-                        .font(NoveliaStyle.fontBody)
-                        .foregroundStyle(NoveliaStyle.muted)
+                    if model.isInspectingEPUB {
+                        ProgressView()
+                            .tint(NoveliaStyle.brandGreen)
+                        Text("仅读取目录与清单元数据，请稍候…")
+                            .font(NoveliaStyle.fontBody)
+                            .foregroundStyle(NoveliaStyle.muted)
+                    } else {
+                        ProgressView(value: Double(model.importCompletedCount), total: Double(max(model.importTotalCount, 1)))
+                            .tint(NoveliaStyle.brandGreen)
+                        Text("已处理 \(model.importCompletedCount) / \(model.importTotalCount) 个文件")
+                            .font(NoveliaStyle.fontBody)
+                            .foregroundStyle(NoveliaStyle.muted)
+                    }
                 }
                 .padding(20)
                 .frame(width: 280)

@@ -116,7 +116,8 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 | 书库 | `Library/LibraryViews.swift`、`LibraryStore.swift`、`LibraryComponents.swift`、`LibraryBookDetailView.swift`、`LibraryBookActions.swift`、`CharacterSeriesView.swift`、`CharacterCardSupportViews.swift` | 聚合本地记录、查询筛选、系列、排序、批量与菜单动作及跨卷人物资料界面 |
 | 收藏与历史 | `Library/FavoritesStore.swift`、`ReadingHistoryStore.swift`、`ShelfViews.swift` | 账号相关远端状态、收藏操作、历史与续读 |
 | 文库 | `Wenku/WenkuStore.swift`、`WenkuViews.swift` | 远端文库查询、详情和收藏；本地文件另由书库 Store 管理 |
-| 下载与导入 | `Downloads/WebNovelDownloadStore.swift`、`Library/WenkuLocalLibraryStore.swift`、`Library/KindleImport/` | 下载、导入（含 AZW3／MOBI 转 EPUB）、文件位置、记录写入及同步书籍接口 |
+| 下载与导入 | `Downloads/WebNovelDownloadStore.swift`、`Library/WenkuLocalLibraryStore.swift`、`Library/KindleImport/` | 下载、导入（含 AZW3／MOBI 转 EPUB 与 EPUB 轻量结构体检）、文件位置、记录写入及同步书籍接口 |
+| EPUB 工具箱 | `EPUBToolbox/EPUBToolboxModels.swift`、`EPUBToolboxInspector.swift`、`EPUBToolboxProcessor.swift`、`EPUBToolboxViews.swift` | EPUB 轻量／深度体检、目录结构标准化（Sigil Norm）、XHTML 良构修复、OPF／目录／封面修复、冗余资源清理与工具箱界面 |
 | 阅读器 | `Reader/ReaderView.swift`、`TXTReaderView.swift`、`EPUBReader/` | 在线/TXT 滚动与分页、EPUB 阅读、引擎和位置转换 |
 | 社区 | `Community/ForumStore.swift`、列表/详情/编辑/Markdown 页面 | 论坛查询、筛选、正文、评论、编辑与链接交互 |
 | 统计 | `Statistics/ReadingStatisticsViews.swift`；Core 的 `Features/Statistics/` | 图表与明细、阅读记录、设备统计及合并 |
@@ -817,6 +818,15 @@ Core 的 `ReadingRecapPlan` 接受此前 1–3 章及可选当前章已读部分
 `ReaderSettings.characters` 持有唯一 `CharacterLexiconStore`，以稳定系列 ID 作为作品身份，单独保存用户确认的书籍键卷序及人物 UUID。`CharacterFact` 独立携带显示名称、正文版本、卷章、UTF-16 引文范围、原文和手工修订状态；人物没有独立的全局真名／简介，`CharacterScope.visible` 在逐事实过滤后才派生名称、别名、首次记录与查询匹配，避免未来字段混入已知人物。卷序变化后原资料保留，并用新序列和当前章重新筛选。
 
 人物自动化由 `CharacterSeriesView` 提供“仅本书／系列所有书籍”和生成／更新入口。确认卷序后，`CharacterScope.readBoundaries` 按每卷真实保存位置限制范围，当前书内入口优先使用实际位置；缺失卷、无进度卷和后卷排除，不默认前卷读完。每次按钮操作先刷新本地状态；当前阅读位置不等同逐章读完记录，跳读空缺不能识别。
+
+## EPUB 工具箱
+
+EPUB 工具箱位于 `iOSApp/Features/EPUBToolbox/`，仅依赖项目既有的 `ReadiumZIPFoundation` 与 `SwiftSoup`，同时编入 `Novelia`（iOS 17+）与 `NoveliaLegacy`（iOS 15+）两个目标，不引入新第三方依赖。
+
+- **只读原文件契约**：`EPUBToolboxInspector` 与 `EPUBToolboxProcessor` 绝不修改原 EPUB；处理结果写入临时文件后原子移动，工具箱仅提供“另存为新书入库”（经 `WenkuLocalLibraryStore.downloadDestination` + `registerDownloadedFile`）与“导出 / 分享”，保持原有阅读器容器只读和进度／书签／WebDAV 同步身份不受影响。
+- **体检分层**：导入链路（`LibraryImportModel`，受本机偏好键 `SettingsKey.libraryAutoInspectEPUBOnImport` 控制，默认开启）只执行 `.lightweight` 体检（仅读 ZIP 目录、`mimetype`、`container.xml`、`content.opf`、NCX／Nav，不解压正文与图片），发现可修复问题后经 `pendingEPUBRepair` 弹出一次汇总确认；工具箱页面执行 `.deep` 体检，额外检查 XHTML 编码／XML 良构性与精确未引用资源体积。
+- **DRM 与字体混淆区分**：`META-INF/encryption.xml` 仅包含 IDPF／Adobe 字体混淆算法时允许处理并同步重写 `CipherReference URI`，包含其他加密算法时标记为 DRM 并拒绝修改。
+- **验证**：核心引擎独立配置为 Swift Package 目标 `NoveliaEPUBToolbox`，由 `NoveliaEPUBToolboxTests` 覆盖轻量／深度体检、四项修复与相对路径重写、DRM 拒绝、字体混淆放行、独立开关隔离以及输出文件由 `EPUBContainer` 端到端读取。
 
 `CharacterAutomaticUpdater` 逐章调用 `CharacterExtractionPlan`，单章最多2 MiB、256块，每块8000字节并重叠200字符。**扫描采用建档模式**：每人只要一条 40 字以内的身份事实，输出量约为逐人详写的四分之一到三分之一；细节由 `CharacterDetailUpdater` 在人物详情页按需补，复用 `detailRequest` 与同一套逐条核验，再通过 `append` 追加到现有卡片，不推进扫描检查点。空章直接推进检查点，不发请求；`CharacterExtractionPlan.isNonContent` 判定不足350字的封面、版权页、作者简介、目录与分卷标题页同样只记检查点，避免把作者／译者当作角色并浪费请求。单章必须在本轮请求预算内才开始。默认每轮64次新请求，可选择32/64/128/256，缓存命中不计费请求。
 

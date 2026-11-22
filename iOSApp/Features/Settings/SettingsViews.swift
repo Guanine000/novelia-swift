@@ -16,6 +16,7 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.appDarkOLED) private var appDarkOLED = false
     @AppStorage(SettingsKey.libraryAutoReadingStatus) private var autoReadingStatus = false
     @AppStorage(SettingsKey.libraryAutoOnHoldDays) private var autoOnHoldDays = 30
+    @AppStorage(SettingsKey.libraryAutoInspectEPUBOnImport) private var autoInspectEPUBOnImport = true
     #if !NOVELIA_READIUM_ONLY
     @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = false
     #endif
@@ -163,6 +164,21 @@ struct SettingsView: View {
                     readiumExperienceControls
                 }
                 #endif
+            }
+            Section("工具") {
+                NavigationLink {
+                    EPUBToolboxView()
+                } label: {
+                    Label("EPUB 工具箱", systemImage: "wrench.and.screwdriver")
+                }
+                Toggle(isOn: $autoInspectEPUBOnImport) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("导入时检测 EPUB 结构问题")
+                        Text("导入本地 EPUB 时执行轻量体检（不解压正文），发现目录、封面或容器问题时询问是否修复并标准化后再导入。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             Section("界面") {
                 NavigationLink { TabBarSettingsView() } label: {

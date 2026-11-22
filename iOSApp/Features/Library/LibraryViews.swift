@@ -261,6 +261,16 @@ struct LibraryView: View {
             } message: { pending in
                 Text(LibraryImportModel.kindleConversionNotice(for: pending.kindleFilenames))
             }
+            .alert("检测到 EPUB 结构问题", isPresented: .init(
+                get: { importer.pendingEPUBRepair != nil },
+                set: { _ in }
+            ), presenting: importer.pendingEPUBRepair) { _ in
+                Button("修复并标准化后导入") { Task { await importer.resolvePendingEPUBRepair(decision: .repairAndImport) } }
+                Button("按原样直接导入") { Task { await importer.resolvePendingEPUBRepair(decision: .importOriginal) } }
+                Button("跳过问题文件", role: .cancel) { Task { await importer.resolvePendingEPUBRepair(decision: .skipProblematic) } }
+            } message: { pending in
+                Text(LibraryImportModel.epubRepairNotice(for: pending.problematicItems))
+            }
             .alert("新建系列", isPresented: $isCreatingSeries) {
                 TextField("系列名称", text: $newSeriesName)
                 Button("取消", role: .cancel) {}

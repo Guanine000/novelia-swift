@@ -39,6 +39,8 @@ enum SettingsKey {
     static let libraryAutoOnHoldDays = "library.autoReadingStatus.onHoldDays.v1"
     /// 单书封面显示模式（`[bookKey: LibraryBookCoverFitMode.rawValue]`），仅存本机，不参与 WebDAV 同步。
     static let libraryCoverFitModes = "library.coverFitModes.v1"
+    /// 导入本地 EPUB 时是否执行轻量结构体检并在发现问题时弹窗询问修复；默认开启，仅存本机。
+    static let libraryAutoInspectEPUBOnImport = "library.autoInspectEPUBOnImport.v1"
     /// 朗读偏好，只存本机，不参与 WebDAV 同步；`SpeechSettingsStore` 负责读写与旧值兼容。
     enum Speech {
         static let edgeVoiceCatalog = "speech.edgeVoiceCatalog.v1"

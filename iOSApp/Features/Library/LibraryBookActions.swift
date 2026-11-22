@@ -40,6 +40,8 @@ final class LibraryBookActions: ObservableObject {
     @Published var wenkuDetail: WenkuNovelOutline?
     /// 列表行只保留核心信息，其余元数据在详细信息里查看。
     @Published var detailBook: LibraryBook?
+    /// 书籍“更多”菜单直达的 EPUB 工具箱。
+    @Published var epubToolboxBook: LibraryBook?
     /// 书籍“更多”菜单发起的 AI 人物词条；未入系列的书以书键作为 work，移入系列时迁移数据。
     @Published var characterBook: LibraryBook?
     /// 下载完成的书，页面据此打开阅读。
@@ -326,6 +328,7 @@ private enum LibraryBookActiveSheet: Identifiable {
     case editInfo(LibraryBook)
     case associateWenku(LibraryBook)
     case detail(LibraryBook)
+    case epubToolbox(LibraryBook)
     case shareArchive(LibraryArchiveShare)
     case shareExport(LibraryFileShare)
 
@@ -336,6 +339,7 @@ private enum LibraryBookActiveSheet: Identifiable {
         case .editInfo(let book): "edit:" + book.key
         case .associateWenku(let book): "associate:" + book.key
         case .detail(let book): "detail:" + book.key
+        case .epubToolbox(let book): "epubToolbox:" + book.key
         case .shareArchive(let archive): "archive:" + archive.id.uuidString
         case .shareExport(let export): "export:" + export.id.uuidString
         }
@@ -360,6 +364,7 @@ struct LibraryBookActionDialogs: ViewModifier {
                 if let book = actions.editingBook { return .editInfo(book) }
                 if let book = actions.associatingBook { return .associateWenku(book) }
                 if let book = actions.detailBook { return .detail(book) }
+                if let book = actions.epubToolboxBook { return .epubToolbox(book) }
                 if let archive = actions.shareArchive { return .shareArchive(archive) }
                 if let export = actions.shareExport { return .shareExport(export) }
                 return nil
@@ -371,6 +376,7 @@ struct LibraryBookActionDialogs: ViewModifier {
                 else if actions.editingBook != nil { actions.editingBook = nil }
                 else if actions.associatingBook != nil { actions.associatingBook = nil }
                 else if actions.detailBook != nil { actions.detailBook = nil }
+                else if actions.epubToolboxBook != nil { actions.epubToolboxBook = nil }
                 else if actions.shareArchive != nil { actions.shareArchive = nil }
                 else if actions.shareExport != nil { actions.dismissExportShare() }
             }
@@ -401,6 +407,10 @@ struct LibraryBookActionDialogs: ViewModifier {
             }
         case .detail(let book):
             LibraryBookDetailView(book: book)
+        case .epubToolbox(let book):
+            CompatNavigationStack {
+                EPUBToolboxView(initialBook: book, isPresentedInSheet: true)
+            }
         case .shareArchive(let archive):
             LibraryArchiveShareSheet(url: archive.url)
                 .ignoresSafeArea()

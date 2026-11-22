@@ -362,6 +362,13 @@ struct LibraryBookMenuItems: View {
                 Label("同步与更新", systemImage: "arrow.triangle.2.circlepath")
             }
         }
+        if book.format == .epub && !book.isCloudOnly {
+            Button {
+                actions.epubToolboxBook = book
+            } label: {
+                Label("EPUB 工具箱", systemImage: "wrench.and.screwdriver")
+            }
+        }
         if book.format == .txt {
             Button {
                 actions.exportTXTAsEPUB(book, settings: readerSettings)

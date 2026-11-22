@@ -71,6 +71,17 @@ let package = Package(
             ],
             path: "iOSApp/Features/Library/KindleImport"
         ),
+        // EPUB 工具箱核心引擎（体检与标准化修复），直接编译 App 源码。
+        .target(
+            name: "NoveliaEPUBToolbox",
+            dependencies: [
+                .product(name: "ReadiumZIPFoundation", package: "ZIPFoundation"),
+                .product(name: "SwiftSoup", package: "SwiftSoup"),
+            ],
+            path: "iOSApp/Features/EPUBToolbox",
+            exclude: ["EPUBToolboxViews.swift"],
+            sources: ["EPUBToolboxModels.swift", "EPUBToolboxInspector.swift", "EPUBToolboxProcessor.swift"]
+        ),
         .testTarget(name: "NoveliaIOSCoreTests", dependencies: ["NoveliaIOSCore"], path: "Tests/NoveliaIOSCoreTests"),
         .testTarget(
             name: "NoveliaEPUBTests",
@@ -86,6 +97,15 @@ let package = Package(
             dependencies: ["NoveliaKindle", "NoveliaEPUB", .product(name: "CLibMobi", package: "CLibMobi"), .product(name: "ReadiumZIPFoundation", package: "ZIPFoundation")],
             path: "Tests/NoveliaKindleTests",
             resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "NoveliaEPUBToolboxTests",
+            dependencies: [
+                "NoveliaEPUBToolbox",
+                "NoveliaEPUB",
+                .product(name: "ReadiumZIPFoundation", package: "ZIPFoundation"),
+            ],
+            path: "Tests/NoveliaEPUBToolboxTests"
         ),
     ]
 )
