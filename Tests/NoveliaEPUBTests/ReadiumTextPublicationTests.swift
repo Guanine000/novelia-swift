@@ -55,6 +55,20 @@ final class ReadiumTextPublicationTests: XCTestCase {
         XCTAssertEqual(target?.href, toc[1].url())
     }
 
+    func testLocateLeavesFragmentProgressionEmpty() async throws {
+        let source = TextChapterSource(bookTitle: "TXT", units: [.init(tocTitle: "第一章") {
+            TextChapterContent(title: "第一章", paragraphs: [.init(text: "正文")])
+        }])
+        let publication = ReadiumTextPublication.make(source: source)
+        let file = publication.readingOrder[0]
+        let plainLocator = await publication.locate(file)
+        let plain = try XCTUnwrap(plainLocator)
+        XCTAssertEqual(plain.locations.progression, 0)
+        let anchoredLocator = await publication.locate(Link(href: file.url().string + "#id0", mediaType: .xhtml))
+        let anchored = try XCTUnwrap(anchoredLocator)
+        XCTAssertNil(anchored.locations.progression, "Readium 3.11 对带 fragment 的链接不给 progression")
+    }
+
     func testFailedResourceCanBeRequestedAgain() async throws {
         struct Offline: Error {}
         var attempts = 0
@@ -130,6 +144,16 @@ extension ReadiumTextPublicationTests {
             Link(href: $0, mediaType: .xhtml)
         }
         let index = ReadiumNavigationIndex(readingOrder: readingOrder, tableOfContents: toc)
+        // 同一文件的 #first 与 #second 必须都留下来，不能被后一项覆盖。
+        XCTAssertEqual(index.fragments(inResource: 1), ["first", "second"])
+        let measurements = ["first": 0.25, "second": 0.75]
+        XCTAssertEqual(index.highlightIndex(resource: 1, viewportProgression: 0.25, measurements: measurements), 0, "#first")
+        XCTAssertEqual(index.highlightIndex(resource: 1, viewportProgression: 0.75, measurements: measurements), 2, "#second")
+        XCTAssertNotEqual(
+            index.highlightIndex(resource: 1, viewportProgression: 0.25, measurements: measurements),
+            index.highlightIndex(resource: 1, viewportProgression: 0.75, measurements: measurements)
+        )
+        // 没有章内位置的 href 查询仍按资源向前填充，供阅读时长分段使用。
         for value in ["chapter-0.xhtml", "chapter-0.xhtml#p1", "chapter-1.xhtml?view=1#note",
                       "chapter-2.xhtml", "part/../chapter-2.xhtml", "missing.xhtml"] {
             let href = Link(href: value).url()

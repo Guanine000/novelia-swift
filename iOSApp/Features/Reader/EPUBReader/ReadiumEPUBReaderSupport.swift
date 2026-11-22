@@ -193,8 +193,14 @@ extension ReadiumEPUBReaderModel {
 
     func chapterTitle(_ index: Int) -> String? {
         guard let publication, publication.readingOrder.indices.contains(index) else { return nil }
-        return navigationIndex?.tocIndex(for: publication.readingOrder[index].url()).map { toc[$0].title }
-            ?? publication.readingOrder[index].title
+        if let locator, navigationIndex?.resourceIndex(for: locator.href) == index,
+           let current = currentTOCIndex, toc.indices.contains(current) {
+            return toc[current].title
+        }
+        if let selected = navigationIndex?.tocIndex(atStartOfResource: index), toc.indices.contains(selected) {
+            return toc[selected].title
+        }
+        return publication.readingOrder[index].title
     }
 
     /// 一章的纯文本：TXT 取生成的章节，EPUB 读取资源 HTML。

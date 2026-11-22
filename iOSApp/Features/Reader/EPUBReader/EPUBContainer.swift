@@ -21,8 +21,92 @@ struct EPUBTOCEntry: Identifiable, Equatable {
     let id = UUID()
     let title: String
     let spineIndex: Int?
+    /// 章内锚点，不含 `#`。nil 表示该 spine 文件的开头。
+    /// 目录只活在打开后的内存里，不进入进度、书签或同步，因此没有旧记录要迁移。
+    var fragment: String? = nil
     /// 目录层级，0 为顶层；nav 的嵌套 <ol> 与 NCX 的嵌套 navPoint 逐层加一。
     var level: Int = 0
+}
+
+/// 同一资源里有多个目录锚点时，按章内位置取「不晚于当前位置」的最后一项。
+/// 位置未知时当前资源回退到第一项。Yuedu 的源文本偏移和 Readium 的 progression 共用这套比较。
+enum InFileTOCSelection {
+    static func currentIndex<Position: Comparable>(
+        resources: [Int?],
+        positions: [Position?],
+        resource: Int,
+        position: Position?,
+        positionsReady: Bool
+    ) -> Int? {
+        let canCompare = positionsReady && position != nil
+        var firstInResource: Int?
+        var resolvedInResource = false
+        var bestEarlier: (resource: Int, index: Int)?
+        var bestHere: (position: Position, index: Int)?
+        for index in resources.indices {
+            guard let entryResource = resources[index] else { continue }
+            if entryResource == resource {
+                if firstInResource == nil { firstInResource = index }
+                guard canCompare, let current = position, let entryPosition = positions[index] else { continue }
+                resolvedInResource = true
+                if entryPosition <= current {
+                    if let best = bestHere {
+                        if entryPosition > best.position || (entryPosition == best.position && index > best.index) {
+                            bestHere = (entryPosition, index)
+                        }
+                    } else {
+                        bestHere = (entryPosition, index)
+                    }
+                }
+            } else if entryResource < resource {
+                // 更早资源已完整经过，不参与当前文件的章内位置比较，按资源与目录顺序取最后一项。
+                if let best = bestEarlier {
+                    if entryResource > best.resource || (entryResource == best.resource && index > best.index) {
+                        bestEarlier = (entryResource, index)
+                    }
+                } else {
+                    bestEarlier = (entryResource, index)
+                }
+            }
+        }
+        if let bestHere { return bestHere.index }
+        // 章内位置未知，或本章一个锚点偏移都没有：落在该文件的第一项，而不是最后一项。
+        if let firstInResource, !canCompare || !resolvedInResource { return firstInResource }
+        return bestEarlier?.index
+    }
+}
+
+/// 原生目录高亮。`anchorOffsets` 为 nil 表示该章还没有排版结果。
+enum EPUBTOCHighlight {
+    static func index(entries: [EPUBTOCEntry], spineIndex: Int,
+                      pageSourceOffset: Int?, anchorOffsets: [String: Int]?) -> Int? {
+        let ready = anchorOffsets != nil && pageSourceOffset != nil
+        let positions: [Int?] = entries.map { entry in
+            guard entry.spineIndex == spineIndex, let anchorOffsets else { return nil }
+            return offset(fragment: entry.fragment, anchors: anchorOffsets)
+        }
+        return InFileTOCSelection.currentIndex(
+            resources: entries.map(\.spineIndex),
+            positions: positions,
+            resource: spineIndex,
+            position: pageSourceOffset,
+            positionsReady: ready
+        )
+    }
+
+    /// 无 fragment 时为文件开头（偏移 0）。锚点不在表里时返回 nil，调用方跳过该项。
+    static func offset(fragment: String?, anchors: [String: Int]) -> Int? {
+        guard let key = normalizedFragment(fragment) else { return 0 }
+        return anchors[key]
+    }
+
+    static func normalizedFragment(_ fragment: String?) -> String? {
+        guard let fragment else { return nil }
+        let trimmed = fragment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.hasPrefix("#") { return EPUBContainer.tocFragment(in: trimmed) }
+        return EPUBContainer.tocFragment(in: "#\(trimmed)")
+    }
 }
 
 /// 按层级展平的目录的折叠计算（YueduCoreText 与 Readium 阅读器的目录面板共用）。

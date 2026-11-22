@@ -75,11 +75,11 @@ extension EPUBReaderModel {
     func jump(to entry: EPUBTOCEntry) {
         rememberReadingPoint()
         guard !isAnimating, !isLayingOut, let spineIndex = entry.spineIndex else { return }
-        navigateToSpine(spineIndex)
+        navigate(toSpine: spineIndex, fragment: entry.fragment)
     }
 
-    /// 书内链接跳转：href 相对当前章节目录解析并映射到 spine；
-    /// 同章锚点暂不精确定位（停留原页），跨章跳到目标章首页。
+    /// 书内链接跳转：href 相对当前章节目录解析并映射到 spine。
+    /// 带章内锚点时落到该锚点所在页；没有锚点的同章链接留在原页。
     func openLink(_ href: String) {
         guard !isAnimating, !isLayingOut, let container = source else { return }
         let chapterHref = container.chapterHref(at: location.spineIndex)
@@ -87,33 +87,49 @@ extension EPUBReaderModel {
             plainLinkMessage = "链接目标不在本书章节列表内（\(href)）"
             return
         }
-        guard targetSpine != location.spineIndex else { return }
-        navigateToSpine(targetSpine)
+        let fragment = EPUBContainer.tocFragment(in: href)
+        if targetSpine == location.spineIndex, fragment == nil { return }
+        navigate(toSpine: targetSpine, fragment: fragment)
     }
 
-    /// 跳到指定章首页；目标章未排版时先排版（增量，首页即现）。
-    private func navigateToSpine(_ spineIndex: Int) {
-        moveLocation(to: EPUBReadingLocation(spineIndex: spineIndex, pageIndex: 0), cause: "navigate")
+    /// 跳到指定章。没有锚点时立即落到首页；有锚点时先排版，再按源文本偏移找到所在页。
+    private func navigate(toSpine spineIndex: Int, fragment: String?) {
+        let anchor = EPUBTOCHighlight.normalizedFragment(fragment)
+        if anchor == nil {
+            moveLocation(to: EPUBReadingLocation(spineIndex: spineIndex, pageIndex: 0), cause: "navigate")
+        }
         // 新跳转替代尚未完成的旧跳转。
         if let navigateTaskID, let previous = layoutTasks.removeValue(forKey: navigateTaskID) { previous.cancel() }
         navigateTaskID = track { [weak self] in
             guard let self else { return }
             isLayingOut = true
             defer { isLayingOut = false }
-            guard let container = source, let book = pageBook, !book.isChapterComplete(spineIndex) else { return }
+            guard let container = source, let book = pageBook else { return }
+            let needsLayout = !book.isChapterComplete(spineIndex)
+            if anchor == nil, !needsLayout { return }
             do {
-                try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
-                                             aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
-                                             writingDirection: writingDirectionRequest,
-                                             verticalTypographyOptimization: style.isVerticalTypographyOptimizationEnabled,
-                                             context: layoutContext(.navigate))
-                if pageBook === book {
-                    // 从失败页经目录或书内链接跳到可读章节时恢复阅读状态；
-                    // 否则失败页会一直盖住新排好的章节，看起来像「换章也没用」。
-                    markReadyAfterRecovery(spineIndex: spineIndex)
-                    notifyVerticalFallbackIfNeeded(spineIndex: spineIndex)
-                    prefetchNeighbors(of: spineIndex)
+                if needsLayout {
+                    try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
+                                                 aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
+                                                 writingDirection: writingDirectionRequest,
+                                                 verticalTypographyOptimization: style.isVerticalTypographyOptimizationEnabled,
+                                                 context: layoutContext(.navigate))
                 }
+                guard pageBook === book else { return }
+                if let anchor {
+                    var page = 0
+                    if let offsets = book.anchorOffsets(spineIndex: spineIndex),
+                       let offset = EPUBTOCHighlight.offset(fragment: anchor, anchors: offsets),
+                       let found = book.pageIndex(spineIndex: spineIndex, containingSourceOffset: offset) {
+                        page = usesDoublePage ? (found / 2) * 2 : found
+                    }
+                    moveLocation(to: EPUBReadingLocation(spineIndex: spineIndex, pageIndex: page), cause: "navigate")
+                }
+                // 从失败页经目录或书内链接跳到可读章节时恢复阅读状态；
+                // 否则失败页会一直盖住新排好的章节，看起来像「换章也没用」。
+                markReadyAfterRecovery(spineIndex: spineIndex)
+                notifyVerticalFallbackIfNeeded(spineIndex: spineIndex)
+                prefetchNeighbors(of: spineIndex)
             } catch {
                 guard pageBook === book, EPUBLayoutLog.failure(error).kind != "cancelled" else { return }
                 lastLayoutFailure = EPUBLayoutLog.failure(error)
@@ -304,9 +320,16 @@ extension EPUBReaderModel {
         searchHighlightRects = end > start ? selectionRects(for: NSRange(location: start, length: end - start)) : []
     }
 
-    /// 章节标题：取 spine 不晚于该章的最后一个目录项。
+    /// 章节标题。正在阅读的这一章用目录高亮的那一项；其他章在不知道页内位置时用该文件的第一项。
     func chapterTitle(_ index: Int) -> String? {
-        source?.toc.last { ($0.spineIndex ?? .max) <= index }?.title
+        guard let toc = source?.toc, !toc.isEmpty else { return nil }
+        if index == location.spineIndex, let current = currentTOCIndex, toc.indices.contains(current) {
+            return toc[current].title
+        }
+        guard let selected = EPUBTOCHighlight.index(entries: toc, spineIndex: index,
+                                                    pageSourceOffset: nil, anchorOffsets: nil),
+              toc.indices.contains(selected) else { return nil }
+        return toc[selected].title
     }
 
     /// 跳到书签或搜索结果：目标章未排版时先排版，再按章内比例找到所在页。属于用户操作，会记录阅读位置。
@@ -392,7 +415,7 @@ extension EPUBReaderModel {
     /// 跳到单元首页（用于生成内容的目录和章节列表）。
     func jump(toUnit unit: Int) {
         guard !isAnimating, !isLayingOut, let source, (0..<source.chapterCount).contains(unit) else { return }
-        navigateToSpine(unit)
+        navigate(toSpine: unit, fragment: nil)
     }
 
     func reloadStoredStyle() {

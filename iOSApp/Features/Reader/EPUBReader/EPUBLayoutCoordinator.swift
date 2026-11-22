@@ -89,6 +89,8 @@ struct EPUBChapterLayout {
     var linkRegions: [LinkInteractionRegionSet]
     /// 本章注脚文本：noteID（不含 #）→ 文本。
     var footnotes: [String: String]
+    /// 锚点 id → 本章 `sourceText` 的 UTF-16 偏移。排版准备阶段写入，供目录高亮和章内跳转。
+    var anchorOffsets: [String: Int] = [:]
     var positionMap = EPUBSourcePositionMap(legacy: "", current: "")
     var tableFallback = false
     /// 本章最终生效的书写方向（当竖排章节因引擎准入限制回退时为 `.horizontal`）。

@@ -145,16 +145,16 @@ extension EPUBReaderModel {
         }
     }
 
-    /// 与当前阅读位置对应的目录条目序号：最后一个 spineIndex ≤ 当前章的条目。
+    /// 与当前阅读位置对应的目录条目。同一文件里的多个锚点按源文本偏移比较；
+    /// 章节未排完或当前页偏移未知时，回退到该文件的第一项。
     var currentTOCIndex: Int? {
         guard let toc = source?.toc, !toc.isEmpty else { return nil }
-        var match: Int?
-        for (index, entry) in toc.enumerated() {
-            if let spineIndex = entry.spineIndex, spineIndex <= location.spineIndex {
-                match = index
-            }
-        }
-        return match
+        let offsets = pageBook?.anchorOffsets(spineIndex: location.spineIndex)
+        let pageOffset = offsets == nil
+            ? nil
+            : pageBook?.sourceOffset(spineIndex: location.spineIndex, pageIndex: location.pageIndex)
+        return EPUBTOCHighlight.index(entries: toc, spineIndex: location.spineIndex,
+                                      pageSourceOffset: pageOffset, anchorOffsets: offsets)
     }
 
     /// 三页位图（同一份缓存结果，预览与落页共用）。
