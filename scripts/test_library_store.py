@@ -24,6 +24,7 @@ enum FileContentHash {
 }
 @MainActor final class HashStore {
  var series = LibrarySeriesState()
+ var readingStatuses = LibraryBookStatusState()
  var hashRefreshGeneration = 0
  var hashes: [String: String] = [:]
  var publications = 0
@@ -34,10 +35,12 @@ enum FileContentHash {
  var prunes: [Set<String>] = []
  func pruneOrphanedState(books: [LibraryBook], keepingHashes: Set<String>) { prunes.append(keepingHashes) }
  func save(_ state: LibrarySeriesState) { series = state }
+ func save(_ statuses: LibraryBookStatusState) { readingStatuses = statuses }
  func persistLastOpened() { lastOpenedWrites += 1 }
 '''
 fixture += display + identity + refresh + forget + '\n}\n'
-fixture += (root / 'Sources/NoveliaIOSCore/Features/Library/LibraryOrganizer.swift').read_text()
+organizer = (root / 'Sources/NoveliaIOSCore/Features/Library/LibraryOrganizer.swift').read_text()
+fixture += organizer[:organizer.index('// MARK: - 书架更新检查聚合模型')]
 fixture += r'''
 @main struct Checks {
  @MainActor static func main() async throws {
