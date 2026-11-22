@@ -41,7 +41,7 @@ enum InFileTOCSelection {
         let canCompare = positionsReady && position != nil
         var firstInResource: Int?
         var resolvedInResource = false
-        var bestEarlier: (resource: Int, position: Position?, index: Int)?
+        var bestEarlier: (resource: Int, index: Int)?
         var bestHere: (position: Position, index: Int)?
         for index in resources.indices {
             guard let entryResource = resources[index] else { continue }
@@ -59,11 +59,13 @@ enum InFileTOCSelection {
                     }
                 }
             } else if entryResource < resource {
-                let candidate = (resource: entryResource, position: positions[index], index: index)
+                // 更早资源已完整经过，不参与当前文件的章内位置比较，按资源与目录顺序取最后一项。
                 if let best = bestEarlier {
-                    if isLater(candidate, than: best) { bestEarlier = candidate }
+                    if entryResource > best.resource || (entryResource == best.resource && index > best.index) {
+                        bestEarlier = (entryResource, index)
+                    }
                 } else {
-                    bestEarlier = candidate
+                    bestEarlier = (entryResource, index)
                 }
             }
         }
@@ -71,24 +73,6 @@ enum InFileTOCSelection {
         // 章内位置未知，或本章一个锚点偏移都没有：落在该文件的第一项，而不是最后一项。
         if let firstInResource, !canCompare || !resolvedInResource { return firstInResource }
         return bestEarlier?.index
-    }
-
-    private static func isLater<Position: Comparable>(
-        _ candidate: (resource: Int, position: Position?, index: Int),
-        than best: (resource: Int, position: Position?, index: Int)
-    ) -> Bool {
-        if candidate.resource != best.resource { return candidate.resource > best.resource }
-        switch (candidate.position, best.position) {
-        case let (left?, right?):
-            if left != right { return left > right }
-            return candidate.index > best.index
-        case (nil, nil):
-            return candidate.index > best.index
-        case (.some, nil):
-            return true
-        case (nil, .some):
-            return false
-        }
     }
 }
 
@@ -98,7 +82,7 @@ enum EPUBTOCHighlight {
                       pageSourceOffset: Int?, anchorOffsets: [String: Int]?) -> Int? {
         let ready = anchorOffsets != nil && pageSourceOffset != nil
         let positions: [Int?] = entries.map { entry in
-            guard let anchorOffsets else { return nil }
+            guard entry.spineIndex == spineIndex, let anchorOffsets else { return nil }
             return offset(fragment: entry.fragment, anchors: anchorOffsets)
         }
         return InFileTOCSelection.currentIndex(

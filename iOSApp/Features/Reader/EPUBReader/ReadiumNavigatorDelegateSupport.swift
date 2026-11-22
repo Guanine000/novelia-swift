@@ -72,8 +72,8 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         let viewport: Double? = needsMeasure
             ? (measurements == nil ? nil : (locator.locations.progression ?? 0))
             : (locator.locations.progression ?? 0)
-        if let current = index.highlightIndex(resource: resource, viewportProgression: viewport, measurements: measurements),
-           currentTOCIndex != current {
+        let current = index.highlightIndex(resource: resource, viewportProgression: viewport, measurements: measurements)
+        if currentTOCIndex != current {
             currentTOCIndex = current
         }
         guard measure, needsMeasure else { return }
@@ -103,18 +103,20 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
                   self.navigationIndex?.resourceIndex(for: href) == token.resource else { return }
             self.tocMeasuredResource = token.resource
             self.tocMeasuredAnchors = snapshot.found
-            guard let index = self.navigationIndex,
-                  let current = index.highlightIndex(resource: token.resource,
-                                                     viewportProgression: snapshot.viewportProgression,
-                                                     measurements: snapshot.found),
-                  self.currentTOCIndex != current else { return }
-            self.currentTOCIndex = current
+            guard let index = self.navigationIndex else { return }
+            let current = index.highlightIndex(resource: token.resource,
+                                               viewportProgression: snapshot.viewportProgression,
+                                               measurements: snapshot.found)
+            if self.currentTOCIndex != current {
+                self.currentTOCIndex = current
+            }
         }
     }
 
     func acceptsTOCMeasure(_ token: ReadiumTOCMeasureToken) -> Bool {
         guard let locator, let resource = navigationIndex?.resourceIndex(for: locator.href) else { return false }
-        let realNavigator = (curlPreview == nil || curlPreview?.committing == true) && viewportRestoration == nil
+        let reusingNavigatorForPreview = curlPreview.map { $0.snapshot === $0.navigator && !$0.committing } ?? false
+        let realNavigator = !reusingNavigatorForPreview && viewportRestoration == nil
         return ReadiumTOCMeasureGate.shouldApply(
             requested: token,
             latest: ReadiumTOCMeasureToken(generation: tocMeasureGeneration, resource: resource),
@@ -630,5 +632,11 @@ extension ReadiumEPUBReaderModel {
     func endCurlPreview(_ transaction: UUID) {
         guard curlPreview?.id == transaction else { return }
         curlPreview = nil; curlBusy = false
+        if let locator, let index = navigationIndex,
+           let resource = index.resourceIndex(for: locator.href),
+           index.needsLayoutMeasurement(resource: resource),
+           tocMeasuredResource != resource {
+            refreshReadiumTOCHighlight(for: locator, measure: true)
+        }
     }
 }

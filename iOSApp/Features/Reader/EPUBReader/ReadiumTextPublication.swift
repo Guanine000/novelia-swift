@@ -107,7 +107,6 @@ struct ReadiumNavigationIndex {
         let tocIndex: Int
         let resource: Int?
         let fragment: String?
-        var progression: Double?
     }
 
     private let resources: [String: Int]
@@ -115,8 +114,7 @@ struct ReadiumNavigationIndex {
     /// 阅读时长分段依赖这个稳定分组，不能改成「该文件的第一项」。
     private let tocByResource: [Int?]
     private let tocByHref: [String: Int]
-    private var anchors: [Anchor]
-    private var progressionsReady = false
+    private let anchors: [Anchor]
 
     init(readingOrder: [Link], tableOfContents: [Link]) {
         var resources: [String: Int] = [:]
@@ -140,7 +138,7 @@ struct ReadiumNavigationIndex {
             }
             let fragment = url.fragment.flatMap { EPUBContainer.tocFragment(in: "#\($0)") }
                 ?? EPUBContainer.tocFragment(in: url.string)
-            anchors.append(Anchor(tocIndex: id, resource: resource, fragment: fragment, progression: nil))
+            anchors.append(Anchor(tocIndex: id, resource: resource, fragment: fragment))
         }
         // 没有章内位置的查询仍取最后一个不晚于该资源的条目，避免后续无目录文件被拆段。
         var best: Int?
@@ -185,18 +183,6 @@ struct ReadiumNavigationIndex {
         )
     }
 
-    /// 测试注入已知的布局 progression。打开书籍不再按正文字数估算这些值。
-    func applying(progressions: [Int: Double]) -> ReadiumNavigationIndex {
-        var copy = self
-        for index in copy.anchors.indices {
-            if let value = progressions[copy.anchors[index].tocIndex] {
-                copy.anchors[index].progression = value
-            }
-        }
-        copy.progressionsReady = true
-        return copy
-    }
-
     func resourceIndex(for href: AnyURL) -> Int? {
         Self.resourceIndex(for: href, resources: resources)
     }
@@ -219,28 +205,6 @@ struct ReadiumNavigationIndex {
     func tocIndex(for href: AnyURL) -> Int? {
         if let resource = resourceIndex(for: href) { return tocByResource[resource] }
         return tocByHref[href.normalized.string]
-    }
-
-    /// 同一资源内取 progression 不晚于当前 locator 的最后一项。
-    /// 目录位置还没算出来时，回退到该资源的第一项。
-    func tocIndex(for locator: Locator) -> Int? {
-        guard let resource = resourceIndex(for: locator.href) else {
-            return tocByHref[locator.href.normalized.string]
-                ?? tocByHref[locator.href.removingQuery().removingFragment().normalized.string]
-        }
-        let positions: [Double?] = anchors.map { anchor in
-            if let progression = anchor.progression { return progression }
-            if anchor.fragment == nil, progressionsReady { return 0 }
-            return nil
-        }
-        let position: Double? = progressionsReady ? (locator.locations.progression ?? 0) : nil
-        return InFileTOCSelection.currentIndex(
-            resources: anchors.map(\.resource),
-            positions: positions,
-            resource: resource,
-            position: position,
-            positionsReady: progressionsReady
-        )
     }
 
     /// 不知道页内位置时，该资源的第一项；资源自己没有目录项时，用更早资源里阅读顺序最后的一项。
@@ -274,7 +238,7 @@ enum ReadiumTOCGeometrySelection {
                       measurements: [String: Double]?) -> Int? {
         let ready = measurements != nil && viewportProgression != nil
         let positions: [Double?] = anchors.map { anchor in
-            guard let measurements else { return nil }
+            guard anchor.resource == resource, let measurements else { return nil }
             guard let fragment = anchor.fragment, !fragment.isEmpty else { return 0 }
             return measurements[fragment]
         }
@@ -304,7 +268,9 @@ enum ReadiumTOCMeasureGate {
 
 /// 在当前可见文档里测量目录锚点。脚本是自有的，只调用 DOM 的公开几何；
 /// 轴向与 Readium 3.11 `onScroll` 一致：非竖排滚动用 `scrollY / scrollHeight`，
-/// 其余（分栏，以及竖排滚动）用带 RTL 符号的 `scrollX / scrollWidth`。
+/// 其余（分栏，以及竖排滚动）用从文档阅读起点起算的水平进度 `scrollX / scrollWidth`。
+/// 分页模式下把元素前缘对齐到所在栏起点，避免页面内边距导致页首锚点永远大于视口起点，
+/// 同时保留双页模式「右栏尚未到达页首」的语义。
 enum ReadiumTOCGeometryScript {
     struct Snapshot: Equatable {
         /// `readium.link.href`，用来确认量到的是当前资源，而不是还没换掉的上一章。
@@ -326,18 +292,37 @@ enum ReadiumTOCGeometryScript {
           var vertical = writingMode.indexOf("vertical") === 0;
           var scrollOn = (document.documentElement.style.getPropertyValue("--USER__view") || "").trim() === "readium-scroll-on";
           var rtl = style.direction === "rtl" || writingMode === "vertical-rl";
-          function progression(rect) {
+          var colCount = parseInt(style.getPropertyValue("column-count"), 10);
+          if (!(colCount > 1)) colCount = 1;
+          var colWidth = window.innerWidth / colCount;
+          function viewportProgression() {
             if (scrollOn && !vertical) {
               var height = root.scrollHeight;
               if (!(height > 0)) return null;
-              return (rect.top + window.scrollY) / height;
+              return window.scrollY / height;
             }
             var width = root.scrollWidth;
             if (!(width > 0)) return null;
-            var raw = rect.left + window.scrollX;
-            return (rtl ? -raw : raw) / width;
+            var scrollPos = rtl ? Math.abs(window.scrollX) : window.scrollX;
+            return scrollPos / width;
           }
-          var viewport = progression({ top: 0, left: 0 });
+          function elementProgression(rect) {
+            if (scrollOn && !vertical) {
+              var height = root.scrollHeight;
+              if (!(height > 0)) return null;
+              return Math.max(0, rect.top + window.scrollY - 1) / height;
+            }
+            var width = root.scrollWidth;
+            if (!(width > 0)) return null;
+            var scrollPos = rtl ? Math.abs(window.scrollX) : window.scrollX;
+            var raw = rtl ? (window.innerWidth - rect.right) + scrollPos : rect.left + scrollPos;
+            if (scrollOn) {
+              return Math.max(0, raw - 1) / width;
+            }
+            var snapped = colWidth > 0 ? Math.floor(Math.max(0, raw + 1) / colWidth) * colWidth : Math.max(0, raw);
+            return snapped / width;
+          }
+          var viewport = viewportProgression();
           var href = (typeof readium !== "undefined" && readium.link && typeof readium.link.href === "string") ? readium.link.href : "";
           var found = {};
           var missing = [];
@@ -345,7 +330,7 @@ enum ReadiumTOCGeometryScript {
             var id = ids[i];
             var element = document.getElementById(id);
             if (!element) { missing.push(id); continue; }
-            var value = progression(element.getBoundingClientRect());
+            var value = elementProgression(element.getBoundingClientRect());
             if (value == null || !isFinite(value)) { missing.push(id); continue; }
             found[id] = value;
           }

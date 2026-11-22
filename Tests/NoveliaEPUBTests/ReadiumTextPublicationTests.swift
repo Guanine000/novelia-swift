@@ -61,9 +61,11 @@ final class ReadiumTextPublicationTests: XCTestCase {
         }])
         let publication = ReadiumTextPublication.make(source: source)
         let file = publication.readingOrder[0]
-        let plain = try XCTUnwrap(await publication.locate(file))
+        let plainLocator = await publication.locate(file)
+        let plain = try XCTUnwrap(plainLocator)
         XCTAssertEqual(plain.locations.progression, 0)
-        let anchored = try XCTUnwrap(await publication.locate(Link(href: file.url().string + "#id0", mediaType: .xhtml)))
+        let anchoredLocator = await publication.locate(Link(href: file.url().string + "#id0", mediaType: .xhtml))
+        let anchored = try XCTUnwrap(anchoredLocator)
         XCTAssertNil(anchored.locations.progression, "Readium 3.11 对带 fragment 的链接不给 progression")
     }
 
@@ -144,13 +146,13 @@ extension ReadiumTextPublicationTests {
         let index = ReadiumNavigationIndex(readingOrder: readingOrder, tableOfContents: toc)
         // 同一文件的 #first 与 #second 必须都留下来，不能被后一项覆盖。
         XCTAssertEqual(index.fragments(inResource: 1), ["first", "second"])
-        let positioned = index.applying(progressions: [0: 0.25, 1: 0, 2: 0.75, 3: 0])
-        let chapter1 = readingOrder[1].url()
-        let atFirst = Locator(href: chapter1, mediaType: .xhtml, locations: .init(progression: 0.25))
-        let atSecond = Locator(href: chapter1, mediaType: .xhtml, locations: .init(progression: 0.75))
-        XCTAssertEqual(positioned.tocIndex(for: atFirst), 0, "#first")
-        XCTAssertEqual(positioned.tocIndex(for: atSecond), 2, "#second")
-        XCTAssertNotEqual(positioned.tocIndex(for: atFirst), positioned.tocIndex(for: atSecond))
+        let measurements = ["first": 0.25, "second": 0.75]
+        XCTAssertEqual(index.highlightIndex(resource: 1, viewportProgression: 0.25, measurements: measurements), 0, "#first")
+        XCTAssertEqual(index.highlightIndex(resource: 1, viewportProgression: 0.75, measurements: measurements), 2, "#second")
+        XCTAssertNotEqual(
+            index.highlightIndex(resource: 1, viewportProgression: 0.25, measurements: measurements),
+            index.highlightIndex(resource: 1, viewportProgression: 0.75, measurements: measurements)
+        )
         // 没有章内位置的 href 查询仍按资源向前填充，供阅读时长分段使用。
         for value in ["chapter-0.xhtml", "chapter-0.xhtml#p1", "chapter-1.xhtml?view=1#note",
                       "chapter-2.xhtml", "part/../chapter-2.xhtml", "missing.xhtml"] {

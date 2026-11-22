@@ -787,6 +787,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
               let origin = viewportRestoration?.origin ?? navigator.currentLocation ?? locator else { return nil }
         let id = UUID()
         viewportRestoration = (id, origin, navigator)
+        invalidateTOCGeometry()
         return id
     }
 

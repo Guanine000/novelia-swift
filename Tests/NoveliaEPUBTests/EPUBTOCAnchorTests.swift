@@ -1,3 +1,4 @@
+import JavaScriptCore
 import XCTest
 import ReadiumShared
 @testable import NoveliaEPUB
@@ -37,7 +38,10 @@ final class EPUBTOCAnchorTests: XCTestCase {
                                               pageSourceOffset: 0, anchorOffsets: [:])
         XCTAssertEqual(nextFile, 10, "进入后一个没有目录项的文件时，高亮前一文件已经开始的最后一节")
 
-        let readingOrder = [Link(href: "Section0005.xhtml", mediaType: .xhtml)]
+        let readingOrder = [
+            Link(href: "Section0005.xhtml", mediaType: .xhtml),
+            Link(href: "Section0006.xhtml", mediaType: .xhtml),
+        ]
         var links = [Link(href: "Section0005.xhtml", mediaType: .xhtml, title: "file")]
         links += (0..<10).map { Link(href: "Section0005.xhtml#id\($0)", mediaType: .xhtml, title: "id\($0)") }
         let index = ReadiumNavigationIndex(readingOrder: readingOrder, tableOfContents: links)
@@ -45,6 +49,7 @@ final class EPUBTOCAnchorTests: XCTestCase {
         expectedFragments.append(contentsOf: (0..<10).map { "id\($0)" })
         XCTAssertEqual(index.fragments(inResource: 0), expectedFragments)
         XCTAssertTrue(index.needsLayoutMeasurement(resource: 0))
+        XCTAssertFalse(index.needsLayoutMeasurement(resource: 1))
         XCTAssertEqual(index.fragmentIDs(inResource: 0), (0..<10).map { "id\($0)" })
         XCTAssertEqual(index.highlightIndex(resource: 0, viewportProgression: 0.99, measurements: nil), 0,
                        "几何尚未量到时回退到该文件第一项")
@@ -59,6 +64,155 @@ final class EPUBTOCAnchorTests: XCTestCase {
         withoutLast["id9"] = nil
         XCTAssertEqual(index.highlightIndex(resource: 0, viewportProgression: 0.99, measurements: withoutLast), 9,
                        "找不到的 id 跳过，不能因此改成最后一项")
+        XCTAssertEqual(index.highlightIndex(resource: 1, viewportProgression: 0, measurements: [:]), 10,
+                       "Readium 进入后续无目录文件时，高亮前一文件的最后一节")
+    }
+
+    func testReadiumGeometryScriptHandlesLTRPaginationTwoColumnRTLAndScroll() throws {
+        // 1) LTR 单页分页：ReadiumCSS 带 24px 左边距，跳到第 2 页（scrollX = 390）时 #id1 应立即高亮。
+        let ltrSingle = try evaluateGeometryScript(
+            ids: ["id0", "id1", "id2"],
+            href: "Section0005.xhtml",
+            innerWidth: 390,
+            scrollX: 390,
+            scrollY: 0,
+            scrollWidth: 1170,
+            scrollHeight: 844,
+            writingMode: "horizontal-tb",
+            direction: "ltr",
+            scrollOn: false,
+            columnCount: 1,
+            rects: [
+                "id0": (top: 40, left: -366, right: -24),
+                "id1": (top: 40, left: 24, right: 366),
+                "id2": (top: 40, left: 414, right: 756),
+            ]
+        )
+        XCTAssertEqual(ltrSingle.viewportProgression, 390.0 / 1170.0, accuracy: 1e-6)
+        XCTAssertEqual(try XCTUnwrap(ltrSingle.found["id0"]), 0.0, accuracy: 1e-6)
+        XCTAssertEqual(try XCTUnwrap(ltrSingle.found["id1"]), 390.0 / 1170.0, accuracy: 1e-6)
+        XCTAssertEqual(try XCTUnwrap(ltrSingle.found["id2"]), 780.0 / 1170.0, accuracy: 1e-6)
+
+        // 2) LTR 双页分页（innerWidth = 780，每栏 390）：左栏 #id1 已到达页首，右栏 #id2 尚未到达页首。
+        let ltrTwoCol = try evaluateGeometryScript(
+            ids: ["id1", "id2"],
+            href: "Section0005.xhtml",
+            innerWidth: 780,
+            scrollX: 0,
+            scrollY: 0,
+            scrollWidth: 1560,
+            scrollHeight: 1000,
+            writingMode: "horizontal-tb",
+            direction: "ltr",
+            scrollOn: false,
+            columnCount: 2,
+            rects: [
+                "id1": (top: 40, left: 24, right: 366),
+                "id2": (top: 40, left: 414, right: 756),
+            ]
+        )
+        XCTAssertEqual(ltrTwoCol.viewportProgression, 0.0, accuracy: 1e-6)
+        XCTAssertLessThanOrEqual(try XCTUnwrap(ltrTwoCol.found["id1"]), ltrTwoCol.viewportProgression)
+        XCTAssertGreaterThan(try XCTUnwrap(ltrTwoCol.found["id2"]), ltrTwoCol.viewportProgression)
+
+        // 3) RTL / vertical-rl 双页分页（scrollX = 0）：右栏 #id1（先读）已到达页首，左栏 #id2（后读）尚未到达。
+        let rtlTwoCol = try evaluateGeometryScript(
+            ids: ["id1", "id2"],
+            href: "Section0005.xhtml",
+            innerWidth: 780,
+            scrollX: 0,
+            scrollY: 0,
+            scrollWidth: 1560,
+            scrollHeight: 1000,
+            writingMode: "vertical-rl",
+            direction: "ltr",
+            scrollOn: false,
+            columnCount: 2,
+            rects: [
+                "id1": (top: 40, left: 414, right: 756),
+                "id2": (top: 40, left: 24, right: 366),
+            ]
+        )
+        XCTAssertEqual(rtlTwoCol.viewportProgression, 0.0, accuracy: 1e-6)
+        XCTAssertEqual(try XCTUnwrap(rtlTwoCol.found["id1"]), 0.0, accuracy: 1e-6)
+        XCTAssertEqual(try XCTUnwrap(rtlTwoCol.found["id2"]), 390.0 / 1560.0, accuracy: 1e-6)
+        XCTAssertGreaterThan(try XCTUnwrap(rtlTwoCol.found["id2"]), rtlTwoCol.viewportProgression)
+
+        // 4) 水平滚动模式：0.5px 亚像素偏移视为已到达，下方 200px 的下一节不提前高亮。
+        let scrollSnap = try evaluateGeometryScript(
+            ids: ["id1", "id2"],
+            href: "Section0005.xhtml",
+            innerWidth: 390,
+            scrollX: 0,
+            scrollY: 400,
+            scrollWidth: 390,
+            scrollHeight: 2000,
+            writingMode: "horizontal-tb",
+            direction: "ltr",
+            scrollOn: true,
+            columnCount: 1,
+            rects: [
+                "id1": (top: 0.5, left: 20, right: 370),
+                "id2": (top: 200, left: 20, right: 370),
+            ]
+        )
+        XCTAssertLessThanOrEqual(try XCTUnwrap(scrollSnap.found["id1"]), scrollSnap.viewportProgression)
+        XCTAssertGreaterThan(try XCTUnwrap(scrollSnap.found["id2"]), scrollSnap.viewportProgression)
+    }
+
+    private func evaluateGeometryScript(
+        ids: [String],
+        href: String,
+        innerWidth: Double,
+        scrollX: Double,
+        scrollY: Double,
+        scrollWidth: Double,
+        scrollHeight: Double,
+        writingMode: String,
+        direction: String,
+        scrollOn: Bool,
+        columnCount: Int,
+        rects: [String: (top: Double, left: Double, right: Double)]
+    ) throws -> ReadiumTOCGeometryScript.Snapshot {
+        let script = try XCTUnwrap(ReadiumTOCGeometryScript.source(fragmentIDs: ids))
+        let context = try XCTUnwrap(JSContext())
+        var jsError: String?
+        context.exceptionHandler = { _, value in jsError = value?.toString() }
+        let rectsJSON = rects.map { key, value in
+            "\"\(key)\":{\"top\":\(value.top),\"left\":\(value.left),\"right\":\(value.right)}"
+        }.joined(separator: ",")
+        let setup = """
+        var _rects = {\(rectsJSON)};
+        var readium = { link: { href: "\(href)" } };
+        var document = {
+          scrollingElement: { scrollWidth: \(scrollWidth), scrollHeight: \(scrollHeight) },
+          documentElement: {
+            scrollWidth: \(scrollWidth),
+            scrollHeight: \(scrollHeight),
+            style: { getPropertyValue: function(k) { return k === "--USER__view" ? "\(scrollOn ? "readium-scroll-on" : "readium-paged-on")" : ""; } }
+          },
+          getElementById: function(id) {
+            if (!_rects[id]) return null;
+            return { getBoundingClientRect: function() { return _rects[id]; } };
+          }
+        };
+        var window = {
+          innerWidth: \(innerWidth),
+          scrollX: \(scrollX),
+          scrollY: \(scrollY),
+          getComputedStyle: function() {
+            return {
+              writingMode: "\(writingMode)",
+              direction: "\(direction)",
+              getPropertyValue: function(k) { return k === "column-count" ? "\(columnCount)" : ""; }
+            };
+          }
+        };
+        """
+        context.evaluateScript(setup)
+        let raw = context.evaluateScript(script)?.toString()
+        XCTAssertNil(jsError)
+        return try XCTUnwrap(ReadiumTOCGeometryScript.parse(jsonString: try XCTUnwrap(raw)))
     }
 
     func testReadiumGeometrySnapshotAndStaleMeasureAreDistinct() throws {
