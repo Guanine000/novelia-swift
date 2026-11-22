@@ -148,7 +148,7 @@ final class EPUBPageBook {
                 if !completedChapters.contains(spineIndex) { chapters[spineIndex] = nil }
                 EPUBLayoutLog.logger.info("\(label, privacy: .public) chapter layout cancelled; \(fields, privacy: .public), elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
             } else {
-                EPUBLayoutLog.logger.error("\(label, privacy: .public) chapter layout failed; \(fields, privacy: .public), error=\(failure.kind, privacy: .public), code=\(failure.code, privacy: .public), elapsedMs=\(elapsed, privacy: .public), thread=\(DiagnosticContext.threadLabel, privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
+                EPUBLayoutLog.shareable.error("\(label) chapter layout failed; \(fields), error=\(failure.kind), code=\(failure.code), elapsedMs=\(elapsed), thread=\(DiagnosticContext.threadLabel), mono=\(DiagnosticContext.monotonicMilliseconds())")
             }
             tally?.logSummary(spineIndex: spineIndex)
             throw error

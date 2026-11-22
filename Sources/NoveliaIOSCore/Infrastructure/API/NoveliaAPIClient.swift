@@ -151,16 +151,22 @@ public struct NoveliaAPIClient: Sendable {
         } catch {
             let nsError = error as NSError
             let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - downloadStartedAt) * 1_000)
-            Self.downloadLogger.error("Novel EPUB request failed before receiving an HTTP response; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
+            ShareableLogger(category: "novel-download").error(
+                AppDiagnosticMessage.novelDownloadRequestFailed(domain: nsError.domain, code: nsError.code, elapsedMs: elapsedMS)
+            )
             throw error
         }
         let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - downloadStartedAt) * 1_000)
         do {
             let size = try acceptEPUBDownload(at: temporaryURL, response: response, to: destinationURL)
-            Self.downloadLogger.info("Novel EPUB download completed; bytes=\(size, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
+            ShareableLogger(category: "novel-download").notice(
+                AppDiagnosticMessage.novelDownloadCompleted(bytes: size, elapsedMs: elapsedMS)
+            )
         } catch {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            Self.downloadLogger.error("Novel EPUB download rejected; status=\(status, privacy: .public), elapsedMs=\(elapsedMS, privacy: .public)")
+            ShareableLogger(category: "novel-download").error(
+                AppDiagnosticMessage.novelDownloadRejected(status: status, elapsedMs: elapsedMS)
+            )
             throw error
         }
     }

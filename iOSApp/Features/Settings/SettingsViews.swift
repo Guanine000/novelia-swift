@@ -344,10 +344,22 @@ struct SettingsView: View {
     private func exportLogs() {
         guard !isExportingLogs else { return }
         isExportingLogs = true
+        #if NOVELIA_READIUM_ONLY
+        let readerEngine = "readium (legacy)"
+        #else
+        let readerEngine = epubUsesReadium ? "readium" : "native"
+        #endif
+        let aiConfig = services.readingAI.configuration
+        let summary = ApplicationLogExporter.EnvironmentSummary(
+            readerEngine: readerEngine,
+            webDAVEnabled: services.local.sync.isEnabled,
+            aiEnabled: aiConfig.isEnabled,
+            aiFormat: aiConfig.requestFormat.rawValue
+        )
         Task {
             do {
                 let url = try await Task.detached(priority: .userInitiated) {
-                    try ApplicationLogExporter.makeFile()
+                    try ApplicationLogExporter.makeFile(summary: summary)
                 }.value
                 logFileURL = url
                 isShowingLogShare = true
@@ -593,7 +605,14 @@ private struct TXTChapterRuleEditor: View {
 }
 
 private enum ApplicationLogExporter {
-    static func makeFile() throws -> URL {
+    struct EnvironmentSummary: Sendable {
+        let readerEngine: String
+        let webDAVEnabled: Bool
+        let aiEnabled: Bool
+        let aiFormat: String
+    }
+
+    static func makeFile(summary: EnvironmentSummary) throws -> URL {
         let store = try OSLogStore(scope: .currentProcessIdentifier)
         let startDate = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? .distantPast
         let entries = try store.getEntries(at: store.position(date: startDate))
@@ -602,9 +621,17 @@ private enum ApplicationLogExporter {
         // 以前启动的记录来自 App 自己的诊断文件；当前进程的记录仍从系统日志读取，避免重复。
         let journal = DiagnosticJournal.shared
         journal.flush()
-        let earlier = journal.entries(since: startDate, excludingLaunch: journal.launch).map { entry in
-            ShareableLogLine(secondsAgo: max(0, Int(now.timeIntervalSince(entry.date))),
-                             level: entry.level, category: entry.category, message: entry.message)
+        let earlierEntries = journal.entries(since: startDate, excludingLaunch: journal.launch)
+        var launchSections: [(label: String, lines: [ShareableLogLine])] = []
+        for entry in earlierEntries {
+            let line = ShareableLogLine(secondsAgo: max(0, Int(now.timeIntervalSince(entry.date))),
+                                        level: entry.level, category: entry.category, message: entry.message)
+            let label = "Launch \(entry.launch) (previous)"
+            if launchSections.last?.label == label {
+                launchSections[launchSections.count - 1].lines.append(line)
+            } else {
+                launchSections.append((label: label, lines: [line]))
+            }
         }
         let current = logEntries.compactMap { entry -> ShareableLogLine? in
             guard let message = ShareableLogPolicy.message(
@@ -613,9 +640,11 @@ private enum ApplicationLogExporter {
             return ShareableLogLine(secondsAgo: max(0, Int(now.timeIntervalSince(entry.date))),
                                     level: levelName(entry.level), category: entry.category, message: message)
         }
-        // 在限制行数之前合并重复记录，防止大量重复事件挤掉较早的事件。
-        let exported = earlier + current
-        let collapsed = ShareableLogAggregator.collapse(exported)
+        if !current.isEmpty {
+            launchSections.append((label: "Launch \(journal.launch) (current)", lines: current))
+        }
+        // 在限制行数之前按启动批次分段并合并连续重复记录，既保留重启边界又防止重复事件挤掉较早记录。
+        let collapsed = ShareableLogAggregator.collapseByLaunch(launchSections)
         let messages = Array(collapsed.suffix(10_000))
         let txtDiagnosticCount = logEntries.filter { $0.category == "txt" }.count
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
@@ -624,8 +653,9 @@ private enum ApplicationLogExporter {
             "Novelia iOS 应用诊断日志（隐私过滤版）",
             "版本：\(version) (\(build))",
             "系统：\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)（\(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone")）",
-            "范围：最近 7 天；以前启动的记录来自 App 诊断文件，本次启动来自系统日志；连续重复事件合并为一行并标注 (×次数)，最多 10000 行",
-            "以前启动的诊断记录：\(earlier.count)",
+            "配置摘要：阅读引擎=\(summary.readerEngine)，WebDAV=\(summary.webDAVEnabled ? "开启" : "关闭")，AI=\(summary.aiEnabled ? "开启(\(summary.aiFormat))" : "关闭")",
+            "范围：最近 7 天；以前启动的记录来自 App 诊断文件，本次启动来自系统日志；按启动批次分段，连续重复事件合并为一行并标注 (×次数)，最多 10000 行",
+            "以前启动的诊断记录：\(earlierEntries.count)",
             "本次启动读取的应用事件：\(logEntries.count)；通过隐私过滤：\(current.count)；合并后行数：\(collapsed.count)",
             "省略未经审查的应用事件：\(logEntries.count - current.count)",
             "不包含系统／框架日志；仅导出已审查的诊断格式，时间为距导出时的秒数。",

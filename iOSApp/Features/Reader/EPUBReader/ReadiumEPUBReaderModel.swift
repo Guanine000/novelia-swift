@@ -215,6 +215,7 @@ final class ReadiumEPUBReaderModel: ObservableObject {
     func open(url: URL, systemIsDark: Bool) async {
         guard status == .idle else { return }
         status = .opening
+        let startedAt = MonotonicInstant.now
 #if DEBUG
         curlOpeningStartedAt = ProcessInfo.processInfo.systemUptime
         curlOpeningMilliseconds = [-1, -1, -1, -1]
@@ -261,7 +262,13 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             status = .ready
             Self.shareable.notice(ReaderDiagnosticMessage.readiumOpened(resources: publication.readingOrder.count, positions: positionCount))
         } catch {
+            let nsError = error as NSError
             Self.logger.error("Readium EPUB open failed: \(String(describing: error), privacy: .public)")
+            Self.shareable.error(ReaderDiagnosticMessage.readiumOpenFailed(
+                domain: nsError.domain,
+                code: nsError.code,
+                elapsedMs: DiagnosticContext.milliseconds(since: startedAt)
+            ))
             status = .failed(Self.describe(error))
         }
     }

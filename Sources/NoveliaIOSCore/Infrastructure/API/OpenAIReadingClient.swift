@@ -38,8 +38,17 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
     /// 也能把"已接收字数"反馈给界面。服务端忽略 stream 而直接返回 JSON 时自动回退。
     func complete(configuration: ReadingAIConfiguration, apiKey: String, request: ReadingAIRequest,
                   onProgress: @escaping @Sendable (Int, String) -> Void) async throws -> ReadingAIResponse {
-        let config = try configuration.validated()
-        let httpRequest = try Self.urlRequest(configuration: config, apiKey: apiKey, request: request)
+        let startedAt = MonotonicInstant.now
+        let format = configuration.requestFormat.rawValue
+        let config: ReadingAIConfiguration
+        let httpRequest: URLRequest
+        do {
+            config = try configuration.validated()
+            httpRequest = try Self.urlRequest(configuration: config, apiKey: apiKey, request: request)
+        } catch {
+            Self.logFailure(format: format, error: error, startedAt: startedAt)
+            throw error
+        }
         do {
             try Task.checkCancellation()
             let (bytes, response) = try await session.bytes(for: httpRequest)
@@ -50,21 +59,69 @@ final class OpenAIReadingClient: ReadingAICompleting, @unchecked Sendable {
             guard contentType.contains("text/event-stream") || response.expectedContentLength <= Int64(Self.maximumResponseBytes) else {
                 throw ReadingAIError.responseLimit
             }
-            if contentType.contains("text/event-stream") {
-                return try await Self.decodeStream(bytes, format: config.requestFormat, onProgress: onProgress)
+            let isStream = contentType.contains("text/event-stream")
+            let result: ReadingAIResponse
+            if isStream {
+                result = try await Self.decodeStream(bytes, format: config.requestFormat, onProgress: onProgress)
+            } else {
+                var data = Data()
+                for try await byte in bytes {
+                    guard data.count < Self.maximumResponseBytes else { throw ReadingAIError.responseLimit }
+                    data.append(byte)
+                    if data.count.isMultiple(of: 4_096) { try Task.checkCancellation() }
+                }
+                try Task.checkCancellation()
+                result = try Self.decode(data, format: config.requestFormat)
             }
-            var data = Data()
-            for try await byte in bytes {
-                guard data.count < Self.maximumResponseBytes else { throw ReadingAIError.responseLimit }
-                data.append(byte)
-                if data.count.isMultiple(of: 4_096) { try Task.checkCancellation() }
+            ShareableLogger(category: "reading-ai").notice(
+                AppDiagnosticMessage.aiRequestCompleted(
+                    format: format,
+                    stream: isStream,
+                    chars: result.text.count,
+                    elapsedMs: DiagnosticContext.milliseconds(since: startedAt)
+                )
+            )
+            return result
+        } catch is CancellationError {
+            ShareableLogger(category: "reading-ai").notice(
+                AppDiagnosticMessage.aiRequestCancelled(format: format, elapsedMs: DiagnosticContext.milliseconds(since: startedAt))
+            )
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            ShareableLogger(category: "reading-ai").notice(
+                AppDiagnosticMessage.aiRequestCancelled(format: format, elapsedMs: DiagnosticContext.milliseconds(since: startedAt))
+            )
+            throw CancellationError()
+        } catch let error as ReadingAIError {
+            Self.logFailure(format: format, error: error, startedAt: startedAt)
+            throw error
+        } catch {
+            Self.logFailure(format: format, error: ReadingAIError.transport, startedAt: startedAt)
+            throw ReadingAIError.transport
+        }
+    }
+
+    private static func logFailure(format: String, error: Error, startedAt: MonotonicInstant) {
+        let elapsed = DiagnosticContext.milliseconds(since: startedAt)
+        let (kind, status): (String, Int) = {
+            guard let aiError = error as? ReadingAIError else { return ("other", -1) }
+            switch aiError {
+            case .invalidAddress, .invalidConfiguration: return ("invalidConfig", -1)
+            case .unsupportedParameter: return ("unsupported", -1)
+            case .missingKey, .credentialStorage: return ("missingKey", -1)
+            case .inputLimit: return ("inputLimit", -1)
+            case .responseLimit: return ("responseLimit", -1)
+            case .http(let code): return ("http", code)
+            case .invalidResponse: return ("invalidResponse", -1)
+            case .truncated: return ("truncated", -1)
+            case .refused: return ("refused", -1)
+            case .transport: return ("transport", -1)
+            case .disabled, .unavailable: return ("other", -1)
             }
-            try Task.checkCancellation()
-            return try Self.decode(data, format: config.requestFormat)
-        } catch is CancellationError { throw CancellationError() }
-        catch let error as URLError where error.code == .cancelled { throw CancellationError() }
-        catch let error as ReadingAIError { throw error }
-        catch { throw ReadingAIError.transport }
+        }()
+        ShareableLogger(category: "reading-ai").error(
+            AppDiagnosticMessage.aiRequestFailed(format: format, error: kind, status: status, elapsedMs: elapsed)
+        )
     }
 
     /// 编码与解码独立可测；不把服务端原始错误正文返回界面，避免回显正文或凭据。

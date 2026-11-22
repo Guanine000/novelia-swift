@@ -2,6 +2,9 @@
 import Foundation
 import ReadiumZIPFoundation
 import SwiftSoup
+#if canImport(NoveliaIOSCore)
+import NoveliaIOSCore
+#endif
 
 /// EPUB 工具箱核心处理引擎：执行目录结构标准化、XHTML 良构修复、OPF/目录/封面修复与冗余资源清理。
 /// 所有处理只读取源文件并在临时文件写入完成后原子替换到目标路径，绝不修改原 EPUB。
@@ -9,6 +12,25 @@ enum EPUBToolboxProcessor {
     private static let fixedEntryDate = Date(timeIntervalSince1970: 1_767_225_600)
 
     static func process(
+        source: URL,
+        destination: URL,
+        options: EPUBToolboxOptions,
+        onProgress: (@Sendable (EPUBToolboxProgress) -> Void)? = nil
+    ) async throws -> EPUBToolboxResult {
+        let startedAt = MonotonicInstant.now
+        do {
+            let result = try await performProcess(source: source, destination: destination, options: options, onProgress: onProgress)
+            let changedItems = result.relocatedPathsCount + result.mendedXHTMLCount
+                + result.removedDeadManifestCount + result.registeredOrphanCount + result.removedUnusedCount
+            EPUBToolboxDiagnosticLog.logActionCompleted(action: "process", items: changedItems, bytes: result.outputSizeBytes, since: startedAt)
+            return result
+        } catch {
+            EPUBToolboxDiagnosticLog.logActionFailed(action: "process", error: error, since: startedAt)
+            throw error
+        }
+    }
+
+    private static func performProcess(
         source: URL,
         destination: URL,
         options: EPUBToolboxOptions,

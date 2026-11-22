@@ -374,7 +374,9 @@ struct DownloadedWebNovelTXTReader: View {
             } catch {
                 guard !Task.isCancelled else { return }
                 let nsError = error as NSError
-                TXTDiagnosticLog.logger.error("TXT reader load failed; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public)")
+                ShareableLogger(category: "txt").error(
+                    AppDiagnosticMessage.txtReaderLoadFailed(mode: "scroll", domain: nsError.domain, code: nsError.code)
+                )
                 errorMessage = error.localizedDescription
             }
         }
@@ -573,7 +575,9 @@ private struct TXTPagedReader: View {
         } catch {
             guard !Task.isCancelled else { return }
             let nsError = error as NSError
-            TXTDiagnosticLog.logger.error("TXT reader load failed; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public)")
+            ShareableLogger(category: "txt").error(
+                AppDiagnosticMessage.txtReaderLoadFailed(mode: "paged", domain: nsError.domain, code: nsError.code)
+            )
             errorMessage = error.localizedDescription
         }
     }

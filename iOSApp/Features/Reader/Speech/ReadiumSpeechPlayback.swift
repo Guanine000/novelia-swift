@@ -262,6 +262,9 @@ final class SpeechPlaybackController: ObservableObject {
 
     func start(from anchor: SpeechAnchor, readiumLocator: Locator? = nil, initiallyPaused: Bool = false) {
         guard let engine else { return }
+        ShareableLogger(category: "speech").notice(
+            AppDiagnosticMessage.speechStarted(engine: engine.kind.rawValue, chapter: anchor.chapterIndex, paused: initiallyPaused)
+        )
         if initiallyPaused {
             stop()
             lastAnchor = anchor
@@ -297,6 +300,15 @@ final class SpeechPlaybackController: ObservableObject {
         engine.onStateChange = { [weak self, weak engine] newState in
             guard let self, let engine, self.generation == generation else { return }
             if newState.utterance == nil { self.flushResumePoint() }
+            if case .failed = newState {
+                ShareableLogger(category: "speech").error(
+                    AppDiagnosticMessage.speechFailed(engine: engine.kind.rawValue, stage: "playback")
+                )
+            } else if case .finished = newState {
+                ShareableLogger(category: "speech").notice(
+                    AppDiagnosticMessage.speechStopped(engine: engine.kind.rawValue, reason: "finished")
+                )
+            }
             self.state = newState
             if newState.isPlaying, let navigation = self.pendingNavigation {
                 self.pendingNavigation = nil
@@ -384,7 +396,14 @@ final class SpeechPlaybackController: ObservableObject {
         startTask = Task { [weak self] in
             let result = await resolve()
             guard let self, !Task.isCancelled, self.generation == generation else { return }
-            guard let result else { self.state = .failed("无法定位当前可见正文，请选择句子起播。"); self.startTask = nil; return }
+            guard let result else {
+                ShareableLogger(category: "speech").error(
+                    AppDiagnosticMessage.speechFailed(engine: self.engineKind?.rawValue ?? "unknown", stage: "selection")
+                )
+                self.state = .failed("无法定位当前可见正文，请选择句子起播。")
+                self.startTask = nil
+                return
+            }
             self.startTask = nil
             self.start(from: result.0, readiumLocator: result.1)
         }

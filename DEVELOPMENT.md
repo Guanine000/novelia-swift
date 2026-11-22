@@ -517,7 +517,7 @@ WebDAV 请求使用 `reloadIgnoringLocalCacheData` 与 `Cache-Control: no-cache,
 
 分享日志使用 `ShareableLogPolicy` 的事件允许清单，只导出 App 子系统的受控记录。新增诊断需同时定义可分享格式和回归；自由文本、用户书名/正文、路径、URL、账号和凭据不能直接进入分享文件。系统/框架日志与未知事件不透传，内部完整诊断的动态敏感字段继续使用私有日志标记。构建日志属于本机排障材料，不作为发布附件。
 
-导出通过 `OSLogStore` 读取，在 iOS 上只能读到当前进程，并且实际只读回 `notice` 及以上级别；`info`／`debug` 只用于连接 Xcode 时的本机排障。需要出现在分享日志中的事件使用 Core 的 `ShareableLogger`：它写入系统日志（只有通过审查的消息标为公开），同时追加到 `DiagnosticJournal`（Application Support/Diagnostics，不备份，单文件约 1.5 MB、轮换保留一个旧文件，导出时取最近 7 天）。写入与读取都再经过 `ShareableLogPolicy` 审查。导出时，以前启动的记录来自该文件，本次启动的记录来自系统日志，两者按启动标识去重，因此 App 重启或被系统结束后仍可导出之前的记录。阅读诊断消息统一由 `ReaderDiagnosticMessage` 生成，不在调用处手写格式；新增事件时同时增加格式化函数、允许清单和 `ReaderDiagnosticMessageTests` 用例。
+导出通过 `OSLogStore` 读取，在 iOS 上只能读到当前进程，并且实际只读回 `notice` 及以上级别；`info`／`debug` 只用于连接 Xcode 时的本机排障。需要出现在分享日志中的事件（包括关键失败事件与跨启动排障事件）使用 Core 的 `ShareableLogger`：它写入系统日志（只有通过审查的消息标为公开），同时追加到 `DiagnosticJournal`（Application Support/Diagnostics，不备份，单文件约 1.5 MB、轮换保留一个旧文件，导出时取最近 7 天）。写入与读取都再经过 `ShareableLogPolicy` 审查。导出时，以前启动的记录来自该文件，本次启动的记录来自系统日志，两者按启动标识去重并由 `ShareableLogAggregator.collapseByLaunch` 按启动批次分段折叠，头部附带无隐私的配置摘要（阅读引擎、WebDAV/AI 开关与格式），因此 App 重启或被系统结束后仍可清晰区分并导出之前的记录。阅读诊断消息统一由 `ReaderDiagnosticMessage` 生成，导入（`txt`／`epub`／`kindleimport`）、下载（`novel-download`）、EPUB 工具箱（`epubtoolbox`）、同步（`webdav`）、朗读（`speech`）、AI 请求（`reading-ai`）与会话认证（`auth`）等跨模块诊断统一由 `AppDiagnosticMessage` 生成，不在调用处手写格式；新增事件时同时增加格式化函数、允许清单和 `ReaderDiagnosticMessageTests` 用例。
 
 跳页相关诊断：
 - 前后台切换与内存警告（`lifecycle`）。

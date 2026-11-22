@@ -335,7 +335,9 @@ final class LibraryImportModel: ObservableObject {
                 if extensionName == "epub" { logEPUBImportFailure(error, stage: "copy", start: start) }
                 if extensionName == "txt" {
                     let nsError = error as NSError
-                    TXTDiagnosticLog.logger.error("TXT import copy failed; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public)")
+                    ShareableLogger(category: "txt").error(
+                        AppDiagnosticMessage.txtImportFailed(stage: "copy", domain: nsError.domain, code: nsError.code, elapsedMs: Self.milliseconds(since: start))
+                    )
                 }
                 throw error
             }
@@ -352,7 +354,9 @@ final class LibraryImportModel: ObservableObject {
             if extensionName == "epub" || isKindle { logEPUBImportFailure(error, stage: "registration", start: start) }
             if extensionName == "txt" {
                 let nsError = error as NSError
-                TXTDiagnosticLog.logger.error("TXT import registration failed; domain=\(nsError.domain, privacy: .public), code=\(nsError.code, privacy: .public)")
+                ShareableLogger(category: "txt").error(
+                    AppDiagnosticMessage.txtImportFailed(stage: "registration", domain: nsError.domain, code: nsError.code, elapsedMs: Self.milliseconds(since: start))
+                )
             }
             throw error
         }
@@ -361,7 +365,9 @@ final class LibraryImportModel: ObservableObject {
             TXTDiagnosticLog.logger.info("TXT import completed; trace=\(trace, privacy: .public), book=\(DiagnosticContext.bookTag(hash), privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public), mono=\(DiagnosticContext.monotonicMilliseconds(), privacy: .public)")
         } else if isKindle {
             let bytes = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-            kindleImportLog.info("Kindle import completed; format=\(extensionName, privacy: .public), epubBytes=\(bytes, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")
+            ShareableLogger(category: "kindleimport").notice(
+                AppDiagnosticMessage.kindleImportCompleted(format: extensionName, epubBytes: bytes, elapsedMs: Self.milliseconds(since: start))
+            )
         } else {
             let bytes = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
             epubImportLog.info("EPUB import completed; bytes=\(bytes, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")
@@ -396,7 +402,7 @@ final class LibraryImportModel: ObservableObject {
     /// 任一步失败都删除临时副本与目标占位文件；临时副本在转换后删除，书库不保留原文件。
     private func convertKindleFile(_ pickedURL: URL, to destination: URL, start: MonotonicInstant) async throws {
         let format = pickedURL.pathExtension.lowercased()
-        kindleImportLog.info("Kindle import started; format=\(format, privacy: .public)")
+        kindleImportLog.info("\(AppDiagnosticMessage.kindleImportStarted(format: format), privacy: .public)")
         isConvertingKindle = true
         defer { isConvertingKindle = false }
         let staging = FileManager.default.temporaryDirectory
@@ -420,14 +426,26 @@ final class LibraryImportModel: ObservableObject {
         switch error {
         case KindleConversionStageError.copy(let underlying):
             let nsError = underlying as NSError
-            kindleImportLog.error("Kindle import failed; stage=copy, domain=\(ShareableLogPolicy.domainLabel(nsError.domain), privacy: .public), code=\(nsError.code, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")
+            ShareableLogger(category: "kindleimport").error(
+                AppDiagnosticMessage.kindleImportFailed(stage: "copy", format: format, reason: "io", domain: nsError.domain, code: nsError.code, elapsedMs: Self.milliseconds(since: start))
+            )
             throw underlying
         case let kindleError as KindleImportError:
-            kindleImportLog.error("Kindle import failed; stage=convert, reason=\(String(describing: kindleError), privacy: .public), format=\(format, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")
+            let reason: String = switch kindleError {
+            case .drmProtected: "drm"
+            case .unsupportedKindleFormat, .printReplica: "unsupported"
+            case .invalidFile: "corrupt"
+            case .conversionFailed: "other"
+            }
+            ShareableLogger(category: "kindleimport").error(
+                AppDiagnosticMessage.kindleImportFailed(stage: "convert", format: format, reason: reason, domain: "app", code: 0, elapsedMs: Self.milliseconds(since: start))
+            )
             throw kindleError
         default:
             let nsError = error as NSError
-            kindleImportLog.error("Kindle import failed; stage=write, domain=\(ShareableLogPolicy.domainLabel(nsError.domain), privacy: .public), code=\(nsError.code, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")
+            ShareableLogger(category: "kindleimport").error(
+                AppDiagnosticMessage.kindleImportFailed(stage: "write", format: format, reason: "io", domain: nsError.domain, code: nsError.code, elapsedMs: Self.milliseconds(since: start))
+            )
             throw KindleImportError.conversionFailed
         }
     }
@@ -455,7 +473,7 @@ final class LibraryImportModel: ObservableObject {
     private func logEPUBImportFailure(_ error: Error, stage: String, start: MonotonicInstant) {
         let nsError = error as NSError
         let domain = ShareableLogPolicy.domainLabel(nsError.domain)
-        epubImportLog.error("EPUB import failed; stage=\(stage, privacy: .public), domain=\(domain, privacy: .public), code=\(nsError.code, privacy: .public), elapsedMs=\(Self.milliseconds(since: start), privacy: .public)")
+        ShareableLogger(category: "epub").error("EPUB import failed; stage=\(stage), domain=\(domain), code=\(nsError.code), elapsedMs=\(Self.milliseconds(since: start))")
     }
 
     private static func milliseconds(since start: MonotonicInstant) -> Int {

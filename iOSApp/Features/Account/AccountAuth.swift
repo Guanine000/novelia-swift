@@ -59,18 +59,29 @@ final class AccountAuthStore: ObservableObject, AccountSessionProviding {
 
     private func performRefresh(generation: Int) async -> Bool {
         guard generation == sessionGeneration else { return false }
+        let authLogger = ShareableLogger(category: "auth")
         do {
             let token = try await refresher.fetchToken()
             guard Self.username(from: token) != nil else { throw AccountAuthError.invalidToken }
             guard generation == sessionGeneration else { return false }
             try tokenStore.save(token)
             username = Self.username(from: token)
+            authLogger.notice(AppDiagnosticMessage.authSessionRefreshed(scope: "novel", outcome: "succeeded"))
             return true
         } catch {
             guard generation == sessionGeneration else { return false }
-            if case AccountAuthError.refreshRejected(401) = error {
-                tokenStore.clear()
-                username = nil
+            if case AccountAuthError.refreshRejected(let status) = error {
+                if status == 401 {
+                    tokenStore.clear()
+                    username = nil
+                    authLogger.error(AppDiagnosticMessage.authSessionRefreshed(scope: "novel", outcome: "unauthorized", status: status))
+                    authLogger.notice(AppDiagnosticMessage.authSessionCleared(scope: "novel", reason: "unauthorized"))
+                } else {
+                    authLogger.error(AppDiagnosticMessage.authSessionRefreshed(scope: "novel", outcome: "failed", status: status))
+                }
+            } else {
+                let nsError = error as NSError
+                authLogger.error(AppDiagnosticMessage.authSessionRefreshed(scope: "novel", outcome: "failed", domain: nsError.domain, code: nsError.code))
             }
             errorMessage = error.localizedDescription
             return false
@@ -80,6 +91,7 @@ final class AccountAuthStore: ObservableObject, AccountSessionProviding {
     /// 与上游客户端的本地退出行为一致：清除本应用令牌，但保留
     /// 共用认证网站的 Cookie，避免影响其他 Novelia 客户端会话。
     func logout() {
+        ShareableLogger(category: "auth").notice(AppDiagnosticMessage.authSessionCleared(scope: "novel", reason: "user"))
         clearSession()
         forumAuth?.clearSession()
     }
@@ -177,6 +189,7 @@ final class ForumAuthStore: ObservableObject, AccountSessionProviding {
 
     private func performRefresh(generation: Int) async -> Bool {
         guard generation == sessionGeneration else { return false }
+        let authLogger = ShareableLogger(category: "auth")
         do {
             let token = try await refresher.fetchToken()
             guard let parsedUsername = AccountAuthStore.username(from: token) else { throw AccountAuthError.invalidToken }
@@ -186,12 +199,22 @@ final class ForumAuthStore: ObservableObject, AccountSessionProviding {
             }
             try tokenStore.save(token)
             username = parsedUsername
+            authLogger.notice(AppDiagnosticMessage.authSessionRefreshed(scope: "forum", outcome: "succeeded"))
             return true
         } catch {
             guard generation == sessionGeneration else { return false }
-            if case AccountAuthError.refreshRejected(401) = error {
-                tokenStore.clear()
-                username = nil
+            if case AccountAuthError.refreshRejected(let status) = error {
+                if status == 401 {
+                    tokenStore.clear()
+                    username = nil
+                    authLogger.error(AppDiagnosticMessage.authSessionRefreshed(scope: "forum", outcome: "unauthorized", status: status))
+                    authLogger.notice(AppDiagnosticMessage.authSessionCleared(scope: "forum", reason: "unauthorized"))
+                } else {
+                    authLogger.error(AppDiagnosticMessage.authSessionRefreshed(scope: "forum", outcome: "failed", status: status))
+                }
+            } else {
+                let nsError = error as NSError
+                authLogger.error(AppDiagnosticMessage.authSessionRefreshed(scope: "forum", outcome: "failed", domain: nsError.domain, code: nsError.code))
             }
             errorMessage = error.localizedDescription
             return false
@@ -199,6 +222,7 @@ final class ForumAuthStore: ObservableObject, AccountSessionProviding {
     }
 
     func logout() {
+        ShareableLogger(category: "auth").notice(AppDiagnosticMessage.authSessionCleared(scope: "forum", reason: "user"))
         clearSession()
         accountAuth?.clearSession()
     }

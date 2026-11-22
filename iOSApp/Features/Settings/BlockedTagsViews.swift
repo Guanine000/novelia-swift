@@ -1,5 +1,4 @@
 import SwiftUI
-import OSLog
 import UIKit
 import UniformTypeIdentifiers
 import ImageIO

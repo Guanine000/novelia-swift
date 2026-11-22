@@ -2,6 +2,9 @@
 import Foundation
 import ReadiumZIPFoundation
 import SwiftSoup
+#if canImport(NoveliaIOSCore)
+import NoveliaIOSCore
+#endif
 
 // MARK: - 1. EPUB 内部文件浏览器 & 编辑器数据加载器
 
@@ -164,6 +167,24 @@ enum EPUBToolboxTXTExporter {
         rubyHandling: EPUBRubyHandling = .removeAnnotations,
         chineseConversion: EPUBChineseConversionOption = .none
     ) async throws -> ExportResult {
+        let startedAt = MonotonicInstant.now
+        do {
+            let result = try await performExportToTXT(source: source, destination: destination, rubyHandling: rubyHandling, chineseConversion: chineseConversion)
+            let bytes = (try? FileManager.default.attributesOfItem(atPath: result.outputURL.path)[.size] as? NSNumber)?.int64Value ?? 0
+            EPUBToolboxDiagnosticLog.logActionCompleted(action: "exportTXT", items: result.chapterCount, bytes: bytes, since: startedAt)
+            return result
+        } catch {
+            EPUBToolboxDiagnosticLog.logActionFailed(action: "exportTXT", error: error, since: startedAt)
+            throw error
+        }
+    }
+
+    private static func performExportToTXT(
+        source: URL,
+        destination: URL,
+        rubyHandling: EPUBRubyHandling = .removeAnnotations,
+        chineseConversion: EPUBChineseConversionOption = .none
+    ) async throws -> ExportResult {
         guard let archive = try? await Archive(url: source, accessMode: .read) else {
             throw EPUBToolboxError.invalidArchive
         }
@@ -249,6 +270,24 @@ enum EPUBToolboxMerger {
 
     /// 将多卷 EPUB 合并为一本标准 EPUB 3（每卷独立前缀防重名，以卷为一级目录合并原目录，保留首卷封面）。
     static func merge(
+        volumes: [VolumeInput],
+        title: String,
+        author: String,
+        destination: URL,
+        onProgress: (@Sendable (EPUBToolboxProgress) -> Void)? = nil
+    ) async throws -> MergeResult {
+        let startedAt = MonotonicInstant.now
+        do {
+            let result = try await performMerge(volumes: volumes, title: title, author: author, destination: destination, onProgress: onProgress)
+            EPUBToolboxDiagnosticLog.logActionCompleted(action: "merge", items: result.volumeCount, bytes: result.outputSizeBytes, since: startedAt)
+            return result
+        } catch {
+            EPUBToolboxDiagnosticLog.logActionFailed(action: "merge", error: error, since: startedAt)
+            throw error
+        }
+    }
+
+    private static func performMerge(
         volumes: [VolumeInput],
         title: String,
         author: String,
@@ -713,6 +752,24 @@ enum EPUBToolboxSplitter {
 
     /// 按选定分组将单本合集 EPUB 拆分为多本独立标准 EPUB 3（每本只保留自身可达资源）。
     static func split(
+        source: URL,
+        groups: [SplitGroup],
+        outputDirectory: URL,
+        onProgress: (@Sendable (EPUBToolboxProgress) -> Void)? = nil
+    ) async throws -> [SplitVolumeResult] {
+        let startedAt = MonotonicInstant.now
+        do {
+            let results = try await performSplit(source: source, groups: groups, outputDirectory: outputDirectory, onProgress: onProgress)
+            let totalBytes = results.reduce(Int64(0)) { $0 + $1.sizeBytes }
+            EPUBToolboxDiagnosticLog.logActionCompleted(action: "split", items: results.count, bytes: totalBytes, since: startedAt)
+            return results
+        } catch {
+            EPUBToolboxDiagnosticLog.logActionFailed(action: "split", error: error, since: startedAt)
+            throw error
+        }
+    }
+
+    private static func performSplit(
         source: URL,
         groups: [SplitGroup],
         outputDirectory: URL,

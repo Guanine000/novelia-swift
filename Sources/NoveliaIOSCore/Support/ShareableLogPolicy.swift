@@ -27,10 +27,18 @@ public enum ShareableLogPolicy {
             #"TXT import started; trace=\#(hex8), mono=[0-9]{1,12}"#,
             #"TXT import completed; trace=\#(hex8), book=\#(hex8), elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
             #"TXT import skipped duplicate; trace=\#(hex8), book=\#(hex8), elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"TXT import failed; stage=(?:copy|registration), domain=\#(domainPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"TXT reader load failed; mode=(?:scroll|paged), domain=\#(domainPattern), code=-?[0-9]{1,8}, mono=[0-9]{1,12}"#,
+        ],
+        "kindleimport": [
+            #"Kindle import started; format=\#(kindleFormat), mono=[0-9]{1,12}"#,
+            #"Kindle import completed; format=\#(kindleFormat), epubBytes=[0-9]{1,12}, elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"Kindle import failed; stage=(?:copy|convert|write), format=\#(kindleFormat), reason=\#(kindleFailureReason), domain=\#(domainPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
         ],
         "novel-download": [
-            #"Novel EPUB request failed before receiving an HTTP response; domain=(?:NSURLErrorDomain|NSCocoaErrorDomain|NSPOSIXErrorDomain), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
+            #"Novel EPUB request failed before receiving an HTTP response; domain=\#(domainPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
             #"Novel EPUB request returned HTTP [0-9]{3}; elapsedMs=[0-9]{1,12}"#,
+            #"Novel EPUB download rejected; status=[0-9]{1,3}, elapsedMs=[0-9]{1,12}"#,
             "Novel file response was empty",
             #"Novel EPUB download completed; bytes=[0-9]{1,12}, elapsedMs=[0-9]{1,12}"#,
         ],
@@ -41,7 +49,7 @@ public enum ShareableLogPolicy {
         "epub": [
             "EPUB import started",
             #"EPUB import completed; bytes=[0-9]{1,12}, elapsedMs=[0-9]{1,12}"#,
-            #"EPUB import failed; stage=(?:copy|registration), domain=\#(domainPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
+            #"EPUB import failed; stage=(?:copy|registration|repair), domain=\#(domainPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
             "EPUB open started",
             #"EPUB open succeeded; spine=[0-9]{1,8}, toc=[0-9]{1,8}, pages=[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
             #"EPUB open failed; stage=(?:hash|container|layout), error=\#(errorKindPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}"#,
@@ -76,7 +84,34 @@ public enum ShareableLogPolicy {
             #"Readium outer swipe redirected; direction=(?:left|right), resource=-?[0-9]{1,8}, mono=[0-9]{1,12}"#,
             #"Readium web view created; count=[0-9]{1,8}, mono=[0-9]{1,12}"#,
             #"Readium resource load failed; resource=-?[0-9]{1,8}, mono=[0-9]{1,12}"#,
+            #"Readium EPUB open failed; domain=\#(domainPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
             #"Readium position changed; kind=\#(bookKind), cause=\#(positionCause), fromResource=-?[0-9]{1,8}, fromProgress=-?[0-9]{1,4}, toResource=-?[0-9]{1,8}, toProgress=-?[0-9]{1,4}, total=-?[0-9]{1,4}, mono=[0-9]{1,12}"#,
+        ],
+        "webdav": [
+            #"WebDAV sync started; trigger=\#(syncTrigger), content=(?:true|false), statistics=(?:true|false), mono=[0-9]{1,12}"#,
+            #"WebDAV sync completed; trigger=\#(syncTrigger), content=(?:true|false), statistics=(?:true|false), imported=[0-9]{1,8}, removed=[0-9]{1,8}, repaired=[0-9]{1,8}, elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"WebDAV sync cancelled; trigger=\#(syncTrigger), stage=\#(syncStage), elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"WebDAV sync failed; trigger=\#(syncTrigger), stage=\#(syncStage), domain=\#(domainPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+        ],
+        "speech": [
+            #"Speech started; engine=\#(speechEngine), chapter=-?[0-9]{1,8}, paused=(?:true|false), mono=[0-9]{1,12}"#,
+            #"Speech stopped; engine=\#(speechEngine), reason=\#(speechStopReason), mono=[0-9]{1,12}"#,
+            #"Speech failed; engine=\#(speechEngine), stage=\#(speechFailureStage), mono=[0-9]{1,12}"#,
+        ],
+        "reading-ai": [
+            #"ReadingAI request completed; format=\#(aiFormat), stream=(?:true|false), chars=[0-9]{1,9}, elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"ReadingAI request cancelled; format=\#(aiFormat), elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"ReadingAI request failed; format=\#(aiFormat), error=\#(aiErrorKind), status=-?[0-9]{1,4}, elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+        ],
+        "auth": [
+            #"Auth session refreshed; scope=\#(authScope), outcome=\#(authOutcome), status=-?[0-9]{1,4}, domain=\#(domainPattern), code=-?[0-9]{1,8}, mono=[0-9]{1,12}"#,
+            #"Auth session cleared; scope=\#(authScope), reason=\#(authClearReason), mono=[0-9]{1,12}"#,
+        ],
+        "epubtoolbox": [
+            #"EPUB toolbox inspect completed; mode=\#(toolboxInspectMode), issues=[0-9]{1,6}, drm=(?:true|false), elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"EPUB toolbox inspect failed; mode=\#(toolboxInspectMode), reason=\#(toolboxFailureReason), domain=\#(domainPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"EPUB toolbox action completed; action=\#(toolboxAction), items=[0-9]{1,8}, bytes=[0-9]{1,12}, elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"EPUB toolbox action failed; action=\#(toolboxAction), reason=\#(toolboxFailureReason), domain=\#(domainPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
         ],
         "enginediag": [
             #"EPUB layout trace summary; spine=[0-9]{1,8}, events=[0-9]{1,12}, html=[0-9]{1,12}, css=[0-9]{1,12}, selector=[0-9]{1,12}, style=[0-9]{1,12}, ingestion=[0-9]{1,12}, adapter=[0-9]{1,12}, allocation=[0-9]{1,12}"#,
@@ -93,9 +128,47 @@ public enum ShareableLogPolicy {
     private static let layoutReason = "(?:" + layoutReasons.joined(separator: "|") + ")"
     private static let bookKind = "(?:epub|txt|online)"
     /// 阅读位置变化的来源：两种阅读引擎共用。`other`／`unattributed` 表示没有对应的用户操作。
-    public static let positionCauses = ["turnForward", "turnBackward", "tap", "swipe", "outerSwipe", "navigate", "seek", "restore", "open", "rebuild", "preferences", "other", "unattributed"]
+    public static let positionCauses = ["turnForward", "turnBackward", "tap", "swipe", "outerSwipe", "navigate", "seek", "restore", "open", "rebuild", "preferences", "speech", "other", "unattributed"]
     private static let positionCause = "(?:" + positionCauses.joined(separator: "|") + ")"
     private static let layoutFields = "book=\(hex8), trace=\(hex8), gen=[0-9]{1,8}, spine=[0-9]{1,8}, totalSpine=[0-9]{1,8}, currentSpine=[0-9]{1,8}, reason=\(layoutReason)"
+
+    public static let kindleFormats = ["azw3", "mobi", "prc", "azw", "kf8", "other"]
+    public static let kindleFailureReasons = ["drm", "unsupported", "corrupt", "empty", "io", "other"]
+    public static let syncTriggers = ["manual", "auto"]
+    public static let syncStages = ["prepare", "credentials", "content", "characters", "webEPUBIdentity", "statistics", "other"]
+    public static let speechEngines = ["system", "readium", "edge", "unknown"]
+    public static let speechStopReasons = ["user", "finished", "error", "switch", "deinit"]
+    public static let speechFailureStages = ["selection", "notReady", "engineCreate", "playback", "other"]
+    public static let aiFormats = ["chat_completions", "responses", "anthropic_messages"]
+    public static let aiErrorKinds = ["invalidConfig", "missingKey", "inputLimit", "responseLimit", "http", "invalidResponse", "truncated", "refused", "unsupported", "transport", "other"]
+    public static let authScopes = ["novel", "forum"]
+    public static let authOutcomes = ["succeeded", "failed", "unauthorized"]
+    public static let authClearReasons = ["user", "unauthorized", "mismatch", "other"]
+    public static let toolboxInspectModes = ["lightweight", "deep"]
+    public static let toolboxActions = ["process", "merge", "split", "exportTXT"]
+    public static let toolboxFailureReasons = ["cancelled", "drm", "invalidArchive", "missingOPF", "nothingSelected", "writeFailed", "other"]
+
+    private static let kindleFormat = "(?:" + kindleFormats.joined(separator: "|") + ")"
+    private static let kindleFailureReason = "(?:" + kindleFailureReasons.joined(separator: "|") + ")"
+    private static let syncTrigger = "(?:" + syncTriggers.joined(separator: "|") + ")"
+    private static let syncStage = "(?:" + syncStages.joined(separator: "|") + ")"
+    private static let speechEngine = "(?:" + speechEngines.joined(separator: "|") + ")"
+    private static let speechStopReason = "(?:" + speechStopReasons.joined(separator: "|") + ")"
+    private static let speechFailureStage = "(?:" + speechFailureStages.joined(separator: "|") + ")"
+    private static let aiFormat = "(?:" + aiFormats.joined(separator: "|") + ")"
+    private static let aiErrorKind = "(?:" + aiErrorKinds.joined(separator: "|") + ")"
+    private static let authScope = "(?:" + authScopes.joined(separator: "|") + ")"
+    private static let authOutcome = "(?:" + authOutcomes.joined(separator: "|") + ")"
+    private static let authClearReason = "(?:" + authClearReasons.joined(separator: "|") + ")"
+    private static let toolboxInspectMode = "(?:" + toolboxInspectModes.joined(separator: "|") + ")"
+    private static let toolboxAction = "(?:" + toolboxActions.joined(separator: "|") + ")"
+    private static let toolboxFailureReason = "(?:" + toolboxFailureReasons.joined(separator: "|") + ")"
+
+    /// 将任意 Kindle 文件扩展名归一化到白名单枚举，避免泄露文件名。
+    public static func kindleFormatLabel(_ ext: String) -> String {
+        let lower = ext.lowercased()
+        return kindleFormats.contains(lower) ? lower : "other"
+    }
 
     /// EPUB 阅读器记录的错误类型：使用固定名称，不包含错误描述。
     public static let errorKinds = ["unsupported", "resource", "layout", "cancelled", "archive", "container", "opf", "spine", "entrySize", "cocoa", "posix", "url", "other"]
@@ -162,6 +235,16 @@ public enum ShareableLogAggregator {
             let repeats = count > 1 ? " (×\(count))" : ""
             output.append("\(time) [\(first.level)] [\(first.category)] \(first.message)\(repeats)")
             index = end
+        }
+        return output
+    }
+
+    /// 按启动批次分段折叠日志，在每个非空批次前插入启动边界标记，便于排查崩溃或强杀前后顺序。
+    public static func collapseByLaunch(_ sections: [(label: String, lines: [ShareableLogLine])]) -> [String] {
+        var output: [String] = []
+        for section in sections where !section.lines.isEmpty {
+            output.append("--- \(section.label) ---")
+            output.append(contentsOf: collapse(section.lines))
         }
         return output
     }
@@ -387,11 +470,148 @@ public enum ReaderDiagnosticMessage {
         "Readium resource load failed; resource=\(resource), mono=\(mono)"
     }
 
+    public static func readiumOpenFailed(domain: String, code: Int, elapsedMs: Int,
+                                         mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "Readium EPUB open failed; domain=\(ShareableLogPolicy.domainLabel(domain)), code=\(code), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
+    }
+
     public static func scenePhase(_ phase: String) -> String {
         "Scene phase changed; phase=\(phase)"
     }
 
     public static func memoryWarning(mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
         "Memory warning received; mono=\(mono)"
+    }
+}
+
+/// 除阅读排版外的跨模块脱敏诊断消息格式。集中在 Core 中生成，并通过回归测试逐一验证
+/// 与 `ShareableLogPolicy` 白名单一致，避免调用处手写文案导致导出时被静默丢弃。
+public enum AppDiagnosticMessage {
+    public static func txtImportFailed(stage: String, domain: String, code: Int, elapsedMs: Int,
+                                       mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "TXT import failed; stage=\(stage), domain=\(ShareableLogPolicy.domainLabel(domain)), code=\(code), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
+    }
+
+    public static func txtReaderLoadFailed(mode: String, domain: String, code: Int,
+                                           mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "TXT reader load failed; mode=\(mode), domain=\(ShareableLogPolicy.domainLabel(domain)), code=\(code), mono=\(mono)"
+    }
+
+    public static func kindleImportStarted(format: String, mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "Kindle import started; format=\(ShareableLogPolicy.kindleFormatLabel(format)), mono=\(mono)"
+    }
+
+    public static func kindleImportCompleted(format: String, epubBytes: Int, elapsedMs: Int,
+                                             mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "Kindle import completed; format=\(ShareableLogPolicy.kindleFormatLabel(format)), epubBytes=\(max(0, epubBytes)), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
+    }
+
+    public static func kindleImportFailed(stage: String, format: String, reason: String, domain: String, code: Int, elapsedMs: Int,
+                                          mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        let safeReason = ShareableLogPolicy.kindleFailureReasons.contains(reason) ? reason : "other"
+        return "Kindle import failed; stage=\(stage), format=\(ShareableLogPolicy.kindleFormatLabel(format)), reason=\(safeReason), domain=\(ShareableLogPolicy.domainLabel(domain)), code=\(code), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
+    }
+
+    public static func novelDownloadRequestFailed(domain: String, code: Int, elapsedMs: Int) -> String {
+        "Novel EPUB request failed before receiving an HTTP response; domain=\(ShareableLogPolicy.domainLabel(domain)), code=\(code), elapsedMs=\(max(0, elapsedMs))"
+    }
+
+    public static func novelDownloadCompleted(bytes: Int, elapsedMs: Int) -> String {
+        "Novel EPUB download completed; bytes=\(max(0, bytes)), elapsedMs=\(max(0, elapsedMs))"
+    }
+
+    public static func novelDownloadRejected(status: Int, elapsedMs: Int) -> String {
+        "Novel EPUB download rejected; status=\(status), elapsedMs=\(max(0, elapsedMs))"
+    }
+
+    public static func webdavSyncStarted(trigger: String, content: Bool, statistics: Bool,
+                                         mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "WebDAV sync started; trigger=\(trigger), content=\(content), statistics=\(statistics), mono=\(mono)"
+    }
+
+    public static func webdavSyncCompleted(trigger: String, content: Bool, statistics: Bool,
+                                           imported: Int, removed: Int, repaired: Int, elapsedMs: Int,
+                                           mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "WebDAV sync completed; trigger=\(trigger), content=\(content), statistics=\(statistics), imported=\(max(0, imported)), removed=\(max(0, removed)), repaired=\(max(0, repaired)), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
+    }
+
+    public static func webdavSyncCancelled(trigger: String, stage: String, elapsedMs: Int,
+                                           mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "WebDAV sync cancelled; trigger=\(trigger), stage=\(stage), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
+    }
+
+    public static func webdavSyncFailed(trigger: String, stage: String, domain: String, code: Int, elapsedMs: Int,
+                                        mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "WebDAV sync failed; trigger=\(trigger), stage=\(stage), domain=\(ShareableLogPolicy.domainLabel(domain)), code=\(code), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
+    }
+
+    public static func speechStarted(engine: String, chapter: Int, paused: Bool,
+                                     mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        let safeEngine = ShareableLogPolicy.speechEngines.contains(engine) ? engine : "unknown"
+        return "Speech started; engine=\(safeEngine), chapter=\(chapter), paused=\(paused), mono=\(mono)"
+    }
+
+    public static func speechStopped(engine: String, reason: String,
+                                     mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        let safeEngine = ShareableLogPolicy.speechEngines.contains(engine) ? engine : "unknown"
+        return "Speech stopped; engine=\(safeEngine), reason=\(reason), mono=\(mono)"
+    }
+
+    public static func speechFailed(engine: String, stage: String,
+                                    mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        let safeEngine = ShareableLogPolicy.speechEngines.contains(engine) ? engine : "unknown"
+        return "Speech failed; engine=\(safeEngine), stage=\(stage), mono=\(mono)"
+    }
+
+    public static func aiRequestCompleted(format: String, stream: Bool, chars: Int, elapsedMs: Int,
+                                          mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "ReadingAI request completed; format=\(format), stream=\(stream), chars=\(max(0, chars)), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
+    }
+
+    public static func aiRequestCancelled(format: String, elapsedMs: Int,
+                                          mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "ReadingAI request cancelled; format=\(format), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
+    }
+
+    public static func aiRequestFailed(format: String, error: String, status: Int = -1, elapsedMs: Int,
+                                       mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        let safeError = ShareableLogPolicy.aiErrorKinds.contains(error) ? error : "other"
+        return "ReadingAI request failed; format=\(format), error=\(safeError), status=\(status), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
+    }
+
+    public static func authSessionRefreshed(scope: String, outcome: String, status: Int = -1, domain: String = "app", code: Int = 0,
+                                            mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "Auth session refreshed; scope=\(scope), outcome=\(outcome), status=\(status), domain=\(ShareableLogPolicy.domainLabel(domain)), code=\(code), mono=\(mono)"
+    }
+
+    public static func authSessionCleared(scope: String, reason: String,
+                                          mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        "Auth session cleared; scope=\(scope), reason=\(reason), mono=\(mono)"
+    }
+
+    public static func epubToolboxInspectCompleted(mode: String, issues: Int, drm: Bool, elapsedMs: Int,
+                                                   mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        let safeMode = ShareableLogPolicy.toolboxInspectModes.contains(mode) ? mode : "lightweight"
+        return "EPUB toolbox inspect completed; mode=\(safeMode), issues=\(max(0, issues)), drm=\(drm), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
+    }
+
+    public static func epubToolboxInspectFailed(mode: String, reason: String, domain: String, code: Int, elapsedMs: Int,
+                                                mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        let safeMode = ShareableLogPolicy.toolboxInspectModes.contains(mode) ? mode : "lightweight"
+        let safeReason = ShareableLogPolicy.toolboxFailureReasons.contains(reason) ? reason : "other"
+        return "EPUB toolbox inspect failed; mode=\(safeMode), reason=\(safeReason), domain=\(ShareableLogPolicy.domainLabel(domain)), code=\(code), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
+    }
+
+    public static func epubToolboxActionCompleted(action: String, items: Int, bytes: Int, elapsedMs: Int,
+                                                  mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        let safeAction = ShareableLogPolicy.toolboxActions.contains(action) ? action : "process"
+        return "EPUB toolbox action completed; action=\(safeAction), items=\(max(0, items)), bytes=\(max(0, bytes)), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
+    }
+
+    public static func epubToolboxActionFailed(action: String, reason: String, domain: String, code: Int, elapsedMs: Int,
+                                               mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        let safeAction = ShareableLogPolicy.toolboxActions.contains(action) ? action : "process"
+        let safeReason = ShareableLogPolicy.toolboxFailureReasons.contains(reason) ? reason : "other"
+        return "EPUB toolbox action failed; action=\(safeAction), reason=\(safeReason), domain=\(ShareableLogPolicy.domainLabel(domain)), code=\(code), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
     }
 }

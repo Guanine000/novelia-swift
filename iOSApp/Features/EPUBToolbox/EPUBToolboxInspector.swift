@@ -2,6 +2,70 @@
 import Foundation
 import ReadiumZIPFoundation
 import SwiftSoup
+#if canImport(NoveliaIOSCore)
+import NoveliaIOSCore
+#endif
+
+/// EPUB 工具箱脱敏诊断日志辅助：只记录模式、操作类型、计数、字节数、固定错误分类与耗时，
+/// 绝不记录书名、文件路径、元数据或正文内容。
+enum EPUBToolboxDiagnosticLog {
+    private static let logger = ShareableLogger(category: "epubtoolbox")
+
+    static func failureReason(for error: Error) -> String {
+        if error is CancellationError { return "cancelled" }
+        guard let toolboxError = error as? EPUBToolboxError else { return "other" }
+        switch toolboxError {
+        case .cancelled: return "cancelled"
+        case .drmProtected: return "drm"
+        case .invalidArchive: return "invalidArchive"
+        case .missingOPF: return "missingOPF"
+        case .nothingSelected: return "nothingSelected"
+        case .writeFailed: return "writeFailed"
+        }
+    }
+
+    static func logInspectCompleted(mode: EPUBInspectionMode, report: EPUBInspectionReport, since start: MonotonicInstant) {
+        let modeLabel = mode == .deep ? "deep" : "lightweight"
+        logger.notice(AppDiagnosticMessage.epubToolboxInspectCompleted(
+            mode: modeLabel,
+            issues: report.issues.count,
+            drm: report.isDRMProtected,
+            elapsedMs: DiagnosticContext.milliseconds(since: start)
+        ))
+    }
+
+    static func logInspectFailed(mode: EPUBInspectionMode, error: Error, since start: MonotonicInstant) {
+        let modeLabel = mode == .deep ? "deep" : "lightweight"
+        let nsError = error as NSError
+        logger.error(AppDiagnosticMessage.epubToolboxInspectFailed(
+            mode: modeLabel,
+            reason: failureReason(for: error),
+            domain: nsError.domain,
+            code: nsError.code,
+            elapsedMs: DiagnosticContext.milliseconds(since: start)
+        ))
+    }
+
+    static func logActionCompleted(action: String, items: Int, bytes: Int64, since start: MonotonicInstant) {
+        logger.notice(AppDiagnosticMessage.epubToolboxActionCompleted(
+            action: action,
+            items: items,
+            bytes: Int(clamping: max(0, bytes)),
+            elapsedMs: DiagnosticContext.milliseconds(since: start)
+        ))
+    }
+
+    static func logActionFailed(action: String, error: Error, since start: MonotonicInstant) {
+        let nsError = error as NSError
+        logger.error(AppDiagnosticMessage.epubToolboxActionFailed(
+            action: action,
+            reason: failureReason(for: error),
+            domain: nsError.domain,
+            code: nsError.code,
+            elapsedMs: DiagnosticContext.milliseconds(since: start)
+        ))
+    }
+}
 
 // MARK: - 共享 OPF / 目录解析结构（体检与处理共用）
 
@@ -149,6 +213,18 @@ enum EPUBToolboxInspector {
     static let maxTextEntryBytes = 32 * 1024 * 1024
 
     static func inspect(url: URL, mode: EPUBInspectionMode) async throws -> EPUBInspectionReport {
+        let startedAt = MonotonicInstant.now
+        do {
+            let report = try await performInspect(url: url, mode: mode)
+            EPUBToolboxDiagnosticLog.logInspectCompleted(mode: mode, report: report, since: startedAt)
+            return report
+        } catch {
+            EPUBToolboxDiagnosticLog.logInspectFailed(mode: mode, error: error, since: startedAt)
+            throw error
+        }
+    }
+
+    private static func performInspect(url: URL, mode: EPUBInspectionMode) async throws -> EPUBInspectionReport {
         guard let archive = try? await Archive(url: url, accessMode: .read) else {
             throw EPUBToolboxError.invalidArchive
         }

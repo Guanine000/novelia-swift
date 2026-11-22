@@ -607,7 +607,7 @@ final class EPUBReaderModel: ObservableObject {
             EPUBLayoutLog.logger.info("\(EPUBLayoutLog.label(kind: self.bookKind), privacy: .public) open cancelled; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), elapsedMs=\(elapsed, privacy: .public), mono=\(mono, privacy: .public)")
         } else if case .failed = status {
             let failure = failure ?? ("other", 0)
-            EPUBLayoutLog.logger.error("\(EPUBLayoutLog.label(kind: self.bookKind), privacy: .public) open failed; kind=\(self.bookKind, privacy: .public), trace=\(self.traceID, privacy: .public), stage=\(stage, privacy: .public), error=\(failure.kind, privacy: .public), code=\(failure.code, privacy: .public), elapsedMs=\(elapsed, privacy: .public), mono=\(mono, privacy: .public)")
+            EPUBLayoutLog.shareable.error("\(EPUBLayoutLog.label(kind: self.bookKind)) open failed; kind=\(self.bookKind), trace=\(self.traceID), stage=\(stage), error=\(failure.kind), code=\(failure.code), elapsedMs=\(elapsed), mono=\(mono)")
         } else {
             let book = DiagnosticContext.bookTag(layoutBookID ?? "private-\(traceID)")
             let spine = source?.chapterCount ?? 0

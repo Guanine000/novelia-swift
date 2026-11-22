@@ -151,6 +151,10 @@ final class WebDAVSyncStore: ObservableObject {
                      content: Bool, statistics syncsStatistics: Bool, trigger: WebDAVAutoSyncTrigger?) async {
         let options = options
         let prefix = trigger == nil ? "" : "自动"
+        let triggerLabel = trigger == nil ? "manual" : "auto"
+        let startedAt = MonotonicInstant.now
+        let syncLogger = ShareableLogger(category: "webdav")
+        syncLogger.notice(AppDiagnosticMessage.webdavSyncStarted(trigger: triggerLabel, content: content, statistics: syncsStatistics))
         isSyncing = true
         message = nil
         show(WebDAVSyncProgress())
@@ -161,7 +165,12 @@ final class WebDAVSyncStore: ObservableObject {
         do {
             try await web?.prepareForSync()
             try await wenku?.prepareForSync()
-        } catch { message = "书库读取失败，本轮同步未开始。"; return }
+        } catch {
+            let nsError = error as NSError
+            syncLogger.error(AppDiagnosticMessage.webdavSyncFailed(trigger: triggerLabel, stage: "prepare", domain: nsError.domain, code: nsError.code, elapsedMs: DiagnosticContext.milliseconds(since: startedAt)))
+            message = "书库读取失败，本轮同步未开始。"
+            return
+        }
         // 目录缓存：自动同步跳过已确认的目录检查；手动同步先清空，重新完整检查一次。失败时清空。
         let folderCache = WebDAVFolderCache(defaults: defaults)
         if trigger == nil { folderCache.clear() }
@@ -175,14 +184,20 @@ final class WebDAVSyncStore: ObservableObject {
             client = try WebDAVClient(address: address.trimmingCharacters(in: .whitespacesAndNewlines),
                                       username: account, password: password, folderCache: folderCache)
         } catch {
+            let nsError = error as NSError
+            syncLogger.error(AppDiagnosticMessage.webdavSyncFailed(trigger: triggerLabel, stage: "credentials", domain: nsError.domain, code: nsError.code, elapsedMs: DiagnosticContext.milliseconds(since: startedAt)))
             message = prefix + "同步失败：\(error.localizedDescription)"
             return
         }
 
         var summary = ""
+        var totalImported = 0
+        var totalRemoved = 0
+        var totalRepaired = 0
         if content, let web, let wenku {
             autoState.content.lastAttempt = Date()
             let before = WebDAVAutoSyncPolicy.fingerprint(local: local, web: web, wenku: wenku, options: options)
+            var diagnosticStage = "content"
             do {
                 if manifestGate.isBusy { progressDetail = "正在等待云端删除完成…" }
                 let result: WebDAVSyncRunResult
@@ -198,6 +213,7 @@ final class WebDAVSyncStore: ObservableObject {
                 } else { result = .init(imported: 0, removedLocal: 0, lacksETag: false) }
                 var missingPortraits = 0
                 if options.characters, let characters = local.characterSync {
+                    diagnosticStage = "characters"
                     stage = "同步人物卡与角色图片"
                     progressDetail = "正在同步人物资料与角色图片…"
                     missingPortraits = try await manifestGate.run {
@@ -206,6 +222,7 @@ final class WebDAVSyncStore: ObservableObject {
                     }
                 }
                 if options.books, web.books.contains(where: { $0.novel.isRemote }) || !cloudBooks.webBooks.isEmpty || !local.webEPUBMaps.isEmpty || local.readingPositions.keys.contains(where: { $0.hasPrefix("webepub:") }) {
+                    diagnosticStage = "webEPUBIdentity"
                     stage = "同步网络小说章节进度与书签"
                     try await manifestGate.run {
                         let identity = try WebDAVClient(address: self.trimmedAddress, username: self.username.trimmingCharacters(in: .whitespacesAndNewlines), password: self.password, folderCache: folderCache, webEPUBIdentity: true)
@@ -213,6 +230,9 @@ final class WebDAVSyncStore: ObservableObject {
                     }
                 }
                 let imported = result.imported
+                totalImported = imported
+                totalRemoved = result.removedLocal
+                totalRepaired = result.repairedBlobs
                 recordETagSupport(lacking: result.lacksETag)
                 autoState.content.lastSuccess = Date()
                 autoState.content.failures = 0
@@ -228,7 +248,13 @@ final class WebDAVSyncStore: ObservableObject {
                     + (result.repairedBlobs > 0 ? "已补传 \(result.repairedBlobs) 个云端缺失的文件。" : "")
                     + Self.missingSummary(result)
             } catch {
-                if isCancellation(error) { cancelled(prefix) } else {
+                let elapsed = DiagnosticContext.milliseconds(since: startedAt)
+                if isCancellation(error) {
+                    syncLogger.notice(AppDiagnosticMessage.webdavSyncCancelled(trigger: triggerLabel, stage: diagnosticStage, elapsedMs: elapsed))
+                    cancelled(prefix)
+                } else {
+                    let nsError = error as NSError
+                    syncLogger.error(AppDiagnosticMessage.webdavSyncFailed(trigger: triggerLabel, stage: diagnosticStage, domain: nsError.domain, code: nsError.code, elapsedMs: elapsed))
                     folderCache.clear()
                     autoState.content.failures += 1
                     let code = (error as? URLError).map { "（网络错误 \($0.code.rawValue)）" } ?? ""
@@ -268,10 +294,14 @@ final class WebDAVSyncStore: ObservableObject {
                 progressDetail = "同步完成"
                 summary += content ? "已合并阅读时长。" : "已合并各设备阅读统计。"
             } catch {
+                let elapsed = DiagnosticContext.milliseconds(since: startedAt)
                 if isCancellation(error) {
+                    syncLogger.notice(AppDiagnosticMessage.webdavSyncCancelled(trigger: triggerLabel, stage: "statistics", elapsedMs: elapsed))
                     cancelled(prefix)
                     return
                 }
+                let nsError = error as NSError
+                syncLogger.error(AppDiagnosticMessage.webdavSyncFailed(trigger: triggerLabel, stage: "statistics", domain: nsError.domain, code: nsError.code, elapsedMs: elapsed))
                 folderCache.clear()
                 autoState.statistics.failures += 1
                 let failure = "阅读时长同步失败：\(error.localizedDescription)"
@@ -279,6 +309,15 @@ final class WebDAVSyncStore: ObservableObject {
                 return
             }
         }
+        syncLogger.notice(AppDiagnosticMessage.webdavSyncCompleted(
+            trigger: triggerLabel,
+            content: content,
+            statistics: syncsStatistics,
+            imported: totalImported,
+            removed: totalRemoved,
+            repaired: totalRepaired,
+            elapsedMs: DiagnosticContext.milliseconds(since: startedAt)
+        ))
         message = content ? prefix + "同步完成：" + summary : prefix + "阅读时长同步完成，" + summary
     }
 

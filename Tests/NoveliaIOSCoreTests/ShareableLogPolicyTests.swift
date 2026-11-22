@@ -219,9 +219,109 @@ final class ReaderDiagnosticMessageTests: XCTestCase {
         passes("readium", M.readiumWebViewCreated(count: 3))
         for direction in ["left", "right"] { passes("readium", M.readiumSwipeRedirected(direction: direction, resource: 14)) }
         passes("readium", M.readiumResourceLoadFailed(resource: 7))
+        passes("readium", M.readiumOpenFailed(domain: NSCocoaErrorDomain, code: 260, elapsedMs: 42))
+        passes("readium", M.readiumOpenFailed(domain: "Custom.SwiftError", code: 1, elapsedMs: 15))
         for phase in ["active", "inactive", "background", "unknown"] { passes("lifecycle", M.scenePhase(phase)) }
         passes("lifecycle", M.memoryWarning())
         passes("lifecycle", "Application launched, version 1.0.0 (93)")
+    }
+
+    func testAppDiagnosticMessagesPassAndRejectFreeText() {
+        typealias A = AppDiagnosticMessage
+        passes("txt", A.txtImportFailed(stage: "copy", domain: NSCocoaErrorDomain, code: 260, elapsedMs: 12))
+        passes("txt", A.txtImportFailed(stage: "registration", domain: "CustomError", code: 1, elapsedMs: 8))
+        passes("txt", A.txtReaderLoadFailed(mode: "scroll", domain: NSPOSIXErrorDomain, code: 2))
+        passes("txt", A.txtReaderLoadFailed(mode: "paged", domain: "CustomError", code: 3))
+        passes("epub", "EPUB import failed; stage=repair, domain=app, code=1, elapsedMs=45")
+        for format in ShareableLogPolicy.kindleFormats + ["unknown-ext"] {
+            passes("kindleimport", A.kindleImportStarted(format: format))
+            passes("kindleimport", A.kindleImportCompleted(format: format, epubBytes: 1024, elapsedMs: 88))
+            for reason in ShareableLogPolicy.kindleFailureReasons + ["unexpected"] {
+                passes("kindleimport", A.kindleImportFailed(stage: "convert", format: format, reason: reason, domain: "Custom", code: 0, elapsedMs: 10))
+            }
+        }
+        passes("novel-download", A.novelDownloadRequestFailed(domain: NSURLErrorDomain, code: -1009, elapsedMs: 50))
+        passes("novel-download", A.novelDownloadCompleted(bytes: 4096, elapsedMs: 210))
+        passes("novel-download", A.novelDownloadRejected(status: 502, elapsedMs: 90))
+        passes("novel-download", A.novelDownloadRejected(status: 0, elapsedMs: 15))
+        for trigger in ShareableLogPolicy.syncTriggers {
+            passes("webdav", A.webdavSyncStarted(trigger: trigger, content: true, statistics: false))
+            passes("webdav", A.webdavSyncCompleted(trigger: trigger, content: true, statistics: true, imported: 2, removed: 1, repaired: 0, elapsedMs: 512))
+            for stage in ShareableLogPolicy.syncStages {
+                passes("webdav", A.webdavSyncCancelled(trigger: trigger, stage: stage, elapsedMs: 100))
+                passes("webdav", A.webdavSyncFailed(trigger: trigger, stage: stage, domain: NSURLErrorDomain, code: -1001, elapsedMs: 300))
+            }
+        }
+        for engine in ShareableLogPolicy.speechEngines + ["other"] {
+            passes("speech", A.speechStarted(engine: engine, chapter: 3, paused: false))
+            for reason in ShareableLogPolicy.speechStopReasons {
+                passes("speech", A.speechStopped(engine: engine, reason: reason))
+            }
+            for stage in ShareableLogPolicy.speechFailureStages {
+                passes("speech", A.speechFailed(engine: engine, stage: stage))
+            }
+        }
+        for format in ShareableLogPolicy.aiFormats {
+            passes("reading-ai", A.aiRequestCompleted(format: format, stream: true, chars: 1200, elapsedMs: 3400))
+            passes("reading-ai", A.aiRequestCancelled(format: format, elapsedMs: 220))
+            for err in ShareableLogPolicy.aiErrorKinds + ["unknown"] {
+                passes("reading-ai", A.aiRequestFailed(format: format, error: err, status: 429, elapsedMs: 410))
+            }
+        }
+        for scope in ShareableLogPolicy.authScopes {
+            for outcome in ShareableLogPolicy.authOutcomes {
+                passes("auth", A.authSessionRefreshed(scope: scope, outcome: outcome, status: 401, domain: NSURLErrorDomain, code: -1009))
+            }
+            for reason in ShareableLogPolicy.authClearReasons {
+                passes("auth", A.authSessionCleared(scope: scope, reason: reason))
+            }
+        }
+        for mode in ShareableLogPolicy.toolboxInspectModes {
+            passes("epubtoolbox", A.epubToolboxInspectCompleted(mode: mode, issues: 4, drm: false, elapsedMs: 32))
+            for reason in ShareableLogPolicy.toolboxFailureReasons {
+                passes("epubtoolbox", A.epubToolboxInspectFailed(mode: mode, reason: reason, domain: NSCocoaErrorDomain, code: 260, elapsedMs: 12))
+            }
+        }
+        for action in ShareableLogPolicy.toolboxActions {
+            passes("epubtoolbox", A.epubToolboxActionCompleted(action: action, items: 5, bytes: 204800, elapsedMs: 650))
+            for reason in ShareableLogPolicy.toolboxFailureReasons {
+                passes("epubtoolbox", A.epubToolboxActionFailed(action: action, reason: reason, domain: "CustomError", code: 1, elapsedMs: 40))
+            }
+        }
+        // 确保自由文本与凭据无法通过新增分类的白名单。
+        for (category, invalid) in [
+            ("kindleimport", "Kindle import failed; stage=convert, format=book.azw3, reason=drm, domain=app, code=0, elapsedMs=1, mono=1"),
+            ("webdav", "WebDAV sync failed; trigger=manual, stage=content, domain=https://dav.example/u, code=401, elapsedMs=1, mono=1"),
+            ("speech", "Speech started; engine=edge, chapter=1, paused=false, mono=1 text=正文"),
+            ("reading-ai", "ReadingAI request failed; format=responses, error=sk-secret, status=401, elapsedMs=1, mono=1"),
+            ("auth", "Auth session refreshed; scope=novel, outcome=failed, status=401, domain=app, code=0, mono=1 token=abc"),
+            ("epubtoolbox", "EPUB toolbox action failed; action=process, reason=/private/book.epub, domain=app, code=0, elapsedMs=1, mono=1"),
+        ] {
+            XCTAssertNil(ShareableLogPolicy.message(subsystem: ShareableLogPolicy.subsystem, category: category, text: invalid), invalid)
+        }
+    }
+
+    func testCollapseByLaunchMarksBoundariesAndSkipsEmptySections() {
+        let prev = [
+            ShareableLogLine(secondsAgo: 120, level: "notice", category: "lifecycle", message: "Application launched, version 1.0.0 (93)"),
+            ShareableLogLine(secondsAgo: 110, level: "error", category: "webdav", message: "WebDAV sync failed; trigger=manual, stage=content, domain=NSURLErrorDomain, code=-1009, elapsedMs=50, mono=1"),
+            ShareableLogLine(secondsAgo: 108, level: "error", category: "webdav", message: "WebDAV sync failed; trigger=manual, stage=content, domain=NSURLErrorDomain, code=-1009, elapsedMs=50, mono=1"),
+        ]
+        let curr = [
+            ShareableLogLine(secondsAgo: 5, level: "notice", category: "lifecycle", message: "Application launched, version 1.0.0 (93)"),
+        ]
+        let output = ShareableLogAggregator.collapseByLaunch([
+            (label: "Launch aaaaaaaa (previous)", lines: prev),
+            (label: "Launch empty (previous)", lines: []),
+            (label: "Launch bbbbbbbb (current)", lines: curr),
+        ])
+        XCTAssertEqual(output, [
+            "--- Launch aaaaaaaa (previous) ---",
+            "-120s [notice] [lifecycle] Application launched, version 1.0.0 (93)",
+            "-110s…-108s [error] [webdav] WebDAV sync failed; trigger=manual, stage=content, domain=NSURLErrorDomain, code=-1009, elapsedMs=50, mono=1 (×2)",
+            "--- Launch bbbbbbbb (current) ---",
+            "-5s [notice] [lifecycle] Application launched, version 1.0.0 (93)",
+        ])
     }
 }
 
