@@ -29,6 +29,8 @@ final class SettingsKeysTests: XCTestCase {
         XCTAssertEqual(SettingsKey.readerFooterShowsProgress, "reader.footer.progress.v1")
         XCTAssertEqual(SettingsKey.appThemeColor, "appThemeColor")
         XCTAssertEqual(SettingsKey.appThemeCustomHex, "appThemeCustomHex")
+        XCTAssertEqual(SettingsKey.libraryAutoReadingStatus, "library.autoReadingStatus.v1")
+        XCTAssertEqual(SettingsKey.libraryAutoOnHoldDays, "library.autoReadingStatus.onHoldDays.v1")
         XCTAssertEqual(SettingsKey.tabBarOrder, "tabBar.order")
         XCTAssertEqual(SettingsKey.tabBarLaunch, "tabBar.launch")
         XCTAssertEqual(SettingsKey.tabBarLastSelected, "tabBar.lastSelected")

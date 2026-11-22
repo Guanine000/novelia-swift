@@ -33,6 +33,10 @@ enum SettingsKey {
     static let appPaperStyle = "appPaperStyle"
     /// 深色模式使用纯黑（OLED）底色；仅影响深色模式，本机保存不参与同步。
     static let appDarkOLED = "appDarkOLED"
+    /// 书库阅读状态（想读/在读/读过/搁置）是否随阅读进度自动识别与流转；默认关闭，本机保存不参与同步。
+    static let libraryAutoReadingStatus = "library.autoReadingStatus.v1"
+    /// 自动识别开启时，在读书籍超过多少天未阅读自动转为搁置（0 表示关闭自动搁置，默认 30）。
+    static let libraryAutoOnHoldDays = "library.autoReadingStatus.onHoldDays.v1"
     /// 朗读偏好，只存本机，不参与 WebDAV 同步；`SpeechSettingsStore` 负责读写与旧值兼容。
     enum Speech {
         static let edgeVoiceCatalog = "speech.edgeVoiceCatalog.v1"

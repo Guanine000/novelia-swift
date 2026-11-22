@@ -164,6 +164,7 @@ struct BrowseNavigationRoot<Master: View>: View {
     @EnvironmentObject private var libraryState: LibraryStateStore
     @State private var selection: BrowseDestination?
     @State private var reading: BrowseReadingDestination?
+    @State private var readingBook: LibraryBook?
     @State private var readingBookKey: String?
     @State private var readingReturn: BrowseReadingReturn?
     var emptyTitle = "选择一本书"
@@ -198,14 +199,18 @@ struct BrowseNavigationRoot<Master: View>: View {
         .environment(\.browseReading, { destination in
             if case .library(let book) = destination {
                 libraryState.markOpened(book)
+                readingBook = book
                 readingBookKey = book.key
-            } else { readingBookKey = nil }
+            } else {
+                readingBook = nil
+                readingBookKey = nil
+            }
             reading = destination
         })
         .environment(\.browseReadingReturn, readingReturn)
         .environment(\.keyboardPageActive, reading == nil)
         .fullScreenCover(item: $reading, onDismiss: {
-            libraryState.reloadPositions()
+            libraryState.reloadPositions(books: readingBook.map { [$0] })
             if let readingBookKey { readingReturn = BrowseReadingReturn(bookKey: readingBookKey) }
         }) { destination in
             BrowseReadingPresentation(destination: destination)

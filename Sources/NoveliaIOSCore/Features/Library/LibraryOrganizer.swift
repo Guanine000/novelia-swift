@@ -346,6 +346,115 @@ struct LibraryBookStatusState: Codable, Equatable, Sendable {
     }
 }
 
+/// 书库阅读状态自动识别配置（仅存本机，不改变 WebDAV 同步格式）。
+struct LibraryAutoStatusConfig: Equatable, Sendable {
+    var enabled: Bool = false
+    /// EPUB 读到此比例及以上自动视为「读过」，避开书末版权页/后记导致卡在 98%–99% 的情况。
+    var completionThreshold: Double = 0.98
+    /// 在读书籍连续未阅读达到该天数时自动转为「搁置」；0 表示关闭自动搁置。
+    var onHoldDays: Int = 30
+}
+
+/// 书库阅读状态的纯逻辑自动识别与流转规则；
+/// 复用现有 `LibraryBookStatusState`，手动设为「抛弃」的书永不自动覆盖。
+enum LibraryBookStatusAutoClassifier {
+    struct BookProgressSnapshot: Equatable, Sendable {
+        let key: String
+        let fraction: Double?
+        let hasProgress: Bool
+        let isAtLastChapter: Bool
+        let lastReadAt: Date?
+    }
+
+    static func isCompleted(fraction: Double?, isAtLastChapter: Bool, threshold: Double = 0.98) -> Bool {
+        if let fraction, fraction >= threshold { return true }
+        return isAtLastChapter
+    }
+
+    /// 打开书籍阅读时的状态流转：未设置、想读或搁置转为在读；读过与抛弃保持不变。
+    static func transitionOnOpen(current: LibraryBookStatus?) -> LibraryBookStatus? {
+        switch current {
+        case nil, .wantToRead, .onHold: .reading
+        case .reading, .completed, .dropped: nil
+        }
+    }
+
+    /// 书籍进度实际推进时的状态流转：抛弃永不覆盖；达到完成阈值转为读过；有进度且为想读/搁置转为在读。
+    static func transitionOnProgress(
+        current: LibraryBookStatus?,
+        isCompleted: Bool,
+        hasProgress: Bool
+    ) -> LibraryBookStatus? {
+        if current == .dropped { return nil }
+        if isCompleted { return current == .completed ? nil : .completed }
+        if hasProgress {
+            switch current {
+            case nil, .wantToRead, .onHold: return .reading
+            case .reading, .completed, .dropped: return nil
+            }
+        }
+        return nil
+    }
+
+    /// 新导入/下载且尚未记录状态的未读书籍，自动归入「想读」。
+    static func transitionOnNewBook(
+        current: LibraryBookStatus?,
+        hasProgress: Bool,
+        lastReadAt: Date?
+    ) -> LibraryBookStatus? {
+        guard current == nil, !hasProgress, lastReadAt == nil else { return nil }
+        return .wantToRead
+    }
+
+    /// 在读书籍久未阅读时自动转为「搁置」；以最近阅读时间与最近状态修改时间的较晚者为准，
+    /// 避免用户刚手动改回「在读」又立即被改回「搁置」。
+    static func autoOnHoldTransition(
+        entry: LibraryBookStatusEntry?,
+        lastReadAt: Date?,
+        now: Date,
+        onHoldDays: Int
+    ) -> LibraryBookStatus? {
+        guard onHoldDays > 0, let lastReadAt else { return nil }
+        let effective = entry?.status ?? .reading
+        guard effective == .reading else { return nil }
+        let lastActive = max(lastReadAt, entry?.updatedAt ?? .distantPast)
+        guard now.timeIntervalSince(lastActive) >= TimeInterval(onHoldDays) * 86_400 else { return nil }
+        return .onHold
+    }
+
+    /// 存量书籍按当前阅读进度一键整理：计算所有需要变更的 `(bookKey -> targetStatus)`。
+    /// 手动标为「抛弃」的书保持不变。
+    static func batchReorganizeChanges(
+        snapshots: [BookProgressSnapshot],
+        existing: LibraryBookStatusState,
+        now: Date,
+        config: LibraryAutoStatusConfig
+    ) -> [String: LibraryBookStatus] {
+        var changes: [String: LibraryBookStatus] = [:]
+        for snapshot in snapshots {
+            let existingEntry = existing.statuses[snapshot.key]
+            if existingEntry?.status == .dropped { continue }
+            let target: LibraryBookStatus
+            if isCompleted(fraction: snapshot.fraction, isAtLastChapter: snapshot.isAtLastChapter,
+                           threshold: config.completionThreshold) {
+                target = .completed
+            } else if !snapshot.hasProgress, snapshot.lastReadAt == nil {
+                target = .wantToRead
+            } else if config.onHoldDays > 0,
+                      let lastReadAt = snapshot.lastReadAt,
+                      now.timeIntervalSince(lastReadAt) >= TimeInterval(config.onHoldDays) * 86_400 {
+                target = .onHold
+            } else {
+                target = .reading
+            }
+            if existing.status(forBook: snapshot.key) != target {
+                changes[snapshot.key] = target
+            }
+        }
+        return changes
+    }
+}
+
 // MARK: - 书架更新检查聚合模型
 
 /// 单本网络小说检查更新的命中结果。

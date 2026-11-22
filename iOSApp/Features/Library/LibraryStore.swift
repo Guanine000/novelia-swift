@@ -263,14 +263,39 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
     }
 
     func markOpened(_ book: LibraryBook) {
-        lastOpened[book.key] = Date()
+        let now = Date()
+        lastOpened[book.key] = now
         persistLastOpened()
+        guard autoStatusConfig.enabled,
+              let next = LibraryBookStatusAutoClassifier.transitionOnOpen(
+                  current: readingStatuses.statuses[book.key]?.status
+              ) else { return }
+        var updated = readingStatuses
+        updated.setStatus(next, forBook: book.key, now: now)
+        save(updated)
     }
 
-    /// 阅读器关闭或同步之后重新读取阅读位置。
-    func reloadPositions() {
+    /// 阅读器关闭或同步之后重新读取阅读位置；传入 `books` 且开启自动识别时，仅对本次进度变动的书做自动流转。
+    func reloadPositions(books: [LibraryBook]? = nil) {
+        let previous = positions
         let latest = readingPositions.all()
         if latest != positions { positions = latest }
+        guard let books, autoStatusConfig.enabled else { return }
+        var changedKeys = Set<String>()
+        for book in books {
+            if let positionKey = positionStorageKey(for: book), previous[positionKey] != latest[positionKey] {
+                changedKeys.insert(book.key)
+            }
+        }
+        reconcileAutoStatuses(for: books, positionsChanged: changedKeys)
+    }
+
+    private func positionStorageKey(for book: LibraryBook) -> String? {
+        if case .webNovel(let record) = book.origin, record.novel.isRemote,
+           let provider = record.novel.providerId, let novel = record.novel.novelId {
+            return WebNovelEPUBContext.key(provider: provider, novel: novel)
+        }
+        return hash(for: book).map { book.positionPrefix + $0 }
     }
 
     // MARK: 文件哈希
@@ -408,6 +433,109 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
             updated.setStatus(status, forBook: book.key, now: now)
         }
         save(updated)
+    }
+
+    var autoStatusConfig: LibraryAutoStatusConfig {
+        let enabled = defaults.bool(forKey: SettingsKey.libraryAutoReadingStatus)
+        let onHoldDays = defaults.object(forKey: SettingsKey.libraryAutoOnHoldDays) == nil
+            ? 30
+            : max(0, defaults.integer(forKey: SettingsKey.libraryAutoOnHoldDays))
+        return LibraryAutoStatusConfig(enabled: enabled, onHoldDays: onHoldDays)
+    }
+
+    /// 自动识别开启时，为新导入未读书设置「想读」、对进度推进的书更新「在读/读过」，并将久未阅读的在读书转为「搁置」。
+    func reconcileAutoStatuses(for books: [LibraryBook], positionsChanged: Set<String> = [], now: Date = Date()) {
+        let config = autoStatusConfig
+        guard config.enabled, !books.isEmpty else { return }
+        var updated = readingStatuses
+        var didChange = false
+        for book in books {
+            let snapshot = progressSnapshot(for: book)
+            let entry = updated.statuses[book.key]
+            if positionsChanged.contains(book.key) {
+                let completed = LibraryBookStatusAutoClassifier.isCompleted(
+                    fraction: snapshot.fraction,
+                    isAtLastChapter: snapshot.isAtLastChapter,
+                    threshold: config.completionThreshold
+                )
+                if let next = LibraryBookStatusAutoClassifier.transitionOnProgress(
+                    current: entry?.status,
+                    isCompleted: completed,
+                    hasProgress: snapshot.hasProgress
+                ) {
+                    updated.setStatus(next, forBook: book.key, now: now)
+                    didChange = true
+                    continue
+                }
+            }
+            if let next = LibraryBookStatusAutoClassifier.transitionOnNewBook(
+                current: entry?.status,
+                hasProgress: snapshot.hasProgress,
+                lastReadAt: snapshot.lastReadAt
+            ) {
+                updated.setStatus(next, forBook: book.key, now: now)
+                didChange = true
+                continue
+            }
+            if let next = LibraryBookStatusAutoClassifier.autoOnHoldTransition(
+                entry: entry,
+                lastReadAt: snapshot.lastReadAt,
+                now: now,
+                onHoldDays: config.onHoldDays
+            ) {
+                updated.setStatus(next, forBook: book.key, now: now)
+                didChange = true
+            }
+        }
+        if didChange { save(updated) }
+    }
+
+    /// 预览存量书籍按当前进度一键整理将产生的状态变更（不直接写盘）。
+    func previewAutoOrganize(books: [LibraryBook], now: Date = Date()) -> [String: LibraryBookStatus] {
+        var config = autoStatusConfig
+        config.enabled = true
+        let snapshots = books.map { progressSnapshot(for: $0) }
+        return LibraryBookStatusAutoClassifier.batchReorganizeChanges(
+            snapshots: snapshots,
+            existing: readingStatuses,
+            now: now,
+            config: config
+        )
+    }
+
+    /// 批量应用一键整理的阅读状态变更。
+    func applyAutoOrganize(_ changes: [String: LibraryBookStatus], now: Date = Date()) {
+        guard !changes.isEmpty else { return }
+        var updated = readingStatuses
+        for (key, status) in changes {
+            updated.setStatus(status, forBook: key, now: now)
+        }
+        save(updated)
+    }
+
+    private func progressSnapshot(for book: LibraryBook) -> LibraryBookStatusAutoClassifier.BookProgressSnapshot {
+        let reading = readingStatus(for: book)
+        var isAtLastChapter = false
+        var hasProgress = (reading.fraction ?? 0) > 0
+        if case .webNovel(let record) = book.origin, record.novel.isRemote,
+           let provider = record.novel.providerId, let novel = record.novel.novelId,
+           let position = positions[WebNovelEPUBContext.key(provider: provider, novel: novel)],
+           let chapterID = position.chapterID {
+            hasProgress = true
+            if let lastID = record.novel.chapters.last?.id, lastID == chapterID {
+                isAtLastChapter = true
+            }
+        } else if let positionKey = positionStorageKey(for: book), let position = positions[positionKey] {
+            if let fraction = position.fraction, fraction > 0 { hasProgress = true }
+            if let chapter = position.chapterIndex, chapter > 0 { hasProgress = true }
+        }
+        return LibraryBookStatusAutoClassifier.BookProgressSnapshot(
+            key: book.key,
+            fraction: reading.fraction,
+            hasProgress: hasProgress,
+            isAtLastChapter: isAtLastChapter,
+            lastReadAt: reading.lastReadAt
+        )
     }
 
     /// 书籍在“网络小说/文库”之间移动后，系列归属、阅读状态与最近打开时间随新标识转移。

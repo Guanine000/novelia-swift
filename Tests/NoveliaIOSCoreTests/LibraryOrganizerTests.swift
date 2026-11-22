@@ -216,4 +216,81 @@ final class LibraryOrganizerTests: XCTestCase {
         XCTAssertEqual(moved.status(forBook: "web:c"), .wantToRead)
         XCTAssertNil(moved.statuses["wenku:c"])
     }
+
+    func testAutoStatusClassifierTransitionsAndBatchReorganize() {
+        let now = Date(timeIntervalSince1970: 100 * 86_400)
+        let recent = Date(timeIntervalSince1970: 95 * 86_400)
+        let stale = Date(timeIntervalSince1970: 50 * 86_400)
+
+        // 打开书籍：未设置、想读、搁置转为在读；读过与抛弃保持不变
+        XCTAssertEqual(LibraryBookStatusAutoClassifier.transitionOnOpen(current: nil), .reading)
+        XCTAssertEqual(LibraryBookStatusAutoClassifier.transitionOnOpen(current: .wantToRead), .reading)
+        XCTAssertEqual(LibraryBookStatusAutoClassifier.transitionOnOpen(current: .onHold), .reading)
+        XCTAssertNil(LibraryBookStatusAutoClassifier.transitionOnOpen(current: .reading))
+        XCTAssertNil(LibraryBookStatusAutoClassifier.transitionOnOpen(current: .completed))
+        XCTAssertNil(LibraryBookStatusAutoClassifier.transitionOnOpen(current: .dropped))
+
+        // 进度推进：98% 以上或末章自动读过；抛弃永不覆盖
+        XCTAssertTrue(LibraryBookStatusAutoClassifier.isCompleted(fraction: 0.98, isAtLastChapter: false))
+        XCTAssertFalse(LibraryBookStatusAutoClassifier.isCompleted(fraction: 0.97, isAtLastChapter: false))
+        XCTAssertTrue(LibraryBookStatusAutoClassifier.isCompleted(fraction: nil, isAtLastChapter: true))
+        XCTAssertEqual(
+            LibraryBookStatusAutoClassifier.transitionOnProgress(current: .reading, isCompleted: true, hasProgress: true),
+            .completed
+        )
+        XCTAssertNil(
+            LibraryBookStatusAutoClassifier.transitionOnProgress(current: .dropped, isCompleted: true, hasProgress: true),
+            "手动抛弃的书不应被进度自动覆盖"
+        )
+        XCTAssertEqual(
+            LibraryBookStatusAutoClassifier.transitionOnProgress(current: .wantToRead, isCompleted: false, hasProgress: true),
+            .reading
+        )
+
+        // 新书无进度归入想读
+        XCTAssertEqual(
+            LibraryBookStatusAutoClassifier.transitionOnNewBook(current: nil, hasProgress: false, lastReadAt: nil),
+            .wantToRead
+        )
+        XCTAssertNil(
+            LibraryBookStatusAutoClassifier.transitionOnNewBook(current: .reading, hasProgress: false, lastReadAt: nil)
+        )
+
+        // 自动搁置：超过 30 天未读转为搁置；若刚手动改回在读（updatedAt 较新），则不立即搁置
+        let staleReading = LibraryBookStatusEntry(status: .reading, updatedAt: stale)
+        XCTAssertEqual(
+            LibraryBookStatusAutoClassifier.autoOnHoldTransition(entry: staleReading, lastReadAt: stale, now: now, onHoldDays: 30),
+            .onHold
+        )
+        let recentlyManuallySetReading = LibraryBookStatusEntry(status: .reading, updatedAt: recent)
+        XCTAssertNil(
+            LibraryBookStatusAutoClassifier.autoOnHoldTransition(entry: recentlyManuallySetReading, lastReadAt: stale, now: now, onHoldDays: 30)
+        )
+        XCTAssertNil(
+            LibraryBookStatusAutoClassifier.autoOnHoldTransition(entry: staleReading, lastReadAt: stale, now: now, onHoldDays: 0)
+        )
+
+        // 存量一键整理：保留手动抛弃，其余按进度归类
+        var existing = LibraryBookStatusState()
+        existing.setStatus(.dropped, forBook: "dropped", now: recent)
+        existing.setStatus(.reading, forBook: "done", now: recent)
+        let snapshots: [LibraryBookStatusAutoClassifier.BookProgressSnapshot] = [
+            .init(key: "unread", fraction: nil, hasProgress: false, isAtLastChapter: false, lastReadAt: nil),
+            .init(key: "active", fraction: 0.35, hasProgress: true, isAtLastChapter: false, lastReadAt: recent),
+            .init(key: "done", fraction: 0.99, hasProgress: true, isAtLastChapter: false, lastReadAt: recent),
+            .init(key: "stale", fraction: 0.2, hasProgress: true, isAtLastChapter: false, lastReadAt: stale),
+            .init(key: "dropped", fraction: 1.0, hasProgress: true, isAtLastChapter: true, lastReadAt: recent),
+        ]
+        let changes = LibraryBookStatusAutoClassifier.batchReorganizeChanges(
+            snapshots: snapshots,
+            existing: existing,
+            now: now,
+            config: LibraryAutoStatusConfig(enabled: true, completionThreshold: 0.98, onHoldDays: 30)
+        )
+        XCTAssertEqual(changes["unread"], .wantToRead)
+        XCTAssertNil(changes["active"], "已在读且活跃的书无需变更")
+        XCTAssertEqual(changes["done"], .completed)
+        XCTAssertEqual(changes["stale"], .onHold)
+        XCTAssertNil(changes["dropped"], "手动抛弃的书不参与一键整理覆盖")
+    }
 }

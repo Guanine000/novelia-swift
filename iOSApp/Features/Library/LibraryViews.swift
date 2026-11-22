@@ -51,6 +51,8 @@ struct LibraryView: View {
     @State private var onlineSpeechTarget: SpeechHandoffStore.OpenRequest?
     @State private var isCreatingSeries = false
     @State private var newSeriesName = ""
+    @State private var pendingAutoOrganize: [String: LibraryBookStatus]?
+    @State private var isShowingAutoOrganizeUpToDate = false
     @State private var syncTask: Task<Void, Never>?
     @State private var hasTriggeredSync = false
     @State private var isShowingSyncProgress = false
@@ -185,7 +187,7 @@ struct LibraryView: View {
                 LibraryReaderDestination(book: book)
             }
             .onValueChange(of: readerTarget) { _, target in
-                if target == nil { state.reloadPositions() }
+                if target == nil { state.reloadPositions(books: sourceBooks) }
             }
             // 迷你条请求回到朗读处：按书籍身份找到书并打开，阅读器起来后从该位置继续朗读。
             .onReceive(services.speechHandoff.$openRequest) { request in openSpeechBook(request) }
@@ -197,13 +199,13 @@ struct LibraryView: View {
                 }
             }
             .onValueChange(of: webDAVSync.isSyncing) { _, syncing in
-                if !syncing { state.reloadPositions() }
+                if !syncing { state.reloadPositions(books: sourceBooks) }
             }
             .onValueChange(of: webDAVSync.isEnabled) { _, isEnabled in
                 if !isEnabled { syncTask?.cancel() }
             }
             .onAppear {
-                state.reloadPositions()
+                state.reloadPositions(books: sourceBooks)
                 handleIncomingDocuments()
             }
             .onValueChange(of: incomingDocuments.pending) { _, _ in handleIncomingDocuments() }
@@ -215,6 +217,9 @@ struct LibraryView: View {
             .task(id: sourceBooks) {
                 state.associateVolumes(sourceBooks)
                 await state.refreshHashes(for: sourceBooks, librariesReady: webDownloads.isReady && wenkuDownloads.isReady)
+                if webDownloads.isReady && wenkuDownloads.isReady {
+                    state.reconcileAutoStatuses(for: sourceBooks)
+                }
             }
             .fullScreenCover(isPresented: $importer.isShowingFileImporter) {
                 EPUBFilePicker(contentTypes: importContentTypes, allowsMultipleSelection: true) { urls in
@@ -261,6 +266,27 @@ struct LibraryView: View {
                 Button("创建") { state.createSeries(named: newSeriesName) }
             } message: {
                 Text("创建后，可在书籍的“更多”菜单中移入系列。")
+            }
+            .alert(
+                "按进度整理阅读状态",
+                isPresented: Binding(
+                    get: { pendingAutoOrganize != nil },
+                    set: { if !$0 { pendingAutoOrganize = nil } }
+                ),
+                presenting: pendingAutoOrganize
+            ) { changes in
+                Button("取消", role: .cancel) { pendingAutoOrganize = nil }
+                Button("应用（\(changes.count) 本）") {
+                    state.applyAutoOrganize(changes)
+                    pendingAutoOrganize = nil
+                }
+            } message: { changes in
+                Text(autoOrganizeSummary(changes))
+            }
+            .alert("按进度整理阅读状态", isPresented: $isShowingAutoOrganizeUpToDate) {
+                Button("好", role: .cancel) {}
+            } message: {
+                Text("当前所有书籍的阅读状态已与阅读进度一致。")
             }
             .overlay { LibraryImportProgressOverlay(model: importer) }
             .overlay {
@@ -510,6 +536,18 @@ struct LibraryView: View {
                 Button { isCreatingSeries = true; newSeriesName = "" } label: {
                     Label("新建系列", systemImage: "rectangle.stack.badge.plus")
                 }
+                if !allBooks.isEmpty {
+                    Button {
+                        let changes = state.previewAutoOrganize(books: allBooks)
+                        if changes.isEmpty {
+                            isShowingAutoOrganizeUpToDate = true
+                        } else {
+                            pendingAutoOrganize = changes
+                        }
+                    } label: {
+                        Label("按进度整理阅读状态", systemImage: "wand.and.stars")
+                    }
+                }
                 if !shelfUpdates.checkableBooks(from: webDownloads.books).isEmpty {
                     Button {
                         shelfUpdates.startCheck(books: webDownloads.books, catalog: services.api.catalog)
@@ -661,6 +699,16 @@ struct LibraryView: View {
         LibraryOrganizer.sorted(books, options: options) { state.sortItem(for: $0) }
     }
 
+    private func autoOrganizeSummary(_ changes: [String: LibraryBookStatus]) -> String {
+        let grouped = Dictionary(grouping: changes.values, by: { $0 })
+        let parts = LibraryBookStatus.allCases.compactMap { status -> String? in
+            guard let count = grouped[status]?.count, count > 0 else { return nil }
+            return "\(status.title) \(count) 本"
+        }
+        let breakdown = parts.joined(separator: "、")
+        return "将按当前阅读进度更新 \(changes.count) 本书（\(breakdown)）。手动标为「抛弃」的书保持不变。"
+    }
+
     /// 云端书籍先询问是否下载，下载完成后由 `downloadedBookKey` 回到这里打开。
     private func open(_ book: LibraryBook) {
         guard !book.isCloudOnly else {
@@ -781,7 +829,7 @@ struct LibrarySeriesDetailView: View {
             LibraryReaderDestination(book: book)
         }
         .onValueChange(of: readerTarget) { _, target in
-            if target == nil { state.reloadPositions() }
+            if target == nil { state.reloadPositions(books: allBooks) }
         }
         .onValueChange(of: series == nil) { _, removed in
             if removed { dismiss() }

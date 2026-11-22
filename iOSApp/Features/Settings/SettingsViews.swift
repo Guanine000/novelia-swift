@@ -14,6 +14,8 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.appThemeCustomHex) private var themeCustomHex = "559775"
     @AppStorage(SettingsKey.appPaperStyle) private var paperStyleRaw = AppPaperStyle.cream.rawValue
     @AppStorage(SettingsKey.appDarkOLED) private var appDarkOLED = false
+    @AppStorage(SettingsKey.libraryAutoReadingStatus) private var autoReadingStatus = false
+    @AppStorage(SettingsKey.libraryAutoOnHoldDays) private var autoOnHoldDays = 30
     #if !NOVELIA_READIUM_ONLY
     @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = false
     #endif
@@ -203,6 +205,24 @@ struct SettingsView: View {
                 }
                 Toggle(isOn: $appDarkOLED) {
                     Label("深色使用纯黑（OLED）", systemImage: "moon.fill")
+                }
+                Toggle(isOn: $autoReadingStatus) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("自动识别阅读状态", systemImage: "wand.and.stars")
+                        Text("开启后，新书自动归入「想读」，开始阅读转为「在读」，读到 98% 以上转为「读过」；手动标为「抛弃」的书不会被覆盖。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if autoReadingStatus {
+                    Picker(selection: $autoOnHoldDays) {
+                        Text("关闭").tag(0)
+                        Text("30 天").tag(30)
+                        Text("60 天").tag(60)
+                        Text("90 天").tag(90)
+                    } label: {
+                        Label("久未阅读自动搁置", systemImage: "pause.circle")
+                    }
                 }
             }
             Section("同步") {
