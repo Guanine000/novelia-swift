@@ -377,12 +377,24 @@ private struct ReadiumEPUBReaderViewContent: View {
                 }
                 Button {
                     model.isTOCDiagnosticsExpanded = false
+                    tocTab = .contents
                     isShowingTOC = true
                 } label: {
                     Label("目录", systemImage: "list.bullet")
                 }
                 .accessibilityLabel("目录")
                 .disabled(model.status != .ready)
+                if model.imageLibrary.isAvailable {
+                    Button {
+                        model.isTOCDiagnosticsExpanded = false
+                        tocTab = .images
+                        isShowingTOC = true
+                    } label: {
+                        Label("插图画廊", systemImage: "photo.on.rectangle.angled")
+                    }
+                    .accessibilityLabel("插图画廊")
+                    .disabled(model.status != .ready)
+                }
                 if model.readingReturnPoint != nil {
                     Button("回到刚才阅读处") { model.returnToReading() }
                 }

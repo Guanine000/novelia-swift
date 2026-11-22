@@ -242,6 +242,21 @@ struct LibrarySeriesState: Codable, Equatable, Sendable {
 
 // MARK: - Bangumi 风格阅读状态分类
 
+/// 单书在书库封面框内的缩放方式；默认裁切填满以保持网格整齐，方图或画集可按书切为完整显示。
+enum LibraryBookCoverFitMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case fill
+    case fit
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fill: "裁切填满（默认）"
+        case .fit: "完整显示"
+        }
+    }
+}
+
 /// 书库书籍的阅读状态分类；未显式设置或新导入的书默认归入「在读」。
 enum LibraryBookStatus: String, Codable, CaseIterable, Identifiable, Sendable {
     case reading

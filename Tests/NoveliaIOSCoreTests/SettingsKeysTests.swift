@@ -31,6 +31,7 @@ final class SettingsKeysTests: XCTestCase {
         XCTAssertEqual(SettingsKey.appThemeCustomHex, "appThemeCustomHex")
         XCTAssertEqual(SettingsKey.libraryAutoReadingStatus, "library.autoReadingStatus.v1")
         XCTAssertEqual(SettingsKey.libraryAutoOnHoldDays, "library.autoReadingStatus.onHoldDays.v1")
+        XCTAssertEqual(SettingsKey.libraryCoverFitModes, "library.coverFitModes.v1")
         XCTAssertEqual(SettingsKey.tabBarOrder, "tabBar.order")
         XCTAssertEqual(SettingsKey.tabBarLaunch, "tabBar.launch")
         XCTAssertEqual(SettingsKey.tabBarLastSelected, "tabBar.lastSelected")

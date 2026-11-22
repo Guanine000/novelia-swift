@@ -422,11 +422,20 @@ struct LibraryView: View {
             },
             uniquingKeysWith: { first, _ in first }
         )
+        let webRecordsByID = Dictionary(
+            webDownloads.books.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         return LibraryShelfUpdateDetailSheet(
             store: shelfUpdates,
             booksByID: webBooksByID,
             onRecheckAll: { shelfUpdates.startCheck(books: webDownloads.books, catalog: services.api.catalog) },
             onRetryFailed: { shelfUpdates.retryFailed(books: webDownloads.books, catalog: services.api.catalog) },
+            onBatchUpdateAll: {
+                shelfUpdates.startBatchUpdate(booksByID: webRecordsByID) { record in
+                    try await webDownloads.updateEPUB(record)
+                }
+            },
             onOpenBook: { open($0) },
             onUpdateBook: { bookActions.pendingEPUBUpdate = $0 },
             onClose: { shelfUpdates.isShowingDetails = false }

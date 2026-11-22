@@ -37,6 +37,8 @@ enum SettingsKey {
     static let libraryAutoReadingStatus = "library.autoReadingStatus.v1"
     /// 自动识别开启时，在读书籍超过多少天未阅读自动转为搁置（0 表示关闭自动搁置，默认 30）。
     static let libraryAutoOnHoldDays = "library.autoReadingStatus.onHoldDays.v1"
+    /// 单书封面显示模式（`[bookKey: LibraryBookCoverFitMode.rawValue]`），仅存本机，不参与 WebDAV 同步。
+    static let libraryCoverFitModes = "library.coverFitModes.v1"
     /// 朗读偏好，只存本机，不参与 WebDAV 同步；`SpeechSettingsStore` 负责读写与旧值兼容。
     enum Speech {
         static let edgeVoiceCatalog = "speech.edgeVoiceCatalog.v1"

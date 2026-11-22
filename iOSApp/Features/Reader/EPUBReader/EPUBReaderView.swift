@@ -346,11 +346,21 @@ private struct EPUBReaderViewContent: View {
                     .accessibilityLabel("摘录与笔记")
                 }
                 Button {
+                    tocTab = .contents
                     isShowingTOC = true
                 } label: {
                     Label("目录", systemImage: "list.bullet")
                 }
                 .accessibilityLabel("目录")
+                if model.imageLibrary.isAvailable {
+                    Button {
+                        tocTab = .images
+                        isShowingTOC = true
+                    } label: {
+                        Label("插图画廊", systemImage: "photo.on.rectangle.angled")
+                    }
+                    .accessibilityLabel("插图画廊")
+                }
                 if model.readingReturnPoint != nil {
                     Button("回到刚才阅读处") { model.returnToReading() }
                 }

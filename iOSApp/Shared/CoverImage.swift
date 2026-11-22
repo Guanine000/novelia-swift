@@ -115,6 +115,7 @@ final class CoverImageLoader: @unchecked Sendable {
 /// 从 `CoverImageLoader` 加载封面，加载中或失败时显示 `placeholder`。
 struct CoverImage<Placeholder: View>: View {
     let url: URL?
+    var contentMode: ContentMode = .fill
     @ViewBuilder var placeholder: () -> Placeholder
     @State private var loaded: (url: URL, image: UIImage)?
 
@@ -123,7 +124,11 @@ struct CoverImage<Placeholder: View>: View {
         Color.clear
             .overlay {
                 if let image = currentImage {
-                    Image(uiImage: image).resizable().scaledToFill()
+                    if contentMode == .fit {
+                        Image(uiImage: image).resizable().scaledToFit()
+                    } else {
+                        Image(uiImage: image).resizable().scaledToFill()
+                    }
                 } else {
                     placeholder()
                 }

@@ -154,6 +154,7 @@ struct LibraryBookRow: View {
         HStack(alignment: .top, spacing: 6) {
             LibraryBookRowContent(book: book, status: state.status(for: book),
                                   bookStatus: showStatusBadge ? state.bookStatus(for: book) : nil,
+                                  coverFitMode: state.coverFitMode(for: book),
                                   hash: hash)
                 .contentShape(Rectangle())
                 // 点击负责打开或切换选择；页面的长按桥接负责连续拖选。
@@ -446,7 +447,7 @@ private struct LibraryBookGridCell: View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topTrailing) {
                 ZStack(alignment: .bottom) {
-                    LibraryCoverView(book: book, width: nil, height: nil, elevated: false)
+                    LibraryCoverView(book: book, width: nil, height: nil, elevated: false, fitMode: state.coverFitMode(for: book))
                         .equatable()
                     if let fraction = status.fraction, fraction > 0.005 {
                         Capsule()
@@ -531,11 +532,12 @@ private struct LibraryBookRowContent: View {
     let status: LibraryReadingStatus
     /// 传入时在元信息栏展示阅读分类标签（用于“全部”视图与搜索结果）。
     var bookStatus: LibraryBookStatus? = nil
+    var coverFitMode: LibraryBookCoverFitMode = .fill
     let hash: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            LibraryCoverView(book: book, width: 56, height: 78)
+            LibraryCoverView(book: book, width: 56, height: 78, fitMode: coverFitMode)
                 .equatable()
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -607,6 +609,7 @@ struct LibraryCoverView: View, Equatable {
     var width: CGFloat? = nil
     var height: CGFloat? = nil
     var elevated = false
+    var fitMode: LibraryBookCoverFitMode = .fill
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.book.key == rhs.book.key
@@ -616,6 +619,7 @@ struct LibraryCoverView: View, Equatable {
             && lhs.width == rhs.width
             && lhs.height == rhs.height
             && lhs.elevated == rhs.elevated
+            && lhs.fitMode == rhs.fitMode
     }
 
     private static let generatedPalettes: [(top: Color, bottom: Color, ink: Color)] = [
@@ -638,7 +642,8 @@ struct LibraryCoverView: View, Equatable {
     var body: some View {
         Group {
             if let url = book.coverURL {
-                CoverImage(url: url) { placeholder }
+                CoverImage(url: url, contentMode: fitMode == .fit ? .fit : .fill) { placeholder }
+                    .background(fitMode == .fit ? NoveliaStyle.card : Color.clear)
             } else {
                 placeholder
             }
@@ -724,7 +729,7 @@ struct LibraryRecentCarousel: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 6) {
                                 ZStack(alignment: .bottom) {
-                                    LibraryCoverView(book: book, width: 88, height: 124, elevated: false)
+                                    LibraryCoverView(book: book, width: 88, height: 124, elevated: false, fitMode: state.coverFitMode(for: book))
                                     if let fraction = status.fraction, fraction > 0.005 {
                                         ZStack(alignment: .leading) {
                                             Capsule()
@@ -1199,10 +1204,17 @@ final class LibraryShelfUpdateStore: ObservableObject {
     @Published private(set) var summary: ShelfUpdateSummary
     @Published var isBannerVisible = false
     @Published var isShowingDetails = false
+    @Published private(set) var isBatchUpdating = false
+    @Published private(set) var batchTotal = 0
+    @Published private(set) var batchCompleted = 0
+    @Published private(set) var batchCurrentTitle: String?
+    @Published private(set) var batchFailures: [String: String] = [:]
+    @Published private(set) var batchNotice: String?
 
     private let defaults: UserDefaults
     private static let lastCheckedKey = "library.shelfUpdateLastCheckedAt.v1"
     private var checkTask: Task<Void, Never>?
+    private var batchUpdateTask: Task<Void, Never>?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -1246,6 +1258,82 @@ final class LibraryShelfUpdateStore: ObservableObject {
 
     func dismissBanner() {
         isBannerVisible = false
+    }
+
+    /// 按既有下载配置顺序批量更新已检出有新章节的网络小说 EPUB；
+    /// 缺少历史下载设置的旧书不会猜测配置，跳过并保留在列表中供单本确认。
+    func startBatchUpdate(
+        booksByID: [String: DownloadedWebNovel],
+        updater: @escaping (DownloadedWebNovel) async throws -> Bool
+    ) {
+        guard !isBatchUpdating, !isChecking else { return }
+        let items = summary.updatedBooks
+        var runnable: [DownloadedWebNovel] = []
+        var skippedMissingConfig = 0
+        for item in items {
+            guard let record = booksByID[item.bookID], record.resolvedFileFormat == .epub else { continue }
+            if record.epubUpdateConfiguration == nil {
+                skippedMissingConfig += 1
+            } else {
+                runnable.append(record)
+            }
+        }
+        batchFailures = [:]
+        if runnable.isEmpty {
+            if skippedMissingConfig > 0 {
+                batchNotice = "有 \(skippedMissingConfig) 本书缺少历史下载配置，请逐本点「更新」选择语言和译源。"
+            }
+            return
+        }
+        batchNotice = nil
+        isBatchUpdating = true
+        batchTotal = runnable.count
+        batchCompleted = 0
+        batchCurrentTitle = nil
+        batchUpdateTask?.cancel()
+        batchUpdateTask = Task { [weak self] in
+            guard let self else { return }
+            var updatedCount = 0
+            var unchangedCount = 0
+            var failedCount = 0
+            var cancelled = false
+            for record in runnable {
+                if Task.isCancelled {
+                    cancelled = true
+                    break
+                }
+                self.batchCurrentTitle = record.novel.title
+                do {
+                    let changed = try await updater(record)
+                    if changed { updatedCount += 1 } else { unchangedCount += 1 }
+                    self.summary.updatedBooks.removeAll { $0.bookID == record.id }
+                } catch is CancellationError {
+                    cancelled = true
+                    break
+                } catch {
+                    failedCount += 1
+                    self.batchFailures[record.id] = error.localizedDescription
+                }
+                self.batchCompleted += 1
+            }
+            self.isBatchUpdating = false
+            self.batchCurrentTitle = nil
+            self.batchUpdateTask = nil
+            var parts: [String] = []
+            if updatedCount > 0 { parts.append("已更新 \(updatedCount) 本") }
+            if unchangedCount > 0 { parts.append("内容未变 \(unchangedCount) 本") }
+            if skippedMissingConfig > 0 { parts.append("\(skippedMissingConfig) 本需单本确认下载配置") }
+            if failedCount > 0 { parts.append("失败 \(failedCount) 本") }
+            if cancelled { parts.append("已停止") }
+            self.batchNotice = parts.isEmpty ? nil : parts.joined(separator: "，") + "。"
+        }
+    }
+
+    func cancelBatchUpdate() {
+        batchUpdateTask?.cancel()
+        batchUpdateTask = nil
+        isBatchUpdating = false
+        batchCurrentTitle = nil
     }
 
     private enum ItemOutcome: Sendable {
@@ -1411,6 +1499,7 @@ struct LibraryShelfUpdateDetailSheet: View {
     let booksByID: [String: LibraryBook]
     let onRecheckAll: () -> Void
     let onRetryFailed: () -> Void
+    let onBatchUpdateAll: () -> Void
     let onOpenBook: (LibraryBook) -> Void
     let onUpdateBook: (DownloadedWebNovel) -> Void
     let onClose: () -> Void
@@ -1436,11 +1525,52 @@ struct LibraryShelfUpdateDetailSheet: View {
                     } label: {
                         Label(store.isChecking ? "正在检查…" : "重新检查全部", systemImage: "arrow.triangle.2.circlepath")
                     }
-                    .disabled(store.isChecking)
+                    .disabled(store.isChecking || store.isBatchUpdating)
+                }
+
+                if store.isBatchUpdating || store.batchNotice != nil {
+                    Section("批量更新") {
+                        if store.isBatchUpdating {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("正在更新 \(store.batchCompleted)/\(store.batchTotal)")
+                                        .font(.subheadline.weight(.semibold))
+                                        .monospacedDigit()
+                                    Spacer()
+                                    Button("停止", role: .destructive) {
+                                        store.cancelBatchUpdate()
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                }
+                                if let title = store.batchCurrentTitle {
+                                    Text(title)
+                                        .font(.caption)
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                        .lineLimit(1)
+                                }
+                                ProgressView(value: Double(store.batchCompleted), total: Double(max(1, store.batchTotal)))
+                                    .tint(NoveliaStyle.brandGreen)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        if let notice = store.batchNotice {
+                            Text(notice)
+                                .font(.caption)
+                                .foregroundStyle(NoveliaStyle.muted)
+                        }
+                    }
                 }
 
                 if !store.summary.updatedBooks.isEmpty {
                     Section("有更新的书籍（\(store.summary.updatedBooks.count)）") {
+                        Button {
+                            onBatchUpdateAll()
+                        } label: {
+                            Label("一键更新全部（\(store.summary.updatedBooks.count) 本）", systemImage: "arrow.down.circle.fill")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(NoveliaStyle.brandGreen)
+                        }
+                        .disabled(store.isChecking || store.isBatchUpdating)
                         ForEach(store.summary.updatedBooks) { item in
                             HStack(spacing: 10) {
                                 Button {
@@ -1466,6 +1596,12 @@ struct LibraryShelfUpdateDetailSheet: View {
                                                 .foregroundStyle(NoveliaStyle.muted)
                                                 .lineLimit(1)
                                         }
+                                        if let failure = store.batchFailures[item.bookID] {
+                                            Text("更新失败：\(failure)")
+                                                .font(.caption)
+                                                .foregroundStyle(NoveliaStyle.danger)
+                                                .lineLimit(2)
+                                        }
                                     }
                                 }
                                 .buttonStyle(.plain)
@@ -1479,6 +1615,7 @@ struct LibraryShelfUpdateDetailSheet: View {
                                     .font(.caption.weight(.semibold))
                                     .buttonStyle(.bordered)
                                     .tint(NoveliaStyle.brandGreen)
+                                    .disabled(store.isBatchUpdating)
                                 }
                             }
                         }

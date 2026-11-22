@@ -145,6 +145,7 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
 
     @Published private(set) var series: LibrarySeriesState
     @Published private(set) var readingStatuses: LibraryBookStatusState
+    @Published private(set) var coverFitModes: [String: LibraryBookCoverFitMode] = [:]
     @Published private(set) var positions: [String: SyncedReadingPosition] = [:]
     @Published private(set) var lastOpened: [String: Date]
     /// 书籍标识 → 文件内容哈希，由 `refreshHashes` 更新。
@@ -174,6 +175,8 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
         readingStatusesURL = directory.appendingPathComponent("readingStatuses.json")
         series = (try? Data(contentsOf: seriesURL)).flatMap { try? JSONDecoder().decode(LibrarySeriesState.self, from: $0) } ?? LibrarySeriesState()
         readingStatuses = (try? Data(contentsOf: readingStatusesURL)).flatMap { try? JSONDecoder().decode(LibraryBookStatusState.self, from: $0) } ?? LibraryBookStatusState()
+        coverFitModes = (defaults.dictionary(forKey: SettingsKey.libraryCoverFitModes) as? [String: String] ?? [:])
+            .compactMapValues(LibraryBookCoverFitMode.init(rawValue:))
         hashes = defaults.dictionary(forKey: Key.hashes) as? [String: String] ?? [:]
         lastOpened = (defaults.data(forKey: Key.lastOpened)).flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) } ?? [:]
         self.positions = readingPositions.all()
@@ -415,6 +418,22 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
         readingStatuses.status(forBook: key)
     }
 
+    func coverFitMode(for book: LibraryBook) -> LibraryBookCoverFitMode {
+        coverFitModes[book.key] ?? .fill
+    }
+
+    func setCoverFitMode(_ mode: LibraryBookCoverFitMode, for book: LibraryBook) {
+        var updated = coverFitModes
+        if mode == .fill {
+            updated.removeValue(forKey: book.key)
+        } else {
+            updated[book.key] = mode
+        }
+        guard updated != coverFitModes else { return }
+        coverFitModes = updated
+        defaults.set(updated.mapValues(\.rawValue), forKey: SettingsKey.libraryCoverFitModes)
+    }
+
     func setBookStatus(_ status: LibraryBookStatus, for book: LibraryBook) {
         setBookStatus(status, forKey: book.key)
     }
@@ -549,6 +568,10 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
         if let opened = lastOpened.removeValue(forKey: oldKey) {
             lastOpened[newKey] = opened
             persistLastOpened()
+        }
+        if let mode = coverFitModes.removeValue(forKey: oldKey) {
+            coverFitModes[newKey] = mode
+            defaults.set(coverFitModes.mapValues(\.rawValue), forKey: SettingsKey.libraryCoverFitModes)
         }
     }
 

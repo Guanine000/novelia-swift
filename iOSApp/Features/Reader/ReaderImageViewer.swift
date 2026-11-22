@@ -173,7 +173,15 @@ struct ReaderImageViewer: View {
                                 .padding(.horizontal, 14).padding(.vertical, 9)
                                 .background(.ultraThinMaterial, in: Capsule())
                         }
-                        .padding(.bottom, 12)
+                        .padding(.bottom, presentation.images.count > 1 ? 8 : 12)
+                    }
+                    if presentation.images.count > 1 {
+                        ReaderImageFilmstrip(
+                            library: library,
+                            images: presentation.images,
+                            selection: $index
+                        )
+                        .padding(.bottom, 10)
                     }
                 }
                 .foregroundStyle(.white)
@@ -355,13 +363,20 @@ struct ReaderTOCTabPicker: View {
     }
 }
 
-/// 全书图片缩略图；点按打开查看器，可从查看器跳到图片在正文中的位置。
+/// 全书图片画廊；支持 2/3 列与完整/裁切切换，点按进入全屏缩放与胶片条浏览，并可跳到原文位置。
 struct ReaderImageGallery: View {
     @ObservedObject var library: ReaderImageLibrary
     let chapterTitle: (Int) -> String?
     /// 跳到图片位置：由目录面板关闭自身后执行。
     let onJump: (EPUBImageEntry) -> Void
     @State private var presentation: ReaderImageLibrary.Presentation?
+    @State private var usesLargeGrid = false
+    @State private var fitsFullImage = false
+
+    private var columns: [GridItem] {
+        let count = usesLargeGrid ? 2 : 3
+        return Array(repeating: GridItem(.flexible(), spacing: usesLargeGrid ? 12 : 10), count: count)
+    }
 
     var body: some View {
         Group {
@@ -371,18 +386,54 @@ struct ReaderImageGallery: View {
                                            description: Text("本书正文中没有可查看的插图。"))
                 } else {
                     ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 10)], spacing: 14) {
+                        HStack(spacing: 10) {
+                            Text("共 \(images.count) 张插图")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.15)) { fitsFullImage.toggle() }
+                            } label: {
+                                Label(fitsFullImage ? "完整显示" : "裁切填满",
+                                      systemImage: fitsFullImage ? "rectangle.arrowtriangle.2.inward" : "crop")
+                                    .font(.caption.weight(.medium))
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 5)
+                                    .background(Color(uiColor: .secondarySystemFill), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.18)) { usesLargeGrid.toggle() }
+                            } label: {
+                                Image(systemName: usesLargeGrid ? "square.grid.3x3" : "square.grid.2x2")
+                                    .font(.caption.weight(.semibold))
+                                    .frame(width: 28, height: 28)
+                                    .background(Color(uiColor: .secondarySystemFill), in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(usesLargeGrid ? "切换为三列缩略图" : "切换为两列大图")
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+
+                        LazyVGrid(columns: columns, spacing: 14) {
                             ForEach(images.indices, id: \.self) { index in
                                 Button {
                                     presentation = ReaderImageLibrary.Presentation(images: images, startIndex: index)
                                 } label: {
-                                    ReaderImageThumbnail(library: library, entry: images[index],
-                                                         caption: images[index].spineIndex.flatMap(chapterTitle))
+                                    ReaderImageThumbnail(
+                                        library: library,
+                                        entry: images[index],
+                                        caption: images[index].spineIndex.flatMap(chapterTitle),
+                                        fitsFullImage: fitsFullImage,
+                                        maxLength: usesLargeGrid ? 240 : 160
+                                    )
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
-                        .padding(16)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
                     }
                 }
             } else {
@@ -400,10 +451,75 @@ struct ReaderImageGallery: View {
     }
 }
 
+/// 全屏图片查看器底部缩略图胶片条，方便在插图较多的轻小说中快速跳选。
+private struct ReaderImageFilmstrip: View {
+    @ObservedObject var library: ReaderImageLibrary
+    let images: [EPUBImageEntry]
+    @Binding var selection: Int
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 6) {
+                    ForEach(images.indices, id: \.self) { position in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.16)) { selection = position }
+                        } label: {
+                            ReaderFilmstripCell(
+                                library: library,
+                                path: images[position].path,
+                                isSelected: position == selection
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .id(position)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+            }
+            .frame(height: 54)
+            .onAppear { proxy.scrollTo(selection, anchor: .center) }
+            .onValueChange(of: selection) { _, next in
+                withAnimation(.easeInOut(duration: 0.18)) { proxy.scrollTo(next, anchor: .center) }
+            }
+        }
+    }
+}
+
+private struct ReaderFilmstripCell: View {
+    @ObservedObject var library: ReaderImageLibrary
+    let path: String
+    let isSelected: Bool
+    @Environment(\.displayScale) private var displayScale
+    @State private var image: UIImage?
+
+    var body: some View {
+        Color.white.opacity(0.14)
+            .frame(width: 34, height: 46)
+            .overlay {
+                if let image {
+                    Image(uiImage: image).resizable().scaledToFill()
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(isSelected ? Color.white : Color.white.opacity(0.22), lineWidth: isSelected ? 2 : 0.5)
+            )
+            .opacity(isSelected ? 1 : 0.65)
+            .task(id: path) {
+                image = await library.image(path: path, maxPixelLength: 60 * displayScale)
+            }
+    }
+}
+
 private struct ReaderImageThumbnail: View {
     @ObservedObject var library: ReaderImageLibrary
     let entry: EPUBImageEntry
     let caption: String?
+    var fitsFullImage = false
+    var maxLength: CGFloat = 160
     @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
 
@@ -413,7 +529,11 @@ private struct ReaderImageThumbnail: View {
                 .aspectRatio(0.72, contentMode: .fit)
                 .overlay {
                     if let image {
-                        Image(uiImage: image).resizable().scaledToFill()
+                        if fitsFullImage {
+                            Image(uiImage: image).resizable().scaledToFit()
+                        } else {
+                            Image(uiImage: image).resizable().scaledToFill()
+                        }
                     } else {
                         ProgressView()
                     }
@@ -425,8 +545,8 @@ private struct ReaderImageThumbnail: View {
                 .lineLimit(1)
         }
         .contentShape(Rectangle())
-        .task(id: entry.path) {
-            image = await library.image(path: entry.path, maxPixelLength: 160 * displayScale)
+        .task(id: "\(entry.path)-\(Int(maxLength))") {
+            image = await library.image(path: entry.path, maxPixelLength: maxLength * displayScale)
         }
     }
 }

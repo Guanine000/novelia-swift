@@ -61,7 +61,7 @@ struct LibraryBookDetailView: View {
                 }
                 Section {
                     HStack(alignment: .top, spacing: 14) {
-                        LibraryCoverView(book: book, width: 72, height: 100)
+                        LibraryCoverView(book: book, width: 72, height: 100, fitMode: state.coverFitMode(for: book))
                         VStack(alignment: .leading, spacing: 6) {
                             Text(book.title)
                                 .font(.headline)
@@ -87,6 +87,16 @@ struct LibraryBookDetailView: View {
                         CompatLabeledContent("分卷", value: record.volumeID ?? "未关联")
                     }
                     CompatLabeledContent("系列", value: state.seriesName(for: book) ?? "未分组")
+                    if book.coverURL != nil {
+                        Picker("封面显示", selection: Binding(
+                            get: { state.coverFitMode(for: book) },
+                            set: { state.setCoverFitMode($0, for: book) }
+                        )) {
+                            ForEach(LibraryBookCoverFitMode.allCases) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        }
+                    }
                     CompatLabeledContent("字数", value: wordCounts.total(hash: hash).map(BookWordCount.format) ?? "正在统计…")
                 }
                 Section("阅读") {
