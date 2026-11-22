@@ -251,6 +251,9 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             toc = await preferGeneratedTOCIfSparse(embedded, publication: publication)
             navigationIndex = ReadiumNavigationIndex(readingOrder: publication.readingOrder,
                                                      tableOfContents: toc.map(\.link))
+            if let index = navigationIndex {
+                navigationIndex = await index.locatingTOCProgressions(in: publication)
+            }
             let initial = await savedLocator(publication: publication, hash: hash)
             try makeNavigator(initialLocation: initial)
             status = .ready
@@ -292,6 +295,9 @@ final class ReadiumEPUBReaderModel: ObservableObject {
             positionCount = source.chapterCount
             navigationIndex = ReadiumNavigationIndex(readingOrder: publication.readingOrder,
                                                      tableOfContents: toc.map(\.link))
+            if let index = navigationIndex {
+                navigationIndex = await index.locatingTOCProgressions(in: publication)
+            }
             guard !publication.readingOrder.isEmpty else { throw ReadiumOpenError.parse("没有可阅读的章节。") }
             let unit = min(max(0, textBook.startUnit), source.chapterCount - 1)
             let initial = try await ReadiumTextPublication.initialLocation(

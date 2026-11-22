@@ -116,18 +116,25 @@ extension EPUBContainer {
         }
     }
 
-    /// 目录 href 相对其文档所在目录解析后映射到 spine。
+    /// 目录 href 相对其文档所在目录解析后映射到 spine，并保留 `#fragment`。
     private func mapToSpine(_ entries: [(title: String, href: String, level: Int)],
                             baseDirectory: String) -> [EPUBTOCEntry] {
-        entries.map { entry in
-            let target = Self.isAbsoluteInPackage(entry.href)
-                ? Self.normalizePath(String(entry.href.dropFirst()))
-                : Self.normalizePath(baseDirectory + entry.href)
-            let index = spine.firstIndex {
-                Self.stripFragment($0.href) == Self.stripFragment(target)
-            }
-            return EPUBTOCEntry(title: entry.title, spineIndex: index, level: entry.level)
+        let hrefs = spine.map(\.href)
+        return entries.map { entry in
+            let match = Self.spineMatch(href: entry.href, baseDirectory: baseDirectory, spineHrefs: hrefs)
+            return EPUBTOCEntry(title: entry.title, spineIndex: match.index,
+                                fragment: match.fragment, level: entry.level)
         }
+    }
+
+    /// 把目录 href 解析成 spine 序号和章内锚点。fragment 取自原始 href，路径规范化不能把它吃掉。
+    static func spineMatch(href: String, baseDirectory: String,
+                           spineHrefs: [String]) -> (index: Int?, fragment: String?) {
+        let target = isAbsoluteInPackage(href)
+            ? normalizePath(String(href.dropFirst()))
+            : normalizePath(baseDirectory + href)
+        let index = spineHrefs.firstIndex { stripFragment($0) == stripFragment(target) }
+        return (index, tocFragment(in: href))
     }
 
     private func chapterHTML(path: String) async throws -> String {
@@ -194,7 +201,7 @@ extension EPUBContainer {
     }
 
     /// 把书内链接 href（相对当前章节目录）解析为 spine 序号；解析不到返回 nil。
-    /// 锚点（#fragment）不影响章定位；章内精确定位留待后续。
+    /// 文件定位忽略 `#fragment`；章内页码由 `openLink` 按锚点偏移计算。
     func spineIndex(forLinkHref href: String, relativeTo chapterHref: String) -> Int? {
         let target: String
         if href.hasPrefix("#") {
@@ -230,6 +237,15 @@ extension EPUBContainer {
     static func stripFragment(_ href: String) -> String {
         guard let hash = href.firstIndex(of: "#") else { return href }
         return String(href[..<hash])
+    }
+
+    /// `#` 之后的锚点。百分号解码后与正文 `id` 比较；空锚点视为文件开头（nil）。
+    static func tocFragment(in href: String) -> String? {
+        guard let hash = href.firstIndex(of: "#") else { return nil }
+        let raw = String(href[href.index(after: hash)...])
+        let decoded = raw.removingPercentEncoding ?? raw
+        let trimmed = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     static func directory(of href: String) -> String {

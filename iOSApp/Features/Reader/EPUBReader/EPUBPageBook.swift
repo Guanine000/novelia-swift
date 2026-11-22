@@ -182,6 +182,7 @@ final class EPUBPageBook {
         let owner = prepared.owner
         var layout = EPUBChapterLayout(
             pages: [], sourceText: prepared.facts.sourceText, displayLists: [], linkRegions: [], footnotes: prepared.facts.footnotes,
+            anchorOffsets: normalizedAnchorOffsets(prepared.facts.anchorOffsets),
             positionMap: prepared.positionMap, tableFallback: prepared.tableFallback,
             effectiveWritingMode: prepared.effectiveWritingMode,
             verticalFallback: prepared.verticalFallback,
@@ -319,6 +320,23 @@ final class EPUBPageBook {
     /// 已排版章节的源文本（`sourceOffset` 所度量的文本）；未排版时为 nil。
     func sourceText(spineIndex: Int) -> String? {
         chapters[spineIndex]?.sourceText
+    }
+
+    /// 本章锚点 id → 源文本 UTF-16 偏移。章节尚未开始排版时为 nil；排完但没有锚点时为空表。
+    func anchorOffsets(spineIndex: Int) -> [String: Int]? {
+        guard chapters[spineIndex] != nil else { return nil }
+        return chapters[spineIndex]?.anchorOffsets ?? [:]
+    }
+
+    /// 引擎给出的锚点键可能带 `#` 或百分号编码，收成与目录 fragment 相同的形式。
+    private static func normalizedAnchorOffsets(_ offsets: [String: Int]) -> [String: Int] {
+        var result: [String: Int] = [:]
+        result.reserveCapacity(offsets.count)
+        for (key, value) in offsets {
+            let fragment = EPUBTOCHighlight.normalizedFragment(key) ?? key
+            if result[fragment] == nil { result[fragment] = value }
+        }
+        return result
     }
 
     /// 已排版章节文本的 UTF-16 长度（`sourceOffset` 所度量的文本范围）。

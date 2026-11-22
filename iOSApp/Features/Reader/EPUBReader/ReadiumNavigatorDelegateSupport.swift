@@ -24,7 +24,7 @@ extension ReadiumEPUBReaderModel: EPUBNavigatorDelegate {
         }
         let previous = self.locator
         logLocationChange(from: previous, to: locator)
-        let current = navigationIndex?.tocIndex(for: locator.href)
+        let current = navigationIndex?.tocIndex(for: locator)
         if currentTOCIndex != current { currentTOCIndex = current }
         self.locator = locator
         if let chapter = navigationIndex?.resourceIndex(for: locator.href), chapter != annotationDecorationChapter {
