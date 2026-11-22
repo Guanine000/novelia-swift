@@ -60,3 +60,94 @@ struct ReadingCharacterCardsEntry: View {
         }
     }
 }
+
+/// 书内阅读菜单「世界观词条」的导航适配：系列书沿用系列 ID，单书使用书键。
+@MainActor
+struct ReadingWorldviewEntry: View {
+    let libraryBookKey: String?
+    @EnvironmentObject private var readerSettings: ReaderSettings
+    @EnvironmentObject private var services: AppServices
+    @EnvironmentObject private var state: LibraryStateStore
+    @EnvironmentObject private var web: WebNovelDownloadStore
+    @EnvironmentObject private var wenku: WenkuLocalLibraryStore
+    @EnvironmentObject private var cloud: CloudBookStore
+
+    var body: some View {
+        let books = state.books(web: web, wenku: wenku, cloud: cloud)
+        let current = libraryBookKey.flatMap { key in books.first { $0.key == key } }
+        if let current, let series = state.series.seriesID(forBook: current.key) {
+            let keys = state.series.bookKeys(inSeries: series)
+            WorldviewLexiconView(
+                workID: series,
+                workTitle: state.series.series[series]?.name ?? current.title,
+                books: books.filter { keys.contains($0.key) },
+                initialBookKey: current.key,
+                store: readerSettings.worldview,
+                ai: services.readingAI
+            )
+        } else if let current {
+            WorldviewLexiconView(
+                workID: current.key,
+                workTitle: current.title,
+                books: [current],
+                initialBookKey: current.key,
+                store: readerSettings.worldview,
+                ai: services.readingAI
+            )
+        } else {
+            Text("暂未找到对应的本地书籍，从书库重新打开本书后即可查看世界观词条。").padding()
+        }
+    }
+}
+
+/// 书内阅读菜单「回顾上一卷」的导航适配：按已确认卷序或自然书名找到上一卷并复用全书梗概管线。
+@MainActor
+struct ReadingPreviousVolumeEntry: View {
+    let libraryBookKey: String?
+    @EnvironmentObject private var readerSettings: ReaderSettings
+    @EnvironmentObject private var services: AppServices
+    @EnvironmentObject private var state: LibraryStateStore
+    @EnvironmentObject private var web: WebNovelDownloadStore
+    @EnvironmentObject private var wenku: WenkuLocalLibraryStore
+    @EnvironmentObject private var cloud: CloudBookStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let books = state.books(web: web, wenku: wenku, cloud: cloud)
+        if let libraryBookKey,
+           let current = books.first(where: { $0.key == libraryBookKey }),
+           let series = state.series.seriesID(forBook: current.key) {
+            let keys = state.series.bookKeys(inSeries: series)
+            let members = books.filter { keys.contains($0.key) }
+            let confirmed = readerSettings.characters.order(work: series)
+            if let prevKey = LibrarySeriesVolumeResolver.previousBookKey(
+                for: current.key,
+                confirmedOrder: confirmed,
+                members: members.map { .init(key: $0.key, title: $0.title) }
+            ), let previous = members.first(where: { $0.key == prevKey }) {
+                PreviousVolumeRecapSheet(
+                    previousBook: previous,
+                    currentBookTitle: current.title,
+                    store: readerSettings.recaps,
+                    ai: services.readingAI
+                )
+            } else {
+                CompatNavigationStack {
+                    Text("《\(current.title)》已经是当前系列的第一卷，没有上一卷可回顾。")
+                        .padding()
+                        .navigationTitle("回顾上一卷")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("返回阅读") { dismiss() } } }
+                }
+            }
+        } else {
+            CompatNavigationStack {
+                Text("请先在书库把多卷轻小说加入同一个系列，再使用一键「回顾上一卷」。")
+                    .padding()
+                    .navigationTitle("回顾上一卷")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("返回阅读") { dismiss() } } }
+            }
+        }
+    }
+}

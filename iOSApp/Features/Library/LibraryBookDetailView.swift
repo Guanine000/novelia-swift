@@ -34,7 +34,12 @@ struct LibraryBookDetailView: View {
     @EnvironmentObject private var wordCounts: LibraryWordCountStore
     @EnvironmentObject private var readerSettings: ReaderSettings
     @EnvironmentObject private var statisticsStore: ReadingStatisticsStore
+    @EnvironmentObject private var services: AppServices
+    @EnvironmentObject private var webDownloads: WebNovelDownloadStore
+    @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
+    @EnvironmentObject private var cloudBooks: CloudBookStore
     @State private var isShowingCompletionCard = false
+    @State private var isShowingPreviousVolumeRecap = false
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -118,6 +123,41 @@ struct LibraryBookDetailView: View {
                     } label: {
                         Label("生成阅读完读卡", systemImage: "sparkles.rectangle.stack")
                     }
+                    if let previousVolume {
+                        Button {
+                            isShowingPreviousVolumeRecap = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Label("回顾上一卷", systemImage: "clock.arrow.circlepath")
+                                Spacer()
+                                Text(previousVolume.title)
+                                    .font(.caption)
+                                    .foregroundStyle(NoveliaStyle.muted)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    NavigationLink {
+                        WorldviewLexiconView(
+                            workID: worldviewWorkID,
+                            workTitle: worldviewWorkTitle,
+                            books: worldviewBooks,
+                            initialBookKey: book.key,
+                            store: readerSettings.worldview,
+                            ai: services.readingAI
+                        )
+                    } label: {
+                        HStack(spacing: 8) {
+                            Label("世界观词条", systemImage: "globe.asia.australia")
+                            Spacer()
+                            let entryCount = readerSettings.worldview.count(for: worldviewWorkID)
+                            if entryCount > 0 {
+                                Text("\(entryCount) 条")
+                                    .font(.caption)
+                                    .foregroundStyle(NoveliaStyle.muted)
+                            }
+                        }
+                    }
                 }
                 Section("文件") {
                     CompatLabeledContent("导入时间", value: Self.dateFormatter.string(from: book.importedAt))
@@ -149,7 +189,42 @@ struct LibraryBookDetailView: View {
                     annotations: bookAnnotations
                 )
             }
+            .sheet(isPresented: $isShowingPreviousVolumeRecap) {
+                if let previousVolume {
+                    PreviousVolumeRecapSheet(
+                        previousBook: previousVolume,
+                        currentBookTitle: book.title,
+                        store: readerSettings.recaps,
+                        ai: services.readingAI
+                    )
+                }
+            }
     }
+
+    private var seriesID: String? { state.series.seriesID(forBook: book.key) }
+
+    private var seriesMembers: [LibraryBook] {
+        guard let seriesID else { return [book] }
+        let keys = state.series.bookKeys(inSeries: seriesID)
+        return state.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks)
+            .filter { keys.contains($0.key) }
+    }
+
+    private var previousVolume: LibraryBook? {
+        guard let seriesID else { return nil }
+        let members = seriesMembers
+        let confirmed = readerSettings.characters.order(work: seriesID)
+        guard let prevKey = LibrarySeriesVolumeResolver.previousBookKey(
+            for: book.key,
+            confirmedOrder: confirmed,
+            members: members.map { .init(key: $0.key, title: $0.title) }
+        ) else { return nil }
+        return members.first { $0.key == prevKey }
+    }
+
+    private var worldviewWorkID: String { seriesID ?? book.key }
+    private var worldviewWorkTitle: String { state.seriesName(for: book) ?? book.title }
+    private var worldviewBooks: [LibraryBook] { seriesID == nil ? [book] : seriesMembers }
 
     private var bookAnnotations: [ReaderAnnotation] {
         var keys = [book.key]

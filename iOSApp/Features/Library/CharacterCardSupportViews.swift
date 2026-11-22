@@ -512,3 +512,595 @@ struct CharacterFactCreator: View {
         }
     }
 }
+
+// MARK: - 一键「回顾上一卷」
+
+/// 复用全书故事梗概管线，一键回顾系列中上一卷的主要人物、主线进展与悬念；
+/// 仅读取上一卷正文，绝不触及当前卷或后续卷内容。
+@MainActor
+struct PreviousVolumeRecapSheet: View {
+    let previousBook: LibraryBook
+    let currentBookTitle: String
+    @ObservedObject var store: ReadingRecapStore
+    @ObservedObject var ai: ReadingAIStore
+
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var readerSettings: ReaderSettings
+    @EnvironmentObject private var libraryState: LibraryStateStore
+
+    @State private var resolvedStorageKey: String?
+    @State private var isPreparing = false
+    @State private var localError: String?
+    @State private var truncatedNotice = false
+    @State private var copied = false
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter
+    }()
+
+    private var activeStorageKey: String? {
+        if let resolvedStorageKey { return resolvedStorageKey }
+        if let hash = libraryState.hashByBook[previousBook.key] ?? previousBook.cloudFileHash {
+            return previousBook.positionPrefix + hash
+        }
+        return nil
+    }
+
+    private var hashedStoryKey: String? {
+        activeStorageKey.map { FileContentHash.sha256(Data($0.utf8)) }
+    }
+
+    private var story: BookStorySummary? {
+        activeStorageKey.flatMap { store.story(book: $0) }
+    }
+
+    private var storyProgress: String? {
+        hashedStoryKey.flatMap { store.storyProgress[$0] }
+    }
+
+    private var storyError: String? {
+        hashedStoryKey.flatMap { store.storyErrors[$0] } ?? localError
+    }
+
+    var body: some View {
+        CompatNavigationStack {
+            List {
+                Section {
+                    HStack(alignment: .top, spacing: 12) {
+                        LibraryCoverView(
+                            book: previousBook,
+                            width: 54,
+                            height: 76,
+                            fitMode: libraryState.coverFitMode(for: previousBook)
+                        )
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(previousBook.title)
+                                .font(.headline)
+                                .foregroundStyle(NoveliaStyle.ink)
+                            if !previousBook.author.isEmpty {
+                                Text(previousBook.author)
+                                    .font(.subheadline)
+                                    .foregroundStyle(NoveliaStyle.muted)
+                            }
+                            Text("仅读取上一卷正文，绝不触及《\(currentBookTitle)》后续内容。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                } header: {
+                    Text("上一卷")
+                }
+
+                Section {
+                    if let story {
+                        Text(story.text)
+                            .font(.body)
+                            .textSelection(.enabled)
+                        HStack {
+                            Text("已缓存 · 覆盖 \(story.coveredThrough) 章 · \(Self.dateFormatter.string(from: story.updatedAt))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button(copied ? "已复制" : "复制") {
+                                UIPasteboard.general.string = story.text
+                                copied = true
+                            }
+                            .font(.caption.weight(.medium))
+                        }
+                    } else if storyProgress == nil && !isPreparing {
+                        Text("还没有上一卷的剧情梗概。点击下方按钮一键整理上一卷的主要人物、主线进展与遗留悬念，方便无缝衔接下一卷。")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if truncatedNotice {
+                        Text("上一卷篇幅较大，已自动按预算精选开篇与后半段核心章节进行概括。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if previousBook.isCloudOnly {
+                        Text("上一卷目前仅在云端，请先在书库下载本机文件后再生成回顾。")
+                            .font(.footnote)
+                            .foregroundStyle(NoveliaStyle.danger)
+                    } else if isPreparing {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("正在读取上一卷章节…")
+                        }
+                    } else if let storyProgress {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(storyProgress)
+                        }
+                        if let key = activeStorageKey {
+                            Button("取消生成", role: .destructive) {
+                                store.cancelStory(book: key)
+                            }
+                        }
+                    } else {
+                        Button {
+                            Task { await generateRecap() }
+                        } label: {
+                            Label(story == nil ? "一键生成上一卷回顾" : "重新生成上一卷回顾", systemImage: "sparkles")
+                        }
+                        .disabled(!ai.isReadyForGeneration)
+                        if !ai.isReadyForGeneration {
+                            Text("请先在「我的 → 高级 → AI 阅读辅助」配置并启用 AI 服务。已有缓存回顾仍可直接阅读。")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("将向 \((try? ai.configuration.endpoint().host) ?? "所配置接口") 发送上一卷正文进行分段概括与归并，可能产生模型费用。关闭此页不会中断后台生成。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if let storyError {
+                        Text(storyError)
+                            .font(.footnote)
+                            .foregroundStyle(NoveliaStyle.danger)
+                    }
+                } header: {
+                    Text("上一卷剧情回顾")
+                }
+            }
+            .navigationTitle("回顾上一卷")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func generateRecap() async {
+        guard !isPreparing else { return }
+        isPreparing = true
+        localError = nil
+        truncatedNotice = false
+        defer { isPreparing = false }
+        do {
+            let volume = try await CharacterVolumeLoader.load(previousBook, settings: readerSettings)
+            resolvedStorageKey = volume.source.bookKey
+            let totalChapters = volume.source.currentChapter
+            guard totalChapters > 0 else {
+                localError = "未能从上一卷读取到有效章节。"
+                return
+            }
+            let loaded = try await volume.source.load(0..<totalChapters)
+            let fitted = StorySummaryPlan.fitChaptersToBudget(loaded)
+            truncatedNotice = fitted.truncated
+            guard !fitted.chapters.isEmpty else {
+                localError = "上一卷正文为空，无法生成回顾。"
+                return
+            }
+            store.startStory(
+                book: volume.source.bookKey,
+                chapters: fitted.chapters,
+                previous: nil,
+                identity: volume.source.identity,
+                coveredThrough: totalChapters,
+                ai: ai
+            )
+        } catch is CancellationError {
+        } catch {
+            localError = error.localizedDescription
+        }
+    }
+}
+
+// MARK: - 世界观词条
+
+/// 轻小说「世界观词条」管理与防剧透 AI 提取界面（按系列或单书 workID 组织）。
+@MainActor
+struct WorldviewLexiconView: View {
+    let workID: String
+    let workTitle: String
+    let books: [LibraryBook]
+    var initialBookKey: String? = nil
+    @ObservedObject var store: WorldviewLexiconStore
+    @ObservedObject var ai: ReadingAIStore
+
+    @EnvironmentObject private var readerSettings: ReaderSettings
+    @EnvironmentObject private var libraryState: LibraryStateStore
+
+    @State private var query = ""
+    @State private var selectedCategory: WorldviewCategory? = nil
+    @State private var selectedBookKey = ""
+    @State private var editingEntry: WorldviewEntry? = nil
+    @State private var isCreatingEntry = false
+    @State private var isPreparingExtraction = false
+    @State private var localError: String? = nil
+
+    private var localBooks: [LibraryBook] {
+        books.filter { !$0.isCloudOnly }
+    }
+
+    private var allWorkEntries: [WorldviewEntry] {
+        store.entries(for: workID)
+    }
+
+    private var filteredEntries: [WorldviewEntry] {
+        store.entries(for: workID, query: query, category: selectedCategory)
+    }
+
+    private var progress: String? {
+        store.extractionProgress[workID]
+    }
+
+    private var errorText: String? {
+        store.extractionErrors[workID] ?? localError
+    }
+
+    private var summaryText: String? {
+        store.lastExtractionSummary[workID]
+    }
+
+    var body: some View {
+        List {
+            Section {
+                TextField("搜索词条、别名或释义", text: $query)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        categoryChip(title: "全部 (\(allWorkEntries.count))", isSelected: selectedCategory == nil) {
+                            selectedCategory = nil
+                        }
+                        ForEach(WorldviewCategory.allCases) { category in
+                            let count = allWorkEntries.filter { $0.category == category }.count
+                            categoryChip(
+                                title: count > 0 ? "\(category.title) (\(count))" : category.title,
+                                isSelected: selectedCategory == category
+                            ) {
+                                selectedCategory = category
+                            }
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+
+            Section {
+                if localBooks.isEmpty {
+                    Text("当前没有可扫描的本机书籍；你仍可点击右上角「+」手工记录世界观词条。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    if localBooks.count > 1 {
+                        Picker("扫描书籍", selection: $selectedBookKey) {
+                            ForEach(localBooks) { book in
+                                Text(book.title).tag(book.key)
+                            }
+                        }
+                        .disabled(progress != nil || isPreparingExtraction)
+                    }
+                    if isPreparingExtraction {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("正在读取已读章节…")
+                        }
+                    } else if let progress {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(progress)
+                        }
+                        Button("取消提取", role: .destructive) {
+                            store.cancelExtraction(workID: workID)
+                        }
+                    } else {
+                        Button {
+                            Task { await startAIExtraction() }
+                        } label: {
+                            Label("从已读正文提取世界观词条", systemImage: "sparkles")
+                        }
+                        .disabled(!ai.isReadyForGeneration)
+                        if !ai.isReadyForGeneration {
+                            Text("配置并启用 AI 阅读辅助后可自动提取；未启用 AI 时也支持完整手工维护。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("仅读取当前进度之前的已读章节（标记为「读过」的卷读取全卷），绝不剧透未读内容，也不会覆盖你手工编辑的词条。")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if let summaryText {
+                        Text(summaryText)
+                            .font(.footnote)
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                    }
+                    if let errorText {
+                        Text(errorText)
+                            .font(.footnote)
+                            .foregroundStyle(NoveliaStyle.danger)
+                    }
+                }
+            } header: {
+                Text("AI 辅助提取")
+            }
+
+            Section {
+                if filteredEntries.isEmpty {
+                    Text(allWorkEntries.isEmpty
+                         ? "还没有世界观词条。点击右上角「+」手工添加，或从已读正文一键提取设定、势力、地点与器物。"
+                         : "没有匹配当前筛选条件的词条。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 6)
+                } else {
+                    ForEach(filteredEntries) { entry in
+                        Button {
+                            editingEntry = entry
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: entry.category.systemImage)
+                                        .font(.caption)
+                                        .foregroundStyle(NoveliaStyle.brandGreen)
+                                    Text(entry.term)
+                                        .font(.headline)
+                                        .foregroundStyle(NoveliaStyle.ink)
+                                    Spacer()
+                                    Text(entry.category.title)
+                                        .font(.caption2.weight(.medium))
+                                        .foregroundStyle(NoveliaStyle.brandGreen)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(NoveliaStyle.brandGreen.opacity(0.12), in: Capsule())
+                                }
+                                if !entry.aliases.isEmpty {
+                                    Text("别名：\(entry.aliases.joined(separator: "、"))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(entry.summary)
+                                    .font(.subheadline)
+                                    .foregroundStyle(NoveliaStyle.ink.opacity(0.88))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                HStack(spacing: 8) {
+                                    if entry.isManual {
+                                        Text("手工记录")
+                                    } else if let bookTitle = entry.sourceBookTitle {
+                                        let chapterPart = entry.sourceChapterIndex.map { " · 第 \($0 + 1) 章" } ?? ""
+                                        Text("出处：\(bookTitle)\(chapterPart)")
+                                    }
+                                }
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                store.delete(id: entry.id)
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Text("词条列表（\(filteredEntries.count)）")
+            } footer: {
+                Text("「世界观词条」仅用于个人阅读理解与设定备忘，与网站翻译术语表相互独立。")
+            }
+        }
+        .navigationTitle(workTitle.isEmpty ? "世界观词条" : "\(workTitle) · 世界观词条")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .compatTopBarTrailing) {
+                Button {
+                    isCreatingEntry = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("新增世界观词条")
+            }
+        }
+        .onAppear {
+            if selectedBookKey.isEmpty {
+                if let initialBookKey, localBooks.contains(where: { $0.key == initialBookKey }) {
+                    selectedBookKey = initialBookKey
+                } else {
+                    selectedBookKey = localBooks.first?.key ?? ""
+                }
+            }
+        }
+        .sheet(isPresented: $isCreatingEntry) {
+            WorldviewEntryEditorSheet(
+                workID: workID,
+                existing: nil,
+                sourceBook: localBooks.first(where: { $0.key == selectedBookKey }) ?? localBooks.first
+            ) { entry in
+                store.upsert(entry)
+            }
+        }
+        .sheet(item: $editingEntry) { entry in
+            WorldviewEntryEditorSheet(
+                workID: workID,
+                existing: entry,
+                sourceBook: nil
+            ) { updated in
+                store.upsert(updated)
+            } onDelete: {
+                store.delete(id: entry.id)
+            }
+        }
+    }
+
+    private func categoryChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption.weight(isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? .white : NoveliaStyle.ink)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    isSelected ? NoveliaStyle.brandGreen : NoveliaStyle.card,
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func startAIExtraction() async {
+        guard !isPreparingExtraction else { return }
+        guard let target = localBooks.first(where: { $0.key == selectedBookKey }) ?? localBooks.first else {
+            localError = "未找到可扫描的本机书籍。"
+            return
+        }
+        isPreparingExtraction = true
+        localError = nil
+        defer { isPreparingExtraction = false }
+        do {
+            let volume = try await CharacterVolumeLoader.load(target, settings: readerSettings)
+            let isCompleted = libraryState.bookStatus(for: target) == .completed
+            let upper = isCompleted ? volume.source.currentChapter : volume.boundary
+            guard upper > 0 else {
+                localError = "《\(target.title)》当前还没有已读完的章节。阅读至少一章（或将其标记为「读过」）后再提取，可确保不剧透未读内容。"
+                return
+            }
+            let loaded = try await volume.source.load(0..<upper)
+            let fitted = StorySummaryPlan.fitChaptersToBudget(loaded, maxBytes: 120 * 1_024)
+            guard !fitted.chapters.isEmpty else {
+                localError = "已读章节正文为空，无法提取。"
+                return
+            }
+            store.startExtraction(
+                workID: workID,
+                chapters: fitted.chapters,
+                sourceBookKey: target.key,
+                sourceBookTitle: target.title,
+                ai: ai
+            )
+        } catch is CancellationError {
+        } catch {
+            localError = error.localizedDescription
+        }
+    }
+}
+
+private struct WorldviewEntryEditorSheet: View {
+    let workID: String
+    let existing: WorldviewEntry?
+    let sourceBook: LibraryBook?
+    let onSave: (WorldviewEntry) -> Void
+    var onDelete: (() -> Void)? = nil
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var term: String
+    @State private var aliasesText: String
+    @State private var category: WorldviewCategory
+    @State private var summary: String
+
+    init(
+        workID: String,
+        existing: WorldviewEntry?,
+        sourceBook: LibraryBook?,
+        onSave: @escaping (WorldviewEntry) -> Void,
+        onDelete: (() -> Void)? = nil
+    ) {
+        self.workID = workID
+        self.existing = existing
+        self.sourceBook = sourceBook
+        self.onSave = onSave
+        self.onDelete = onDelete
+        _term = State(initialValue: existing?.term ?? "")
+        _aliasesText = State(initialValue: existing?.aliases.joined(separator: "、") ?? "")
+        _category = State(initialValue: existing?.category ?? .concept)
+        _summary = State(initialValue: existing?.summary ?? "")
+    }
+
+    private var canSave: Bool {
+        !term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        CompatNavigationStack {
+            Form {
+                Section("词条信息") {
+                    TextField("词条名称（如：固有结界、王立骑士团）", text: $term)
+                    TextField("别名 / 简称（用顿号或逗号分隔，可选）", text: $aliasesText)
+                    Picker("分类", selection: $category) {
+                        ForEach(WorldviewCategory.allCases) { item in
+                            Label(item.title, systemImage: item.systemImage).tag(item)
+                        }
+                    }
+                }
+                Section("释义") {
+                    TextEditor(text: $summary)
+                        .frame(minHeight: 110)
+                }
+                if existing != nil, let onDelete {
+                    Section {
+                        Button("删除词条", role: .destructive) {
+                            onDelete()
+                            dismiss()
+                        }
+                    }
+                }
+            }
+            .navigationTitle(existing == nil ? "新增世界观词条" : "编辑世界观词条")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        let aliases = aliasesText
+                            .split { $0 == "、" || $0 == "," || $0 == "，" || $0 == "/" }
+                            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                            .filter { !$0.isEmpty }
+                        let now = Date()
+                        let entry = WorldviewEntry(
+                            id: existing?.id ?? UUID(),
+                            workID: existing?.workID ?? workID,
+                            term: term,
+                            aliases: aliases,
+                            category: category,
+                            summary: summary,
+                            sourceBookKey: existing?.sourceBookKey ?? sourceBook?.key,
+                            sourceBookTitle: existing?.sourceBookTitle ?? sourceBook?.title,
+                            sourceChapterIndex: existing?.sourceChapterIndex,
+                            sourceChapterTitle: existing?.sourceChapterTitle,
+                            isManual: true,
+                            createdAt: existing?.createdAt ?? now,
+                            updatedAt: now
+                        )
+                        onSave(entry)
+                        dismiss()
+                    }
+                    .disabled(!canSave)
+                }
+            }
+        }
+    }
+}

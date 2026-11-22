@@ -17,6 +17,7 @@ final class ReaderSettings: ObservableObject {
     func invalidateTXTBook(hash: String) { txtReaderIdentities.removeValue(forKey: hash) }
     let characters: CharacterLexiconStore
     let recaps: ReadingRecapStore
+    let worldview: WorldviewLexiconStore
     let remainingTime: ReadingTimeEstimateStore
     let txtAdjustments: TXTChapterAdjustmentStore
     let offlineChapters: OnlineChapterOfflineStore
@@ -137,6 +138,7 @@ final class ReaderSettings: ObservableObject {
             ? support.appendingPathComponent("CharacterPortraits", isDirectory: true)
             : (offlineDirectory ?? FileManager.default.temporaryDirectory.appendingPathComponent("Characters-" + UUID().uuidString)).appendingPathComponent("CharacterPortraits", isDirectory: true))
         recaps = ReadingRecapStore(defaults: defaults)
+        worldview = WorldviewLexiconStore(defaults: defaults)
         remainingTime = ReadingTimeEstimateStore(defaults: defaults)
         self.positions = positions ?? ReadingPositionStore(defaults: defaults)
         self.bookmarks = bookmarks ?? ReaderBookmarkStore()

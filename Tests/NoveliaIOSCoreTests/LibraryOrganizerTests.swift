@@ -336,4 +336,28 @@ final class LibraryOrganizerTests: XCTestCase {
         XCTAssertEqual(bmHits.count, 1, "未在当前书库映射中的书签不返回")
         XCTAssertEqual(bmHits[0].bookTitle, "冰菓")
     }
+
+    func testSeriesVolumeResolverUsesConfirmedOrderOrNaturalTitleOrder() {
+        let members: [LibrarySeriesVolumeResolver.Member] = [
+            .init(key: "v10", title: "无职转生 第10卷"),
+            .init(key: "v2", title: "无职转生 第2卷"),
+            .init(key: "v1", title: "无职转生 第1卷"),
+        ]
+        // 未确认卷序时按自然数字标题升序
+        XCTAssertEqual(
+            LibrarySeriesVolumeResolver.orderedKeys(confirmedOrder: [], members: members),
+            ["v1", "v2", "v10"]
+        )
+        XCTAssertNil(LibrarySeriesVolumeResolver.previousBookKey(for: "v1", confirmedOrder: [], members: members))
+        XCTAssertEqual(LibrarySeriesVolumeResolver.previousBookKey(for: "v2", confirmedOrder: [], members: members), "v1")
+        XCTAssertEqual(LibrarySeriesVolumeResolver.previousBookKey(for: "v10", confirmedOrder: [], members: members), "v2")
+
+        // 用户确认的卷序优先，未列出的成员附在末尾
+        let confirmed = ["v2", "v1"]
+        XCTAssertEqual(
+            LibrarySeriesVolumeResolver.orderedKeys(confirmedOrder: confirmed, members: members),
+            ["v2", "v1", "v10"]
+        )
+        XCTAssertEqual(LibrarySeriesVolumeResolver.previousBookKey(for: "v1", confirmedOrder: confirmed, members: members), "v2")
+    }
 }

@@ -896,6 +896,7 @@ struct LibrarySeriesDetailView: View {
     @State private var searchFocusRequest = 0
     @State private var readerTarget: LibraryBook?
     @State private var isAddingBooks = false
+    @State private var previousVolumeRecapTarget: (previous: LibraryBook, currentTitle: String)?
     @AppStorage("library.booksLayout") private var booksLayout: LibraryBooksLayout = .list
     @StateObject private var bookActions = LibraryBookActions()
 
@@ -1041,6 +1042,19 @@ struct LibrarySeriesDetailView: View {
             guard let request, visible.contains(where: { $0.key == request.bookKey }) else { return }
             browserScroll.scrollTo(request.bookKey, anchor: .center)
         }
+        .sheet(isPresented: Binding(
+            get: { previousVolumeRecapTarget != nil },
+            set: { if !$0 { previousVolumeRecapTarget = nil } }
+        )) {
+            if let target = previousVolumeRecapTarget {
+                PreviousVolumeRecapSheet(
+                    previousBook: target.previous,
+                    currentBookTitle: target.currentTitle,
+                    store: readerSettings.recaps,
+                    ai: services.readingAI
+                )
+            }
+        }
         }
     }
 
@@ -1082,6 +1096,23 @@ struct LibrarySeriesDetailView: View {
                     CharacterSeriesView(workID: seriesID, books: unfilteredMembers, store: readerSettings.characters, ai: services.readingAI,
                         initialBook: unfilteredMembers.max { (state.lastOpened[$0.key] ?? .distantPast) < (state.lastOpened[$1.key] ?? .distantPast) }?.key)
                 } label: { Label("AI 人物词条", systemImage: "person.text.rectangle") }
+                NavigationLink {
+                    WorldviewLexiconView(
+                        workID: seriesID,
+                        workTitle: series?.name ?? "系列",
+                        books: unfilteredMembers,
+                        initialBookKey: unfilteredMembers.max { (state.lastOpened[$0.key] ?? .distantPast) < (state.lastOpened[$1.key] ?? .distantPast) }?.key,
+                        store: readerSettings.worldview,
+                        ai: services.readingAI
+                    )
+                } label: { Label("世界观词条", systemImage: "globe.asia.australia") }
+                if let pair = seriesPreviousVolumePair {
+                    Button {
+                        previousVolumeRecapTarget = pair
+                    } label: {
+                        Label("回顾上一卷（\(pair.previous.title)）", systemImage: "clock.arrow.circlepath")
+                    }
+                }
                 Button { isCheckingNewVolumes = true } label: { Label("检查新卷", systemImage: "arrow.clockwise") }
                 Button { isAddingBooks = true } label: { Label("添加书籍", systemImage: "plus") }
                 LibrarySeriesMenuItems(seriesID: seriesID, name: series?.name ?? "", books: members, actions: bookActions)
@@ -1090,6 +1121,22 @@ struct LibrarySeriesDetailView: View {
             }
             .accessibilityLabel("系列操作")
         }
+    }
+
+    /// 为系列当前待续读卷找到上一卷，供系列菜单一键「回顾上一卷」。
+    private var seriesPreviousVolumePair: (previous: LibraryBook, currentTitle: String)? {
+        let all = unfilteredMembers
+        guard all.count >= 2 else { return nil }
+        let confirmed = readerSettings.characters.order(work: seriesID)
+        let latest = all.max { (state.lastOpened[$0.key] ?? .distantPast) < (state.lastOpened[$1.key] ?? .distantPast) }
+        guard let current = latest,
+              let prevKey = LibrarySeriesVolumeResolver.previousBookKey(
+                  for: current.key,
+                  confirmedOrder: confirmed,
+                  members: all.map { .init(key: $0.key, title: $0.title) }
+              ),
+              let previous = all.first(where: { $0.key == prevKey }) else { return nil }
+        return (previous, current.title)
     }
 
     /// 云端书籍先询问是否下载，下载完成后由 `downloadedBookKey` 回到这里打开。
@@ -1155,6 +1202,7 @@ private struct LibraryAddToSeriesSheet: View {
                     Button("添加 \(selection.count)") {
                         for book in books where selection.contains(book.key) {
                             try? readerSettings.characters.migrateWork(from: book.key, to: seriesID)
+                            readerSettings.worldview.migrateWork(from: book.key, to: seriesID)
                             state.assign(book, to: seriesID)
                         }
                         dismiss()

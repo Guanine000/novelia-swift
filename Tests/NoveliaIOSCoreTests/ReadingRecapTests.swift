@@ -331,4 +331,77 @@ final class ReadingAIExplainPromptTests: XCTestCase {
         XCTAssertTrue(bounded.input.contains("第29轮："))
         XCTAssertFalse(bounded.input.contains("第0轮："))
     }
+
+    func testStorySummaryFitChaptersToBudgetKeepsTailAndOpening() {
+        let chapters = (0..<10).map { idx in
+            RecapChapter(index: idx, title: "第\(idx + 1)章", text: String(repeating: "正", count: 200))
+        }
+        // 每章约 600 UTF-8 字节，总计约 6000 字节；预算 2500 字节应截断并保留末章与开篇
+        let fitted = StorySummaryPlan.fitChaptersToBudget(chapters, maxBytes: 2_500)
+        XCTAssertTrue(fitted.truncated)
+        XCTAssertLessThan(fitted.chapters.count, chapters.count)
+        XCTAssertEqual(fitted.chapters.last?.index, 9, "应优先保留末章以衔接下一卷")
+        XCTAssertEqual(fitted.chapters.first?.index, 0, "剩余预算应保留开篇")
+
+        let unfitted = StorySummaryPlan.fitChaptersToBudget(chapters, maxBytes: 20_000)
+        XCTAssertFalse(unfitted.truncated)
+        XCTAssertEqual(unfitted.chapters.count, 10)
+    }
+
+    @MainActor
+    func testWorldviewExtractionParseAndStoreMergeProtectsManualEntries() throws {
+        let raw = """
+        ```json
+        {"entries":[
+          {"term":"固有结界","aliases":["Reality Marble"],"category":"设定","summary":"将心象风景具现化并侵蚀现实世界的大魔术。"},
+          {"term":"时钟塔","aliases":["魔术协会总部"],"category":"势力","summary":"魔术协会在伦敦设立的核心学府与权力机构。"},
+          {"term":"固有结界","aliases":[],"category":"设定","summary":"重复项应被去重。"}
+        ]}
+        ```
+        """
+        let parsed = try WorldviewExtractionPlan.parse(
+            raw,
+            workID: "book-1",
+            sourceBookKey: "book-1",
+            sourceBookTitle: "Fate/stay night",
+            chapterIndex: 3,
+            chapterTitle: "第四章"
+        )
+        XCTAssertEqual(parsed.count, 2)
+        XCTAssertEqual(parsed[0].category, .concept)
+        XCTAssertEqual(parsed[1].category, .organization)
+
+        let suite = "novelia.test.worldview.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = WorldviewLexiconStore(defaults: defaults)
+        let manual = WorldviewEntry(
+            id: UUID(),
+            workID: "book-1",
+            term: "固有结界",
+            aliases: ["心象世界"],
+            category: .concept,
+            summary: "手工笔记：只有极少数魔术师或英灵能展开。",
+            sourceBookKey: "book-1",
+            sourceBookTitle: "Fate/stay night",
+            sourceChapterIndex: 1,
+            sourceChapterTitle: nil,
+            isManual: true,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        store.upsert(manual)
+
+        let changed = store.mergeExtracted(parsed, workID: "book-1")
+        XCTAssertEqual(changed, 1, "手工词条不被覆盖，只新增时钟塔")
+        let items = store.entries(for: "book-1")
+        XCTAssertEqual(items.count, 2)
+        XCTAssertEqual(items.first(where: { $0.term == "固有结界" })?.summary, manual.summary)
+
+        // 移入系列后词条自动迁移
+        store.migrateWork(from: "book-1", to: "series-fate")
+        XCTAssertEqual(store.count(for: "book-1"), 0)
+        XCTAssertEqual(store.count(for: "series-fate"), 2)
+    }
 }

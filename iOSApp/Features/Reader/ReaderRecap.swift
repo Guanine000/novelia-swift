@@ -194,6 +194,8 @@ private struct AIContextExplainKey: EnvironmentKey { static let defaultValue: ((
 private struct ReadingRecapActionKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
 private struct CharacterCardsKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
 private struct CharacterCardsReadOnlyKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
+private struct WorldviewLexiconKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
+private struct PreviousVolumeRecapKey: EnvironmentKey { static let defaultValue: (() -> Void)? = nil }
 extension EnvironmentValues {
     var characterLookup: ((String) -> Void)? {
         get { self[CharacterLookupKey.self] }
@@ -217,6 +219,14 @@ extension EnvironmentValues {
         get { self[CharacterCardsReadOnlyKey.self] }
         set { self[CharacterCardsReadOnlyKey.self] = newValue }
     }
+    var worldviewLexicon: (() -> Void)? {
+        get { self[WorldviewLexiconKey.self] }
+        set { self[WorldviewLexiconKey.self] = newValue }
+    }
+    var previousVolumeRecap: (() -> Void)? {
+        get { self[PreviousVolumeRecapKey.self] }
+        set { self[PreviousVolumeRecapKey.self] = newValue }
+    }
 }
 @MainActor
 struct ReaderRecapMenu: View {
@@ -224,10 +234,14 @@ struct ReaderRecapMenu: View {
     @Environment(\.readingRecapAction) private var open
     @Environment(\.characterCards) private var cards
     @Environment(\.characterCardsReadOnly) private var readOnlyCards
+    @Environment(\.worldviewLexicon) private var worldview
+    @Environment(\.previousVolumeRecap) private var previousVolume
     var body: some View {
         Menu {
             Button("更新人物卡") { cards?() }.disabled(cards == nil)
             Button("查看人物卡") { readOnlyCards?() }.disabled(readOnlyCards == nil)
+            Button("世界观词条") { worldview?() }.disabled(worldview == nil)
+            Button("回顾上一卷") { previousVolume?() }.disabled(previousVolume == nil)
             Button("生成 AI 前情回顾") { open?() }.disabled(open == nil)
             Picker("久未阅读时询问", selection: $store.promptAfterDays) {
                 Text("不自动询问").tag(0)
@@ -252,6 +266,8 @@ struct ReaderRecapPresentation: ViewModifier {
     @State private var showingCharacters = false
     @State private var showingCards = false
     @State private var showingCardsReadOnly = false
+    @State private var showingWorldview = false
+    @State private var showingPreviousVolume = false
     @State private var characterQuery = ""
     @State private var explainRequest: AIContextExplainRequest?
     private var activityID: String { active && scenePhase == .active && !prompts && !showing && !showingCharacters && explainRequest == nil ? source?.bookKey ?? "none" : "inactive" }
@@ -270,6 +286,8 @@ struct ReaderRecapPresentation: ViewModifier {
             } : nil)
             .environment(\.characterCards, libraryBookKey == nil ? nil : { showingCards = true })
             .environment(\.characterCardsReadOnly, libraryBookKey == nil ? nil : { showingCardsReadOnly = true })
+            .environment(\.worldviewLexicon, libraryBookKey == nil ? nil : { showingWorldview = true })
+            .environment(\.previousVolumeRecap, libraryBookKey == nil ? nil : { showingPreviousVolume = true })
             .task(id: source?.bookKey) {
                 guard let source, visitedBook != source.bookKey else { return }
                 visitedBook = source.bookKey
@@ -316,6 +334,19 @@ struct ReaderRecapPresentation: ViewModifier {
                         ReadingCharacterCardsEntry(libraryBookKey: libraryBookKey)
                             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("返回阅读") { showingCards = false } } }
                     }
+                }
+            }
+            .sheet(isPresented: $showingWorldview) {
+                NavigationView {
+                    if let libraryBookKey {
+                        ReadingWorldviewEntry(libraryBookKey: libraryBookKey)
+                            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("返回阅读") { showingWorldview = false } } }
+                    }
+                }
+            }
+            .sheet(isPresented: $showingPreviousVolume) {
+                if let libraryBookKey {
+                    ReadingPreviousVolumeEntry(libraryBookKey: libraryBookKey)
                 }
             }
             .sheet(isPresented: $showing) {

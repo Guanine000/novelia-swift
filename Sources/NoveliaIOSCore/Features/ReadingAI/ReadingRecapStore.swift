@@ -110,3 +110,183 @@ final class ReadingRecapStore: ObservableObject {
         if let data = try? JSONEncoder().encode(stories) { defaults.set(data, forKey: Self.storiesKey) }
     }
 }
+
+/// ReaderSettings 持有的本机「世界观词条」存储：按系列或单书 workID 组织，支持手工维护与防剧透 AI 提取。
+@MainActor
+final class WorldviewLexiconStore: ObservableObject {
+    private static let storageKey = "reader.worldview.entries.v1"
+    private static let maximumEntries = 2_000
+    private static let maximumBytes = 8 * 1_024 * 1_024
+
+    @Published private(set) var entries: [WorldviewEntry] = []
+    @Published private(set) var extractionProgress: [String: String] = [:]
+    @Published private(set) var extractionErrors: [String: String] = [:]
+    @Published private(set) var lastExtractionSummary: [String: String] = [:]
+
+    private let defaults: UserDefaults
+    private var extractionTasks: [String: Task<Void, Never>] = [:]
+
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+        if let data = defaults.data(forKey: Self.storageKey),
+           data.count <= Self.maximumBytes,
+           let decoded = try? JSONDecoder().decode([WorldviewEntry].self, from: data) {
+            entries = Array(decoded.prefix(Self.maximumEntries))
+        }
+    }
+
+    func entries(for workID: String, query: String = "", category: WorldviewCategory? = nil) -> [WorldviewEntry] {
+        entries
+            .filter { item in
+                guard item.workID == workID else { return false }
+                if let category, item.category != category { return false }
+                return item.matches(query: query)
+            }
+            .sorted { lhs, rhs in
+                if lhs.category != rhs.category {
+                    let li = WorldviewCategory.allCases.firstIndex(of: lhs.category) ?? 99
+                    let ri = WorldviewCategory.allCases.firstIndex(of: rhs.category) ?? 99
+                    return li < ri
+                }
+                return lhs.term.localizedStandardCompare(rhs.term) == .orderedAscending
+            }
+    }
+
+    func count(for workID: String) -> Int {
+        entries.reduce(0) { $0 + ($1.workID == workID ? 1 : 0) }
+    }
+
+    func upsert(_ entry: WorldviewEntry) {
+        let trimmedTerm = entry.term.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSummary = entry.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTerm.isEmpty, !trimmedSummary.isEmpty else { return }
+        var normalized = entry
+        normalized.term = String(trimmedTerm.prefix(60))
+        normalized.summary = String(trimmedSummary.prefix(400))
+        normalized.aliases = Array(Set(
+            entry.aliases
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty && $0.lowercased() != normalized.normalizedTerm }
+        )).sorted()
+        normalized.updatedAt = Date()
+        if let idx = entries.firstIndex(where: { $0.id == normalized.id }) {
+            entries[idx] = normalized
+        } else {
+            entries.append(normalized)
+            if entries.count > Self.maximumEntries {
+                entries.removeFirst(entries.count - Self.maximumEntries)
+            }
+        }
+        persist()
+    }
+
+    func delete(id: UUID) {
+        let before = entries.count
+        entries.removeAll { $0.id == id }
+        if entries.count != before { persist() }
+    }
+
+    /// 合并 AI 提取出的词条：按词条名/别名去重，绝不覆盖用户手工编辑过的词条。
+    @discardableResult
+    func mergeExtracted(_ incoming: [WorldviewEntry], workID: String) -> Int {
+        guard !incoming.isEmpty else { return 0 }
+        var changed = 0
+        for item in incoming {
+            let termKey = item.normalizedTerm
+            guard !termKey.isEmpty else { continue }
+            if let idx = entries.firstIndex(where: { existing in
+                guard existing.workID == workID else { return false }
+                if existing.normalizedTerm == termKey { return true }
+                return existing.aliases.contains { $0.lowercased() == termKey }
+            }) {
+                // 手工维护过的词条绝不被自动提取覆盖
+                guard !entries[idx].isManual else { continue }
+                var updated = entries[idx]
+                let mergedAliases = Set(updated.aliases + item.aliases)
+                    .filter { $0.lowercased() != updated.normalizedTerm }
+                updated.aliases = Array(mergedAliases).sorted()
+                if item.summary.count > updated.summary.count {
+                    updated.summary = item.summary
+                }
+                updated.updatedAt = Date()
+                entries[idx] = updated
+                changed += 1
+            } else {
+                var added = item
+                added.workID = workID
+                entries.append(added)
+                changed += 1
+            }
+        }
+        if entries.count > Self.maximumEntries {
+            entries.removeFirst(entries.count - Self.maximumEntries)
+        }
+        if changed > 0 { persist() }
+        return changed
+    }
+
+    /// 书籍加入系列时，把原单书键下的世界观词条迁移到系列 ID，避免移入系列后丢失。
+    func migrateWork(from: String, to: String) {
+        guard from != to else { return }
+        var changed = false
+        for idx in entries.indices where entries[idx].workID == from {
+            entries[idx].workID = to
+            changed = true
+        }
+        if changed { persist() }
+    }
+
+    func isExtracting(workID: String) -> Bool {
+        extractionTasks[workID] != nil
+    }
+
+    func cancelExtraction(workID: String) {
+        extractionTasks[workID]?.cancel()
+        extractionTasks[workID] = nil
+        extractionProgress[workID] = nil
+    }
+
+    func startExtraction(
+        workID: String,
+        chapters: [RecapChapter],
+        sourceBookKey: String?,
+        sourceBookTitle: String?,
+        ai: ReadingAIStore
+    ) {
+        guard extractionTasks[workID] == nil else { return }
+        extractionErrors[workID] = nil
+        lastExtractionSummary[workID] = nil
+        extractionProgress[workID] = "准备扫描已读正文…"
+        let existingTerms = entries(for: workID).map(\.term)
+        extractionTasks[workID] = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let extracted = try await WorldviewExtractionPlan.extract(
+                    chapters: chapters,
+                    workID: workID,
+                    sourceBookKey: sourceBookKey,
+                    sourceBookTitle: sourceBookTitle,
+                    existingTerms: existingTerms,
+                    ai: ai
+                ) { [weak self] status in
+                    self?.extractionProgress[workID] = status
+                }
+                try Task.checkCancellation()
+                let count = self.mergeExtracted(extracted, workID: workID)
+                self.lastExtractionSummary[workID] = count > 0
+                    ? "已新增或补充 \(count) 条世界观词条"
+                    : "所选已读正文中未发现新的世界观词条"
+            } catch is CancellationError {
+            } catch {
+                self.extractionErrors[workID] = error.localizedDescription
+            }
+            self.extractionProgress[workID] = nil
+            self.extractionTasks[workID] = nil
+        }
+    }
+
+    private func persist() {
+        guard let data = try? JSONEncoder().encode(entries), data.count <= Self.maximumBytes else { return }
+        defaults.set(data, forKey: Self.storageKey)
+    }
+}

@@ -601,3 +601,37 @@ enum LibraryGlobalSearch {
             .map { $0 }
     }
 }
+
+// MARK: - 系列上一卷定位
+
+/// 解析系列卷序与上一卷：优先使用用户已确认的系列卷序，未确认时按自然数字书名升序推断。
+enum LibrarySeriesVolumeResolver {
+    struct Member: Equatable, Sendable {
+        let key: String
+        let title: String
+    }
+
+    static func orderedKeys(confirmedOrder: [String], members: [Member]) -> [String] {
+        let memberMap = Dictionary(uniqueKeysWithValues: members.map { ($0.key, $0) })
+        var ordered: [String] = []
+        var seen = Set<String>()
+        for key in confirmedOrder where memberMap[key] != nil && seen.insert(key).inserted {
+            ordered.append(key)
+        }
+        let remaining = members
+            .filter { !seen.contains($0.key) }
+            .sorted { lhs, rhs in
+                let cmp = lhs.title.localizedStandardCompare(rhs.title)
+                if cmp != .orderedSame { return cmp == .orderedAscending }
+                return lhs.key < rhs.key
+            }
+        ordered.append(contentsOf: remaining.map(\.key))
+        return ordered
+    }
+
+    static func previousBookKey(for bookKey: String, confirmedOrder: [String], members: [Member]) -> String? {
+        let keys = orderedKeys(confirmedOrder: confirmedOrder, members: members)
+        guard let index = keys.firstIndex(of: bookKey), index > 0 else { return nil }
+        return keys[index - 1]
+    }
+}

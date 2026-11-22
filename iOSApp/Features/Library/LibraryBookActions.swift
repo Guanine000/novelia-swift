@@ -615,6 +615,7 @@ struct LibraryBookActionDialogs: ViewModifier {
     /// 移入系列前把单书键下的人物卡迁移到系列 ID，避免“AI 人物词条”生成的卡片在移入系列后不可见。
     private func assign(_ book: LibraryBook, to seriesID: String) {
         try? readerSettings.characters.migrateWork(from: book.key, to: seriesID)
+        readerSettings.worldview.migrateWork(from: book.key, to: seriesID)
         state.assign(book, to: seriesID)
     }
 
