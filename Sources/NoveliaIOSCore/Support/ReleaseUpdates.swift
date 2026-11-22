@@ -377,12 +377,12 @@ struct NoveliaGitHubRelease: Decodable {
     var version: NoveliaReleaseVersion? { NoveliaReleaseVersion(tag_name) }
     /// 提示里的短说明。没有开场文字时为 nil，对话框不另起一段。
     var summary: String? { NoveliaReleaseNotes.openingSummary(body) }
-    /// 发现新版本对话框的说明。没有摘要时只保留原来的版本问句。
+    /// 发现新版本对话框的说明。没有摘要时只保留版本和更新页面这一句。
     var updatePromptMessage: String {
         let versionText = version?.display ?? tag_name
-        let question = "Novelia \(versionText) 已发布，是否前往下载页面？"
-        guard let summary else { return question }
-        return question + "\n\n" + summary
+        let lead = "Novelia \(versionText) 已发布。说明与安装包都在更新页面。"
+        guard let summary else { return lead }
+        return lead + "\n\n" + summary
     }
     var downloadPage: URL? {
         guard let url = URL(string: html_url), let c = URLComponents(url: url, resolvingAgainstBaseURL: false),

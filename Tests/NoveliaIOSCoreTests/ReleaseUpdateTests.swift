@@ -216,7 +216,7 @@ final class ReleaseUpdateTests: XCTestCase {
                                            body: body, draft: false, prerelease: false)
         XCTAssertEqual(release.summary, "这是 Novelia 1.5.0 正式版。本次新增仿真翻页动画、注脚气泡浮窗。")
         XCTAssertEqual(release.updatePromptMessage, """
-        Novelia 1.5.0 已发布，是否前往下载页面？
+        Novelia 1.5.0 已发布。说明与安装包都在更新页面。
 
         这是 Novelia 1.5.0 正式版。本次新增仿真翻页动画、注脚气泡浮窗。
         """)
@@ -244,7 +244,7 @@ final class ReleaseUpdateTests: XCTestCase {
         """.utf8))
         XCTAssertNil(missing.body)
         XCTAssertNil(missing.summary)
-        XCTAssertEqual(missing.updatePromptMessage, "Novelia 0.9.0 已发布，是否前往下载页面？")
+        XCTAssertEqual(missing.updatePromptMessage, "Novelia 0.9.0 已发布。说明与安装包都在更新页面。")
         XCTAssertTrue(missing.shouldOffer(current: "0.8.0", ignored: ""))
         let nullBody = try JSONDecoder().decode(NoveliaGitHubRelease.self, from: Data("""
         {"tag_name":"v0.9.0","html_url":"\(page)","draft":false,"prerelease":false,"body":null}
