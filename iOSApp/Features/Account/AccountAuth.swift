@@ -91,12 +91,14 @@ final class AccountAuthStore: ObservableObject, AccountSessionProviding {
     /// 与上游客户端的本地退出行为一致：清除本应用令牌，但保留
     /// 共用认证网站的 Cookie，避免影响其他 Novelia 客户端会话。
     func logout() {
-        ShareableLogger(category: "auth").notice(AppDiagnosticMessage.authSessionCleared(scope: "novel", reason: "user"))
         clearSession()
         forumAuth?.clearSession()
     }
 
     func clearSession() {
+        if username != nil {
+            ShareableLogger(category: "auth").notice(AppDiagnosticMessage.authSessionCleared(scope: "novel", reason: "user"))
+        }
         sessionGeneration += 1
         tokenStore.clear()
         username = nil
@@ -222,12 +224,14 @@ final class ForumAuthStore: ObservableObject, AccountSessionProviding {
     }
 
     func logout() {
-        ShareableLogger(category: "auth").notice(AppDiagnosticMessage.authSessionCleared(scope: "forum", reason: "user"))
         clearSession()
         accountAuth?.clearSession()
     }
 
     func clearSession() {
+        if username != nil {
+            ShareableLogger(category: "auth").notice(AppDiagnosticMessage.authSessionCleared(scope: "forum", reason: "user"))
+        }
         sessionGeneration += 1
         tokenStore.clear()
         username = nil

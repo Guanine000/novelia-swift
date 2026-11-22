@@ -14,6 +14,7 @@ layout = json.loads((root/'scripts/source_layout.json').read_text())
 core = root / 'Sources/NoveliaIOSCore'
 app = root / 'iOSApp'
 code = '\n'.join((root / layout[name]).read_text() for name in [
+    'DiagnosticContext.swift', 'ShareableLogPolicy.swift',
     'APIConfiguration.swift', 'Novel.swift', 'WenkuNovel.swift',
     'NoveliaAPIClient.swift', 'NoveliaAPISessionAndDTOs.swift', 'ForumAPIClient.swift', 'APIServices.swift', 'NoveliaServices.swift'])
 code += '\n' + '\n'.join((root / layout[name]).read_text() for name in [
