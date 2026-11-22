@@ -418,4 +418,199 @@ final class EPUBToolboxTests: XCTestCase {
         XCTAssertFalse(after.hasActionableIssues, "处理后不应再残留可修复问题")
         XCTAssertEqual(afterSpine.count, beforeSpine.count)
     }
+
+    // MARK: - 5. 高级变换：字体/样式清洗、简繁、横竖排、EPUB 2→3、Ruby、注释、元数据覆盖
+
+    func testAdvancedSingleBookTransforms() async throws {
+        let containerXML = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+          <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+        </container>
+        """
+        let opfXML = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="uid">
+          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:title>原始繁體標題</dc:title>
+            <dc:creator>舊作者</dc:creator>
+            <dc:language>zh-TW</dc:language>
+            <dc:identifier id="uid">urn:uuid:adv-1</dc:identifier>
+          </metadata>
+          <manifest>
+            <item id="ch1" href="Text/ch1.xhtml" media-type="application/xhtml+xml"/>
+            <item id="css1" href="Styles/style.css" media-type="text/css"/>
+            <item id="font1" href="Fonts/embed.ttf" media-type="font/ttf"/>
+          </manifest>
+          <spine><itemref idref="ch1"/></spine>
+        </package>
+        """
+        let css = """
+        @font-face { font-family: "EmbedFont"; src: url("../Fonts/embed.ttf"); }
+        body { color: #000000; background-color: #ffffff; font-size: 14px; writing-mode: vertical-rl; }
+        """
+        let ch1 = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <html xmlns="http://www.w3.org/1999/xhtml">
+        <head><link rel="stylesheet" href="../Styles/style.css"/></head>
+        <body>
+          <h1>第一章 測試</h1>
+          <p style="color: black; font-size: 12pt;">這裡有<ruby>漢字<rt>かんじ</rt></ruby>和註釋<a class="duokan-footnote" href="#fn1">[1]</a>。</p>
+          <ol class="duokan-footnote-content"><li class="duokan-footnote-item" id="fn1">註釋說明</li></ol>
+        </body>
+        </html>
+        """
+
+        let sourceURL = try await makeArchive(name: "advanced-src.epub", entries: [
+            ("mimetype", Data("application/epub+zip".utf8), false),
+            ("META-INF/container.xml", Data(containerXML.utf8), true),
+            ("OEBPS/content.opf", Data(opfXML.utf8), true),
+            ("OEBPS/Text/ch1.xhtml", Data(ch1.utf8), true),
+            ("OEBPS/Styles/style.css", Data(css.utf8), true),
+            ("OEBPS/Fonts/embed.ttf", Data(repeating: 0x41, count: 4096), true),
+        ])
+
+        var options = EPUBToolboxOptions.all
+        options.removeEmbeddedFonts = true
+        options.cleanForcedStyles = true
+        options.chineseConversion = .toSimplified
+        options.writingDirection = .horizontal
+        options.upgradeToEPUB3 = true
+        options.rubyHandling = .inlineParentheses
+        options.standardizeFootnotes = true
+        options.metadataOverride = EPUBMetadataOverride(
+            title: "新标题",
+            author: "新作者",
+            language: "zh-Hans",
+            description: "这是测试简介",
+            coverImageData: tinyPNG,
+            coverMediaType: "image/png"
+        )
+
+        let outURL = tempDir.appendingPathComponent("advanced-out.epub")
+        let result = try await EPUBToolboxProcessor.process(source: sourceURL, destination: outURL, options: options)
+
+        XCTAssertEqual(result.removedFontsCount, 1)
+        XCTAssertGreaterThan(result.cleanedStyleCount, 0)
+        XCTAssertTrue(result.convertedChinese)
+        XCTAssertTrue(result.convertedWritingDirection)
+        XCTAssertTrue(result.upgradedToEPUB3)
+        XCTAssertEqual(result.processedRubyCount, 1)
+        XCTAssertGreaterThanOrEqual(result.standardizedFootnotesCount, 2)
+        XCTAssertTrue(result.updatedMetadata)
+
+        let outArchiveOptional = try? await Archive(url: outURL, accessMode: .read)
+        let outArchive = try XCTUnwrap(outArchiveOptional)
+        let paths = Set((try await outArchive.entries()).map(\.path))
+        XCTAssertFalse(paths.contains("OEBPS/Fonts/embed.ttf"))
+        XCTAssertTrue(paths.contains("OEBPS/Text/nav.xhtml"))
+
+        let outCh1Optional = try await outArchive.get("OEBPS/Text/ch1.xhtml")
+        let outCh1Data = try await EPUBToolboxInspector.extractData(from: outArchive, entry: try XCTUnwrap(outCh1Optional), limit: 1024 * 1024)
+        let outCh1 = try XCTUnwrap(String(data: outCh1Data, encoding: .utf8))
+        XCTAssertTrue(outCh1.contains("汉字（かんじ）"))
+        XCTAssertTrue(outCh1.contains(#"epub:type="noteref""#))
+        XCTAssertTrue(outCh1.contains(#"epub:type="footnote""#))
+        XCTAssertTrue(outCh1.contains("horizontal-tb"))
+        XCTAssertFalse(outCh1.contains("font-size: 12pt"))
+
+        let outCSSOptional = try await outArchive.get("OEBPS/Styles/style.css")
+        let outCSSData = try await EPUBToolboxInspector.extractData(from: outArchive, entry: try XCTUnwrap(outCSSOptional), limit: 1024 * 1024)
+        let outCSS = try XCTUnwrap(String(data: outCSSData, encoding: .utf8))
+        XCTAssertFalse(outCSS.contains("@font-face"))
+        XCTAssertFalse(outCSS.contains("background-color"))
+        XCTAssertTrue(outCSS.contains("horizontal-tb"))
+
+        let report = try await EPUBToolboxInspector.inspect(url: outURL, mode: .deep)
+        XCTAssertEqual(report.epubVersion, "3.0")
+        XCTAssertEqual(report.title, "新标题")
+        XCTAssertEqual(report.author, "新作者")
+    }
+
+    // MARK: - 6. 合并多卷、拆分合集、导出 TXT、内部文件浏览器与正则重建目录
+
+    func testMergeSplitExportTXTAndBrowser() async throws {
+        func makeSimpleBook(name: String, title: String, chapterTitle: String, body: String) async throws -> URL {
+            let container = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+            </container>
+            """
+            let opf = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+              <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                <dc:title>\(title)</dc:title>
+                <dc:language>zh-CN</dc:language>
+                <dc:identifier id="uid">urn:uuid:\(UUID().uuidString)</dc:identifier>
+              </metadata>
+              <manifest>
+                <item id="ch1" href="Text/ch1.xhtml" media-type="application/xhtml+xml"/>
+                <item id="nav" href="Text/nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+              </manifest>
+              <spine><itemref idref="ch1"/></spine>
+            </package>
+            """
+            let nav = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+            <body><nav epub:type="toc"><ol><li><a href="ch1.xhtml">\(chapterTitle)</a></li></ol></nav></body>
+            </html>
+            """
+            let ch = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml"><body><h1>\(chapterTitle)</h1><p>\(body)</p></body></html>
+            """
+            return try await makeArchive(name: name, entries: [
+                ("mimetype", Data("application/epub+zip".utf8), false),
+                ("META-INF/container.xml", Data(container.utf8), true),
+                ("OEBPS/content.opf", Data(opf.utf8), true),
+                ("OEBPS/Text/nav.xhtml", Data(nav.utf8), true),
+                ("OEBPS/Text/ch1.xhtml", Data(ch.utf8), true),
+            ])
+        }
+
+        let vol1 = try await makeSimpleBook(name: "vol1.epub", title: "第一卷", chapterTitle: "第一章 起点", body: "第一卷正文内容")
+        let vol2 = try await makeSimpleBook(name: "vol2.epub", title: "第二卷", chapterTitle: "第二章 旅途", body: "第二卷正文内容")
+
+        // 1) 合并两卷
+        let mergedURL = tempDir.appendingPathComponent("merged.epub")
+        let mergeResult = try await EPUBToolboxMerger.merge(
+            volumes: [.init(title: "第一卷", url: vol1), .init(title: "第二卷", url: vol2)],
+            title: "合集书",
+            author: "作者A",
+            destination: mergedURL
+        )
+        XCTAssertEqual(mergeResult.volumeCount, 2)
+        XCTAssertEqual(mergeResult.totalSpineCount, 2)
+
+        // 2) 内部文件浏览器与文本预览
+        let entries = try await EPUBArchiveBrowser.listEntries(url: mergedURL)
+        XCTAssertTrue(entries.contains(where: { $0.path == "OEBPS/content.opf" && $0.isTextPreviewable }))
+        let opfPreview = try await EPUBArchiveBrowser.readTextPreview(url: mergedURL, entryPath: "OEBPS/content.opf")
+        XCTAssertTrue(opfPreview.contains("合集书"))
+
+        // 3) 正则重建目录
+        let rebuiltTOC = try await EPUBToolboxTransforms.rebuildTOC(url: mergedURL, regexPattern: #"^第[一二]章"#)
+        XCTAssertEqual(rebuiltTOC.count, 2)
+
+        // 4) 导出为 TXT
+        let txtURL = tempDir.appendingPathComponent("merged.txt")
+        let txtResult = try await EPUBToolboxTXTExporter.exportToTXT(source: mergedURL, destination: txtURL)
+        XCTAssertEqual(txtResult.chapterCount, 2)
+        let txtContent = try String(contentsOf: txtURL, encoding: .utf8)
+        XCTAssertTrue(txtContent.contains("第一卷正文内容"))
+        XCTAssertTrue(txtContent.contains("第二卷正文内容"))
+
+        // 5) 拆分合集
+        let proposed = try await EPUBToolboxSplitter.proposeGroups(url: mergedURL)
+        XCTAssertEqual(proposed.count, 2)
+        let splitDir = tempDir.appendingPathComponent("split-out", isDirectory: true)
+        let splitResults = try await EPUBToolboxSplitter.split(source: mergedURL, groups: proposed, outputDirectory: splitDir)
+        XCTAssertEqual(splitResults.count, 2)
+        let splitContainer = try await EPUBContainer.open(fileURL: splitResults[0].outputURL)
+        let splitSpine = await splitContainer.spine
+        XCTAssertEqual(splitSpine.count, 1)
+    }
 }

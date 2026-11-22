@@ -22,6 +22,7 @@ final class EPUBToolboxModel: ObservableObject {
     @Published private(set) var progress = EPUBToolboxProgress(fraction: 0, stage: "")
     @Published private(set) var result: EPUBToolboxResult?
     @Published private(set) var isSavingToLibrary = false
+    @Published private(set) var isExportingTXT = false
     @Published var savedToLibraryTitle: String?
     @Published var errorMessage: String?
 
@@ -165,6 +166,33 @@ final class EPUBToolboxModel: ObservableObject {
         processTask = nil
     }
 
+    /// 将当前 EPUB 按阅读顺序导出为 UTF-8 纯文本 TXT（应用当前 Ruby 与简繁设置）。
+    func exportAsTXT() async -> URL? {
+        guard let target = source, !isExportingTXT else { return nil }
+        isExportingTXT = true
+        defer { isExportingTXT = false }
+        let dir = ensureWorkspaceDirectory()
+        let filename = EPUBToolboxPath.sanitizedFilename(target.title, fallback: "book") + ".txt"
+        let dest = dir.appendingPathComponent("txt-\(UUID().uuidString.prefix(6))-\(filename)")
+        let ruby = options.rubyHandling == .keep ? .removeAnnotations : options.rubyHandling
+        let chinese = options.chineseConversion
+        let src = target.fileURL
+        do {
+            let exported = try await Task.detached(priority: .userInitiated) {
+                try await EPUBToolboxTXTExporter.exportToTXT(
+                    source: src,
+                    destination: dest,
+                    rubyHandling: ruby,
+                    chineseConversion: chinese
+                )
+            }.value
+            return exported.outputURL
+        } catch {
+            errorMessage = "导出 TXT 失败：\(error.localizedDescription)"
+            return nil
+        }
+    }
+
     /// 把处理后的 EPUB 另存为新书登记到本地书库，不修改原书。
     func saveResultToLibrary(using wenkuDownloads: WenkuLocalLibraryStore) async {
         guard let outcome = result, !isSavingToLibrary else { return }
@@ -246,6 +274,8 @@ struct EPUBToolboxView: View {
 
     @State private var isShowingLibraryPicker = false
     @State private var isShowingFileImporter = false
+    @State private var isShowingMetadataEditor = false
+    @State private var isShowingTOCEditor = false
     @State private var shareURL: URL?
 
     init(initialBook: LibraryBook? = nil, isPresentedInSheet: Bool = false) {
@@ -261,14 +291,19 @@ struct EPUBToolboxView: View {
     var body: some View {
         Form {
             sourceSection
-            if model.source != nil {
+            if let target = model.source {
                 inspectionSection
+                singleBookToolsSection(target)
                 optionsSection
+                slimAndStyleSection
+                layoutAndFormatSection
+                lightNovelAndNotesSection
                 actionSection
             }
             if let outcome = model.result {
                 resultSection(outcome)
             }
+            multiBookToolsSection
         }
         .compatScrollContentBackgroundHidden()
         .background(NoveliaStyle.paper.ignoresSafeArea())
@@ -294,6 +329,26 @@ struct EPUBToolboxView: View {
                 EPUBToolboxLibraryPickerView(books: localEPUBBooks) { selected in
                     isShowingLibraryPicker = false
                     model.selectLibraryBook(selected)
+                }
+            }
+        }
+        .sheet(isPresented: $isShowingMetadataEditor) {
+            if let target = model.source {
+                EPUBMetadataEditorSheet(
+                    sourceURL: target.fileURL,
+                    initialOverride: model.options.metadataOverride
+                ) { updated in
+                    model.options.metadataOverride = updated
+                }
+            }
+        }
+        .sheet(isPresented: $isShowingTOCEditor) {
+            if let target = model.source {
+                EPUBTOCEditorSheet(
+                    sourceURL: target.fileURL,
+                    initialNodes: model.options.customTOC
+                ) { updated in
+                    model.options.customTOC = updated
                 }
             }
         }
@@ -420,7 +475,71 @@ struct EPUBToolboxView: View {
         }
     }
 
-    // MARK: - 四项功能开关区
+    // MARK: - 单书专项工具区
+
+    private func singleBookToolsSection(_ target: EPUBToolboxModel.TargetSource) -> some View {
+        Section("单书专项工具") {
+            Button {
+                isShowingMetadataEditor = true
+            } label: {
+                HStack {
+                    Label("编辑元数据与封面", systemImage: "doc.badge.gearshape")
+                    Spacer()
+                    if model.options.metadataOverride?.hasAnyOverride == true {
+                        Text("已修改")
+                            .font(.caption)
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                    }
+                }
+            }
+            .disabled(model.isProcessing || (model.report?.isDRMProtected == true))
+
+            Button {
+                isShowingTOCEditor = true
+            } label: {
+                HStack {
+                    Label("目录可视化编辑 / 正则重建", systemImage: "list.bullet.indent")
+                    Spacer()
+                    if let custom = model.options.customTOC {
+                        Text("\(custom.count) 项")
+                            .font(.caption)
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                    }
+                }
+            }
+            .disabled(model.isProcessing || (model.report?.isDRMProtected == true))
+
+            NavigationLink {
+                EPUBArchiveBrowserView(sourceURL: target.fileURL, bookTitle: target.title)
+            } label: {
+                Label("内部文件浏览器（只读）", systemImage: "folder.badge.questionmark")
+            }
+
+            NavigationLink {
+                EPUBToolboxSplitView(sourceURL: target.fileURL, bookTitle: target.title)
+            } label: {
+                Label("拆分合集 EPUB", systemImage: "rectangle.split.2x1")
+            }
+            .disabled(model.report?.isDRMProtected == true)
+
+            Button {
+                Task {
+                    if let txtURL = await model.exportAsTXT() {
+                        shareURL = txtURL
+                    }
+                }
+            } label: {
+                if model.isExportingTXT {
+                    Label("正在提取纯文本 TXT…", systemImage: "hourglass")
+                } else {
+                    Label("导出为纯文本 TXT", systemImage: "doc.text")
+                }
+            }
+            .disabled(model.isExportingTXT || model.isProcessing || (model.report?.isDRMProtected == true))
+        }
+    }
+
+    // MARK: - 四项基础修复开关区
 
     private var optionsSection: some View {
         Section {
@@ -457,9 +576,86 @@ struct EPUBToolboxView: View {
                 }
             }
         } header: {
-            Text("处理选项")
+            Text("基础标准化与修复")
         }
         .disabled(model.isProcessing || (model.report?.isDRMProtected == true))
+    }
+
+    private var slimAndStyleSection: some View {
+        Section("瘦身与样式清洗") {
+            Picker("图片瘦身压缩", selection: $model.options.imageCompression) {
+                ForEach(EPUBImageCompressionOption.allCases) { Text($0.title).tag($0) }
+            }
+            Toggle(isOn: $model.options.removeEmbeddedFonts) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("移除内嵌字体")
+                    Text("删除包内字体文件并移除 CSS 中的 @font-face，大幅减小体积并让阅读器字体设置生效。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Toggle(isOn: $model.options.cleanForcedStyles) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("清理强制排版样式")
+                    Text("清除 CSS 与内联样式中写死的字色、底色、字号、行高与字体族，修复深色模式看不清等问题。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .disabled(model.isProcessing || (model.report?.isDRMProtected == true))
+    }
+
+    private var layoutAndFormatSection: some View {
+        Section("排版与格式转换") {
+            Picker("全书简繁转换", selection: $model.options.chineseConversion) {
+                ForEach(EPUBChineseConversionOption.allCases) { Text($0.title).tag($0) }
+            }
+            Picker("横排 / 竖排转换", selection: $model.options.writingDirection) {
+                ForEach(EPUBWritingDirectionTransform.allCases) { Text($0.title).tag($0) }
+            }
+            Toggle(isOn: $model.options.upgradeToEPUB3) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("EPUB 2 → EPUB 3 升级")
+                    Text("升级 OPF 版本至 3.0，补齐 dcterms:modified、nav.xhtml 导航目录与 HTML5 DOCTYPE。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .disabled(model.isProcessing || (model.report?.isDRMProtected == true))
+    }
+
+    private var lightNovelAndNotesSection: some View {
+        Section("日轻与注释处理") {
+            Picker("Ruby 注音处理", selection: $model.options.rubyHandling) {
+                ForEach(EPUBRubyHandling.allCases) { Text($0.title).tag($0) }
+            }
+            Toggle(isOn: $model.options.standardizeFootnotes) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("注释标准化（EPUB 3）")
+                    Text("将多看等常见非标准注释转换为标准 epub:type=\"noteref\" 与 <aside epub:type=\"footnote\">。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .disabled(model.isProcessing || (model.report?.isDRMProtected == true))
+    }
+
+    private var multiBookToolsSection: some View {
+        Section("多书与效率工具") {
+            NavigationLink {
+                EPUBToolboxBatchView()
+            } label: {
+                Label("批量处理多本 EPUB", systemImage: "square.stack.3d.up")
+            }
+            NavigationLink {
+                EPUBToolboxMergeView()
+            } label: {
+                Label("合并多卷 EPUB 为合集", systemImage: "doc.on.doc")
+            }
+        }
     }
 
     // MARK: - 执行按钮区
@@ -528,6 +724,35 @@ struct EPUBToolboxView: View {
                 let saved = ByteCountFormatter.string(fromByteCount: outcome.removedUnusedBytes, countStyle: .file)
                 CompatLabeledContent("清理冗余资源", value: "\(outcome.removedUnusedCount) 个（释放 \(saved)）")
             }
+            if outcome.compressedImagesCount > 0 {
+                let saved = ByteCountFormatter.string(fromByteCount: outcome.compressedImagesSavedBytes, countStyle: .file)
+                CompatLabeledContent("图片瘦身", value: "\(outcome.compressedImagesCount) 张（节省 \(saved)）")
+            }
+            if outcome.removedFontsCount > 0 {
+                let saved = ByteCountFormatter.string(fromByteCount: outcome.removedFontsBytes, countStyle: .file)
+                CompatLabeledContent("移除内嵌字体", value: "\(outcome.removedFontsCount) 个（释放 \(saved)）")
+            }
+            if outcome.cleanedStyleCount > 0 {
+                CompatLabeledContent("样式清洗", value: "\(outcome.cleanedStyleCount) 处样式表/文档")
+            }
+            if outcome.updatedMetadata {
+                CompatLabeledContent("元数据与封面", value: "已写入新 EPUB")
+            }
+            if outcome.convertedChinese {
+                CompatLabeledContent("简繁转换", value: "已转换全书正文与目录")
+            }
+            if outcome.convertedWritingDirection {
+                CompatLabeledContent("排版方向", value: "已更新 OPF 与 CSS")
+            }
+            if outcome.upgradedToEPUB3 {
+                CompatLabeledContent("版本升级", value: "已升级至 EPUB 3.0")
+            }
+            if outcome.processedRubyCount > 0 {
+                CompatLabeledContent("Ruby 注音", value: "已处理 \(outcome.processedRubyCount) 处")
+            }
+            if outcome.standardizedFootnotesCount > 0 {
+                CompatLabeledContent("注释标准化", value: "已规范化 \(outcome.standardizedFootnotesCount) 处")
+            }
             if outcome.totalChangesCount == 0 {
                 Text("已完成重新打包，原书未触发额外结构改动。")
                     .font(.caption)
@@ -583,7 +808,7 @@ struct EPUBToolboxView: View {
 
 // MARK: - 书库 EPUB 选择器
 
-private struct EPUBToolboxLibraryPickerView: View {
+struct EPUBToolboxLibraryPickerView: View {
     let books: [LibraryBook]
     let onSelect: (LibraryBook) -> Void
 

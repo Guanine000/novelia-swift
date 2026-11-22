@@ -76,9 +76,21 @@ enum EPUBToolboxProcessor {
         var removedUnusedBytes: Int64 = 0
         var mendedXHTMLCount = 0
         var relocatedPathsCount = 0
+        var compressedImagesCount = 0
+        var compressedImagesSavedBytes: Int64 = 0
+        var removedFontsCount = 0
+        var removedFontsBytes: Int64 = 0
+        var cleanedStyleCount = 0
+        var convertedChinese = false
+        var convertedWritingDirection = false
+        var upgradedToEPUB3 = false
+        var processedRubyCount = 0
+        var standardizedFootnotesCount = 0
+        var updatedMetadata = false
 
         let existingPaths = Set(entryByPath.keys)
         var usedIDs = Set(opf.manifest.map(\.id))
+        var injectedBinaryEntries: [String: Data] = [:]
 
         func makeUniqueID(prefix: String) -> String {
             var idx = 1
@@ -89,18 +101,74 @@ enum EPUBToolboxProcessor {
             }
         }
 
+        // 2b) EPUB 2 → EPUB 3 升级
+        if options.upgradeToEPUB3 && !opf.isEPUB3 {
+            opf.version = "3.0"
+            upgradedToEPUB3 = true
+            ensureCoreMetadata(in: &opf, fallbackTitle: source.deletingPathExtension().lastPathComponent)
+        }
+
+        // 2c) 元数据与封面覆盖
+        if let meta = options.metadataOverride, meta.hasAnyOverride {
+            applyMetadataOverride(
+                meta,
+                in: &opf,
+                makeUniqueID: makeUniqueID,
+                injectedBinaryEntries: &injectedBinaryEntries
+            )
+            updatedMetadata = true
+            if meta.coverImageData != nil {
+                repairedCover = true
+            }
+        }
+
+        // 2d) 横竖排方向切换（OPF 元数据与 spine 翻页方向）
+        if options.writingDirection != .keep {
+            opf.pageProgressionDirection = options.writingDirection == .vertical ? "rtl" : "ltr"
+            opf.metadataEntries.removeAll { entry in
+                EPUBToolboxParsedOPF.localName(entry.tagName) == "meta"
+                    && entry.attributes.contains(where: { $0.0 == "name" && $0.1.lowercased() == "primary-writing-mode" })
+            }
+            opf.metadataEntries.append(EPUBToolboxMetadataEntry(
+                tagName: "meta",
+                attributes: [
+                    ("content", options.writingDirection == .vertical ? "vertical-rl" : "horizontal-lr"),
+                    ("name", "primary-writing-mode"),
+                ],
+                text: ""
+            ))
+            convertedWritingDirection = true
+        }
+
+        // 2e) 全书简繁转换同步更新 OPF 元数据
+        if options.chineseConversion != .none {
+            for idx in opf.metadataEntries.indices {
+                let local = EPUBToolboxParsedOPF.localName(opf.metadataEntries[idx].tagName)
+                if local == "title" || local == "creator" || local == "description" || local == "subject" {
+                    opf.metadataEntries[idx].text = EPUBToolboxTransforms.convertText(
+                        opf.metadataEntries[idx].text,
+                        option: options.chineseConversion
+                    )
+                } else if local == "language" {
+                    opf.metadataEntries[idx].text = options.chineseConversion == .toSimplified ? "zh-Hans" : "zh-Hant"
+                }
+            }
+            convertedChinese = true
+        }
+
         // 3) OPF 基础清理：死链、未注册文件、必要元数据、封面声明
         onProgress?(EPUBToolboxProgress(fraction: 0.18, stage: "正在检查与修复 OPF 清单…"))
         try checkCancelled()
 
+        let allAvailablePaths = existingPaths.union(injectedBinaryEntries.keys)
         if options.repairOPFTOCCover {
             // 3a) 移除不存在的 manifest 项与无效 spine 项
             let beforeManifestCount = opf.manifest.count
-            opf.manifest = opf.manifest.filter { existingPaths.contains($0.path) }
+            opf.manifest = opf.manifest.filter { allAvailablePaths.contains($0.path) }
             removedDeadManifestCount = beforeManifestCount - opf.manifest.count
             let validManifestIDs = Set(opf.manifest.map(\.id))
             opf.spine = opf.spine.filter { validManifestIDs.contains($0.idref) }
-            opf.guide = opf.guide.filter { existingPaths.contains($0.path) }
+            opf.guide = opf.guide.filter { allAvailablePaths.contains($0.path) }
 
             // 3b) 补录压缩包中未注册的有效内容文件（忽略 mimetype / META-INF / 系统垃圾）
             let registeredPaths = Set(opf.manifest.map(\.path))
@@ -125,13 +193,13 @@ enum EPUBToolboxProcessor {
             ensureCoreMetadata(in: &opf, fallbackTitle: source.deletingPathExtension().lastPathComponent)
 
             // 3d) 封面修复
-            let coverResolution = EPUBToolboxInspector.resolveCoverItem(in: opf, existingPaths: existingPaths)
+            let coverResolution = EPUBToolboxInspector.resolveCoverItem(in: opf, existingPaths: allAvailablePaths)
             if coverResolution.needsRepair, let coverItem = coverResolution.item {
                 repairedCover = applyCoverDeclaration(coverID: coverItem.id, in: &opf)
             }
         }
 
-        // 4) 冗余资源清理（在 OPF/封面修复后计算可达性，防止误删封面或目录）
+        // 4) 冗余资源清理与内嵌字体移除
         onProgress?(EPUBToolboxProgress(fraction: 0.30, stage: "正在分析资源引用…"))
         try checkCancelled()
 
@@ -140,6 +208,21 @@ enum EPUBToolboxProcessor {
             droppedPaths.insert(path)
             removedUnusedCount += 1
             removedUnusedBytes += Int64(entryByPath[path]?.uncompressedSize ?? 0)
+        }
+
+        if options.removeEmbeddedFonts {
+            for item in opf.manifest where isFontItem(item) {
+                if droppedPaths.insert(item.path).inserted {
+                    removedFontsCount += 1
+                    removedFontsBytes += Int64(entryByPath[item.path]?.uncompressedSize ?? 0)
+                }
+            }
+            for (path, entry) in entryByPath where isFontPath(path) {
+                if droppedPaths.insert(path).inserted {
+                    removedFontsCount += 1
+                    removedFontsBytes += Int64(entry.uncompressedSize)
+                }
+            }
         }
 
         if options.removeUnusedResources {
@@ -158,15 +241,16 @@ enum EPUBToolboxProcessor {
                     removedUnusedBytes += Int64(entryByPath[path]?.uncompressedSize ?? 0)
                 }
             }
-            if !droppedPaths.isEmpty {
-                opf.manifest.removeAll { droppedPaths.contains($0.path) }
-                let remainingIDs = Set(opf.manifest.map(\.id))
-                opf.spine.removeAll { !remainingIDs.contains($0.idref) }
-                opf.guide.removeAll { droppedPaths.contains($0.path) }
-            }
         }
 
-        let keptPaths = Set(entryByPath.keys).subtracting(droppedPaths)
+        if !droppedPaths.isEmpty {
+            opf.manifest.removeAll { droppedPaths.contains($0.path) }
+            let remainingIDs = Set(opf.manifest.map(\.id))
+            opf.spine.removeAll { !remainingIDs.contains($0.idref) }
+            opf.guide.removeAll { droppedPaths.contains($0.path) }
+        }
+
+        let keptPaths = allAvailablePaths.subtracting(droppedPaths)
 
         // 5) 解析/修复目录（NCX / Nav）
         onProgress?(EPUBToolboxProgress(fraction: 0.42, stage: "正在检查与修复目录…"))
@@ -182,40 +266,49 @@ enum EPUBToolboxProcessor {
             return item.isNCX
         })
 
-        if let existingNavItem,
-           let entry = entryByPath[existingNavItem.path],
-           let data = try? await EPUBToolboxInspector.extractData(from: archive, entry: entry, limit: EPUBToolboxInspector.maxTextEntryBytes),
-           let html = EPUBToolboxInspector.decodeText(data).text {
-            let parsed = EPUBToolboxInspector.parseNavTOC(html: html, baseDirectory: EPUBToolboxPath.directory(of: existingNavItem.path))
-            tocNodes = filterValidTOCNodes(parsed, validPaths: keptPaths)
-        }
-        if tocNodes.isEmpty,
-           let existingNCXItem,
-           let entry = entryByPath[existingNCXItem.path],
-           let data = try? await EPUBToolboxInspector.extractData(from: archive, entry: entry, limit: EPUBToolboxInspector.maxTextEntryBytes),
-           let xml = EPUBToolboxInspector.decodeText(data).text {
-            let parsed = EPUBToolboxInspector.parseNCXTOC(xml: xml, baseDirectory: EPUBToolboxPath.directory(of: existingNCXItem.path))
-            tocNodes = filterValidTOCNodes(parsed, validPaths: keptPaths)
+        if let customTOC = options.customTOC {
+            tocNodes = filterValidTOCNodes(customTOC, validPaths: keptPaths)
+            repairedTOC = true
+        } else {
+            if let existingNavItem,
+               let entry = entryByPath[existingNavItem.path],
+               let data = try? await EPUBToolboxInspector.extractData(from: archive, entry: entry, limit: EPUBToolboxInspector.maxTextEntryBytes),
+               let html = EPUBToolboxInspector.decodeText(data).text {
+                let parsed = EPUBToolboxInspector.parseNavTOC(html: html, baseDirectory: EPUBToolboxPath.directory(of: existingNavItem.path))
+                tocNodes = filterValidTOCNodes(parsed, validPaths: keptPaths)
+            }
+            if tocNodes.isEmpty,
+               let existingNCXItem,
+               let entry = entryByPath[existingNCXItem.path],
+               let data = try? await EPUBToolboxInspector.extractData(from: archive, entry: entry, limit: EPUBToolboxInspector.maxTextEntryBytes),
+               let xml = EPUBToolboxInspector.decodeText(data).text {
+                let parsed = EPUBToolboxInspector.parseNCXTOC(xml: xml, baseDirectory: EPUBToolboxPath.directory(of: existingNCXItem.path))
+                tocNodes = filterValidTOCNodes(parsed, validPaths: keptPaths)
+            }
         }
 
-        if options.repairOPFTOCCover {
-            let needsRebuildTOC = (tocNodes.isEmpty && !opf.spine.isEmpty)
-                || (tocNodes.count <= 1 && opf.spine.count >= 3)
+        let needsTOCWrite = options.repairOPFTOCCover || options.customTOC != nil || options.upgradeToEPUB3 || options.chineseConversion != .none
+        if needsTOCWrite {
+            let needsRebuildTOC = options.customTOC == nil
+                && ((tocNodes.isEmpty && !opf.spine.isEmpty)
+                    || (options.repairOPFTOCCover && tocNodes.count <= 1 && opf.spine.count >= 3))
             if needsRebuildTOC {
                 let rebuilt = await buildTOCFromSpine(opf: opf, archive: archive, entryByPath: entryByPath)
                 if rebuilt.count > tocNodes.count {
                     tocNodes = rebuilt
                     repairedTOC = true
                 }
-            } else {
-                // 检查原目录是否存在断链或缺失某一种目录文件
+            } else if options.repairOPFTOCCover {
                 if (opf.isEPUB3 && existingNavItem == nil) || existingNCXItem == nil {
                     repairedTOC = true
                 }
             }
 
+            if options.chineseConversion != .none {
+                tocNodes = convertTOCNodes(tocNodes, option: options.chineseConversion)
+            }
+
             if !tocNodes.isEmpty {
-                // 确保 NCX 项存在
                 if let existingNCXItem {
                     generatedNCXPath = existingNCXItem.path
                     opf.spineTocID = existingNCXItem.id
@@ -234,7 +327,6 @@ enum EPUBToolboxProcessor {
                     repairedTOC = true
                 }
 
-                // EPUB 3 或原书已有 nav 时，确保 nav 项存在并保持同步
                 if opf.isEPUB3 || existingNavItem != nil {
                     if let existingNavItem {
                         generatedNavPath = existingNavItem.path
@@ -350,8 +442,12 @@ enum EPUBToolboxProcessor {
         """
         try await writeEntry(path: "META-INF/container.xml", data: Data(containerXML.utf8), compression: .deflate)
 
-        // 保留其他 META-INF 文件（例如字体混淆 encryption.xml 或 iBooks display-options），若路径改变则同步重写 encryption.xml 的 URI
+        // 保留其他 META-INF 文件（例如字体混淆 encryption.xml 或 iBooks display-options）
         for path in entryByPath.keys.sorted() where path.hasPrefix("META-INF/") && path != "META-INF/container.xml" {
+            if path == "META-INF/encryption.xml" && options.removeEmbeddedFonts {
+                // 已移除全部内嵌字体，不再保留字体混淆声明
+                continue
+            }
             guard !EPUBToolboxPath.isJunkArchiveEntry(path),
                   let entry = entryByPath[path],
                   let data = try? await EPUBToolboxInspector.extractData(from: archive, entry: entry, limit: EPUBToolboxInspector.maxTextEntryBytes) else { continue }
@@ -365,15 +461,11 @@ enum EPUBToolboxProcessor {
             }
         }
 
-        // 7c) 写入规范化的 OPF
-        let opfContent = serializeOPF(opf)
-        try await writeEntry(path: targetOPFPath, data: Data(opfContent.utf8), compression: .deflate)
-
-        // 7d) 写入重建/同步的 NCX 与 Nav（若启用了 OPF/目录修复且生成了目录）
+        // 7d) 写入重建/同步的 NCX 与 Nav
         let mappedNCXPath = generatedNCXPath.flatMap { pathMap[$0] ?? $0 }
         let mappedNavPath = generatedNavPath.flatMap { pathMap[$0] ?? $0 }
 
-        if options.repairOPFTOCCover && !tocNodes.isEmpty {
+        if needsTOCWrite && !tocNodes.isEmpty {
             if let mappedNCXPath {
                 let ncxXML = serializeNCX(
                     title: opf.title.isEmpty ? source.deletingPathExtension().lastPathComponent : opf.title,
@@ -384,8 +476,7 @@ enum EPUBToolboxProcessor {
                 try await writeEntry(path: mappedNCXPath, data: Data(ncxXML.utf8), compression: .deflate)
             }
             if let mappedNavPath {
-                // 若原书已有 nav 且有效（不需要重建）且未开标准化，保留原 nav 经下面流程处理；否则输出标准 nav
-                let shouldWriteGeneratedNav = existingNavItem == nil || repairedTOC
+                let shouldWriteGeneratedNav = existingNavItem == nil || repairedTOC || options.customTOC != nil || options.chineseConversion != .none
                 if shouldWriteGeneratedNav {
                     let navHTML = serializeNavXHTML(
                         title: opf.title.isEmpty ? source.deletingPathExtension().lastPathComponent : opf.title,
@@ -398,20 +489,31 @@ enum EPUBToolboxProcessor {
             }
         }
 
-        // 7e) 逐个处理并写入 manifest 资源（以及未在 manifest 中但未清理的保留资源）
+        // 7e) 逐个处理并写入 manifest 资源（图片压缩可能更新 mediaType，因此 OPF 在资源循环后再写入）
         let reverseMap = Dictionary(pathMap.map { ($0.value, $0.key) }, uniquingKeysWith: { first, _ in first })
-        let sortedManifest = opf.manifest.sorted { $0.path < $1.path }
-        let totalItems = max(sortedManifest.count, 1)
+        let sortedIndices = opf.manifest.indices.sorted { opf.manifest[$0].path < opf.manifest[$1].path }
+        let totalItems = max(sortedIndices.count, 1)
+        let needsDOMTransform = options.mendXHTML
+            || options.rubyHandling != .keep
+            || options.standardizeFootnotes
+            || options.cleanForcedStyles
+            || options.writingDirection != .keep
+            || options.upgradeToEPUB3
 
-        for (idx, item) in sortedManifest.enumerated() {
+        for (stepIdx, manifestIdx) in sortedIndices.enumerated() {
             try checkCancelled()
-            if idx % 10 == 0 || idx == sortedManifest.count - 1 {
-                let ratio = 0.55 + 0.40 * (Double(idx + 1) / Double(totalItems))
-                onProgress?(EPUBToolboxProgress(fraction: ratio, stage: "正在处理资源（\(idx + 1)/\(totalItems)）…"))
+            if stepIdx % 10 == 0 || stepIdx == sortedIndices.count - 1 {
+                let ratio = 0.55 + 0.40 * (Double(stepIdx + 1) / Double(totalItems))
+                onProgress?(EPUBToolboxProgress(fraction: ratio, stage: "正在处理资源（\(stepIdx + 1)/\(totalItems)）…"))
             }
+            let item = opf.manifest[manifestIdx]
             if writtenPaths.contains(item.path) { continue }
 
             let oldPath = reverseMap[item.path] ?? item.path
+            if let injected = injectedBinaryEntries[oldPath] {
+                try await writeEntry(path: item.path, data: injected, compression: .deflate)
+                continue
+            }
             guard let entry = entryByPath[oldPath] else { continue }
 
             let compression: CompressionMethod = .deflate
@@ -429,28 +531,52 @@ enum EPUBToolboxProcessor {
                     || !EPUBToolboxInspector.isWellFormedXML(data: Data(html.utf8))
                     || !html.contains("http://www.w3.org/1999/xhtml")
 
-                if options.mendXHTML {
-                    let mended = mendXHTMLDocument(
+                if needsDOMTransform {
+                    let transformed = transformXHTMLDocument(
                         html,
                         isEPUB3: opf.isEPUB3,
                         oldDirectory: oldDir,
                         newDirectory: newDir,
-                        pathMap: options.standardizeStructure ? pathMap : nil
+                        pathMap: options.standardizeStructure ? pathMap : nil,
+                        options: options
                     )
-                    if wasMalformed || mended != html {
-                        if wasMalformed { mendedXHTMLCount += 1 }
-                    }
-                    html = mended
+                    if options.mendXHTML && wasMalformed { mendedXHTMLCount += 1 }
+                    processedRubyCount += transformed.rubyCount
+                    standardizedFootnotesCount += transformed.footnoteCount
+                    if transformed.cleanedInlineStyles > 0 { cleanedStyleCount += 1 }
+                    html = transformed.html
                 } else if options.standardizeStructure {
                     html = rewriteHTMLPathsRegex(html, oldDirectory: oldDir, newDirectory: newDir, pathMap: pathMap)
                     html = rewriteCSSPaths(html, oldDirectory: oldDir, newDirectory: newDir, pathMap: pathMap)
                 }
+
+                if options.chineseConversion != .none {
+                    html = EPUBToolboxTransforms.convertHTML(html, option: options.chineseConversion)
+                }
                 try await writeEntry(path: item.path, data: Data(html.utf8), compression: .deflate)
             } else if item.isCSS {
                 let rawData = try await EPUBToolboxInspector.extractData(from: archive, entry: entry, limit: EPUBToolboxInspector.maxTextEntryBytes)
-                if options.standardizeStructure, let css = EPUBToolboxInspector.decodeText(rawData).text {
-                    let rewritten = rewriteCSSPaths(css, oldDirectory: oldDir, newDirectory: newDir, pathMap: pathMap)
-                    try await writeEntry(path: item.path, data: Data(rewritten.utf8), compression: .deflate)
+                let needsCSSRewrite = options.standardizeStructure
+                    || options.removeEmbeddedFonts
+                    || options.cleanForcedStyles
+                    || options.writingDirection != .keep
+                if needsCSSRewrite, let css = EPUBToolboxInspector.decodeText(rawData).text {
+                    var updated = css
+                    if options.standardizeStructure {
+                        updated = rewriteCSSPaths(updated, oldDirectory: oldDir, newDirectory: newDir, pathMap: pathMap)
+                    }
+                    if options.removeEmbeddedFonts {
+                        updated = EPUBToolboxTransforms.removeFontFaceRules(in: updated)
+                    }
+                    if options.cleanForcedStyles {
+                        let cleaned = EPUBToolboxTransforms.cleanForcedStyles(in: updated)
+                        if cleaned != updated { cleanedStyleCount += 1 }
+                        updated = cleaned
+                    }
+                    if options.writingDirection != .keep {
+                        updated = EPUBToolboxTransforms.applyWritingDirection(options.writingDirection, toCSS: updated)
+                    }
+                    try await writeEntry(path: item.path, data: Data(updated.utf8), compression: .deflate)
                 } else {
                     try await writeEntry(path: item.path, data: rawData, compression: .deflate)
                 }
@@ -471,12 +597,30 @@ enum EPUBToolboxProcessor {
                 } else {
                     try await writeEntry(path: item.path, data: rawData, compression: .deflate)
                 }
+            } else if item.isImage && options.imageCompression != .off {
+                let data = try await extractBinaryData(from: archive, entry: entry)
+                if let compressed = EPUBToolboxTransforms.compressImage(
+                    data: data,
+                    mediaType: item.mediaType,
+                    option: options.imageCompression
+                ) {
+                    opf.manifest[manifestIdx].mediaType = compressed.mediaType
+                    compressedImagesCount += 1
+                    compressedImagesSavedBytes += compressed.savedBytes
+                    try await writeEntry(path: item.path, data: compressed.data, compression: .deflate)
+                } else {
+                    try await writeEntry(path: item.path, data: data, compression: compression)
+                }
             } else {
                 // 二进制资源（图片、字体、音频等）直接拷贝字节，不进文本解码
                 let data = try await extractBinaryData(from: archive, entry: entry)
                 try await writeEntry(path: item.path, data: data, compression: compression)
             }
         }
+
+        // 7f) 写入最终规范化的 OPF（含图片压缩后可能更新的 media-type）
+        let opfContent = serializeOPF(opf)
+        try await writeEntry(path: targetOPFPath, data: Data(opfContent.utf8), compression: .deflate)
 
         // 若未启用 OPF 修复且未启用冗余清理，保留原包中未注册但未丢弃的非垃圾文件
         if !options.repairOPFTOCCover && !options.removeUnusedResources {
@@ -517,6 +661,17 @@ enum EPUBToolboxProcessor {
             repairedCover: repairedCover,
             removedUnusedCount: removedUnusedCount,
             removedUnusedBytes: removedUnusedBytes,
+            compressedImagesCount: compressedImagesCount,
+            compressedImagesSavedBytes: compressedImagesSavedBytes,
+            removedFontsCount: removedFontsCount,
+            removedFontsBytes: removedFontsBytes,
+            cleanedStyleCount: cleanedStyleCount,
+            convertedChinese: convertedChinese,
+            convertedWritingDirection: convertedWritingDirection,
+            upgradedToEPUB3: upgradedToEPUB3,
+            processedRubyCount: processedRubyCount,
+            standardizedFootnotesCount: standardizedFootnotesCount,
+            updatedMetadata: updatedMetadata,
             notes: notes
         )
     }
@@ -532,15 +687,23 @@ enum EPUBToolboxProcessor {
         try await EPUBToolboxInspector.extractData(from: archive, entry: entry, limit: 128 * 1024 * 1024)
     }
 
-    // MARK: - XHTML 良构修复与路径重写
+    // MARK: - XHTML 良构修复与专项 DOM 变换
 
-    private static func mendXHTMLDocument(
+    private struct XHTMLTransformOutput {
+        let html: String
+        let rubyCount: Int
+        let footnoteCount: Int
+        let cleanedInlineStyles: Int
+    }
+
+    private static func transformXHTMLDocument(
         _ html: String,
         isEPUB3: Bool,
         oldDirectory: String,
         newDirectory: String,
-        pathMap: [String: String]?
-    ) -> String {
+        pathMap: [String: String]?,
+        options: EPUBToolboxOptions
+    ) -> XHTMLTransformOutput {
         do {
             let doc = try SwiftSoup.parse(html)
             doc.outputSettings()
@@ -569,7 +732,6 @@ enum EPUBToolboxProcessor {
                         }
                     }
                 }
-                // 内联 style="..." 中的 url(...)
                 for element in try doc.select("[style]").array() {
                     let style = try element.attr("style")
                     if style.range(of: "url(", options: .caseInsensitive) != nil {
@@ -577,7 +739,6 @@ enum EPUBToolboxProcessor {
                         try element.attr("style", rewritten)
                     }
                 }
-                // <style> 标签块中的 CSS
                 for styleEl in try doc.select("style").array() {
                     let css = styleEl.data()
                     if !css.isEmpty {
@@ -590,7 +751,27 @@ enum EPUBToolboxProcessor {
                 }
             }
 
-            // 组装标准 XML 头 + DOCTYPE + <html>
+            let rubyCount = EPUBToolboxTransforms.processRuby(in: doc, mode: options.rubyHandling)
+            let footnoteCount = options.standardizeFootnotes ? EPUBToolboxTransforms.standardizeFootnotes(in: doc) : 0
+            let cleanedInline = options.cleanForcedStyles ? EPUBToolboxTransforms.cleanInlineForcedStyles(in: doc) : 0
+
+            if options.removeEmbeddedFonts || options.cleanForcedStyles {
+                for styleEl in try doc.select("style").array() {
+                    var css = styleEl.data()
+                    let original = css
+                    if options.removeEmbeddedFonts { css = EPUBToolboxTransforms.removeFontFaceRules(in: css) }
+                    if options.cleanForcedStyles { css = EPUBToolboxTransforms.cleanForcedStyles(in: css) }
+                    if css != original {
+                        try styleEl.text("")
+                        try styleEl.appendChild(DataNode(Array(css.utf8), []))
+                    }
+                }
+            }
+
+            if options.writingDirection != .keep {
+                EPUBToolboxTransforms.applyWritingDirection(options.writingDirection, toDoc: doc)
+            }
+
             let serializedHTML: String
             if let htmlRoot = try doc.select("html").first() {
                 serializedHTML = try htmlRoot.outerHtml()
@@ -600,15 +781,74 @@ enum EPUBToolboxProcessor {
             let doctype = isEPUB3
                 ? "<!DOCTYPE html>"
                 : "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN\" \"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">"
-            return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\(doctype)\n\(serializedHTML)\n"
+            return XHTMLTransformOutput(
+                html: "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\(doctype)\n\(serializedHTML)\n",
+                rubyCount: rubyCount,
+                footnoteCount: footnoteCount,
+                cleanedInlineStyles: cleanedInline
+            )
         } catch {
-            // 极端情况下 SwiftSoup 解析失败，回退正则路径重写
             if let pathMap {
                 var fallback = rewriteHTMLPathsRegex(html, oldDirectory: oldDirectory, newDirectory: newDirectory, pathMap: pathMap)
                 fallback = rewriteCSSPaths(fallback, oldDirectory: oldDirectory, newDirectory: newDirectory, pathMap: pathMap)
-                return fallback
+                return XHTMLTransformOutput(html: fallback, rubyCount: 0, footnoteCount: 0, cleanedInlineStyles: 0)
             }
-            return html
+            return XHTMLTransformOutput(html: html, rubyCount: 0, footnoteCount: 0, cleanedInlineStyles: 0)
+        }
+    }
+
+    private static func isFontItem(_ item: EPUBToolboxManifestItem) -> Bool {
+        let mt = item.mediaType.lowercased()
+        return mt.hasPrefix("font/") || mt.contains("font") || isFontPath(item.path)
+    }
+
+    private static func isFontPath(_ path: String) -> Bool {
+        ["ttf", "otf", "woff", "woff2", "ttc"].contains(EPUBToolboxPath.pathExtension(of: path))
+    }
+
+    private static func convertTOCNodes(_ nodes: [EPUBToolboxTOCNode], option: EPUBChineseConversionOption) -> [EPUBToolboxTOCNode] {
+        nodes.map { node in
+            EPUBToolboxTOCNode(
+                title: EPUBToolboxTransforms.convertText(node.title, option: option),
+                path: node.path,
+                fragment: node.fragment,
+                children: convertTOCNodes(node.children, option: option)
+            )
+        }
+    }
+
+    private static func applyMetadataOverride(
+        _ meta: EPUBMetadataOverride,
+        in opf: inout EPUBToolboxParsedOPF,
+        makeUniqueID: (String) -> String,
+        injectedBinaryEntries: inout [String: Data]
+    ) {
+        func replaceDC(localName: String, tagName: String, value: String?) {
+            guard let raw = value else { return }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            opf.metadataEntries.removeAll { EPUBToolboxParsedOPF.localName($0.tagName) == localName }
+            if !trimmed.isEmpty {
+                opf.metadataEntries.append(EPUBToolboxMetadataEntry(tagName: tagName, attributes: [], text: trimmed))
+            }
+        }
+        replaceDC(localName: "title", tagName: "dc:title", value: meta.title)
+        replaceDC(localName: "creator", tagName: "dc:creator", value: meta.author)
+        replaceDC(localName: "language", tagName: "dc:language", value: meta.language)
+        replaceDC(localName: "description", tagName: "dc:description", value: meta.description)
+
+        if let coverData = meta.coverImageData, !coverData.isEmpty {
+            let ext = meta.coverMediaType.lowercased().contains("png") ? "png" : "jpg"
+            let path = "OEBPS/Images/cover_custom.\(ext)"
+            let id = makeUniqueID("cover_custom_")
+            injectedBinaryEntries[path] = coverData
+            opf.manifest.append(EPUBToolboxManifestItem(
+                id: id,
+                path: path,
+                mediaType: meta.coverMediaType,
+                properties: opf.isEPUB3 ? ["cover-image"] : [],
+                fallback: nil
+            ))
+            _ = applyCoverDeclaration(coverID: id, in: &opf)
         }
     }
 

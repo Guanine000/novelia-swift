@@ -117,7 +117,7 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 | 收藏与历史 | `Library/FavoritesStore.swift`、`ReadingHistoryStore.swift`、`ShelfViews.swift` | 账号相关远端状态、收藏操作、历史与续读 |
 | 文库 | `Wenku/WenkuStore.swift`、`WenkuViews.swift` | 远端文库查询、详情和收藏；本地文件另由书库 Store 管理 |
 | 下载与导入 | `Downloads/WebNovelDownloadStore.swift`、`Library/WenkuLocalLibraryStore.swift`、`Library/KindleImport/` | 下载、导入（含 AZW3／MOBI 转 EPUB 与 EPUB 轻量结构体检）、文件位置、记录写入及同步书籍接口 |
-| EPUB 工具箱 | `EPUBToolbox/EPUBToolboxModels.swift`、`EPUBToolboxInspector.swift`、`EPUBToolboxProcessor.swift`、`EPUBToolboxViews.swift` | EPUB 轻量／深度体检、目录结构标准化（Sigil Norm）、XHTML 良构修复、OPF／目录／封面修复、冗余资源清理与工具箱界面 |
+| EPUB 工具箱 | `EPUBToolbox/EPUBToolboxModels.swift`、`EPUBToolboxInspector.swift`、`EPUBToolboxTransforms.swift`、`EPUBToolboxProcessor.swift`、`EPUBToolboxMultiBook.swift`、`EPUBToolboxViews.swift`、`EPUBToolboxEditors.swift`、`EPUBToolboxBatchAndMultiViews.swift` | EPUB 轻量／深度体检、目录标准化、XHTML 良构修复、OPF／目录／封面修复、冗余清理、图片瘦身、样式字体清洗、简繁／横竖排／EPUB 3 升级、Ruby 与注释处理、元数据与目录编辑、文件浏览器、TXT 导出、多卷合并拆分与批量处理 |
 | 阅读器 | `Reader/ReaderView.swift`、`TXTReaderView.swift`、`EPUBReader/` | 在线/TXT 滚动与分页、EPUB 阅读、引擎和位置转换 |
 | 社区 | `Community/ForumStore.swift`、列表/详情/编辑/Markdown 页面 | 论坛查询、筛选、正文、评论、编辑与链接交互 |
 | 统计 | `Statistics/ReadingStatisticsViews.swift`；Core 的 `Features/Statistics/` | 图表与明细、阅读记录、设备统计及合并 |

@@ -56,6 +56,14 @@
 		E95F00000000000000000003 /* EPUBToolboxProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E91000000000000000000003 /* EPUBToolboxProcessor.swift */; };
 		E90000000000000000000004 /* EPUBToolboxViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E91000000000000000000004 /* EPUBToolboxViews.swift */; };
 		E95F00000000000000000004 /* EPUBToolboxViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E91000000000000000000004 /* EPUBToolboxViews.swift */; };
+		E90000000000000000000005 /* EPUBToolboxTransforms.swift in Sources */ = {isa = PBXBuildFile; fileRef = E91000000000000000000005 /* EPUBToolboxTransforms.swift */; };
+		E95F00000000000000000005 /* EPUBToolboxTransforms.swift in Sources */ = {isa = PBXBuildFile; fileRef = E91000000000000000000005 /* EPUBToolboxTransforms.swift */; };
+		E90000000000000000000006 /* EPUBToolboxMultiBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = E91000000000000000000006 /* EPUBToolboxMultiBook.swift */; };
+		E95F00000000000000000006 /* EPUBToolboxMultiBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = E91000000000000000000006 /* EPUBToolboxMultiBook.swift */; };
+		E90000000000000000000007 /* EPUBToolboxEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = E91000000000000000000007 /* EPUBToolboxEditors.swift */; };
+		E95F00000000000000000007 /* EPUBToolboxEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = E91000000000000000000007 /* EPUBToolboxEditors.swift */; };
+		E90000000000000000000008 /* EPUBToolboxBatchAndMultiViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E91000000000000000000008 /* EPUBToolboxBatchAndMultiViews.swift */; };
+		E95F00000000000000000008 /* EPUBToolboxBatchAndMultiViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E91000000000000000000008 /* EPUBToolboxBatchAndMultiViews.swift */; };
 		A10000000000000000000021 /* EPUBPagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000018 /* EPUBPagerView.swift */; };
 		A10000000000000000000022 /* EPUBReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000019 /* EPUBReaderModel.swift */; };
 		A10000000000000000000023 /* EPUBReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000020 /* EPUBReaderView.swift */; };
@@ -419,6 +427,10 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		E91000000000000000000002 /* EPUBToolboxInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/EPUBToolbox/EPUBToolboxInspector.swift; sourceTree = SOURCE_ROOT; };
 		E91000000000000000000003 /* EPUBToolboxProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/EPUBToolbox/EPUBToolboxProcessor.swift; sourceTree = SOURCE_ROOT; };
 		E91000000000000000000004 /* EPUBToolboxViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/EPUBToolbox/EPUBToolboxViews.swift; sourceTree = SOURCE_ROOT; };
+		E91000000000000000000005 /* EPUBToolboxTransforms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/EPUBToolbox/EPUBToolboxTransforms.swift; sourceTree = SOURCE_ROOT; };
+		E91000000000000000000006 /* EPUBToolboxMultiBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/EPUBToolbox/EPUBToolboxMultiBook.swift; sourceTree = SOURCE_ROOT; };
+		E91000000000000000000007 /* EPUBToolboxEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/EPUBToolbox/EPUBToolboxEditors.swift; sourceTree = SOURCE_ROOT; };
+		E91000000000000000000008 /* EPUBToolboxBatchAndMultiViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iOSApp/Features/EPUBToolbox/EPUBToolboxBatchAndMultiViews.swift; sourceTree = SOURCE_ROOT; };
 		B10000000000000000000018 /* EPUBPagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBPagerView.swift; sourceTree = "<group>"; };
 		B10000000000000000000019 /* EPUBReaderModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBReaderModel.swift; sourceTree = "<group>"; };
 		B10000000000000000000020 /* EPUBReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBReaderView.swift; sourceTree = "<group>"; };
@@ -738,6 +750,10 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				E91000000000000000000002 /* EPUBToolboxInspector.swift */,
 				E91000000000000000000003 /* EPUBToolboxProcessor.swift */,
 				E91000000000000000000004 /* EPUBToolboxViews.swift */,
+				E91000000000000000000005 /* EPUBToolboxTransforms.swift */,
+				E91000000000000000000006 /* EPUBToolboxMultiBook.swift */,
+				E91000000000000000000007 /* EPUBToolboxEditors.swift */,
+				E91000000000000000000008 /* EPUBToolboxBatchAndMultiViews.swift */,
 				F7A000000000000000000008 /* LibraryWordCounts.swift */,
 				E81000000000000000000001 /* KindleEPUBConverter.swift */,
 				E81000000000000000000002 /* KindleCSSMediaFlattener.swift */,
@@ -1215,6 +1231,10 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				E90000000000000000000002 /* EPUBToolboxInspector.swift in Sources */,
 				E90000000000000000000003 /* EPUBToolboxProcessor.swift in Sources */,
 				E90000000000000000000004 /* EPUBToolboxViews.swift in Sources */,
+				E90000000000000000000005 /* EPUBToolboxTransforms.swift in Sources */,
+				E90000000000000000000006 /* EPUBToolboxMultiBook.swift in Sources */,
+				E90000000000000000000007 /* EPUBToolboxEditors.swift in Sources */,
+				E90000000000000000000008 /* EPUBToolboxBatchAndMultiViews.swift in Sources */,
 				A10000000000000000000021 /* EPUBPagerView.swift in Sources */,
 				A10000000000000000000022 /* EPUBReaderModel.swift in Sources */,
 				A10000000000000000000023 /* EPUBReaderView.swift in Sources */,
@@ -1405,6 +1425,10 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				E95F00000000000000000002 /* EPUBToolboxInspector.swift in Sources */,
 				E95F00000000000000000003 /* EPUBToolboxProcessor.swift in Sources */,
 				E95F00000000000000000004 /* EPUBToolboxViews.swift in Sources */,
+				E95F00000000000000000005 /* EPUBToolboxTransforms.swift in Sources */,
+				E95F00000000000000000006 /* EPUBToolboxMultiBook.swift in Sources */,
+				E95F00000000000000000007 /* EPUBToolboxEditors.swift in Sources */,
+				E95F00000000000000000008 /* EPUBToolboxBatchAndMultiViews.swift in Sources */,
 				A15F0000000000000000005E /* EPUBReaderView.swift in Sources */,
 				A15F000000000000000001A0 /* AnnotationEditor.swift in Sources */,
 				A15F0000000000000000005F /* EPUBSampleBook.swift in Sources */,

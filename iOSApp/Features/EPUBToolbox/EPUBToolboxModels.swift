@@ -1,7 +1,109 @@
 // SPDX-License-Identifier: GPL-3.0-only
 import Foundation
 
-/// EPUB 工具箱四项处理能力的独立开关。
+/// 图片压缩档位（使用系统 ImageIO，仅在压缩后体积确有减小时替换）。
+enum EPUBImageCompressionOption: String, CaseIterable, Identifiable, Equatable, Sendable {
+    case off
+    case high
+    case balanced
+    case compact
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .off: "不压缩"
+        case .high: "高清瘦身（2048px · 85%）"
+        case .balanced: "均衡瘦身（1600px · 78%）"
+        case .compact: "极限瘦身（1200px · 70%）"
+        }
+    }
+
+    var maxPixelSize: Int {
+        switch self {
+        case .off: 0
+        case .high: 2048
+        case .balanced: 1600
+        case .compact: 1200
+        }
+    }
+
+    var jpegQuality: Double {
+        switch self {
+        case .off: 1.0
+        case .high: 0.85
+        case .balanced: 0.78
+        case .compact: 0.70
+        }
+    }
+}
+
+/// 全书简繁转换选项（复用项目内置简繁词表与语言标记修正）。
+enum EPUBChineseConversionOption: String, CaseIterable, Identifiable, Equatable, Sendable {
+    case none
+    case toSimplified
+    case toTraditional
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none: "保持原文"
+        case .toSimplified: "转为简体中文"
+        case .toTraditional: "轉為繁體中文（台灣常用詞）"
+        }
+    }
+}
+
+/// 横排 / 竖排一键转换选项。
+enum EPUBWritingDirectionTransform: String, CaseIterable, Identifiable, Equatable, Sendable {
+    case keep
+    case horizontal
+    case vertical
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .keep: "保持原样"
+        case .horizontal: "转为横排（从左到右）"
+        case .vertical: "转为竖排（从右到左）"
+        }
+    }
+}
+
+/// Ruby 注音处理模式。
+enum EPUBRubyHandling: String, CaseIterable, Identifiable, Equatable, Sendable {
+    case keep
+    case removeAnnotations
+    case inlineParentheses
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .keep: "保留原样"
+        case .removeAnnotations: "移除所有注音"
+        case .inlineParentheses: "转为「底文（读音）」"
+        }
+    }
+}
+
+/// 写入 EPUB 文件的元数据与封面覆盖项（nil 表示保留原书字段）。
+struct EPUBMetadataOverride: Equatable, Sendable {
+    var title: String?
+    var author: String?
+    var language: String?
+    var description: String?
+    var coverImageData: Data?
+    var coverMediaType: String = "image/jpeg"
+
+    var hasAnyOverride: Bool {
+        title != nil || author != nil || language != nil || description != nil || coverImageData != nil
+    }
+}
+
+/// EPUB 工具箱单书处理选项（全部支持独立开关与自由组合）。
 struct EPUBToolboxOptions: Equatable, Sendable {
     /// EPUB 目录结构标准化（Sigil Norm：`OEBPS/{Text,Styles,Images,Fonts,Misc}` + 相对路径重写）。
     var standardizeStructure = true
@@ -12,8 +114,42 @@ struct EPUBToolboxOptions: Equatable, Sendable {
     /// 冗余资源清理（移除未被正文、目录、封面或样式表引用的图片、样式表、字体与杂项）。
     var removeUnusedResources = true
 
+    /// 图片瘦身压缩。
+    var imageCompression: EPUBImageCompressionOption = .off
+    /// 元数据与封面覆写。
+    var metadataOverride: EPUBMetadataOverride?
+    /// 移除内嵌字体文件并清理 CSS 中的 `@font-face`。
+    var removeEmbeddedFonts = false
+    /// 清理 CSS 与内联样式中写死的字色、底色、字号、行高与字体族。
+    var cleanForcedStyles = false
+    /// 全书简繁转换。
+    var chineseConversion: EPUBChineseConversionOption = .none
+    /// 横排 / 竖排转换。
+    var writingDirection: EPUBWritingDirectionTransform = .keep
+    /// EPUB 2 → EPUB 3 升级。
+    var upgradeToEPUB3 = false
+    /// Ruby 注音处理。
+    var rubyHandling: EPUBRubyHandling = .keep
+    /// 注释标准化（将多看等常见非标准脚注转为标准 EPUB 3 noteref / footnote）。
+    var standardizeFootnotes = false
+    /// 目录可视化编辑器手工修订后的目录（非 nil 时写入 NCX 与 Nav）。
+    var customTOC: [EPUBToolboxTOCNode]?
+
     var hasAnyEnabled: Bool {
-        standardizeStructure || mendXHTML || repairOPFTOCCover || removeUnusedResources
+        standardizeStructure
+            || mendXHTML
+            || repairOPFTOCCover
+            || removeUnusedResources
+            || imageCompression != .off
+            || (metadataOverride?.hasAnyOverride == true)
+            || removeEmbeddedFonts
+            || cleanForcedStyles
+            || chineseConversion != .none
+            || writingDirection != .keep
+            || upgradeToEPUB3
+            || rubyHandling != .keep
+            || standardizeFootnotes
+            || customTOC != nil
     }
 
     static let all = EPUBToolboxOptions()
@@ -138,6 +274,17 @@ struct EPUBToolboxResult: Equatable, Sendable {
     let repairedCover: Bool
     let removedUnusedCount: Int
     let removedUnusedBytes: Int64
+    var compressedImagesCount: Int = 0
+    var compressedImagesSavedBytes: Int64 = 0
+    var removedFontsCount: Int = 0
+    var removedFontsBytes: Int64 = 0
+    var cleanedStyleCount: Int = 0
+    var convertedChinese: Bool = false
+    var convertedWritingDirection: Bool = false
+    var upgradedToEPUB3: Bool = false
+    var processedRubyCount: Int = 0
+    var standardizedFootnotesCount: Int = 0
+    var updatedMetadata: Bool = false
     let notes: [String]
 
     var totalChangesCount: Int {
@@ -148,7 +295,28 @@ struct EPUBToolboxResult: Equatable, Sendable {
             + (repairedTOC ? 1 : 0)
             + (repairedCover ? 1 : 0)
             + removedUnusedCount
+            + compressedImagesCount
+            + removedFontsCount
+            + cleanedStyleCount
+            + (convertedChinese ? 1 : 0)
+            + (convertedWritingDirection ? 1 : 0)
+            + (upgradedToEPUB3 ? 1 : 0)
+            + processedRubyCount
+            + standardizedFootnotesCount
+            + (updatedMetadata ? 1 : 0)
     }
+}
+
+/// 内部文件浏览器展示的单条压缩包资源信息。
+struct EPUBArchiveEntryInfo: Identifiable, Equatable, Sendable {
+    let id: String
+    let path: String
+    let category: String
+    let uncompressedBytes: Int64
+    let compressedBytes: Int64
+    let isCompressed: Bool
+    let isTextPreviewable: Bool
+    let isReferenced: Bool
 }
 
 /// 处理阶段进度回调数据。
