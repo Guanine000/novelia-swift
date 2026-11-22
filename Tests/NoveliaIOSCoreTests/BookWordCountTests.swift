@@ -54,6 +54,54 @@ final class BookWordCountTests: XCTestCase {
         let counts = BookWordCount.tocCounts(entrySpines: [1, 1, 3, nil, 9], chapterCounts: chapters)
         XCTAssertEqual(counts, [300, nil, 700, nil, nil])
         XCTAssertEqual(BookWordCount.tocCounts(entrySpines: [], chapterCounts: chapters), [])
+        // 全是同级时，传入层级与省略层级一致，平铺目录仍按下一章截断。
+        let flatLevels = [0, 0, 0, 0, 0]
+        XCTAssertEqual(BookWordCount.tocCounts(entrySpines: [1, 1, 3, nil, 9], chapterCounts: chapters, levels: flatLevels),
+                       [300, nil, 700, nil, nil])
+        XCTAssertEqual(BookWordCount.tocCounts(entrySpines: [0, 1, 2, 3, 4], chapterCounts: chapters, levels: flatLevels),
+                       [10, 100, 200, 300, 400])
+    }
+
+    func testNestedTOCParentShowsTotalIncludingChildrenAndIntro() {
+        // spine：封面 10、章首正文 50、子章甲 100、子章乙 80、下一同级章 40。
+        let chapters = [10, 50, 100, 80, 40]
+        let counts = BookWordCount.tocCounts(entrySpines: [1, 2, 3, 4], chapterCounts: chapters, levels: [0, 1, 1, 0])
+        let intro = 50
+        let children = 100 + 80
+        XCTAssertEqual(counts, [intro + children, 100, 80, 40])
+        XCTAssertNotEqual(counts[0], intro, "父章不能只显示扣掉子章后的剩余")
+        XCTAssertEqual(counts[0], intro + (counts[1] ?? 0) + (counts[2] ?? 0))
+    }
+
+    func testNestedTOCParentIncludesGrandchildrenUntilNextNonDescendant() {
+        // 卷 0、章 1、节 2（跨到 spine 3）、下一章 4、下一卷 6。中间 spine 3 没有单独目录项。
+        let chapters = [10, 20, 30, 40, 50, 60, 70]
+        let counts = BookWordCount.tocCounts(
+            entrySpines: [0, 1, 2, 4, 6],
+            chapterCounts: chapters,
+            levels: [0, 1, 2, 1, 0])
+        XCTAssertEqual(counts[0], 10 + 20 + 30 + 40 + 50 + 60)
+        XCTAssertEqual(counts[1], 20 + 30 + 40)
+        XCTAssertEqual(counts[2], 30 + 40)
+        XCTAssertEqual(counts[3], 50 + 60)
+        XCTAssertEqual(counts[4], 70)
+        XCTAssertNotEqual(counts[0], 10)
+        XCTAssertNotEqual(counts[1], 20)
+    }
+
+    func testSameSpineChildStaysHiddenWhileParentKeepsFullRange() {
+        // 父项与第一个子项指向同一文件，无法拆开；后续子项有独立文件。父项仍显示到下一同级之前的合计。
+        let chapters = [5, 20, 30, 40, 50]
+        let counts = BookWordCount.tocCounts(entrySpines: [1, 1, 2, 4], chapterCounts: chapters, levels: [0, 1, 1, 0])
+        XCTAssertEqual(counts, [20 + 30 + 40, nil, 30 + 40, 50])
+    }
+
+    func testMismatchedTOCLevelsFallBackToFlatSpans() {
+        let chapters = [10, 50, 100]
+        let spines = [0, 1, 2]
+        let flat = BookWordCount.tocCounts(entrySpines: spines, chapterCounts: chapters)
+        XCTAssertEqual(BookWordCount.tocCounts(entrySpines: spines, chapterCounts: chapters, levels: [0, 1]), flat)
+        XCTAssertEqual(flat, [10, 50, 100])
     }
 
     func testFormat() {

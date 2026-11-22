@@ -109,7 +109,7 @@ extension ReadiumEPUBReaderModel {
     }
 
     /// 目录显示的字数：EPUB 按原生容器的 spine 统计并缓存（目录项按文件路径换算 spine 序号），
-    /// TXT 由打开方提供；在线小说为 nil。
+    /// 再按展平目录的层级把父项展示为范围内的合计。TXT 由打开方提供；在线小说为 nil。
     func tocWordCounts() async -> ReaderTOCWordCounts? {
         if let textBook { return await textBook.tocWordCounts?() }
         guard let container = imageContainer, let hash = bookHash else { return nil }
@@ -118,7 +118,8 @@ extension ReadiumEPUBReaderModel {
             let path = EPUBContainer.stripFragment(string.removingPercentEncoding ?? string)
             return container.spine.firstIndex { EPUBContainer.normalizePath(path) == $0.href || path.hasSuffix("/" + $0.href) }
         }
-        return await BookWordCounter.epubTOCCounts(fileURL: container.fileURL, hash: hash, entrySpines: spines)
+        return await BookWordCounter.epubTOCCounts(fileURL: container.fileURL, hash: hash,
+                                                   entrySpines: spines, levels: toc.map(\.level))
     }
 
     /// 图片列表记录的是原生容器的 spine 序号；Readium 的 readingOrder 可能不含非线性条目，按文件路径换算。

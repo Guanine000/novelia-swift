@@ -173,12 +173,14 @@ extension EPUBReaderModel {
 
     // MARK: 字数
 
-    /// 目录显示的字数：EPUB 按 spine 统计并缓存，TXT 由打开方提供；在线小说为 nil，不为字数逐章联网。
+    /// 目录显示的字数：EPUB 按 spine 统计并缓存，再按目录层级把父项展示为范围内的合计；
+    /// TXT 由打开方提供；在线小说为 nil，不为字数逐章联网。
     func tocWordCounts() async -> ReaderTOCWordCounts? {
         if let textTOCWordCounts { return await textTOCWordCounts() }
         guard let container, let hash = openedBookHash else { return nil }
         return await BookWordCounter.epubTOCCounts(fileURL: container.fileURL, hash: hash,
-                                                   entrySpines: container.toc.map(\.spineIndex))
+                                                   entrySpines: container.toc.map(\.spineIndex),
+                                                   levels: container.toc.map(\.level))
     }
 
     /// 当前显示的页（双页时两页）在本章内的比例范围。

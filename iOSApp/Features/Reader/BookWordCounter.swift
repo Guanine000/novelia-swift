@@ -33,11 +33,15 @@ enum BookWordCounter {
         return ReaderTOCWordCounts(total: total?.total ?? chapters.reduce(0, +), entries: chapters)
     }
 
-    /// EPUB 目录各条目的字数，条目按 spine 序号对应（见 `BookWordCount.tocCounts`）。
-    static func epubTOCCounts(fileURL: URL, hash: String, entrySpines: [Int?]) async -> ReaderTOCWordCounts? {
+    /// EPUB 目录各条目的展示字数。`levels` 与目录条目一一对应；有层级时父项显示范围内的合计
+    /// （含子项与不属于子项的卷首／章首正文），子项仍显示自身范围。见 `BookWordCount.tocCounts`。
+    /// 不改写缓存里的逐 spine 字数和全书总数。
+    static func epubTOCCounts(fileURL: URL, hash: String, entrySpines: [Int?], levels: [Int]? = nil) async -> ReaderTOCWordCounts? {
         guard let counts = try? await counts(fileURL: fileURL, format: .epub, hash: hash) else { return nil }
         return ReaderTOCWordCounts(total: counts.total,
-                                   entries: BookWordCount.tocCounts(entrySpines: entrySpines, chapterCounts: counts.chapters))
+                                   entries: BookWordCount.tocCounts(entrySpines: entrySpines,
+                                                                    chapterCounts: counts.chapters,
+                                                                    levels: levels))
     }
 }
 
