@@ -49,13 +49,26 @@ public enum BookWordCount {
 
     private static let generatedTXTTitles: Set = ["全文", "前言"]
 
-    /// 目录各条目的字数：从条目所在的分页单位（EPUB spine 项）起，到下一个位置更靠后的条目之前。
-    /// 没有位置或与前面的条目指向同一单位的条目为 nil（同一文件内的锚点无法拆分字数）。
-    public static func tocCounts(entrySpines: [Int?], chapterCounts: [Int]) -> [Int?] {
+    /// 目录各条目的展示字数。只重排已经统计好的 spine 字数，不改变逐 spine 结果或全书总数。
+    ///
+    /// 没有层级（或 `levels` 与条目数量不一致）时，从条目所在 spine 累加到下一个位置更靠后的条目之前。
+    /// 提供等长层级时，父项累加到下一个非后代（层级不更深）且位置更靠后的条目之前，因此展示值是该范围的合计：
+    /// 包含嵌套子项，也包含夹在父项起点与第一个子项之间、不属于任何子项的卷首或章首正文。
+    /// 子项仍只统计自身范围。没有位置、spine 越界，或与前面条目指向同一 spine 的条目为 nil
+    /// （同一文件内的锚点无法拆分字数）。
+    ///
+    /// 剩余阅读时间与回顾按目录 spine 起点切章，不读取这里的展示值。
+    public static func tocCounts(entrySpines: [Int?], chapterCounts: [Int], levels: [Int]? = nil) -> [Int?] {
+        let resolvedLevels = levels?.count == entrySpines.count ? levels : nil
         var seen = Set<Int>()
         return entrySpines.enumerated().map { index, spine in
             guard let spine, chapterCounts.indices.contains(spine), seen.insert(spine).inserted else { return nil }
-            let next = entrySpines[(index + 1)...].lazy.compactMap { $0 }.first { $0 > spine }
+            let level = resolvedLevels?[index] ?? 0
+            let next = entrySpines[(index + 1)...].enumerated().lazy.compactMap { offset, candidate -> Int? in
+                guard let candidate, candidate > spine else { return nil }
+                if let resolvedLevels, resolvedLevels[index + 1 + offset] > level { return nil }
+                return candidate
+            }.first
             let end = min(next ?? chapterCounts.count, chapterCounts.count)
             return chapterCounts[spine..<end].reduce(0, +)
         }
