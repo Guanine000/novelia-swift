@@ -767,59 +767,290 @@ struct LibraryRecentCarousel: View {
     }
 }
 
+/// 系列展示所需的只读摘要：共同作者、已读统计、整体进度与续读目标，供系列列表行与详情头卡共用。
+struct LibrarySeriesSummary {
+    let totalCount: Int
+    let completedCount: Int
+    let averageProgress: Double
+    let primaryAuthor: String?
+    let continueBook: LibraryBook?
+    let hasStarted: Bool
+    let statusLine: String
+
+    @MainActor
+    init(books: [LibraryBook], state: LibraryStateStore) {
+        totalCount = books.count
+        var completed = 0
+        var progressSum = 0.0
+        var latestBook: LibraryBook?
+        var latestDate: Date?
+        var latestDetail: String?
+        var authorCounts: [String: Int] = [:]
+
+        for book in books {
+            let trimmedAuthor = book.author.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedAuthor.isEmpty {
+                authorCounts[trimmedAuthor, default: 0] += 1
+            }
+            let reading = state.status(for: book)
+            let isDone = state.bookStatus(for: book) == .completed || (reading.fraction ?? 0) >= 0.98
+            if isDone {
+                completed += 1
+                progressSum += 1.0
+            } else if let fraction = reading.fraction {
+                progressSum += min(max(fraction, 0), 1)
+            }
+            if let date = reading.lastReadAt, latestDate == nil || date > latestDate! {
+                latestDate = date
+                latestBook = book
+                latestDetail = reading.detail
+            }
+        }
+
+        completedCount = completed
+        averageProgress = books.isEmpty ? 0 : progressSum / Double(books.count)
+        if let top = authorCounts.max(by: { $0.value < $1.value }), top.value * 2 >= books.count {
+            primaryAuthor = top.key
+        } else {
+            primaryAuthor = nil
+        }
+        continueBook = latestBook ?? books.first
+        hasStarted = latestBook != nil || completed > 0 || progressSum > 0
+
+        if books.isEmpty {
+            statusLine = "暂无书籍"
+        } else if completed == books.count {
+            statusLine = "全部已读"
+        } else if let latestBook, let latestDetail {
+            statusLine = "最近：\(latestBook.title) · \(latestDetail)"
+        } else {
+            statusLine = "尚未开始阅读"
+        }
+    }
+}
+
+/// 整齐的阶梯式书封堆叠：底部对齐、向右依次错开，无离屏阴影，用于系列列表行与详情头卡。
+struct LibrarySeriesCoverStack: View {
+    let books: [LibraryBook]
+    var coverWidth: CGFloat = 54
+    var coverHeight: CGFloat = 76
+    var fixedWidth: Bool = true
+
+    private var extraWidth: CGFloat {
+        if fixedWidth { return 16 }
+        if books.count > 2 { return 16 }
+        if books.count > 1 { return 8 }
+        return 0
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            if books.count > 2 {
+                LibraryCoverView(book: books[2], width: coverWidth * 0.86, height: coverHeight * 0.86, elevated: false)
+                    .opacity(0.65)
+                    .offset(x: 16)
+            }
+            if books.count > 1 {
+                LibraryCoverView(book: books[1], width: coverWidth * 0.93, height: coverHeight * 0.93, elevated: false)
+                    .opacity(0.86)
+                    .offset(x: 8)
+            }
+            if let first = books.first {
+                LibraryCoverView(book: first, width: coverWidth, height: coverHeight, elevated: false)
+            } else {
+                RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous)
+                    .fill(NoveliaStyle.brandGreen.opacity(0.10))
+                    .frame(width: coverWidth, height: coverHeight)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous)
+                            .stroke(NoveliaStyle.hairline, lineWidth: 0.5)
+                    )
+                    .overlay(
+                        Image(systemName: "rectangle.stack")
+                            .font(.system(size: coverWidth * 0.34, weight: .medium))
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                    )
+            }
+        }
+        .frame(width: coverWidth + extraWidth, height: coverHeight, alignment: .bottomLeading)
+        .accessibilityHidden(true)
+    }
+}
+
 struct LibrarySeriesRow: View {
+    @EnvironmentObject private var state: LibraryStateStore
     let name: String
     let books: [LibraryBook]
 
     var body: some View {
-        HStack(spacing: 14) {
-            ZStack(alignment: .bottomLeading) {
-                if books.count > 2 {
-                    LibraryCoverView(book: books[2], width: 44, height: 62)
-                        .rotationEffect(.degrees(7))
-                        .opacity(0.55)
-                        .offset(x: 16, y: -10)
-                }
-                if books.count > 1 {
-                    LibraryCoverView(book: books[1], width: 46, height: 64)
-                        .rotationEffect(.degrees(3.5))
-                        .opacity(0.78)
-                        .offset(x: 8, y: -5)
-                }
-                if let first = books.first {
-                    LibraryCoverView(book: first, width: 48, height: 66, elevated: false)
-                } else {
-                    RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous)
-                        .fill(NoveliaStyle.brandGreen.opacity(0.12))
-                        .frame(width: 48, height: 66)
-                        .overlay(Image(systemName: "rectangle.stack").foregroundStyle(NoveliaStyle.brandGreen))
-                }
-            }
-            .frame(width: 68, height: 76, alignment: .bottomLeading)
-            VStack(alignment: .leading, spacing: 4) {
+        let summary = LibrarySeriesSummary(books: books, state: state)
+        HStack(alignment: .center, spacing: 14) {
+            LibrarySeriesCoverStack(books: books, coverWidth: 54, coverHeight: 76)
+            VStack(alignment: .leading, spacing: 5) {
                 Text(name)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(NoveliaStyle.ink)
                     .lineLimit(2)
-                Text("\(books.count) 本")
-                    .font(NoveliaStyle.fontFootnote)
-                    .foregroundStyle(NoveliaStyle.muted)
+
+                HStack(spacing: 5) {
+                    Text("共 \(summary.totalCount) 本")
+                    if summary.completedCount > 0 {
+                        Text("·")
+                        Text("已读 \(summary.completedCount) 本")
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                    }
+                    if let author = summary.primaryAuthor {
+                        Text("·")
+                        Text(author)
+                            .lineLimit(1)
+                    }
+                }
+                .font(NoveliaStyle.fontCaption)
+                .foregroundStyle(NoveliaStyle.muted)
+
+                Text(summary.statusLine)
+                    .font(NoveliaStyle.fontMicro)
+                    .foregroundStyle(summary.hasStarted ? NoveliaStyle.brandGreen : NoveliaStyle.muted)
+                    .lineLimit(1)
+
+                if summary.totalCount > 0 {
+                    Capsule()
+                        .fill(NoveliaStyle.hairline)
+                        .frame(height: 3)
+                        .overlay {
+                            Capsule()
+                                .fill(NoveliaStyle.brandGreen)
+                                .scaleEffect(x: min(1, max(0, summary.averageProgress)), y: 1, anchor: .leading)
+                        }
+                        .padding(.top, 2)
+                }
             }
-            Spacer()
+            Spacer(minLength: 4)
             Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(NoveliaStyle.muted.opacity(0.6))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(NoveliaStyle.muted.opacity(0.55))
         }
         .padding(.vertical, 10)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(NoveliaStyle.hairline)
                 .frame(height: 0.5)
-                .padding(.leading, 82)
+                .padding(.leading, 84)
                 .allowsHitTesting(false)
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(name)，共 \(summary.totalCount) 本，\(summary.statusLine)")
+    }
+}
+
+/// 系列详情顶部概览卡：展示堆叠封面、作者与进度统计，并提供一键续读、添加书籍与检查新卷快捷入口。
+struct LibrarySeriesHeaderCard: View {
+    @EnvironmentObject private var state: LibraryStateStore
+    let name: String
+    let books: [LibraryBook]
+    let onContinue: (LibraryBook) -> Void
+    let onAddBooks: () -> Void
+    let onCheckNewVolumes: () -> Void
+
+    var body: some View {
+        let summary = LibrarySeriesSummary(books: books, state: state)
+        let stackBooks: [LibraryBook] = {
+            guard let lead = summary.continueBook else { return books }
+            return [lead] + books.filter { $0.key != lead.key }
+        }()
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 16) {
+                LibrarySeriesCoverStack(books: stackBooks, coverWidth: 68, coverHeight: 96, fixedWidth: false)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(name)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(NoveliaStyle.ink)
+                        .lineLimit(2)
+
+                    if let author = summary.primaryAuthor {
+                        Text(author)
+                            .font(NoveliaStyle.fontBody)
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .lineLimit(1)
+                    }
+
+                    HStack(spacing: 6) {
+                        Text("共 \(summary.totalCount) 本")
+                        Text("·")
+                        Text("已读 \(summary.completedCount) 本")
+                        if summary.totalCount > 0 {
+                            Text("·")
+                            Text("\(Int((summary.averageProgress * 100).rounded()))%")
+                                .foregroundStyle(summary.averageProgress > 0 ? NoveliaStyle.brandGreen : NoveliaStyle.muted)
+                                .monospacedDigit()
+                        }
+                    }
+                    .font(NoveliaStyle.fontCaption)
+                    .foregroundStyle(NoveliaStyle.muted)
+
+                    Capsule()
+                        .fill(NoveliaStyle.hairline)
+                        .frame(height: 4)
+                        .overlay {
+                            Capsule()
+                                .fill(NoveliaStyle.brandGreen)
+                                .scaleEffect(x: min(1, max(0, summary.averageProgress)), y: 1, anchor: .leading)
+                        }
+                        .padding(.top, 2)
+
+                    Text(summary.statusLine)
+                        .font(NoveliaStyle.fontMicro)
+                        .foregroundStyle(summary.hasStarted ? NoveliaStyle.brandGreen : NoveliaStyle.muted)
+                        .lineLimit(1)
+                }
+            }
+
+            HStack(spacing: 10) {
+                if let target = summary.continueBook {
+                    Button { onContinue(target) } label: {
+                        Label(summary.hasStarted ? "继续阅读" : "开始阅读", systemImage: "book.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 36)
+                            .background(NoveliaStyle.brandGreen, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button(action: onAddBooks) {
+                    Label("添加", systemImage: "plus")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(NoveliaStyle.ink)
+                        .padding(.horizontal, 12)
+                        .frame(height: 36)
+                        .background(NoveliaStyle.paper, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous)
+                                .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
+                        )
+                }
+                .buttonStyle(.plain)
+
+                Button(action: onCheckNewVolumes) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(NoveliaStyle.ink)
+                        .frame(width: 36, height: 36)
+                        .background(NoveliaStyle.paper, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous)
+                                .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("检查新卷")
+            }
+        }
+        .padding(14)
+        .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
+        .padding(.vertical, 6)
     }
 }
 

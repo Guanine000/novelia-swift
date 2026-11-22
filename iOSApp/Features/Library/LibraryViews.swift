@@ -648,17 +648,24 @@ struct LibraryView: View {
 
     @ViewBuilder
     private func seriesList(_ books: [LibraryBook]) -> some View {
-        Button {
-            newSeriesName = ""
-            isCreatingSeries = true
-        } label: {
-            Label("新建系列", systemImage: "plus.rectangle.on.rectangle")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(NoveliaStyle.brandGreen)
+        HStack(spacing: 12) {
+            sourceFilterMenu
+            Spacer()
+            Button {
+                newSeriesName = ""
+                isCreatingSeries = true
+            } label: {
+                Label("新建系列", systemImage: "plus.rectangle.on.rectangle")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(NoveliaStyle.brandGreen)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(NoveliaStyle.brandGreen.opacity(0.10), in: Capsule())
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 2)
         .libraryListRow()
-        sourceFilterMenu.libraryListRow()
         let allSeries = visibleSeries(in: books)
         if allSeries.isEmpty {
             CompatUnavailable {
@@ -743,6 +750,7 @@ struct LibrarySeriesDetailView: View {
     @State private var searchFocusRequest = 0
     @State private var readerTarget: LibraryBook?
     @State private var isAddingBooks = false
+    @AppStorage("library.booksLayout") private var booksLayout: LibraryBooksLayout = .list
     @StateObject private var bookActions = LibraryBookActions()
 
     private var series: LibrarySeries? {
@@ -789,10 +797,44 @@ struct LibrarySeriesDetailView: View {
                 .padding(.top, 40)
                 .libraryListRow()
             } else {
-                LibrarySortSummary(options: options, count: members.count) { state.setSortOptions($0, scope: seriesID) }
+                if !isSearching || query.isEmpty {
+                    LibrarySeriesHeaderCard(
+                        name: series?.name ?? "系列",
+                        books: members,
+                        onContinue: open,
+                        onAddBooks: { isAddingBooks = true },
+                        onCheckNewVolumes: { isCheckingNewVolumes = true }
+                    )
                     .libraryListRow()
+                }
+                HStack(spacing: 12) {
+                    LibrarySortSummary(options: options, count: members.count) { state.setSortOptions($0, scope: seriesID) }
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            booksLayout = booksLayout == .list ? .grid : .list
+                        }
+                    } label: {
+                        Image(systemName: booksLayout == .list ? "square.grid.3x3" : "list.bullet")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(booksLayout == .list ? "切换为封面网格" : "切换为列表视图")
+                }
+                .libraryListRow()
                 if visible.isEmpty {
                     CompatSearchUnavailable(text: query).libraryListRow()
+                } else if booksLayout == .grid {
+                    LibraryBooksGrid(
+                        books: visible,
+                        actions: bookActions,
+                        open: open,
+                        isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
+                        selectedKeys: bookActions.selectedKeys
+                    )
+                    .libraryListRow()
                 } else {
                     ForEach(visible) { book in
                         LibraryBookRow(book: book, actions: bookActions, open: open,
