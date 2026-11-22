@@ -36,6 +36,7 @@ struct LibraryView: View {
     @EnvironmentObject private var webDAVSync: WebDAVSyncStore
     @EnvironmentObject private var cloudBooks: CloudBookStore
     @EnvironmentObject private var state: LibraryStateStore
+    @EnvironmentObject private var readerSettings: ReaderSettings
     @EnvironmentObject private var services: AppServices
     @EnvironmentObject private var incomingDocuments: IncomingDocumentCoordinator
     @StateObject private var importer = LibraryImportModel()
@@ -466,7 +467,7 @@ struct LibraryView: View {
             VStack(spacing: 8) {
                 LibrarySearchField(
                     query: $query,
-                    prompt: "搜索书名或作者",
+                    prompt: "搜索书名、作者、摘录或书签",
                     focusRequest: searchFocusRequest,
                     onSubmit: { searchHistory.record(query) },
                     onCancel: {
@@ -607,20 +608,156 @@ struct LibraryView: View {
     private func searchResults(_ books: [LibraryBook]) -> some View {
         sourceFilterMenu.libraryListRow()
         let matches = books.filter { LibraryOrganizer.matches(title: $0.title, author: $0.author, query: query) }
-        Text(matches.isEmpty ? "没有找到匹配的书" : "找到 \(matches.count) 本")
+        let storageMap = storageKeyBookMap(for: books)
+        let titlesByStorageKey = storageMap.mapValues(\.title)
+        let annotationHits = LibraryGlobalSearch.searchAnnotations(
+            query: query,
+            annotations: Array(readerSettings.annotations.records.values),
+            bookTitlesByKey: titlesByStorageKey
+        )
+        let bookmarkHits = LibraryGlobalSearch.searchBookmarks(
+            query: query,
+            bookmarks: Array(readerSettings.bookmarks.records.values),
+            bookTitlesByKey: titlesByStorageKey
+        )
+        let summaryParts = [
+            matches.isEmpty ? nil : "书籍 \(matches.count)",
+            annotationHits.isEmpty ? nil : "摘录与笔记 \(annotationHits.count)",
+            bookmarkHits.isEmpty ? nil : "书签 \(bookmarkHits.count)",
+        ].compactMap { $0 }
+
+        Text(summaryParts.isEmpty ? "没有找到匹配内容" : "找到 " + summaryParts.joined(separator: " · "))
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(NoveliaStyle.muted)
             .libraryListRow()
-        if matches.isEmpty {
+
+        if summaryParts.isEmpty {
             CompatSearchUnavailable(text: query).libraryListRow()
         } else {
-            ForEach(sorted(matches, options: sortOptions)) { book in
-                LibraryBookRow(book: book, actions: bookActions, open: open,
-                               isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
-                               isSelected: bookActions.selectedKeys.contains(book.key),
-                               showStatusBadge: true)
-                    .libraryListRow()
+            if !matches.isEmpty {
+                ForEach(sorted(matches, options: sortOptions)) { book in
+                    LibraryBookRow(book: book, actions: bookActions, open: open,
+                                   isSelecting: bookActions.isSelecting || bookActions.isDraggingSelection,
+                                   isSelected: bookActions.selectedKeys.contains(book.key),
+                                   showStatusBadge: true)
+                        .libraryListRow()
+                }
             }
+            if !annotationHits.isEmpty {
+                Text("摘录与笔记")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(NoveliaStyle.ink)
+                    .padding(.top, matches.isEmpty ? 4 : 14)
+                    .libraryListRow()
+                ForEach(annotationHits) { hit in
+                    Button {
+                        if let book = storageMap[hit.bookKey] { open(book) }
+                    } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(annotationSwatchColor(hit.color))
+                                .frame(width: 3)
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(hit.bookTitle)
+                                        .font(NoveliaStyle.fontCaption.weight(.semibold))
+                                        .foregroundStyle(NoveliaStyle.brandGreen)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text("第 \(hit.chapterIndex + 1) 章")
+                                        .font(NoveliaStyle.fontMicro)
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                }
+                                Text(hit.quote)
+                                    .font(NoveliaStyle.fontBody)
+                                    .foregroundStyle(NoveliaStyle.ink)
+                                    .lineLimit(3)
+                                if !hit.note.isEmpty {
+                                    Text("笔记：\(hit.note)")
+                                        .font(NoveliaStyle.fontCaption)
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                        .lineLimit(2)
+                                }
+                            }
+                        }
+                        .padding(10)
+                        .noveliaCard(cornerRadius: NoveliaStyle.radiusSmall)
+                        .padding(.vertical, 3)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .libraryListRow()
+                }
+            }
+            if !bookmarkHits.isEmpty {
+                Text("书签")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(NoveliaStyle.ink)
+                    .padding(.top, (matches.isEmpty && annotationHits.isEmpty) ? 4 : 14)
+                    .libraryListRow()
+                ForEach(bookmarkHits) { hit in
+                    Button {
+                        if let book = storageMap[hit.bookKey] { open(book) }
+                    } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "bookmark.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(NoveliaStyle.brandGreen)
+                                .padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack {
+                                    Text(hit.bookTitle)
+                                        .font(NoveliaStyle.fontCaption.weight(.semibold))
+                                        .foregroundStyle(NoveliaStyle.brandGreen)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(hit.chapterTitle ?? "第 \(hit.chapterIndex + 1) 章")
+                                        .font(NoveliaStyle.fontMicro)
+                                        .foregroundStyle(NoveliaStyle.muted)
+                                        .lineLimit(1)
+                                }
+                                if !hit.snippet.isEmpty {
+                                    Text(hit.snippet)
+                                        .font(NoveliaStyle.fontBody)
+                                        .foregroundStyle(NoveliaStyle.ink)
+                                        .lineLimit(2)
+                                }
+                            }
+                        }
+                        .padding(10)
+                        .noveliaCard(cornerRadius: NoveliaStyle.radiusSmall)
+                        .padding(.vertical, 3)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .libraryListRow()
+                }
+            }
+        }
+    }
+
+    private func storageKeyBookMap(for books: [LibraryBook]) -> [String: LibraryBook] {
+        var map: [String: LibraryBook] = [:]
+        for book in books {
+            map[book.key] = book
+            if let hash = state.hashByBook[book.key] ?? book.cloudFileHash {
+                map[book.positionPrefix + hash] = book
+            }
+            if case .webNovel(let record) = book.origin, record.novel.isRemote,
+               let provider = record.novel.providerId, let novel = record.novel.novelId {
+                map[WebNovelEPUBContext.key(provider: provider, novel: novel)] = book
+            }
+        }
+        return map
+    }
+
+    private func annotationSwatchColor(_ color: ReaderAnnotation.Color) -> Color {
+        switch color {
+        case .yellow: Color(red: 0.92, green: 0.72, blue: 0.16)
+        case .green: NoveliaStyle.brandGreen
+        case .blue: Color(red: 0.25, green: 0.54, blue: 0.88)
+        case .pink: Color(red: 0.88, green: 0.36, blue: 0.52)
+        case .purple: Color(red: 0.58, green: 0.40, blue: 0.84)
         }
     }
 

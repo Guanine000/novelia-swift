@@ -516,3 +516,88 @@ struct ShelfUpdateSummary: Equatable, Sendable {
         )
     }
 }
+
+// MARK: - 跨书库全局搜索（摘录、笔记与书签）
+
+/// 在本地书库的全部摘录、笔记与书签中按关键词检索，按最近更新时间倒序返回。
+enum LibraryGlobalSearch {
+    struct AnnotationHit: Identifiable, Equatable, Sendable {
+        let id: UUID
+        let bookKey: String
+        let bookTitle: String
+        let chapterIndex: Int
+        let quote: String
+        let note: String
+        let color: ReaderAnnotation.Color
+        let updatedAt: Date
+    }
+
+    struct BookmarkHit: Identifiable, Equatable, Sendable {
+        let id: UUID
+        let bookKey: String
+        let bookTitle: String
+        let chapterIndex: Int
+        let chapterTitle: String?
+        let snippet: String
+        let updatedAt: Date
+    }
+
+    static func searchAnnotations(
+        query: String,
+        annotations: [ReaderAnnotation],
+        bookTitlesByKey: [String: String],
+        limit: Int = 50
+    ) -> [AnnotationHit] {
+        let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return [] }
+        return annotations
+            .compactMap { item -> AnnotationHit? in
+                guard !item.isDeleted, let title = bookTitlesByKey[item.bookKey] else { return nil }
+                let matchesQuote = item.quote.localizedCaseInsensitiveContains(keyword)
+                let matchesNote = !item.note.isEmpty && item.note.localizedCaseInsensitiveContains(keyword)
+                guard matchesQuote || matchesNote else { return nil }
+                return AnnotationHit(
+                    id: item.id,
+                    bookKey: item.bookKey,
+                    bookTitle: title,
+                    chapterIndex: item.chapterIndex,
+                    quote: item.quote,
+                    note: item.note,
+                    color: item.color,
+                    updatedAt: item.updatedAt
+                )
+            }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    static func searchBookmarks(
+        query: String,
+        bookmarks: [ReaderBookmark],
+        bookTitlesByKey: [String: String],
+        limit: Int = 50
+    ) -> [BookmarkHit] {
+        let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return [] }
+        return bookmarks
+            .compactMap { item -> BookmarkHit? in
+                guard !item.isDeleted, let title = bookTitlesByKey[item.bookKey] else { return nil }
+                let matchesSnippet = item.snippet.localizedCaseInsensitiveContains(keyword)
+                let matchesChapter = item.chapterTitle?.localizedCaseInsensitiveContains(keyword) == true
+                guard matchesSnippet || matchesChapter else { return nil }
+                return BookmarkHit(
+                    id: item.id,
+                    bookKey: item.bookKey,
+                    bookTitle: title,
+                    chapterIndex: item.chapterIndex,
+                    chapterTitle: item.chapterTitle,
+                    snippet: item.snippet,
+                    updatedAt: item.updatedAt
+                )
+            }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .prefix(limit)
+            .map { $0 }
+    }
+}

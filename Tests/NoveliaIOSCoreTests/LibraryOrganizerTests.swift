@@ -293,4 +293,47 @@ final class LibraryOrganizerTests: XCTestCase {
         XCTAssertEqual(changes["stale"], .onHold)
         XCTAssertNil(changes["dropped"], "手动抛弃的书不参与一键整理覆盖")
     }
+
+    func testGlobalSearchMatchesAnnotationsAndBookmarksAcrossBooks() {
+        let t1 = Date(timeIntervalSince1970: 1_000)
+        let t2 = Date(timeIntervalSince1970: 2_000)
+        let books = ["epub:a": "冰菓", "txt:b": "三日间的幸福"]
+
+        let a1 = ReaderAnnotation(
+            id: UUID(), bookKey: "epub:a", chapterIndex: 2,
+            startUTF16: 0, endUTF16: 10, quote: "我很好奇！", prefix: "", suffix: "",
+            projectionIdentity: "", color: .green, note: "经典台词", createdAt: t1, updatedAt: t1
+        )
+        let a2 = ReaderAnnotation(
+            id: UUID(), bookKey: "txt:b", chapterIndex: 5,
+            startUTF16: 0, endUTF16: 12, quote: "一年的寿命价值一万元", prefix: "", suffix: "",
+            projectionIdentity: "", color: .yellow, note: "很好奇结局", createdAt: t2, updatedAt: t2
+        )
+        var deleted = a1
+        deleted.deleted = true
+
+        let annHits = LibraryGlobalSearch.searchAnnotations(
+            query: "好奇",
+            annotations: [a1, a2, deleted],
+            bookTitlesByKey: books
+        )
+        XCTAssertEqual(annHits.map(\.bookTitle), ["三日间的幸福", "冰菓"], "按最近更新时间倒序并排除已删除")
+        XCTAssertEqual(annHits.count, 2)
+
+        let b1 = ReaderBookmark(
+            id: UUID(), bookKey: "epub:a", chapterIndex: 0, chapterProgression: 0.2,
+            chapterTitle: "古籍研究社的复苏", snippet: "折木奉太郎推开门", createdAt: t1, updatedAt: t1
+        )
+        let b2 = ReaderBookmark(
+            id: UUID(), bookKey: "unknown:x", chapterIndex: 0, chapterProgression: 0.5,
+            chapterTitle: "古籍", snippet: "已删除书的残留书签", createdAt: t2, updatedAt: t2
+        )
+        let bmHits = LibraryGlobalSearch.searchBookmarks(
+            query: "古籍",
+            bookmarks: [b1, b2],
+            bookTitlesByKey: books
+        )
+        XCTAssertEqual(bmHits.count, 1, "未在当前书库映射中的书签不返回")
+        XCTAssertEqual(bmHits[0].bookTitle, "冰菓")
+    }
 }
