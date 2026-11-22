@@ -646,6 +646,7 @@ struct LibraryCoverView: View, Equatable {
         .frame(width: width, height: height)
         .frame(maxWidth: width == nil ? .infinity : nil, maxHeight: height == nil ? .infinity : nil)
         .noveliaBookCoverStyle(cornerRadius: NoveliaStyle.radiusSmall, elevated: elevated)
+        .contentShape(Rectangle())
         .accessibilityHidden(true)
     }
 

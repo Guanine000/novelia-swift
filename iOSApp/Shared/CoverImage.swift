@@ -119,17 +119,21 @@ struct CoverImage<Placeholder: View>: View {
     @State private var loaded: (url: URL, image: UIImage)?
 
     var body: some View {
-        Group {
-            if let image = currentImage {
-                Image(uiImage: image).resizable().scaledToFill()
-            } else {
-                placeholder()
+        // 用 Color.clear 锁定布局尺寸，避免宽图或方图经 scaledToFill() 撑破网格列宽并挤占邻列点击热区。
+        Color.clear
+            .overlay {
+                if let image = currentImage {
+                    Image(uiImage: image).resizable().scaledToFill()
+                } else {
+                    placeholder()
+                }
             }
-        }
-        .task(id: url) {
-            guard let url, loaded?.url != url else { return }
-            if let image = await CoverImageLoader.shared.image(for: url) { loaded = (url, image) }
-        }
+            .clipped()
+            .contentShape(Rectangle())
+            .task(id: url) {
+                guard let url, loaded?.url != url else { return }
+                if let image = await CoverImageLoader.shared.image(for: url) { loaded = (url, image) }
+            }
     }
 
     private var currentImage: UIImage? {
