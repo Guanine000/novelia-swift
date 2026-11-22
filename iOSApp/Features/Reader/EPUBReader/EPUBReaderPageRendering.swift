@@ -123,6 +123,7 @@ extension EPUBReaderModel {
                                                  config: makeConfig(), aspectRatio: viewportAspectRatio,
                                                  readerCSS: effectiveReaderCSS,
                                                  writingDirection: writingDirectionRequest,
+                                                 verticalTypographyOptimization: style.isVerticalTypographyOptimizationEnabled,
                                                  context: layoutContext(.seek))
                 } catch {
                     if EPUBLayoutLog.failure(error).kind != "cancelled", pageBook === book {

@@ -87,6 +87,7 @@ final class EPUBPageBook {
                        config: BrowserLayoutConfig, aspectRatio: CGFloat = 0.5,
                        readerCSS: String? = nil,
                        writingDirection: EPUBWritingDirectionRequest = .horizontal,
+                       verticalTypographyOptimization: Bool = false,
                        context: EPUBLayoutContext = EPUBLayoutContext()) async throws {
         let start = ContinuousClock.now
         let book = DiagnosticContext.bookTag(context.bookID ?? privateBookID)
@@ -109,7 +110,8 @@ final class EPUBPageBook {
         let key = EPUBLayoutCoordinator.Key(
             bookID: context.bookID ?? privateBookID, spine: spineIndex,
             parameters: EPUBLayoutParameters(config: config, aspectRatio: aspectRatio, readerCSS: readerCSS,
-                                             writingDirection: writingDirection))
+                                             writingDirection: writingDirection,
+                                             verticalTypographyOptimization: verticalTypographyOptimization))
         let runConfig = config
         do {
             let (layout, outcome) = try await coordinator.layout(
@@ -124,7 +126,9 @@ final class EPUBPageBook {
                 work: { publish in
                     try await Self.performLayout(spineIndex, container: container, config: runConfig,
                                                  aspectRatio: aspectRatio, readerCSS: readerCSS,
-                                                 writingDirection: writingDirection, publish: publish)
+                                                 writingDirection: writingDirection,
+                                                 verticalTypographyOptimization: verticalTypographyOptimization,
+                                                 publish: publish)
                 })
             chapters[spineIndex] = layout
             completedChapters.insert(spineIndex)
@@ -156,6 +160,7 @@ final class EPUBPageBook {
                                       config: BrowserLayoutConfig, aspectRatio: CGFloat,
                                       readerCSS: String?,
                                       writingDirection: EPUBWritingDirectionRequest,
+                                      verticalTypographyOptimization: Bool,
                                       publish: (EPUBChapterLayout) -> Void) async throws -> EPUBChapterLayout {
         let html = try await container.chapterHTML(at: spineIndex)
         try Task.checkCancellation()
@@ -165,15 +170,15 @@ final class EPUBPageBook {
         let rawCSS = await container.cssTexts(forChapterHTML: html, chapterHref: chapterHref,
                                               aspectRatio: aspectRatio, vertical: requestsVerticalCSS)
         let usedClasses = EPUBCSSPruning.usedClasses(in: html)
-        var css = rawCSS.map { EPUBCSSPruning.pruningUnusedClassRules(in: $0, usedClasses: usedClasses) }
-        if let readerCSS { css.append(readerCSS) }
+        let bookCSS = rawCSS.map { EPUBCSSPruning.pruningUnusedClassRules(in: $0, usedClasses: usedClasses) }
         let images = await container.images(forChapterHTML: html, chapterHref: chapterHref)
         try Task.checkCancellation()
 
         let worker = EPUBBackgroundLayout()
         let prepared = try await worker.prepare(
-            html: html, css: css, config: config, images: images,
-            writingDirection: writingDirection, bookPrefersVertical: container.prefersVerticalByDefault)
+            html: html, bookCSS: bookCSS, readerCSS: readerCSS, config: config, images: images,
+            writingDirection: writingDirection, bookPrefersVertical: container.prefersVerticalByDefault,
+            verticalTypographyOptimization: verticalTypographyOptimization)
         let owner = prepared.owner
         var layout = EPUBChapterLayout(
             pages: [], sourceText: prepared.facts.sourceText, displayLists: [], linkRegions: [], footnotes: prepared.facts.footnotes,
@@ -935,13 +940,15 @@ private actor EPUBBackgroundLayout {
         )
     }
 
-    func prepare(html: String, css: [String], config: BrowserLayoutConfig,
+    func prepare(html: String, bookCSS: [String], readerCSS: String?, config: BrowserLayoutConfig,
                  images: [String: UIImage],
                  writingDirection: EPUBWritingDirectionRequest,
-                 bookPrefersVertical: Bool) async throws -> Prepared {
+                 bookPrefersVertical: Bool,
+                 verticalTypographyOptimization: Bool) async throws -> Prepared {
         try Task.checkCancellation()
-        let normalizedCSS = css.map(Self.normalizingPlayBooksTCYWorkaround)
-        let initialInput = CSSFrontendInput.currentCompatibility(html: html, cssTexts: normalizedCSS)
+        var baseCSS = bookCSS.map(Self.normalizingPlayBooksTCYWorkaround)
+        if let readerCSS { baseCSS.append(Self.normalizingPlayBooksTCYWorkaround(readerCSS)) }
+        let initialInput = CSSFrontendInput.currentCompatibility(html: html, cssTexts: baseCSS)
         let initialDocument = try BrowserChapterDocument(input: initialInput)
 
         let desiredMode: ReaderWritingMode = switch writingDirection {
@@ -953,9 +960,26 @@ private actor EPUBBackgroundLayout {
             initialDocument.principalWritingMode ?? (bookPrefersVertical ? .verticalRTL : .horizontal)
         }
 
+        let evalHTML: String
+        let evalCSS: [String]
+        let evalInitialDocument: BrowserChapterDocument?
+        if desiredMode == .verticalRTL, verticalTypographyOptimization,
+           let optimized = try? EPUBVerticalTypographyOptimizer.apply(html: html) {
+            evalHTML = optimized.html
+            var combined = bookCSS.map(Self.normalizingPlayBooksTCYWorkaround)
+            combined.append(optimized.css)
+            if let readerCSS { combined.append(Self.normalizingPlayBooksTCYWorkaround(readerCSS)) }
+            evalCSS = combined
+            evalInitialDocument = nil
+        } else {
+            evalHTML = html
+            evalCSS = baseCSS
+            evalInitialDocument = initialDocument
+        }
+
         var result = try await evaluateChapter(
-            html: html, css: normalizedCSS, baseConfig: config, images: images,
-            writingMode: desiredMode, initialDocument: initialDocument)
+            html: evalHTML, css: evalCSS, baseConfig: config, images: images,
+            writingMode: desiredMode, initialDocument: evalInitialDocument)
         var effectiveMode = desiredMode
         var verticalFallback = false
         var verticalFallbackFeatures: [String] = []
@@ -963,8 +987,9 @@ private actor EPUBBackgroundLayout {
         if desiredMode == .verticalRTL, !result.evaluation.capabilities.supported {
             verticalFallbackFeatures = result.evaluation.capabilities.unsupportedFeatures.map(\.description)
             EPUBLayoutLog.logger.notice("Vertical chapter unsupported (\(verticalFallbackFeatures.joined(separator: ", "), privacy: .public)); falling back to horizontal")
+            // 回退横排时恢复未做竖排标点/缩进改写的原始 HTML 与 CSS。
             let horizontalResult = try await evaluateChapter(
-                html: html, css: normalizedCSS, baseConfig: config, images: images,
+                html: html, css: baseCSS, baseConfig: config, images: images,
                 writingMode: .horizontal, initialDocument: initialDocument)
             result = horizontalResult
             effectiveMode = .horizontal
@@ -1061,5 +1086,114 @@ struct EPUBSourcePositionMap: Sendable {
     }
     func legacy(_ offset: Int) -> Int {
         currentToLegacy.isEmpty ? max(0, offset) : currentToLegacy[min(max(0, offset), currentToLegacy.count - 1)]
+    }
+}
+
+/// 竖排标点与排版优化：仅在竖排排版渲染层生效，不修改原书文件，且严格保持正文 UTF-16 字符数不变以兼容进度、书签与摘录偏移。
+enum EPUBVerticalTypographyOptimizer {
+    static let stylesheet = """
+    .__novelia_tcy { text-combine-upright: all; }
+    p.__novelia_v_indent { text-indent: 1em; }
+    p.__novelia_v_noindent { text-indent: 0 !important; }
+    """
+
+    private static let skippedTags: Set<String> = [
+        "script", "style", "title", "code", "pre", "rt", "rp", "svg"
+    ]
+    private static let dialogueLeadingScalars: Set<Unicode.Scalar> = [
+        "「", "『", "（", "(", "【", "［", "〈", "《"
+    ]
+    /// 匹配独立的 2 位半角数字（如 `12`、`99`，不拆 4 位年份 `2026` 或小数 `3.14`）以及双感叹/问号。
+    private static let tcyRegex = try! NSRegularExpression(
+        pattern: #"(?<![0-9A-Za-z._-])(?:[0-9]{2}|!\?|\?!|!!|\?\?|！？|？！|！！|？？)(?![0-9A-Za-z._-])"#
+    )
+
+    static func apply(html: String) throws -> (html: String, css: String) {
+        let document = try SwiftSoup.parse(html)
+        document.outputSettings().prettyPrint(pretty: false)
+        guard let body = document.body() else {
+            return (html, stylesheet)
+        }
+        try transformTextNodes(in: body)
+        try classifyParagraphIndentation(in: body)
+        return (try document.outerHtml(), stylesheet)
+    }
+
+    private static func transformTextNodes(in element: Element) throws {
+        let tag = element.tagName().lowercased()
+        if skippedTags.contains(tag) { return }
+        if element.hasClass("__novelia_tcy") { return }
+
+        let children = element.getChildNodes()
+        for node in children {
+            if let textNode = node as? TextNode {
+                let raw = textNode.getWholeText()
+                guard !raw.isEmpty else { continue }
+                let quoted = convertQuotes(raw)
+                let ns = quoted as NSString
+                let matches = tcyRegex.matches(in: quoted, range: NSRange(location: 0, length: ns.length))
+                if !matches.isEmpty {
+                    var rebuilt = ""
+                    rebuilt.reserveCapacity(quoted.count + matches.count * 36)
+                    var cursor = 0
+                    for match in matches {
+                        if match.range.location > cursor {
+                            let prefix = ns.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+                            rebuilt.append(Entities.escape(prefix))
+                        }
+                        let token = ns.substring(with: match.range)
+                        rebuilt.append("<span class=\"__novelia_tcy\">")
+                        rebuilt.append(Entities.escape(token))
+                        rebuilt.append("</span>")
+                        cursor = match.range.location + match.range.length
+                    }
+                    if cursor < ns.length {
+                        rebuilt.append(Entities.escape(ns.substring(from: cursor)))
+                    }
+                    try textNode.before(rebuilt)
+                    try textNode.remove()
+                } else if quoted != raw {
+                    textNode.text(quoted)
+                }
+            } else if let childElement = node as? Element {
+                try transformTextNodes(in: childElement)
+            }
+        }
+    }
+
+    private static func convertQuotes(_ text: String) -> String {
+        guard text.contains(where: { $0 == "\u{201C}" || $0 == "\u{201D}" || $0 == "\u{2018}" || $0 == "\u{2019}" }) else {
+            return text
+        }
+        var result = String()
+        result.reserveCapacity(text.count)
+        for ch in text {
+            switch ch {
+            case "\u{201C}": result.append("「")
+            case "\u{201D}": result.append("」")
+            case "\u{2018}": result.append("『")
+            case "\u{2019}": result.append("』")
+            default: result.append(ch)
+            }
+        }
+        return result
+    }
+
+    private static func classifyParagraphIndentation(in body: Element) throws {
+        for paragraph in try body.select("p").array() {
+            // 含插图或显式居中/零缩进的段落保持原样，不强加缩进。
+            if !(try paragraph.select("img, svg").isEmpty()) { continue }
+            let inlineStyle = (try? paragraph.attr("style").lowercased()) ?? ""
+            if inlineStyle.contains("text-align") || inlineStyle.contains("text-indent") { continue }
+            let text = (try? paragraph.text()) ?? ""
+            guard let firstScalar = text.unicodeScalars.first(where: { !CharacterSet.whitespacesAndNewlines.contains($0) }) else {
+                continue
+            }
+            if dialogueLeadingScalars.contains(firstScalar) {
+                try paragraph.addClass("__novelia_v_noindent")
+            } else {
+                try paragraph.addClass("__novelia_v_indent")
+            }
+        }
     }
 }

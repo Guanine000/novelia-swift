@@ -105,6 +105,7 @@ extension EPUBReaderModel {
                 try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
                                              aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
                                              writingDirection: writingDirectionRequest,
+                                             verticalTypographyOptimization: style.isVerticalTypographyOptimizationEnabled,
                                              context: layoutContext(.navigate))
                 if pageBook === book {
                     // 从失败页经目录或书内链接跳到可读章节时恢复阅读状态；
@@ -204,6 +205,7 @@ extension EPUBReaderModel {
             try await book.layoutChapter(index, container: source, config: makeConfig(),
                                          aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
                                          writingDirection: writingDirectionRequest,
+                                         verticalTypographyOptimization: style.isVerticalTypographyOptimizationEnabled,
                                          context: layoutContext(.navigate))
         }
         try Task.checkCancellation()
@@ -320,6 +322,7 @@ extension EPUBReaderModel {
                     try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
                                                  aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
                                                  writingDirection: writingDirectionRequest,
+                                                 verticalTypographyOptimization: style.isVerticalTypographyOptimizationEnabled,
                                                  context: layoutContext(.navigate))
                 }
                 guard pageBook === book else { return }
@@ -366,6 +369,7 @@ extension EPUBReaderModel {
                     try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
                                                  aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
                                                  writingDirection: writingDirectionRequest,
+                                                 verticalTypographyOptimization: style.isVerticalTypographyOptimizationEnabled,
                                                  context: layoutContext(.navigate))
                 }
                 guard pageBook === book else { return }

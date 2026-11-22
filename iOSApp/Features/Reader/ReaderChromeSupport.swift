@@ -546,6 +546,15 @@ struct ReaderStyleSheet: View {
                         .accessibilityIdentifier("reader-writing-direction")
                         Text("「跟随书籍」按书籍原版式自动选择横竖排；仅用于原生分页，点击「应用」后生效。竖排暂不支持的章节将自动回退为横排。")
                             .font(.caption).foregroundStyle(.secondary)
+                        if (draftStyle.writingDirection ?? .bookDefault) != .horizontal {
+                            Toggle("竖排标点与排版优化", isOn: Binding(
+                                get: { draftStyle.isVerticalTypographyOptimizationEnabled },
+                                set: { draftStyle.verticalTypographyOptimization = $0 ? true : nil }
+                            ))
+                            .accessibilityIdentifier("reader-vertical-typography-optimization")
+                            Text("仅在竖排时生效：弯引号转「」『』、叙述段缩进一格、对话段顶格、独立两位数字与双标点（!? / !!）纵中横；不修改原书与阅读进度。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     if supportsReadiumPageTurn {
                         Picker("翻页动画", selection: $settings.readiumPageCurlEnabled) {

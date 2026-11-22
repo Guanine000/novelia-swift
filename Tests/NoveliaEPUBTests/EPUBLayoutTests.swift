@@ -403,4 +403,46 @@ final class EPUBLayoutTests: XCTestCase {
         XCTAssertNil(book.verticalFallbackFeatures(spineIndex: 0))
         XCTAssertGreaterThan(book.pageCount(spineIndex: 0), 0)
     }
+
+    @MainActor
+    func testVerticalTypographyOptimizationPreservesOffsetsAndTransformsQuotesTCYAndIndent() async throws {
+        let html = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <html xmlns="http://www.w3.org/1999/xhtml"><head><title>“标题不改”</title></head>
+        <body>
+          <p class="lead">“你好，世界！”她说，“里面有‘嵌套’、第12章、2026年和 3.14，真的吗!?”</p>
+          <p>普通叙述段落在2026年11月22日共有99条记录，确认两位数字纵中横且不拆四位年份。</p>
+          <p style="text-align:center;">居中标题不加缩进</p>
+        </body></html>
+        """
+        let optimized = try EPUBVerticalTypographyOptimizer.apply(html: html)
+        // 属性与 <title> 不被改动；正文弯引号转直角引号
+        XCTAssertTrue(optimized.html.contains("<title>“标题不改”</title>"))
+        XCTAssertTrue(optimized.html.contains("「你好，世界！」"))
+        XCTAssertTrue(optimized.html.contains("『嵌套』"))
+        // 独立两位数字与双标点包裹 TCY；四位年份 2026 与小数 3.14 不被拆包
+        XCTAssertTrue(optimized.html.contains(#"<span class="__novelia_tcy">12</span>"#))
+        XCTAssertTrue(optimized.html.contains(#"<span class="__novelia_tcy">99</span>"#))
+        XCTAssertTrue(optimized.html.contains(#"<span class="__novelia_tcy">!?</span>"#))
+        XCTAssertTrue(optimized.html.contains("2026年"))
+        XCTAssertTrue(optimized.html.contains("3.14"))
+        // 对话段顶格、普通叙述段缩进一格、居中段落保持原样
+        XCTAssertTrue(optimized.html.contains(#"class="lead __novelia_v_noindent""#))
+        XCTAssertTrue(optimized.html.contains(#"<p class="__novelia_v_indent">"#))
+        XCTAssertFalse(optimized.html.contains(#"style="text-align:center;" class="__novelia_v_indent""#))
+
+        // 验证开启与关闭优化后，竖排排版均成功且章节 UTF-16 长度完全一致（不破坏进度与书签偏移）
+        let source = StubChapterSource(chapters: [(html, ["p { text-indent: 2em; }"])])
+        let bookPlain = EPUBPageBook(generation: 1)
+        let bookOpt = EPUBPageBook(generation: 2)
+        try await bookPlain.layoutChapter(0, container: source, config: Self.readerConfig(workarounds: true),
+                                          aspectRatio: 440 / 956, writingDirection: .verticalRTL,
+                                          verticalTypographyOptimization: false)
+        try await bookOpt.layoutChapter(0, container: source, config: Self.readerConfig(workarounds: true),
+                                        aspectRatio: 440 / 956, writingDirection: .verticalRTL,
+                                        verticalTypographyOptimization: true)
+        XCTAssertEqual(bookOpt.writingMode(spineIndex: 0), .verticalRTL)
+        XCTAssertNil(bookOpt.verticalFallbackFeatures(spineIndex: 0))
+        XCTAssertEqual(bookPlain.sourceLength(spineIndex: 0), bookOpt.sourceLength(spineIndex: 0))
+    }
 }

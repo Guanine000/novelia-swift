@@ -50,6 +50,9 @@ struct EPUBReaderStyle: Codable, Equatable {
     var doublePage: Bool? = false
     /// nil 或 `.bookDefault` 跟随书籍声明（原生分页）；可手动切换横排或竖排。
     var writingDirection: EPUBWritingDirectionOption? = nil
+    /// 竖排模式下自动优化标点与排版（弯引号转直角引号、叙述缩进一格、对话顶格、两位数字与双标点纵中横）。
+    var verticalTypographyOptimization: Bool? = nil
+    var isVerticalTypographyOptimizationEnabled: Bool { verticalTypographyOptimization == true }
     var fontSize: CGFloat = 21
     var fontFamily: String? = nil
     var lineSpacing: CGFloat = 0

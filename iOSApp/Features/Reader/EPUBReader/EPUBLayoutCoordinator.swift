@@ -44,12 +44,14 @@ struct EPUBLayoutParameters: Hashable {
     let backgroundColor: [CGFloat]
     let alignment: Int
     let writingMode: String
+    let verticalTypographyOptimization: Bool
     let aspectRatio: CGFloat
     let readerCSS: String?
     let version: Int
 
     init(config: BrowserLayoutConfig, aspectRatio: CGFloat, readerCSS: String?,
-         writingDirection: EPUBWritingDirectionRequest? = nil) {
+         writingDirection: EPUBWritingDirectionRequest? = nil,
+         verticalTypographyOptimization: Bool = false) {
         renderWidth = config.renderWidth
         renderHeight = config.renderHeight
         rootFontSize = config.rootFontSize
@@ -64,6 +66,7 @@ struct EPUBLayoutParameters: Hashable {
         backgroundColor = Self.components(config.backgroundColor)
         alignment = config.defaultTextAlignment.rawValue
         writingMode = writingDirection?.rawValue ?? config.writingMode.rawValue
+        self.verticalTypographyOptimization = verticalTypographyOptimization
         self.aspectRatio = aspectRatio
         self.readerCSS = readerCSS
         version = Self.layoutVersion

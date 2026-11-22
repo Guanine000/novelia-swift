@@ -786,6 +786,7 @@ final class EPUBReaderModel: ObservableObject {
             try await book.layoutChapter(spineIndex, container: container, config: makeConfig(),
                                          aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
                                          writingDirection: writingDirectionRequest,
+                                         verticalTypographyOptimization: style.isVerticalTypographyOptimizationEnabled,
                                          context: layoutContext(reason))
             if book.generation == generation {
                 pendingRelayoutAnchor = nil
@@ -848,6 +849,7 @@ final class EPUBReaderModel: ObservableObject {
             try? await book.layoutChapter(target, container: container, config: makeConfig(),
                                           aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
                                           writingDirection: writingDirectionRequest,
+                                          verticalTypographyOptimization: style.isVerticalTypographyOptimizationEnabled,
                                           context: layoutContext(.navigate))
         }
         prefetchNeighbors(of: target)
@@ -869,6 +871,7 @@ final class EPUBReaderModel: ObservableObject {
             guard !book.isChapterComplete(neighbor), prefetchTasks[neighbor] == nil else { continue }
             let config = makeConfig()
             let direction = writingDirectionRequest
+            let optimizeVertical = style.isVerticalTypographyOptimizationEnabled
             let context = layoutContext(.prefetch)
             prefetchTasks[neighbor] = Task { [weak self] in
                 guard let self else { return }
@@ -876,6 +879,7 @@ final class EPUBReaderModel: ObservableObject {
                     try await book.layoutChapter(neighbor, container: container, config: config,
                                                  aspectRatio: viewportAspectRatio, readerCSS: effectiveReaderCSS,
                                                  writingDirection: direction,
+                                                 verticalTypographyOptimization: optimizeVertical,
                                                  context: context)
                     failedChapters.remove(neighbor)
                 } catch {
