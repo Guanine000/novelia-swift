@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking // Linux 把 URLSession 放在这个模块；Apple 仍由 Foundation 提供。
+#endif
 import XCTest
 @testable import NoveliaIOSCore
 
@@ -71,6 +74,7 @@ final class ReleaseUpdateTests: XCTestCase {
         let store = NoveliaUpdateStore(defaults: defaults, session: session, currentVersion: "0.8.0")
         await store.check()
         XCTAssertEqual(store.release?.version?.display, "0.8.1", "new stable offered")
+        XCTAssertNil(store.release?.summary, "response without body omits summary")
         await store.check()
         XCTAssertEqual(ReleaseMock.hits, 1, "once per launch")
         store.ignore(store.release!)
@@ -176,6 +180,8 @@ final class ReleaseUpdateTests: XCTestCase {
         let available = await store.checkManually()
         XCTAssertEqual(available, .available)
         XCTAssertEqual(store.release?.tag_name, "v0.9.0")
+        XCTAssertNil(store.release?.body, "fallback does not read the page")
+        XCTAssertNil(store.release?.summary, "fallback has no summary")
         XCTAssertEqual(ReleaseMock.requestedHosts, ["api.github.com", "github.com"])
         XCTAssertFalse(ReleaseMock.sawAuthorization)
 
@@ -192,4 +198,165 @@ final class ReleaseUpdateTests: XCTestCase {
             XCTAssertEqual(failed, .rateLimited)
         }
     }
+
+    func testOpeningSummaryUsesCurrentReleaseProse() {
+        let body = """
+        这是 Novelia 1.5.0 正式版。本次新增仿真翻页动画、注脚气泡浮窗。
+
+        ### 阅读与排版
+
+        - **仿真翻页**：不应出现在摘要中。
+        """
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary(body), "这是 Novelia 1.5.0 正式版。本次新增仿真翻页动画、注脚气泡浮窗。")
+        let published = "这是 Novelia 1.5.0 正式版。本次新增仿真翻页动画、注脚气泡浮窗、摘录与笔记（含 WebDAV 同步）、有声朗读（TTS）、阅读 AI（剧情总结与人物卡）以及 iPad 适配与键盘快捷键扩展。"
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary(published + "\n\n### 阅读与排版\n\n- 详细列表"), published)
+        XCTAssertLessThan(published.count, NoveliaReleaseNotes.summaryCharacterLimit)
+        let release = NoveliaGitHubRelease(tag_name: "v1.5.0",
+                                           html_url: "https://github.com/Guanine000/novelia-swift/releases/tag/v1.5.0",
+                                           body: body, draft: false, prerelease: false)
+        XCTAssertEqual(release.summary, "这是 Novelia 1.5.0 正式版。本次新增仿真翻页动画、注脚气泡浮窗。")
+        XCTAssertEqual(release.updatePromptMessage, """
+        Novelia 1.5.0 已发布。说明与安装包都在更新页面。
+
+        这是 Novelia 1.5.0 正式版。本次新增仿真翻页动画、注脚气泡浮窗。
+        """)
+        XCTAssertTrue(release.shouldOffer(current: "1.4.1", ignored: ""))
+    }
+
+    func testOpeningSummarySkipsLeadingHeadingsWhitespaceAndCRLF() {
+        let crlf = "\r\n \r\n## 更新内容\r\n### 细节\r\n\r\n  修复了阅读进度。\r\n\r\n- 列表不进入摘要\r\n"
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary(crlf), "修复了阅读进度。")
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary("\r## 标题\r\r正文"), "正文")
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary("\u{feff}说明"), "说明")
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary("---\n\n正式说明。\n\n---\n"), "正式说明。")
+        let wrapped = "第一行说明\n第二行仍属同段。\n\n另一段"
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary(wrapped), "第一行说明 第二行仍属同段。")
+    }
+
+    func testOpeningSummaryOmitsEmptyMissingAndNullBody() throws {
+        XCTAssertNil(NoveliaReleaseNotes.openingSummary(nil))
+        XCTAssertNil(NoveliaReleaseNotes.openingSummary(""))
+        XCTAssertNil(NoveliaReleaseNotes.openingSummary(" \n\n## 只有标题\n"))
+        XCTAssertNil(NoveliaReleaseNotes.openingSummary("**"))
+        let page = "https://github.com/Guanine000/novelia-swift/releases/tag/v0.9.0"
+        let missing = try JSONDecoder().decode(NoveliaGitHubRelease.self, from: Data("""
+        {"tag_name":"v0.9.0","html_url":"\(page)","draft":false,"prerelease":false}
+        """.utf8))
+        XCTAssertNil(missing.body)
+        XCTAssertNil(missing.summary)
+        XCTAssertEqual(missing.updatePromptMessage, "Novelia 0.9.0 已发布。说明与安装包都在更新页面。")
+        XCTAssertTrue(missing.shouldOffer(current: "0.8.0", ignored: ""))
+        let nullBody = try JSONDecoder().decode(NoveliaGitHubRelease.self, from: Data("""
+        {"tag_name":"v0.9.0","html_url":"\(page)","draft":false,"prerelease":false,"body":null}
+        """.utf8))
+        XCTAssertNil(nullBody.body)
+        XCTAssertNil(nullBody.summary)
+        XCTAssertEqual(nullBody.updatePromptMessage, missing.updatePromptMessage)
+        let blank = try JSONDecoder().decode(NoveliaGitHubRelease.self, from: Data("""
+        {"tag_name":"v0.9.0","html_url":"\(page)","draft":false,"prerelease":false,"body":"  \\n## 只有标题\\n"}
+        """.utf8))
+        XCTAssertNil(blank.summary)
+        XCTAssertFalse(NoveliaGitHubRelease(tag_name: "v0.9.0", html_url: page, body: "这是说明。",
+                                            draft: false, prerelease: true).shouldOffer(current: "0.8.0", ignored: ""))
+        XCTAssertFalse(NoveliaGitHubRelease(tag_name: "v0.9.0", html_url: "https://example.com/download", body: "这是说明。",
+                                            draft: false, prerelease: false).shouldOffer(current: "0.8.0", ignored: ""))
+    }
+
+    func testOpeningSummaryFlattensMarkdownMarkersAndLinks() {
+        let prose = """
+        ## 标题
+
+        本次包含 **加粗**、`行内代码` 与 [完整说明](https://github.com/Guanine000/novelia-swift/releases/tag/v1.5.0)。
+
+        - 列表项
+        """
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary(prose), "本次包含 加粗、行内代码 与 完整说明。")
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary("见 ![封面](https://example.com/a.png) 与 <https://example.com/notes>。"),
+                       "见 封面 与 https://example.com/notes。")
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary(#"保留 reader_book 键，\*不是强调\*，代码 `**原样**`。"#),
+                       "保留 reader_book 键，*不是强调*，代码 **原样**。")
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary("[说明](https://example.com/a \"标题\") 和 [参考][notes]"), "说明 和 参考")
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary("见 [附录] 即可"), "见 [附录] 即可")
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary("1.5.0 正式版保持完整。"), "1.5.0 正式版保持完整。")
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary("- 修复封面\n- **修复翻页**"), "修复封面 修复翻页")
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary("1. 修复封面\n2. 修复翻页"), "修复封面 修复翻页")
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary("> 引用说明"), "引用说明")
+    }
+
+    func testOpeningSummaryBoundsLongParagraph() {
+        XCTAssertEqual(NoveliaReleaseNotes.summaryCharacterLimit, 160)
+        let exact = String(repeating: "甲", count: 160)
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary(exact), exact)
+        let over = String(repeating: "乙", count: 161)
+        XCTAssertEqual(NoveliaReleaseNotes.openingSummary(over), String(repeating: "乙", count: 159) + "…")
+        let body = "## 标题\n\n" + String(repeating: "字", count: 180) + "\n\n第二段不应出现\n\n### 阅读与排版\n"
+        let summary = NoveliaReleaseNotes.openingSummary(body)
+        XCTAssertEqual(summary, String(repeating: "字", count: 159) + "…")
+        XCTAssertEqual(summary?.count, 160)
+        XCTAssertFalse(summary?.contains("第二段") == true)
+        XCTAssertFalse(summary?.contains("阅读") == true)
+    }
+
+    /// API 正文进入摘要；限流后的网页回退即使响应里有说明文字，也不解析。
+    func testAPISummaryIsKeptAndFallbackDoesNotParseHTML() async {
+        let name = "NoveliaSummaryTest-\(UUID())"
+        let defaults = UserDefaults(suiteName: name)!
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ReleaseMock.self]
+        let session = URLSession(configuration: config)
+        defer {
+            defaults.removePersistentDomain(forName: name)
+            session.invalidateAndCancel()
+            ReleaseMock.status = 200
+            ReleaseMock.rateLimited = false
+            ReleaseMock.fallbackURL = nil
+            ReleaseMock.payload = ""
+            ReleaseMock.sawAuthorization = false
+        }
+        ReleaseMock.status = 200
+        ReleaseMock.rateLimited = false
+        ReleaseMock.fallbackURL = nil
+        ReleaseMock.sawAuthorization = false
+        ReleaseMock.requestedHosts = []
+        ReleaseMock.payload = githubReleaseJSON(tag: "v0.9.0", body: "这是说明。\n\n### 详情\n\n- 条目")
+        let store = NoveliaUpdateStore(defaults: defaults, session: session, currentVersion: "0.8.0")
+        let available = await store.checkManually()
+        XCTAssertEqual(available, .available)
+        XCTAssertEqual(store.release?.summary, "这是说明。")
+        XCTAssertFalse(store.release?.summary?.contains("条目") == true)
+        store.ignore(store.release!)
+        XCTAssertNil(store.release)
+
+        ReleaseMock.payload = githubReleaseJSON(tag: "v0.9.1", body: NSNull())
+        let nullBody = NoveliaUpdateStore(defaults: defaults, session: session, currentVersion: "0.8.0")
+        let nullResult = await nullBody.checkManually()
+        XCTAssertEqual(nullResult, .available)
+        XCTAssertEqual(nullBody.release?.tag_name, "v0.9.1")
+        XCTAssertNil(nullBody.release?.summary)
+
+        ReleaseMock.status = 403
+        ReleaseMock.rateLimited = true
+        ReleaseMock.fallbackURL = "https://github.com/Guanine000/novelia-swift/releases/tag/v1.0.0"
+        ReleaseMock.payload = "<html><body>这是不应解析的网页正文</body></html>"
+        let fallback = NoveliaUpdateStore(defaults: defaults, session: session, currentVersion: "0.9.1")
+        let fallbackResult = await fallback.checkManually()
+        XCTAssertEqual(fallbackResult, .available)
+        XCTAssertEqual(fallback.release?.tag_name, "v1.0.0")
+        XCTAssertNil(fallback.release?.body)
+        XCTAssertNil(fallback.release?.summary)
+        XCTAssertFalse(ReleaseMock.sawAuthorization)
+        XCTAssertEqual(Array(ReleaseMock.requestedHosts.suffix(2)), ["api.github.com", "github.com"])
+    }
+}
+
+private func githubReleaseJSON(tag: String, body: Any) -> String {
+    let object: [String: Any] = [
+        "tag_name": tag,
+        "html_url": "https://github.com/Guanine000/novelia-swift/releases/tag/\(tag)",
+        "draft": false,
+        "prerelease": false,
+        "body": body,
+    ]
+    let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    return String(decoding: data, as: UTF8.self)
 }

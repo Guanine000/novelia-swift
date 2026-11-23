@@ -459,11 +459,13 @@ struct RootView: View {
             get: { updates.release != nil },
             set: { if !$0 { updates.release = nil } }
         ), presenting: updates.release) { release in
-            Button("跳转下载") { if let url = release.downloadPage { openURL(url) } }
-            Button("取消", role: .cancel) { updates.release = nil }
+            // 「查看更新」打开已经过来源检查的 Release 页，说明和安装包都在该页。「稍后」只关闭本次提示。
+            Button("查看更新") { if let url = release.downloadPage { openURL(url) } }
+            Button("稍后", role: .cancel) { updates.release = nil }
             Button("忽略此版本") { updates.ignore(release) }
         } message: { release in
-            Text("Novelia \(release.version?.display ?? release.tag_name) 已发布，是否前往下载页面？")
+            // 摘要已是纯文本。verbatim 避免把残留符号再当成 Markdown。
+            Text(verbatim: release.updatePromptMessage)
         }
         .task {
             auth.forumAuth = forumAuth
