@@ -409,7 +409,12 @@ struct LibraryBookActionDialogs: ViewModifier {
             LibraryBookDetailView(book: book)
         case .epubToolbox(let book):
             CompatNavigationStack {
-                EPUBToolboxView(initialBook: book, isPresentedInSheet: true)
+                EPUBToolboxView(initialBook: book)
+                    .toolbar {
+                        ToolbarItem(placement: .compatTopBarLeading) {
+                            Button("关闭") { actions.epubToolboxBook = nil }
+                        }
+                    }
             }
         case .shareArchive(let archive):
             LibraryArchiveShareSheet(url: archive.url)

@@ -263,10 +263,8 @@ final class EPUBToolboxModel: ObservableObject {
 /// 独立的 EPUB 工具箱页面：提供深度体检、四项标准化/修复开关、处理报告、另存为新书入库与导出分享。
 struct EPUBToolboxView: View {
     let initialBook: LibraryBook?
-    let isPresentedInSheet: Bool
 
     @StateObject private var model = EPUBToolboxModel()
-    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var libraryState: LibraryStateStore
     @EnvironmentObject private var webDownloads: WebNovelDownloadStore
     @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
@@ -278,9 +276,8 @@ struct EPUBToolboxView: View {
     @State private var isShowingTOCEditor = false
     @State private var shareURL: URL?
 
-    init(initialBook: LibraryBook? = nil, isPresentedInSheet: Bool = false) {
+    init(initialBook: LibraryBook? = nil) {
         self.initialBook = initialBook
-        self.isPresentedInSheet = isPresentedInSheet
     }
 
     private var localEPUBBooks: [LibraryBook] {
@@ -309,13 +306,6 @@ struct EPUBToolboxView: View {
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle("EPUB 工具箱")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .compatTopBarLeading) {
-                Button("关闭") { dismiss() }
-                    .opacity(isPresentedInSheet ? 1 : 0)
-                    .disabled(!isPresentedInSheet)
-            }
-        }
         .onAppear {
             if model.source == nil, let initialBook {
                 model.selectLibraryBook(initialBook)

@@ -825,6 +825,7 @@ Core 的 `ReadingRecapPlan` 接受此前 1–3 章及可选当前章已读部分
 
 EPUB 工具箱位于 `iOSApp/Features/EPUBToolbox/`，仅依赖项目既有的 `ReadiumZIPFoundation` 与 `SwiftSoup`，同时编入 `Novelia`（iOS 17+）与 `NoveliaLegacy`（iOS 15+）两个目标，不引入新第三方依赖。
 
+- **入口导航**：设置页将工具箱推入现有导航栈，沿用系统返回按钮。书库的 `LibraryBookActionDialogs` 弹出工具箱，并在弹层入口提供“关闭”按钮。
 - **只读原文件契约**：`EPUBToolboxInspector` 与 `EPUBToolboxProcessor` 绝不修改原 EPUB；处理结果写入临时文件后原子移动，工具箱仅提供“另存为新书入库”（经 `WenkuLocalLibraryStore.downloadDestination` + `registerDownloadedFile`）与“导出 / 分享”，保持原有阅读器容器只读和进度／书签／WebDAV 同步身份不受影响。
 - **内部文件浏览**：`EPUBArchiveBrowser` 扫描一次 ZIP 目录并建立共享的只读文件夹索引，跳转子目录不重开压缩包。预览按 ZIP 原始键单独读取条目，先核对大小（文本 256 KiB、图片 32 MiB）。系统 Quick Look 只接收单张图片的临时文件，随预览释放清理；XHTML、SVG 等仍以可选中的源码呈现。
 - **体检分层**：导入链路（`LibraryImportModel`，受本机偏好键 `SettingsKey.libraryAutoInspectEPUBOnImport` 控制，默认开启）只执行 `.lightweight` 体检（仅读 ZIP 目录、`mimetype`、`container.xml`、`content.opf`、NCX／Nav，不解压正文与图片），发现可修复问题后经 `pendingEPUBRepair` 弹出一次汇总确认；工具箱页面执行 `.deep` 体检，额外检查 XHTML 编码／XML 良构性与精确未引用资源体积。
