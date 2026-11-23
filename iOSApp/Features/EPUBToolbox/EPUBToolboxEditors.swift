@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
+import QuickLook
 import SwiftUI
+import UniformTypeIdentifiers
 import UIKit
 
 // MARK: - 1. 元数据与封面编辑器
@@ -324,156 +326,308 @@ struct EPUBTOCEditorSheet: View {
 
 // MARK: - 3. EPUB 内部文件浏览器（只读）
 
-/// 按分类与体积展示 EPUB 内部全部文件，标出未引用条目，支持点击查看文本/OPF/CSS/XHTML 源码预览。
+/// 浏览器持有一次扫描的目录索引，子页面共用它。打开预览时按原始键读取对应条目。
 struct EPUBArchiveBrowserView: View {
     let sourceURL: URL
     let bookTitle: String
 
-    @State private var isLoading = true
-    @State private var entries: [EPUBArchiveEntryInfo] = []
-    @State private var sortBySize = true
-    @State private var query = ""
-    @State private var previewEntry: EPUBArchiveEntryInfo?
+    @State private var listing: EPUBArchiveListing?
     @State private var errorMessage: String?
-
-    private var totalUncompressed: Int64 {
-        max(entries.reduce(0) { $0 + $1.uncompressedBytes }, 1)
-    }
-
-    private var filteredEntries: [EPUBArchiveEntryInfo] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let base = trimmed.isEmpty
-            ? entries
-            : entries.filter {
-                $0.path.localizedCaseInsensitiveContains(trimmed)
-                    || $0.category.localizedCaseInsensitiveContains(trimmed)
-            }
-        if sortBySize {
-            return base.sorted { $0.uncompressedBytes > $1.uncompressedBytes }
-        }
-        return base.sorted { $0.path < $1.path }
-    }
-
-    private var categorySummary: [(category: String, count: Int, bytes: Int64)] {
-        let grouped = Dictionary(grouping: entries, by: \.category)
-        return grouped.map { key, list in
-            (key, list.count, list.reduce(0) { $0 + $1.uncompressedBytes })
-        }.sorted { $0.bytes > $1.bytes }
-    }
+    @State private var sortOrder = EPUBArchiveSortOrder.name
 
     var body: some View {
-        List {
-            if isLoading {
-                HStack(spacing: 12) {
-                    ProgressView()
-                    Text("正在扫描压缩包内部文件…")
-                        .foregroundStyle(NoveliaStyle.muted)
+        Group {
+            if let listing {
+                EPUBArchiveFolderView(sourceURL: sourceURL, title: bookTitle, folder: "", listing: listing, sortOrder: $sortOrder)
+            } else if let errorMessage {
+                VStack(spacing: 12) {
+                    Label("无法打开 EPUB", systemImage: "exclamationmark.triangle")
+                        .font(.headline)
+                    Text(errorMessage)
+                        .foregroundStyle(.secondary)
+                    Button("重试") { Task { await loadEntries() } }
                 }
+                .padding()
             } else {
-                Section("分类体积占比") {
-                    ForEach(categorySummary, id: \.category) { item in
-                        let ratio = Double(item.bytes) / Double(totalUncompressed)
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text("\(item.category)（\(item.count)）")
-                                    .font(.subheadline)
-                                Spacer()
-                                Text("\(ByteCountFormatter.string(fromByteCount: item.bytes, countStyle: .file)) · \(Int(ratio * 100))%")
-                                    .font(.caption)
-                                    .foregroundStyle(NoveliaStyle.muted)
-                            }
-                            ProgressView(value: ratio)
-                                .tint(NoveliaStyle.brandGreen)
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-
-                Section("全部条目（\(filteredEntries.count)）") {
-                    ForEach(filteredEntries) { entry in
-                        Button {
-                            if entry.isTextPreviewable {
-                                previewEntry = entry
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(entry.path)
-                                        .font(.system(.caption, design: .monospaced))
-                                        .foregroundStyle(NoveliaStyle.ink)
-                                        .lineLimit(2)
-                                    HStack(spacing: 6) {
-                                        Text(entry.category)
-                                            .font(.caption2)
-                                            .foregroundStyle(NoveliaStyle.muted)
-                                        if !entry.isReferenced {
-                                            Text("未引用")
-                                                .font(.caption2)
-                                                .padding(.horizontal, 5)
-                                                .padding(.vertical, 1)
-                                                .background(NoveliaStyle.warning.opacity(0.18), in: Capsule())
-                                                .foregroundStyle(NoveliaStyle.warning)
-                                        }
-                                        if !entry.isCompressed {
-                                            Text("无压缩")
-                                                .font(.caption2)
-                                                .foregroundStyle(NoveliaStyle.muted)
-                                        }
-                                    }
-                                }
-                                Spacer()
-                                Text(ByteCountFormatter.string(fromByteCount: entry.uncompressedBytes, countStyle: .file))
-                                    .font(.caption)
-                                    .foregroundStyle(NoveliaStyle.muted)
-                                if entry.isTextPreviewable {
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption2)
-                                        .foregroundStyle(NoveliaStyle.muted)
-                                }
-                            }
-                        }
-                        .disabled(!entry.isTextPreviewable)
-                    }
-                }
+                ProgressView("正在读取文件目录…")
             }
         }
-        .compatScrollContentBackgroundHidden()
-        .background(NoveliaStyle.paper.ignoresSafeArea())
-        .searchable(text: $query, prompt: "筛选路径或分类")
-        .navigationTitle("内部文件浏览器")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .compatTopBarTrailing) {
-                Button(sortBySize ? "按路径排" : "按体积排") {
-                    sortBySize.toggle()
-                }
-            }
-        }
-        .sheet(item: $previewEntry) { entry in
-            EPUBArchiveTextPreviewSheet(sourceURL: sourceURL, entry: entry)
-        }
-        .task { await loadEntries() }
-        .alert("读取失败", isPresented: Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )) {
-            Button("好", role: .cancel) { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
+        .task {
+            if listing == nil, errorMessage == nil { await loadEntries() }
         }
     }
 
     private func loadEntries() async {
-        isLoading = true
-        defer { isLoading = false }
+        errorMessage = nil
         do {
-            entries = try await Task.detached(priority: .userInitiated) {
-                try await EPUBArchiveBrowser.listEntries(url: sourceURL)
-            }.value
+            listing = try await EPUBArchiveBrowser.listEntries(url: sourceURL)
         } catch {
-            errorMessage = error.localizedDescription
+            if !Task.isCancelled { errorMessage = error.localizedDescription }
         }
     }
+}
+
+private enum EPUBArchiveSortOrder: String, CaseIterable, Identifiable {
+    case name = "名称"
+    case size = "大小"
+
+    var id: Self { self }
+}
+
+private struct EPUBArchiveFolderView: View {
+    let sourceURL: URL
+    let title: String
+    let folder: String
+    let listing: EPUBArchiveListing
+    @Binding var sortOrder: EPUBArchiveSortOrder
+
+    @State private var query = ""
+    @State private var previewEntry: EPUBArchiveEntryInfo?
+    @State private var loadingImage: EPUBArchiveEntryInfo?
+    @State private var imagePreviewFile: EPUBArchivePreviewFile?
+    @State private var imagePreviewURL: URL?
+    @State private var imagePreviewError: String?
+    @State private var showsStatistics = false
+
+    private var searchTerm: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var isSearching: Bool { !searchTerm.isEmpty }
+    private var folders: [String] {
+        guard isSearching else { return listing.foldersByParent[folder] ?? [] }
+        let prefix = folder.isEmpty ? "" : folder + "/"
+        return listing.foldersByParent.values.joined().filter {
+            $0.hasPrefix(prefix) && $0 != folder && EPUBToolboxPath.filename(of: $0).localizedCaseInsensitiveContains(searchTerm)
+        }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private var files: [EPUBArchiveEntryInfo] {
+        let entries: [EPUBArchiveEntryInfo]
+        if isSearching {
+            let prefix = folder.isEmpty ? "" : folder + "/"
+            entries = listing.entries.filter {
+                $0.path.hasPrefix(prefix) && ($0.path.localizedCaseInsensitiveContains(searchTerm)
+                    || $0.category.localizedCaseInsensitiveContains(searchTerm))
+            }
+        } else {
+            entries = listing.filesByFolder[folder] ?? []
+        }
+        return entries.sorted {
+            if sortOrder == .size, $0.uncompressedBytes != $1.uncompressedBytes {
+                return $0.uncompressedBytes > $1.uncompressedBytes
+            }
+            let byName = $0.name.localizedStandardCompare($1.name)
+            return byName == .orderedSame ? $0.path < $1.path : byName == .orderedAscending
+        }
+    }
+
+    var body: some View {
+        let visibleFolders = folders
+        let visibleFiles = files
+        List {
+            ForEach(visibleFolders, id: \.self) { path in
+                folderRow(path)
+            }
+            ForEach(visibleFiles) { entry in
+                if entry.isTextPreviewable || imageType(for: entry) != nil {
+                    Button { open(entry) } label: {
+                        fileRow(entry, opensPreview: true)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("epub-archive-file-\(entry.path)")
+                } else {
+                    fileRow(entry, opensPreview: false)
+                }
+            }
+            if visibleFolders.isEmpty, visibleFiles.isEmpty {
+                Label(isSearching ? "未找到匹配项" : "此文件夹为空", systemImage: isSearching ? "magnifyingglass" : "folder")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .listStyle(.plain)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "搜索文件与文件夹")
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(folder.isEmpty ? .large : .inline)
+        .toolbar {
+            ToolbarItem(placement: .compatTopBarTrailing) {
+                Menu {
+                    Picker("排序方式", selection: $sortOrder) {
+                        ForEach(EPUBArchiveSortOrder.allCases) { order in
+                            Text(order.rawValue).tag(order)
+                        }
+                    }
+                    if folder.isEmpty {
+                        Button { showsStatistics = true } label: {
+                            Label("文件统计", systemImage: "chart.bar")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .accessibilityLabel("浏览选项")
+            }
+        }
+        .sheet(item: $previewEntry) {
+            EPUBArchiveTextPreviewSheet(sourceURL: sourceURL, entry: $0)
+        }
+        .sheet(isPresented: $showsStatistics) {
+            EPUBArchiveStatisticsSheet(entries: listing.entries)
+        }
+        .quickLookPreview($imagePreviewURL)
+        .onValueChange(of: imagePreviewURL) { _, url in
+            if url == nil { imagePreviewFile = nil }
+        }
+        .task(id: loadingImage) { await loadImagePreview() }
+        .alert("无法预览图片", isPresented: Binding(
+            get: { imagePreviewError != nil },
+            set: { if !$0 { imagePreviewError = nil } }
+        )) {
+            Button("好", role: .cancel) { imagePreviewError = nil }
+        } message: {
+            Text(imagePreviewError ?? "")
+        }
+    }
+
+    private func open(_ entry: EPUBArchiveEntryInfo) {
+        if imageType(for: entry) != nil {
+            loadingImage = entry
+        } else {
+            loadingImage = nil
+            previewEntry = entry
+        }
+    }
+
+    private func loadImagePreview() async {
+        guard let entry = loadingImage, let type = imageType(for: entry) else { return }
+        defer {
+            if !Task.isCancelled { loadingImage = nil }
+        }
+        do {
+            let file = try await EPUBArchivePreviewFile.load(sourceURL: sourceURL, entry: entry, type: type)
+            try Task.checkCancellation()
+            guard QLPreviewController.canPreview(file.url as NSURL) else {
+                imagePreviewError = "当前系统不支持预览这个图片格式。"
+                return
+            }
+            imagePreviewFile = file
+            imagePreviewURL = file.url
+        } catch {
+            if !Task.isCancelled { imagePreviewError = error.localizedDescription }
+        }
+    }
+
+    private func folderRow(_ path: String) -> some View {
+        let name = EPUBToolboxPath.filename(of: path)
+        let count = (listing.foldersByParent[path]?.count ?? 0) + (listing.filesByFolder[path]?.count ?? 0)
+        return NavigationLink {
+            EPUBArchiveFolderView(sourceURL: sourceURL, title: name, folder: path, listing: listing, sortOrder: $sortOrder)
+        } label: {
+            HStack(spacing: 12) {
+                rowIcon("folder.fill", tint: .blue)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(verbatim: name)
+                        .foregroundStyle(.primary)
+                    Text(isSearching ? path : "\(count) 项")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .padding(.vertical, 5)
+        }
+        .accessibilityIdentifier("epub-archive-folder-\(path)")
+    }
+
+    private func fileRow(_ entry: EPUBArchiveEntryInfo, opensPreview: Bool) -> some View {
+        let isImage = imageType(for: entry) != nil
+        return HStack(spacing: 12) {
+            rowIcon(isImage ? "photo" : (entry.isTextPreviewable ? "doc.text" : "doc"), tint: isImage ? .purple : .secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(verbatim: entry.name)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                if isSearching {
+                    Text(verbatim: entry.path)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                HStack(spacing: 8) {
+                    Text(ByteCountFormatter.string(fromByteCount: entry.uncompressedBytes, countStyle: .file))
+                    if !entry.isReferenced {
+                        Text("未引用")
+                            .foregroundStyle(NoveliaStyle.warning)
+                    }
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            if loadingImage?.id == entry.id {
+                ProgressView()
+                    .accessibilityLabel("正在读取图片")
+            } else if opensPreview {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    private func rowIcon(_ symbol: String, tint: Color) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 23))
+            .foregroundStyle(tint)
+            .frame(width: 34, height: 34)
+            .accessibilityHidden(true)
+    }
+}
+
+private struct EPUBArchiveStatisticsSheet: View {
+    let entries: [EPUBArchiveEntryInfo]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let groups = Dictionary(grouping: entries, by: \.category).map { category, files in
+            (category: category, count: files.count, bytes: files.reduce(Int64(0)) { $0 + $1.uncompressedBytes })
+        }.sorted { $0.bytes > $1.bytes }
+        let total = groups.reduce(Int64(0)) { $0 + $1.bytes }
+        CompatNavigationStack {
+            List {
+                ForEach(groups, id: \.category) { group in
+                    let ratio = total == 0 ? 0 : Double(group.bytes) / Double(total)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("\(group.category)（\(group.count)）")
+                            Spacer()
+                            Text("\(ByteCountFormatter.string(fromByteCount: group.bytes, countStyle: .file)) · \(Int(ratio * 100))%")
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.subheadline)
+                        ProgressView(value: ratio)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+            .navigationTitle("文件统计")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .compatTopBarTrailing) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+private func imageType(for entry: EPUBArchiveEntryInfo) -> UTType? {
+    // SVG 继续以源码查看，避免把 EPUB 自带的标记作为可执行页面呈现。
+    guard !entry.isTextPreviewable,
+          let type = UTType(filenameExtension: EPUBToolboxPath.pathExtension(of: entry.path)),
+          type.conforms(to: .image) else { return nil }
+    return type
 }
 
 private struct EPUBArchiveTextPreviewSheet: View {
@@ -481,39 +635,79 @@ private struct EPUBArchiveTextPreviewSheet: View {
     let entry: EPUBArchiveEntryInfo
 
     @Environment(\.dismiss) private var dismiss
-    @State private var text = ""
-    @State private var isLoading = true
+    @State private var text: String?
+    @State private var errorMessage: String?
 
     var body: some View {
         CompatNavigationStack {
             Group {
-                if isLoading {
-                    ProgressView("正在读取源码…")
-                } else {
+                if let text {
                     ScrollView([.vertical, .horizontal]) {
                         Text(verbatim: text)
                             .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(NoveliaStyle.ink)
                             .padding()
                             .textSelection(.enabled)
                     }
+                } else if let errorMessage {
+                    VStack(spacing: 12) {
+                        Label("无法预览", systemImage: "exclamationmark.triangle")
+                            .font(.headline)
+                        Text(errorMessage)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding()
+                } else {
+                    ProgressView("正在读取文件…")
                 }
             }
-            .background(NoveliaStyle.paper.ignoresSafeArea())
-            .navigationTitle(EPUBToolboxPath.filename(of: entry.path))
+            .navigationTitle(entry.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .compatTopBarLeading) {
-                    Button("关闭") { dismiss() }
+                ToolbarItem(placement: .compatTopBarTrailing) {
+                    Button("完成") { dismiss() }
                 }
             }
-            .task {
-                isLoading = true
-                defer { isLoading = false }
-                text = (try? await Task.detached(priority: .userInitiated) {
-                    try await EPUBArchiveBrowser.readTextPreview(url: sourceURL, entryPath: entry.path)
-                }.value) ?? "无法读取该条目。"
-            }
+            .task { await load() }
         }
+    }
+
+    private func load() async {
+        do {
+            let preview = try await EPUBArchiveBrowser.readTextPreview(url: sourceURL, entryPath: entry.archivePath)
+            try Task.checkCancellation()
+            text = preview
+        } catch {
+            if !Task.isCancelled { errorMessage = error.localizedDescription }
+        }
+    }
+}
+
+/// Quick Look 只获得独立临时目录中的单张图片。浏览页面在 Quick Look 打开期间持有临时文件，关闭预览后释放。
+private final class EPUBArchivePreviewFile: Sendable {
+    let url: URL
+    private let directory: URL
+
+    private init(directory: URL, url: URL) {
+        self.directory = directory
+        self.url = url
+    }
+
+    static func load(sourceURL: URL, entry: EPUBArchiveEntryInfo, type: UTType) async throws -> EPUBArchivePreviewFile {
+        let data = try await EPUBArchiveBrowser.readPreviewData(url: sourceURL, entryPath: entry.archivePath)
+        try Task.checkCancellation()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let original = entry.name as NSString
+        let basename = EPUBToolboxPath.sanitizedFilename(original.deletingPathExtension, fallback: "image")
+        let url = directory.appendingPathComponent(basename)
+            .appendingPathExtension(type.preferredFilenameExtension ?? original.pathExtension)
+        let file = EPUBArchivePreviewFile(directory: directory, url: url)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        try data.write(to: url, options: .atomic)
+        return file
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: directory)
     }
 }

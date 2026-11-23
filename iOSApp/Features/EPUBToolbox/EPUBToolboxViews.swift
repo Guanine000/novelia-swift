@@ -512,7 +512,7 @@ struct EPUBToolboxView: View {
             NavigationLink {
                 EPUBArchiveBrowserView(sourceURL: target.fileURL, bookTitle: target.title)
             } label: {
-                Label("内部文件浏览器（只读）", systemImage: "folder.badge.questionmark")
+                Label("浏览内部文件", systemImage: "folder")
             }
 
             NavigationLink {

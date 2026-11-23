@@ -309,14 +309,41 @@ struct EPUBToolboxResult: Equatable, Sendable {
 
 /// 内部文件浏览器展示的单条压缩包资源信息。
 struct EPUBArchiveEntryInfo: Identifiable, Equatable, Sendable {
-    let id: String
+    var id: String { path }
     let path: String
+    // 显示路径会规范化，读取时仍使用 ZIP 中的原始键。
+    let archivePath: String
     let category: String
     let uncompressedBytes: Int64
-    let compressedBytes: Int64
-    let isCompressed: Bool
     let isTextPreviewable: Bool
     let isReferenced: Bool
+
+    var name: String { EPUBToolboxPath.filename(of: path) }
+}
+
+/// 一次扫描建立的只读目录索引，包含未在 ZIP 中单独记录的父目录。
+struct EPUBArchiveListing: Sendable {
+    let entries: [EPUBArchiveEntryInfo]
+    let foldersByParent: [String: [String]]
+    let filesByFolder: [String: [EPUBArchiveEntryInfo]]
+
+    init(entries: [EPUBArchiveEntryInfo], explicitFolders: [String]) {
+        self.entries = entries
+        filesByFolder = Dictionary(grouping: entries) { EPUBToolboxPath.directory(of: $0.path) }
+        var seen = Set<String>()
+        var foldersByParent: [String: [String]] = [:]
+        for folder in explicitFolders + Array(filesByFolder.keys) {
+            var path = folder
+            while !path.isEmpty, seen.insert(path).inserted {
+                let parent = EPUBToolboxPath.directory(of: path)
+                foldersByParent[parent, default: []].append(path)
+                path = parent
+            }
+        }
+        self.foldersByParent = foldersByParent.mapValues { folders in
+            folders.sorted { EPUBToolboxPath.filename(of: $0).localizedStandardCompare(EPUBToolboxPath.filename(of: $1)) == .orderedAscending }
+        }
+    }
 }
 
 /// 处理阶段进度回调数据。

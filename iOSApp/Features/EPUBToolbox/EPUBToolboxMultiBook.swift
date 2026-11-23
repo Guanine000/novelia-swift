@@ -17,12 +17,24 @@ struct EPUBEditableSnapshot: Sendable {
     let tocNodes: [EPUBToolboxTOCNode]
 }
 
+enum EPUBArchivePreviewError: LocalizedError, Equatable {
+    case missingEntry
+    case entryTooLarge
+
+    var errorDescription: String? {
+        switch self {
+        case .missingEntry: "压缩包中找不到该文件。"
+        case .entryTooLarge: "文件太大，无法预览。"
+        }
+    }
+}
+
 enum EPUBArchiveBrowser {
-    static func listEntries(url: URL) async throws -> [EPUBArchiveEntryInfo] {
+    static func listEntries(url: URL) async throws -> EPUBArchiveListing {
         guard let archive = try? await Archive(url: url, accessMode: .read) else {
             throw EPUBToolboxError.invalidArchive
         }
-        let entries = (try? await archive.entries()) ?? []
+        let entries = try await archive.entries()
         var entryByPath: [String: Entry] = [:]
         for entry in entries where entry.type == .file {
             let norm = EPUBToolboxPath.normalize(entry.path)
@@ -42,7 +54,7 @@ enum EPUBArchiveBrowser {
         }
 
         let textExts: Set<String> = ["xhtml", "xht", "html", "htm", "css", "opf", "ncx", "xml", "svg", "js", "txt", "json", "smil"]
-        return entryByPath.keys.sorted().compactMap { path in
+        let files: [EPUBArchiveEntryInfo] = entryByPath.keys.sorted().compactMap { path in
             guard let entry = entryByPath[path] else { return nil }
             let ext = EPUBToolboxPath.pathExtension(of: path)
             let mt = EPUBToolboxPath.inferredMediaType(for: path)
@@ -60,27 +72,35 @@ enum EPUBArchiveBrowser {
             }
             let previewable = path == "mimetype" || textExts.contains(ext)
             return EPUBArchiveEntryInfo(
-                id: path,
                 path: path,
+                archivePath: entry.path,
                 category: category,
                 uncompressedBytes: Int64(entry.uncompressedSize),
-                compressedBytes: Int64(entry.compressedSize),
-                isCompressed: entry.isCompressed,
                 isTextPreviewable: previewable,
                 isReferenced: reachable.contains(path) || path.hasPrefix("META-INF/")
             )
         }
+        let folders = entries.filter { $0.type == .directory }.map { EPUBToolboxPath.normalize($0.path) }
+        return EPUBArchiveListing(entries: files, explicitFolders: folders)
     }
 
-    static func readTextPreview(url: URL, entryPath: String, maxBytes: Int = 256 * 1024) async throws -> String {
+    static func readTextPreview(url: URL, entryPath: String) async throws -> String {
+        let data = try await readPreviewData(url: url, entryPath: entryPath, maxBytes: 256 * 1024)
+        return EPUBToolboxInspector.decodeText(data).text ?? "（无法以文本解码该文件）"
+    }
+
+    static func readPreviewData(url: URL, entryPath: String, maxBytes: Int = 32 * 1024 * 1024) async throws -> Data {
         guard let archive = try? await Archive(url: url, accessMode: .read) else {
             throw EPUBToolboxError.invalidArchive
         }
-        guard let entry = try? await archive.get(entryPath) else {
-            throw EPUBToolboxError.writeFailed("找不到条目 \(entryPath)")
+        guard let entry = try? await archive.get(entryPath), entry.type == .file else {
+            throw EPUBArchivePreviewError.missingEntry
         }
-        let data = try await EPUBToolboxInspector.extractData(from: archive, entry: entry, limit: maxBytes)
-        return EPUBToolboxInspector.decodeText(data).text ?? "（无法以文本解码该文件）"
+        guard entry.uncompressedSize <= Int64(maxBytes) else {
+            throw EPUBArchivePreviewError.entryTooLarge
+        }
+        try Task.checkCancellation()
+        return try await EPUBToolboxInspector.extractData(from: archive, entry: entry, limit: maxBytes)
     }
 
     /// 读取书籍的当前元数据、封面图与目录树，供元数据编辑器与目录编辑器初始化使用。

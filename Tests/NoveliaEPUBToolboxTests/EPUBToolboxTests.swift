@@ -58,6 +58,35 @@ final class EPUBToolboxTests: XCTestCase {
         ])
     }
 
+    func testArchiveBrowserGroupsFoldersAndReadsImageByOriginalArchivePath() async throws {
+        let url = try await makeArchive(name: "browser.epub", entries: [
+            ("mimetype", Data("application/epub+zip".utf8), false),
+            ("OEBPS/Text/chapter.xhtml", Data("<p>Chapter</p>".utf8), true),
+            ("./OEBPS/Images/page.png", tinyPNG, true),
+            ("OEBPS/Other/page.png", tinyPNG, false),
+        ])
+        let archive = try await Archive(url: url, accessMode: .update)
+        try await archive.addEntry(with: "OEBPS/Empty/", type: .directory, uncompressedSize: 0) { _, _ in Data() }
+
+        let listing = try await EPUBArchiveBrowser.listEntries(url: url)
+        XCTAssertEqual(listing.foldersByParent[""], ["OEBPS"])
+        XCTAssertEqual(listing.foldersByParent["OEBPS"], ["OEBPS/Empty", "OEBPS/Images", "OEBPS/Other", "OEBPS/Text"])
+        XCTAssertNil(listing.filesByFolder["OEBPS/Empty"])
+        XCTAssertEqual(listing.filesByFolder[""]?.map(\.name), ["mimetype"])
+        let image = try XCTUnwrap(listing.filesByFolder["OEBPS/Images"]?.first)
+        XCTAssertEqual(image.path, "OEBPS/Images/page.png")
+        XCTAssertEqual(image.archivePath, "./OEBPS/Images/page.png")
+        XCTAssertNotEqual(image.id, listing.filesByFolder["OEBPS/Other"]?.first?.id)
+        let bytes = try await EPUBArchiveBrowser.readPreviewData(url: url, entryPath: image.archivePath)
+        XCTAssertEqual(bytes, tinyPNG)
+        do {
+            _ = try await EPUBArchiveBrowser.readPreviewData(url: url, entryPath: image.archivePath, maxBytes: 1)
+            XCTFail("大于预览体积限制的条目应被拒绝")
+        } catch let error as EPUBArchivePreviewError {
+            XCTAssertEqual(error, .entryTooLarge)
+        }
+    }
+
     // MARK: - 1. 体检 + 全套标准化修复 + EPUBContainer 端到端验证
 
     func testInspectAndFullStandardizationAndReaderCompatibility() async throws {
@@ -586,7 +615,7 @@ final class EPUBToolboxTests: XCTestCase {
         XCTAssertEqual(mergeResult.totalSpineCount, 2)
 
         // 2) 内部文件浏览器与文本预览
-        let entries = try await EPUBArchiveBrowser.listEntries(url: mergedURL)
+        let entries = try await EPUBArchiveBrowser.listEntries(url: mergedURL).entries
         XCTAssertTrue(entries.contains(where: { $0.path == "OEBPS/content.opf" && $0.isTextPreviewable }))
         let opfPreview = try await EPUBArchiveBrowser.readTextPreview(url: mergedURL, entryPath: "OEBPS/content.opf")
         XCTAssertTrue(opfPreview.contains("合集书"))
