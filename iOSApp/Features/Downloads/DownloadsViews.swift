@@ -75,13 +75,7 @@ final class LibraryImportModel: ObservableObject {
     }
 
     static func isKindleFile(_ url: URL) -> Bool {
-        #if NOVELIA_READIUM_ONLY
-        // iOS 15 目标不链接 CLibMobi，不能把 AZW3／MOBI 转成 EPUB。
-        _ = url
-        return false
-        #else
         KindleEPUBConverter.supportedExtensions.contains(url.pathExtension.lowercased())
-        #endif
     }
 
     /// 导入前 EPUB 轻量结构体检的汇总提示。
@@ -319,11 +313,7 @@ final class LibraryImportModel: ObservableObject {
         FileManager.default.createFile(atPath: destination.path, contents: nil)
         // 协调读取可能需要先从 iCloud 下载，大文件复制也很耗时，都放到主线程之外，进度浮窗保持更新。
         if isKindle {
-            #if NOVELIA_READIUM_ONLY
-            throw LibraryImportError.unsupportedFile
-            #else
             try await convertKindleFile(pickedURL, to: destination, start: start)
-            #endif
         } else if repairEPUB && extensionName == "epub" {
             try await repairAndStandardizeEPUB(pickedURL, to: destination, start: start)
         } else {
@@ -397,7 +387,6 @@ final class LibraryImportModel: ObservableObject {
         }
     }
 
-    #if !NOVELIA_READIUM_ONLY
     /// 先把选中的文件协调复制到临时目录（可能需要从 iCloud 下载），再在主线程之外转换为 EPUB 写到书库目标。
     /// 任一步失败都删除临时副本与目标占位文件；临时副本在转换后删除，书库不保留原文件。
     private func convertKindleFile(_ pickedURL: URL, to destination: URL, start: MonotonicInstant) async throws {
@@ -453,7 +442,6 @@ final class LibraryImportModel: ObservableObject {
     private enum KindleConversionStageError: Error {
         case copy(Error)
     }
-    #endif
 
     nonisolated private static func coordinatedCopy(from source: URL, to destination: URL) throws {
         var coordinatedError: NSError?

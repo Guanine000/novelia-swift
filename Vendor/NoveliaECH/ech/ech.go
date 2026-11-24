@@ -355,6 +355,24 @@ func (c *Call) FailureReason() string {
 	return c.failure
 }
 
+// ReadChunk 显式区分正文数据与正常 EOF，避免 gomobile 把空切片映射为 ObjC nil 导致 Swift try 误判为错误。
+type ReadChunk struct {
+	Data []byte
+	EOF  bool
+}
+
+// ReadChunk 流式读取下一块正文；正常结束时返回非空对象且 EOF 为 true。
+func (c *Call) ReadChunk(maxBytes int) (*ReadChunk, error) {
+	data, err := c.Read(maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return &ReadChunk{EOF: true}, nil
+	}
+	return &ReadChunk{Data: data, EOF: false}, nil
+}
+
 // Read 在到达 EOF 时返回空切片，单次读取上限为 64 KiB。
 func (c *Call) Read(maxBytes int) ([]byte, error) {
 	if maxBytes <= 0 {

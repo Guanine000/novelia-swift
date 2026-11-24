@@ -34,7 +34,7 @@
 
 ## 项目概览
 
-Novelia 是第三方小说客户端，使用 Swift、SwiftUI 和 UIKit。主目标 `Novelia` 面向 iOS 17 及以上，默认使用 YueduCoreText 分页。另一个 App 目标 `NoveliaLegacy`（bundle id `cc.novelia.ios.port.ios15`）面向 iOS 15，不链接 YueduCoreText 与 CLibMobi，分页固定为 Readium。主要能力包括网络小说和文库发现、收藏与历史、论坛、本地 TXT/EPUB 书库、在线阅读、EPUB 下载、阅读统计和 WebDAV 同步（手动或自动）。
+Novelia 是第三方小说客户端，使用 Swift、SwiftUI 和 UIKit。主目标 `Novelia` 面向 iOS 17 及以上，默认使用 YueduCoreText 分页。另一个 App 目标 `NoveliaLegacy`（bundle id `cc.novelia.ios.port.ios15`）面向 iOS 15，不链接 YueduCoreText（分页固定为 Readium），同样链接 CLibMobi 以支持 AZW3／MOBI 导入。主要能力包括网络小说和文库发现、收藏与历史、论坛、本地 TXT/EPUB/AZW3/MOBI 书库、在线阅读、EPUB 下载、阅读统计和 WebDAV 同步（手动或自动）。
 
 界面使用 SwiftUI，阅读器按引擎需要结合原生视图和 WebKit。可观察状态通常由 `@MainActor` Store 管理；远端操作使用异步服务接口；Core 保存业务模型、算法和存储逻辑。项目没有统一采用单一大型 ViewModel，每个功能应沿用适合其职责的现有实现。
 

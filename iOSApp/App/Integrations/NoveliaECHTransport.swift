@@ -240,7 +240,7 @@ final class NoveliaECHController: @unchecked Sendable {
         }
         lock.unlock()
 
-        let summary = Self.summarizeEvents(events)
+        let summary = Self.summarizeEvents(events, ok: outcome == "ok")
         let message = AppDiagnosticMessage.echRequest(
             host: Self.hostLogLabel(host),
             outcome: outcome,
@@ -261,7 +261,7 @@ final class NoveliaECHController: @unchecked Sendable {
     }
 
     private func logProbeDiagnostic(_ report: ECHProbeReport) {
-        let summary = Self.summarizeEvents(report.events)
+        let summary = Self.summarizeEvents(report.events, ok: report.ok)
         let message = AppDiagnosticMessage.echProbe(
             host: Self.hostLogLabel(report.host),
             ok: report.ok,
@@ -297,12 +297,18 @@ final class NoveliaECHController: @unchecked Sendable {
         }
     }
 
-    private static func summarizeEvents(_ events: [ECHDiagnosticEvent]) -> (stage: String, reason: String, resolver: String, family: String) {
-        let failed = events.last(where: { $0.outcome == "failed" })
+    private static func summarizeEvents(_ events: [ECHDiagnosticEvent], ok: Bool) -> (stage: String, reason: String, resolver: String, family: String) {
+        let failed = ok ? nil : events.last(where: { $0.outcome == "failed" && $0.reason != "cancelled" }) ?? events.last(where: { $0.outcome == "failed" })
         let stage = failed?.stage ?? events.last?.stage ?? "none"
         let reason = failed?.reason ?? "none"
         let resolver = events.last(where: { ($0.resolver?.isEmpty == false) })?.resolver ?? "none"
-        let family = events.last(where: { ($0.family?.isEmpty == false) })?.family ?? "none"
+        let rawFamily = events.last(where: { ($0.family?.isEmpty == false) })?.family ?? "none"
+        let family: String = switch rawFamily {
+        case "v4", "ipv4": "ipv4"
+        case "v6", "ipv6": "ipv6"
+        case "none": "none"
+        default: "other"
+        }
         return (stage, reason, resolver, family)
     }
 
@@ -651,16 +657,16 @@ final class NoveliaECHURLProtocol: URLProtocol {
 
         while !cancelled() {
             do {
-                let chunk = try call.read(65536)
-                if chunk.isEmpty {
+                let chunk = try call.readChunk(65536)
+                if chunk.eof {
                     if !cancelled() {
                         finalOutcome = "ok"
                         client?.urlProtocolDidFinishLoading(self)
                     }
                     return
                 }
-                if !cancelled() {
-                    client?.urlProtocol(self, didLoad: chunk)
+                if !cancelled(), let data = chunk.data, !data.isEmpty {
+                    client?.urlProtocol(self, didLoad: data)
                 }
             } catch {
                 if !cancelled() {

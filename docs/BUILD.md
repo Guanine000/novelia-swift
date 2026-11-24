@@ -6,7 +6,7 @@
 
 ## 从源码运行
 
-使用 Xcode 打开 `NoveliaIOS.xcodeproj`。`Novelia` scheme 面向 iOS 17，保留 YueduCoreText。`NoveliaLegacy` scheme 面向 iOS 15（bundle id `cc.novelia.ios.port.ios15`），不链接 YueduCoreText 与 CLibMobi，分页固定为 Readium。依赖由 Swift Package Manager 解析，锁定版本见 `NoveliaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`。本地测试包 `Package.swift` 的平台仍是 iOS 17，因为其中的 EPUB 与 Kindle 测试依赖上述两个库。
+使用 Xcode 打开 `NoveliaIOS.xcodeproj`。`Novelia` scheme 面向 iOS 17，保留 YueduCoreText。`NoveliaLegacy` scheme 面向 iOS 15（bundle id `cc.novelia.ios.port.ios15`），不链接 YueduCoreText，分页固定为 Readium，同样支持 AZW3／MOBI 导入（链接 CLibMobi）。依赖由 Swift Package Manager 解析，锁定版本见 `NoveliaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`。本地测试包 `Package.swift` 的平台仍是 iOS 17，因为其中的 EPUB 测试依赖 YueduCoreText。
 
 ### 目录结构
 
@@ -79,7 +79,7 @@ Release 编译每次仍调用 Xcode，由其做增量构建；生产验证排除
 Release 分发时一并提供两个 IPA、source.tar.gz、dependencies.tar.gz、BUILD.json 与 SHA256SUMS；未签名 IPA 需接收者自行重签。
 
 - `novelia-<版本>-build<构建号>-unsigned.ipa`：iOS 17，含 YueduCoreText 原生分页与 AZW3／MOBI 转换。
-- `novelia-<版本>-build<构建号>-ios15-unsigned.ipa`：iOS 15，bundle id `cc.novelia.ios.port.ios15`。分页只有 Readium，设置里不能切回原生分页；不包含 YueduCoreText 与 libmobi，不能导入 AZW3／MOBI。iOS 16/17 才有的界面控件在 iOS 15 上有降级，见[功能说明](FEATURES.md#ios-15-版本)。
+- `novelia-<版本>-build<构建号>-ios15-unsigned.ipa`：iOS 15，bundle id `cc.novelia.ios.port.ios15`。分页只有 Readium，设置里不能切回原生分页；不包含 YueduCoreText，支持 AZW3／MOBI 导入。iOS 16/17 才有的界面控件在 iOS 15 上有降级，见[功能说明](FEATURES.md#ios-15-版本)。
 
 - **公开发行版**：构建另加 `--public-release`，生成指向本版本固定公开 Release 页的 `novelia-<版本>-build<构建号>-source-info.txt`，并纳入 SHA256SUMS；发布公开 Release 时一并上传该 TXT。
 - **公开预发布版**：同时使用 `--public-release --public-release-tag v<版本>-rc.<序号>`，源码说明链接到实际候选标签，不指向尚未发布的正式版；保持 prerelease，不设为 Latest。

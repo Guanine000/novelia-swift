@@ -57,9 +57,6 @@ def target_membership_violations(root=ROOT):
         "EPUBReaderModel.swift in Sources",
         "EPUBReaderNavigationSupport.swift in Sources",
         "EPUBReaderPageRendering.swift in Sources",
-        "KindleEPUBConverter.swift in Sources",
-        "KindleCSSMediaFlattener.swift in Sources",
-        "KindleMOBI6Normalizer.swift in Sources",
     }
     only_main = [name for name in main_names if name not in set(legacy_names)]
     unexpected = [name for name in only_main if name not in excluded_sources]
@@ -73,7 +70,7 @@ def target_membership_violations(root=ROOT):
         yield "NoveliaLegacy sources not in Novelia: " + ", ".join(only_legacy)
     main_fw = set(listed(main_frameworks))
     legacy_fw = set(listed(legacy_frameworks))
-    if main_fw != legacy_fw | {"YueduCoreText in Frameworks", "CLibMobi in Frameworks"}:
+    if main_fw != legacy_fw | {"YueduCoreText in Frameworks"}:
         yield f"Frameworks diverged: main-only {sorted(main_fw - legacy_fw)}, legacy-only {sorted(legacy_fw - main_fw)}"
     main_resources = phase("A20000000000000000000002")
     legacy_resources = phase("A15E00000000000000000002")

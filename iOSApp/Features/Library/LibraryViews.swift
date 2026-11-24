@@ -97,15 +97,13 @@ struct LibraryView: View {
     }
     private var sortOptions: LibrarySortOptions { state.sortOptions(scope: nil) }
 
-    /// 导入文件类型。iOS 15 目标没有 Kindle 转换，不把 AZW3／MOBI 放进选择器。
+    /// 导入文件类型，包含 TXT、EPUB 与 AZW3／MOBI。
     private var importContentTypes: [UTType] {
         var types = [
             UTType(filenameExtension: "txt") ?? .plainText,
             UTType(filenameExtension: "epub") ?? .data
         ]
-        #if !NOVELIA_READIUM_ONLY
         types += KindleEPUBConverter.supportedExtensions.sorted().compactMap { UTType(filenameExtension: $0) }
-        #endif
         return types
     }
 

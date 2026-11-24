@@ -14,7 +14,7 @@ let prefixMaps = (homePrefix.hasPrefix("/Users/") || homePrefix.hasPrefix("/home
 // libmobi v0.12 的 C 源码，供 AZW3／MOBI 导入转换使用。来源、取舍与编译选项见 README.md。
 let package = Package(
     name: "CLibMobi",
-    platforms: [.iOS(.v17)],
+    platforms: [.iOS(.v15)],
     products: [
         .library(name: "CLibMobi", type: .static, targets: ["CLibMobi"])
     ],

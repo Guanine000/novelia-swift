@@ -13,6 +13,7 @@
 
 @class EchCall;
 @class EchClient;
+@class EchReadChunk;
 @class EchReply;
 @protocol EchProxyResolver;
 @class EchProxyResolver;
@@ -50,6 +51,10 @@
  */
 - (NSData* _Nullable)read:(long)maxBytes error:(NSError* _Nullable* _Nullable)error;
 /**
+ * ReadChunk 流式读取下一块正文；正常结束时返回非空对象且 EOF 为 true。
+ */
+- (EchReadChunk* _Nullable)readChunk:(long)maxBytes error:(NSError* _Nullable* _Nullable)error;
+/**
  * SetConnectAttempts 允许外层有界恢复策略接管重试，避免重试层层相乘。
  */
 - (BOOL)setConnectAttempts:(long)attempts error:(NSError* _Nullable* _Nullable)error;
@@ -79,6 +84,19 @@
  * SetCustomDoHResolvers 更新用于 A/AAAA/HTTPS（ECH）解析的 DoH 节点列表；传入空字符串恢复内置默认节点。
  */
 - (BOOL)setCustomDoHResolvers:(NSString* _Nullable)rawList error:(NSError* _Nullable* _Nullable)error;
+@end
+
+/**
+ * ReadChunk 显式区分正文数据与正常 EOF，避免 gomobile 把空切片映射为 ObjC nil 导致 Swift try 误判为错误。
+ */
+@interface EchReadChunk : NSObject <goSeqRefInterface> {
+}
+@property(strong, readonly) _Nonnull id _ref;
+
+- (nonnull instancetype)initWithRef:(_Nonnull id)ref;
+- (nonnull instancetype)init;
+@property (nonatomic) NSData* _Nullable data;
+@property (nonatomic) BOOL eof;
 @end
 
 /**

@@ -182,6 +182,9 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		A15F00000000000000000005 /* SyncLocalStateAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDB000000000000000000001 /* SyncLocalStateAdapter.swift */; };
 		A15F00000000000000000006 /* ReadingTimeTracking.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCB000000000000000000003 /* ReadingTimeTracking.swift */; };
 		A15F00000000000000000404 /* NoveliaECHTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCB000000000000000000403 /* NoveliaECHTransport.swift */; };
+		A15F00000000000000000406 /* KindleEPUBConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E81000000000000000000001 /* KindleEPUBConverter.swift */; };
+		A15F00000000000000000407 /* KindleCSSMediaFlattener.swift in Sources */ = {isa = PBXBuildFile; fileRef = E81000000000000000000002 /* KindleCSSMediaFlattener.swift */; };
+		A15F00000000000000000408 /* KindleMOBI6Normalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E81000000000000000000003 /* KindleMOBI6Normalizer.swift */; };
 		A15F00000000000000000007 /* ReadingActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCB000000000000000000002 /* ReadingActivity.swift */; };
 		A15F00000000000000000008 /* ReadingActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCB000000000000000000001 /* ReadingActivityController.swift */; };
 		A15F00000000000000000009 /* NoveliaServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBB000000000000000000001 /* NoveliaServices.swift */; };
@@ -302,6 +305,7 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		A15F00000000000000000066 /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = F15F00000000000000000004 /* ReadiumNavigator */; };
 		A15F00000000000000000067 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = F15F00000000000000000005 /* SwiftSoup */; };
 		A15F00000000000000000403 /* NoveliaECH in Frameworks */ = {isa = PBXBuildFile; productRef = F15F00000000000000000006 /* NoveliaECH */; };
+		A15F00000000000000000405 /* CLibMobi in Frameworks */ = {isa = PBXBuildFile; productRef = F15F00000000000000000007 /* CLibMobi */; };
 		A15F00000000000000000068 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* Assets.xcassets */; };
 		A15F00000000000000000069 /* ThirdPartyLicenses in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000022 /* ThirdPartyLicenses */; };
 		A15F0000000000000000006A /* WebNovelEPUBIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03110000000000000000001 /* WebNovelEPUBIdentity.swift */; };
@@ -612,6 +616,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A15F00000000000000000066 /* ReadiumNavigator in Frameworks */,
 				A15F00000000000000000067 /* SwiftSoup in Frameworks */,
 				A15F00000000000000000403 /* NoveliaECH in Frameworks */,
+				A15F00000000000000000405 /* CLibMobi in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -896,6 +901,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				F15F00000000000000000004 /* ReadiumNavigator */,
 				F15F00000000000000000005 /* SwiftSoup */,
 				F15F00000000000000000006 /* NoveliaECH */,
+				F15F00000000000000000007 /* CLibMobi */,
 			);
 			name = NoveliaLegacy;
 			productName = NoveliaLegacy;
@@ -1062,6 +1068,10 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 		F15F00000000000000000006 /* NoveliaECH */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = NoveliaECH;
+		};
+		F15F00000000000000000007 /* CLibMobi */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CLibMobi;
 		};
 /* End XCSwiftPackageProductDependency section */
 
@@ -1323,6 +1333,9 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A15F00000000000000000005 /* SyncLocalStateAdapter.swift in Sources */,
 				A15F00000000000000000006 /* ReadingTimeTracking.swift in Sources */,
 				A15F00000000000000000404 /* NoveliaECHTransport.swift in Sources */,
+				A15F00000000000000000406 /* KindleEPUBConverter.swift in Sources */,
+				A15F00000000000000000407 /* KindleCSSMediaFlattener.swift in Sources */,
+				A15F00000000000000000408 /* KindleMOBI6Normalizer.swift in Sources */,
 				A15F00000000000000000007 /* ReadingActivity.swift in Sources */,
 				A15F00000000000000000008 /* ReadingActivityController.swift in Sources */,
 				A15F00000000000000000009 /* NoveliaServices.swift in Sources */,
@@ -1582,7 +1595,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.6.0;
-				CURRENT_PROJECT_VERSION = 234;
+				CURRENT_PROJECT_VERSION = 236;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1606,7 +1619,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.6.0;
-				CURRENT_PROJECT_VERSION = 234;
+				CURRENT_PROJECT_VERSION = 236;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1631,7 +1644,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				INFOPLIST_KEY_CFBundleDisplayName = "Novelia 15";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.6.0;
-				CURRENT_PROJECT_VERSION = 234;
+				CURRENT_PROJECT_VERSION = 236;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port.ios15;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1657,7 +1670,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				INFOPLIST_KEY_CFBundleDisplayName = "Novelia 15";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.6.0;
-				CURRENT_PROJECT_VERSION = 234;
+				CURRENT_PROJECT_VERSION = 236;
 				PRODUCT_BUNDLE_IDENTIFIER = cc.novelia.ios.port.ios15;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;

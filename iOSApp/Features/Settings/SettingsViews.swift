@@ -707,8 +707,8 @@ private struct LogActivitySheet: UIViewControllerRepresentable {
 private struct ThirdPartyLicensesView: View {
     /// GPL-3.0 第 5(a) 条要求的修改日期。scripts/build_local_release.py 要求它等于
     /// 发布提交的日期，因此每次发布构建时都需更新。
-    static let modifiedDate = "2026-11-23"
-    /// iOS 15 目标不链接 YueduCoreText 与 libmobi，开源许可页不把它们列为本二进制的组件。
+    static let modifiedDate = "2026-11-24"
+    /// iOS 15 目标不链接 YueduCoreText，开源许可页不将其列为本二进制的组件。
     private var packages: [(name: String, version: String, license: String, file: String)] {
         let all: [(name: String, version: String, license: String, file: String)] = [
             ("SwiftSoup", "2.13.7", "MIT", "SwiftSoup-LICENSE.txt"),
@@ -725,7 +725,7 @@ private struct ThirdPartyLicensesView: View {
             ("OpenCC 繁体词组表（派生）", "ver.1.4.2", "Apache-2.0", "OpenCC-LICENSE.txt")
         ]
         #if NOVELIA_READIUM_ONLY
-        return all.filter { $0.name != "YueduCoreText" && $0.name != "libmobi" }
+        return all.filter { $0.name != "YueduCoreText" }
         #else
         return all
         #endif
@@ -751,7 +751,7 @@ private struct ThirdPartyLicensesView: View {
             }
             Section {
                 #if NOVELIA_READIUM_ONLY
-                Text("本应用使用的第三方软件、数据及其原始许可文本。此 iOS 15 版本使用 Readium 分页，不包含 YueduCoreText，也不包含用于 AZW3／MOBI 转换的 libmobi。简繁词表为 OpenCC 词典的修改版本。")
+                Text("本应用使用的第三方软件、数据及其原始许可文本。此 iOS 15 版本使用 Readium 分页，不包含 YueduCoreText。简繁词表为 OpenCC 词典的修改版本。")
                 #else
                 Text("本应用使用的第三方软件、数据及其原始许可文本。YueduCoreText 的 NOTICE 包含 Unicode License v3；简繁词表为 OpenCC 词典的修改版本。")
                 #endif
