@@ -37,14 +37,18 @@ final class AppServices: ObservableObject {
 
     /// 生产组装保留小说/论坛独立会话；API 每次读取账号使用的同一凭据存储，避免令牌快照过期。
     static func novelia(configuration: APIConfiguration = .production,
-                        session: URLSession = .shared) -> AppServices {
+                        session: URLSession? = nil) -> AppServices {
+        let transportSession = session ?? NoveliaECHController.shared.session
         RetiredSpeechServiceCleanup.removeStoredKey()
-        // 小说与论坛续期使用同一刷新 Cookie，共用一个队列逐个执行。
+        // 小说与论坛续期使用同一刷新 Cookie，共用一个队列与 Cookie 存储逐个执行。
         let refreshQueue = SerialAsyncGate()
-        let account = AccountAuthStore(configuration: configuration, session: session, refreshQueue: refreshQueue)
-        let forum = ForumAuthStore(configuration: configuration, session: session, refreshQueue: refreshQueue)
+        let cookieStore = AuthRefreshCookieKeychainStore()
+        let account = AccountAuthStore(configuration: configuration, session: transportSession,
+                                       refreshQueue: refreshQueue, cookieStore: cookieStore)
+        let forum = ForumAuthStore(configuration: configuration, session: transportSession,
+                                   refreshQueue: refreshQueue, cookieStore: cookieStore)
         let api = APIServiceCollection.novelia(
-            configuration: configuration, session: session,
+            configuration: configuration, session: transportSession,
             novelToken: { [store = account.tokenStore] in store.read() },
             forumToken: { [store = forum.tokenStore] in store.read() })
         return AppServices(configuration: configuration, api: api, account: account, forumAccount: forum,

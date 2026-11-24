@@ -21,7 +21,7 @@ final class CoverImageLoader: @unchecked Sendable {
 
     init(directory: URL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CoverImages", isDirectory: true),
-         session: URLSession = .shared) {
+         session: URLSession = NoveliaECHController.shared.session) {
         self.directory = directory
         self.session = session
         memory.totalCostLimit = 48 * 1024 * 1024

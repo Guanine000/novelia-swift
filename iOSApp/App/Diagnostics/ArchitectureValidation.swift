@@ -146,10 +146,13 @@ extension AppServices {
         else { newerFile = nil }
         let backend = ArchitectureFixtureBackend(initialFailure: failure, sampleFile: initialFile, updatedSampleFile: newerFile, ambiguousChapters: ambiguous, directorySize: large ? 131 : nil, onCall: { ArchitectureNetworkTrap.serviceCalled($0) })
         let refreshQueue = SerialAsyncGate()
+        let cookieStore = MemoryAuthRefreshCookieStore()
         let account = AccountAuthStore(configuration: configuration,
-            tokenStore: FixtureTokenStore(username: ArchitectureFixtureBackend.username), refreshQueue: refreshQueue)
+            tokenStore: FixtureTokenStore(username: ArchitectureFixtureBackend.username),
+            refreshQueue: refreshQueue, cookieStore: cookieStore)
         let forum = ForumAuthStore(configuration: configuration,
-            tokenStore: FixtureTokenStore(username: ArchitectureFixtureBackend.username), refreshQueue: refreshQueue)
+            tokenStore: FixtureTokenStore(username: ArchitectureFixtureBackend.username),
+            refreshQueue: refreshQueue, cookieStore: cookieStore)
         let conversationAI: ReadingAIStore?
         if ProcessInfo.processInfo.arguments.contains("-architectureCharacterConversation") {
             let ai = ReadingAIStore(defaults: local.readerSettings.defaults, keys: MemoryReadingAIKeys(), client: ArchitectureCharacterReplyAI())

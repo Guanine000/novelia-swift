@@ -16,9 +16,14 @@ def method(part, signature):
 a = s.split('final class AccountAuthStore',1)[1].split('final class ForumAuthStore',1)[0]
 f = s.split('final class ForumAuthStore',1)[1].split('enum NoveliaForumSessionTokenVault',1)[0]
 code = '''import Foundation
+@MainActor final class StubCookieStore {
+ var clears = 0
+ func clear() async { clears += 1 }
+}
 @MainActor final class AccountAuthStore {
  var isRefreshing = false; var username: String?; var errorMessage: String?
  weak var forumAuth: ForumAuthStore?
+ let cookieStore = StubCookieStore()
  var nextUser = "alice"; var succeeds = true; var refreshes = 0; var clears = 0
  func refreshSession() async -> Bool { refreshes += 1; if succeeds { username = nextUser }; return succeeds }
  func clearSession() { clears += 1; username = nil }
@@ -27,6 +32,7 @@ code = '''import Foundation
 @MainActor final class ForumAuthStore {
  var isRefreshing = false; var username: String?; var errorMessage: String?
  weak var accountAuth: AccountAuthStore?
+ let cookieStore = StubCookieStore()
  var nextUser = "alice"; var succeeds = true; var refreshes = 0; var clears = 0
  func refreshSession() async -> Bool { refreshes += 1; if succeeds && nextUser == accountAuth?.username { username = nextUser; return true }; return false }
  func clearSession() { clears += 1; username = nil }

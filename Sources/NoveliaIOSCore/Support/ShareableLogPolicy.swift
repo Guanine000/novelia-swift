@@ -107,6 +107,10 @@ public enum ShareableLogPolicy {
             #"Auth session refreshed; scope=\#(authScope), outcome=\#(authOutcome), status=-?[0-9]{1,4}, domain=\#(domainPattern), code=-?[0-9]{1,8}, mono=[0-9]{1,12}"#,
             #"Auth session cleared; scope=\#(authScope), reason=\#(authClearReason), mono=[0-9]{1,12}"#,
         ],
+        "ech": [
+            #"ECH request; host=\#(echHost), outcome=\#(echOutcome), status=-?[0-9]{1,4}, stage=\#(echStage), reason=\#(echReason), resolver=\#(echResolver), family=\#(echFamily), customDoH=(?:true|false), elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+            #"ECH probe; host=\#(echHost), ok=(?:true|false), stage=\#(echStage), reason=\#(echReason), resolver=\#(echResolver), family=\#(echFamily), customDoH=(?:true|false), elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
+        ],
         "epubtoolbox": [
             #"EPUB toolbox inspect completed; mode=\#(toolboxInspectMode), issues=[0-9]{1,6}, drm=(?:true|false), elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
             #"EPUB toolbox inspect failed; mode=\#(toolboxInspectMode), reason=\#(toolboxFailureReason), domain=\#(domainPattern), code=-?[0-9]{1,8}, elapsedMs=[0-9]{1,12}, mono=[0-9]{1,12}"#,
@@ -144,6 +148,12 @@ public enum ShareableLogPolicy {
     public static let authScopes = ["novel", "forum"]
     public static let authOutcomes = ["succeeded", "failed", "unauthorized"]
     public static let authClearReasons = ["user", "unauthorized", "mismatch", "other"]
+    public static let echHosts = ["novel", "auth", "forum", "other"]
+    public static let echOutcomes = ["ok", "failed", "cancelled"]
+    public static let echStages = ["none", "doh_ech", "doh_provider", "proxy", "connect_attempt", "tcp", "tls", "ech", "response_headers", "body", "other"]
+    public static let echReasons = ["none", "timeout", "cancelled", "dns", "dns_no_address", "dns_response", "ech_config_missing", "ech_rejected", "ech_not_accepted", "certificate", "reset", "refused", "unreachable", "eof", "http_403", "http_429", "io", "other"]
+    public static let echResolvers = ["none", "alidns_name", "alidns_ip", "cloudflare_ip", "cloudflare_name", "google_ip", "google_json", "other"]
+    public static let echFamilies = ["none", "ipv4", "ipv6", "other"]
     public static let toolboxInspectModes = ["lightweight", "deep"]
     public static let toolboxActions = ["process", "merge", "split", "exportTXT"]
     public static let toolboxFailureReasons = ["cancelled", "drm", "invalidArchive", "missingOPF", "nothingSelected", "writeFailed", "other"]
@@ -158,6 +168,12 @@ public enum ShareableLogPolicy {
     private static let aiFormat = "(?:" + aiFormats.joined(separator: "|") + ")"
     private static let aiErrorKind = "(?:" + aiErrorKinds.joined(separator: "|") + ")"
     private static let authScope = "(?:" + authScopes.joined(separator: "|") + ")"
+    private static let echHost = "(?:" + echHosts.joined(separator: "|") + ")"
+    private static let echOutcome = "(?:" + echOutcomes.joined(separator: "|") + ")"
+    private static let echStage = "(?:" + echStages.joined(separator: "|") + ")"
+    private static let echReason = "(?:" + echReasons.joined(separator: "|") + ")"
+    private static let echResolver = "(?:" + echResolvers.joined(separator: "|") + ")"
+    private static let echFamily = "(?:" + echFamilies.joined(separator: "|") + ")"
     private static let authOutcome = "(?:" + authOutcomes.joined(separator: "|") + ")"
     private static let authClearReason = "(?:" + authClearReasons.joined(separator: "|") + ")"
     private static let toolboxInspectMode = "(?:" + toolboxInspectModes.joined(separator: "|") + ")"
@@ -587,6 +603,30 @@ public enum AppDiagnosticMessage {
     public static func authSessionCleared(scope: String, reason: String,
                                           mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
         "Auth session cleared; scope=\(scope), reason=\(reason), mono=\(mono)"
+    }
+
+    public static func echRequest(host: String, outcome: String, status: Int = -1, stage: String = "none",
+                                  reason: String = "none", resolver: String = "none", family: String = "none",
+                                  customDoH: Bool = false, elapsedMs: Int,
+                                  mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        let safeHost = ShareableLogPolicy.echHosts.contains(host) ? host : "other"
+        let safeOutcome = ShareableLogPolicy.echOutcomes.contains(outcome) ? outcome : "failed"
+        let safeStage = ShareableLogPolicy.echStages.contains(stage) ? stage : "other"
+        let safeReason = ShareableLogPolicy.echReasons.contains(reason) ? reason : "other"
+        let safeResolver = ShareableLogPolicy.echResolvers.contains(resolver) ? resolver : "other"
+        let safeFamily = ShareableLogPolicy.echFamilies.contains(family) ? family : "other"
+        return "ECH request; host=\(safeHost), outcome=\(safeOutcome), status=\(status), stage=\(safeStage), reason=\(safeReason), resolver=\(safeResolver), family=\(safeFamily), customDoH=\(customDoH), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
+    }
+
+    public static func echProbe(host: String, ok: Bool, stage: String = "none", reason: String = "none",
+                                resolver: String = "none", family: String = "none", customDoH: Bool = false,
+                                elapsedMs: Int, mono: Int = DiagnosticContext.monotonicMilliseconds()) -> String {
+        let safeHost = ShareableLogPolicy.echHosts.contains(host) ? host : "other"
+        let safeStage = ShareableLogPolicy.echStages.contains(stage) ? stage : "other"
+        let safeReason = ShareableLogPolicy.echReasons.contains(reason) ? reason : "other"
+        let safeResolver = ShareableLogPolicy.echResolvers.contains(resolver) ? resolver : "other"
+        let safeFamily = ShareableLogPolicy.echFamilies.contains(family) ? family : "other"
+        return "ECH probe; host=\(safeHost), ok=\(ok), stage=\(safeStage), reason=\(safeReason), resolver=\(safeResolver), family=\(safeFamily), customDoH=\(customDoH), elapsedMs=\(max(0, elapsedMs)), mono=\(mono)"
     }
 
     public static func epubToolboxInspectCompleted(mode: String, issues: Int, drm: Bool, elapsedMs: Int,

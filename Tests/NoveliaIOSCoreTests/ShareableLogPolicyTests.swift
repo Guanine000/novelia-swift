@@ -276,6 +276,14 @@ final class ReaderDiagnosticMessageTests: XCTestCase {
                 passes("auth", A.authSessionCleared(scope: scope, reason: reason))
             }
         }
+        for host in ShareableLogPolicy.echHosts + ["secret.example.com"] {
+            passes("ech", A.echRequest(host: host, outcome: "ok", status: 200, stage: "response_headers", reason: "none", resolver: "alidns_ip", family: "ipv4", customDoH: false, elapsedMs: 120))
+            passes("ech", A.echRequest(host: host, outcome: "failed", status: -1, stage: "tls", reason: "ech_rejected", resolver: "other", family: "ipv6", customDoH: true, elapsedMs: 450))
+            passes("ech", A.echProbe(host: host, ok: true, stage: "tls", reason: "none", resolver: "cloudflare_ip", family: "ipv4", customDoH: false, elapsedMs: 95))
+            passes("ech", A.echProbe(host: host, ok: false, stage: "doh_ech", reason: "timeout", resolver: "other", family: "none", customDoH: true, elapsedMs: 2000))
+        }
+        XCTAssertNil(ShareableLogPolicy.message(subsystem: ShareableLogPolicy.subsystem, category: "ech",
+                                                text: "ECH request; url=https://n.novelia.cc/secret"))
         for mode in ShareableLogPolicy.toolboxInspectModes {
             passes("epubtoolbox", A.epubToolboxInspectCompleted(mode: mode, issues: 4, drm: false, elapsedMs: 32))
             for reason in ShareableLogPolicy.toolboxFailureReasons {

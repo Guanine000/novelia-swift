@@ -111,6 +111,13 @@ public struct AuthenticationConfiguration: Sendable {
         return parts.url!
     }
 
+    /// 原生账密登录接口地址，始终指向已校验的 HTTPS 认证来源。
+    public var loginAPIURL: URL {
+        var parts = URLComponents(url: origin, resolvingAgainstBaseURL: false)!
+        parts.path = loginPath
+        return parts.url!
+    }
+
     public func loginURL(app: String) -> URL {
         var parts = URLComponents(url: loginPageOrigin, resolvingAgainstBaseURL: false)!
         parts.path = "/"

@@ -135,6 +135,8 @@ final class APIServiceTests: XCTestCase {
                        "https://auth.novelia.cc/api/v1/auth/refresh?app=n")
         XCTAssertEqual(production.refreshURL(app: "f").absoluteString,
                        "https://auth.novelia.cc/api/v1/auth/refresh?app=f")
+        XCTAssertEqual(production.loginAPIURL.absoluteString,
+                       "https://auth.novelia.cc/api/v1/auth/login")
         XCTAssertEqual(production.loginURL(app: "n").absoluteString,
                        "https://n.novelia.cc/?app=n&theme=system")
         XCTAssertTrue(production.trustsLoginPage(scheme: "https", host: "n.novelia.cc", port: 0))
@@ -150,6 +152,7 @@ final class APIServiceTests: XCTestCase {
         let custom = try AuthenticationConfiguration(origin: URL(string: "https://login.example.test:8443/")!,
             refreshPath: "/session/renew", loginPath: "/session/login", registerPath: "/session/register")
         XCTAssertEqual(custom.refreshURL(app: "f").path, "/session/renew")
+        XCTAssertEqual(custom.loginAPIURL.absoluteString, "https://login.example.test:8443/session/login")
         XCTAssertEqual(custom.loginURL(app: "n").query, "app=n&theme=system")
         XCTAssertTrue(custom.trusts(scheme: "https", host: "login.example.test", port: 8443))
         XCTAssertFalse(custom.trusts(scheme: "https", host: "login.example.test", port: 0))

@@ -12,6 +12,7 @@
 		E80000000000000000000003 /* KindleMOBI6Normalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E81000000000000000000003 /* KindleMOBI6Normalizer.swift */; };
 		A10000000000000000000401 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000401 /* SwiftSoup */; };
 		A10000000000000000000402 /* CLibMobi in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000402 /* CLibMobi */; };
+		A10000000000000000000403 /* NoveliaECH in Frameworks */ = {isa = PBXBuildFile; productRef = F31000000000000000000403 /* NoveliaECH */; };
 		E40000000000000000000003 /* LocalLibraryIndexWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000000000000000000004 /* LocalLibraryIndexWriter.swift */; };
 		E40000000000000000000001 /* EPUBContentDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E40000000000000000000002 /* EPUBContentDiagnostics.swift */; };
 		A10000000000000000000300 /* ReadiumEPUBReaderModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000300 /* ReadiumEPUBReaderModel.swift */; };
@@ -161,6 +162,7 @@
 		FCA000000000000000000002 /* ReadingActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCB000000000000000000002 /* ReadingActivity.swift */; };
 		FCA000000000000000000003 /* ReadingTimeTracking.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCB000000000000000000003 /* ReadingTimeTracking.swift */; };
 		FDA000000000000000000001 /* SyncLocalStateAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDB000000000000000000001 /* SyncLocalStateAdapter.swift */; };
+		FCA000000000000000000403 /* NoveliaECHTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCB000000000000000000403 /* NoveliaECHTransport.swift */; };
 		FDA000000000000000000002 /* FileContentHash.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDB000000000000000000002 /* FileContentHash.swift */; };
 		FEA000000000000000000001 /* SessionTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEB000000000000000000001 /* SessionTokenStore.swift */; };
 		FEA000000000000000000002 /* ArchitectureValidation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEB000000000000000000002 /* ArchitectureValidation.swift */; };
@@ -179,6 +181,7 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		A15F00000000000000000004 /* FileContentHash.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDB000000000000000000002 /* FileContentHash.swift */; };
 		A15F00000000000000000005 /* SyncLocalStateAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDB000000000000000000001 /* SyncLocalStateAdapter.swift */; };
 		A15F00000000000000000006 /* ReadingTimeTracking.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCB000000000000000000003 /* ReadingTimeTracking.swift */; };
+		A15F00000000000000000404 /* NoveliaECHTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCB000000000000000000403 /* NoveliaECHTransport.swift */; };
 		A15F00000000000000000007 /* ReadingActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCB000000000000000000002 /* ReadingActivity.swift */; };
 		A15F00000000000000000008 /* ReadingActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCB000000000000000000001 /* ReadingActivityController.swift */; };
 		A15F00000000000000000009 /* NoveliaServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBB000000000000000000001 /* NoveliaServices.swift */; };
@@ -298,6 +301,7 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		A15F00000000000000000065 /* ReadiumStreamer in Frameworks */ = {isa = PBXBuildFile; productRef = F15F00000000000000000003 /* ReadiumStreamer */; };
 		A15F00000000000000000066 /* ReadiumNavigator in Frameworks */ = {isa = PBXBuildFile; productRef = F15F00000000000000000004 /* ReadiumNavigator */; };
 		A15F00000000000000000067 /* SwiftSoup in Frameworks */ = {isa = PBXBuildFile; productRef = F15F00000000000000000005 /* SwiftSoup */; };
+		A15F00000000000000000403 /* NoveliaECH in Frameworks */ = {isa = PBXBuildFile; productRef = F15F00000000000000000006 /* NoveliaECH */; };
 		A15F00000000000000000068 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000012 /* Assets.xcassets */; };
 		A15F00000000000000000069 /* ThirdPartyLicenses in Resources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000022 /* ThirdPartyLicenses */; };
 		A15F0000000000000000006A /* WebNovelEPUBIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03110000000000000000001 /* WebNovelEPUBIdentity.swift */; };
@@ -523,6 +527,7 @@ F03200000000000000000001 /* WebNovelEPUBReading.swift in Sources */ = {isa = PBX
 		FCB000000000000000000002 /* ReadingActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/ReadingActivity.swift; sourceTree = "<group>"; };
 		FCB000000000000000000003 /* ReadingTimeTracking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/Integrations/ReadingTimeTracking.swift; sourceTree = "<group>"; };
 		FDB000000000000000000001 /* SyncLocalStateAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/Integrations/SyncLocalStateAdapter.swift; sourceTree = "<group>"; };
+		FCB000000000000000000403 /* NoveliaECHTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/Integrations/NoveliaECHTransport.swift; sourceTree = "<group>"; };
 		FDB000000000000000000002 /* FileContentHash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/FileContentHash.swift; sourceTree = "<group>"; };
 		FEB000000000000000000001 /* SessionTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Domain/SessionTokenStore.swift; sourceTree = "<group>"; };
 		FEB000000000000000000002 /* ArchitectureValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/Diagnostics/ArchitectureValidation.swift; sourceTree = "<group>"; };
@@ -593,6 +598,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A10000000000000000000304 /* ReadiumNavigator in Frameworks */,
 				A10000000000000000000401 /* SwiftSoup in Frameworks */,
 				A10000000000000000000402 /* CLibMobi in Frameworks */,
+				A10000000000000000000403 /* NoveliaECH in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -605,6 +611,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A15F00000000000000000065 /* ReadiumStreamer in Frameworks */,
 				A15F00000000000000000066 /* ReadiumNavigator in Frameworks */,
 				A15F00000000000000000067 /* SwiftSoup in Frameworks */,
+				A15F00000000000000000403 /* NoveliaECH in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -685,6 +692,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				FEB000000000000000000002 /* ArchitectureValidation.swift */,
 				FDB000000000000000000001 /* SyncLocalStateAdapter.swift */,
 				FCB000000000000000000003 /* ReadingTimeTracking.swift */,
+				FCB000000000000000000403 /* NoveliaECHTransport.swift */,
 				FAB000000000000000000003 /* ForumStore.swift */,
 				FAB000000000000000000002 /* WebNovelDownloadStore.swift */,
 				FAB000000000000000000001 /* WenkuLocalLibraryStore.swift */,
@@ -862,6 +870,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				F31000000000000000000304 /* ReadiumNavigator */,
 				F31000000000000000000401 /* SwiftSoup */,
 				F31000000000000000000402 /* CLibMobi */,
+				F31000000000000000000403 /* NoveliaECH */,
 			);
 			name = Novelia;
 			productName = Novelia;
@@ -886,6 +895,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				F15F00000000000000000003 /* ReadiumStreamer */,
 				F15F00000000000000000004 /* ReadiumNavigator */,
 				F15F00000000000000000005 /* SwiftSoup */,
+				F15F00000000000000000006 /* NoveliaECH */,
 			);
 			name = NoveliaLegacy;
 			productName = NoveliaLegacy;
@@ -933,6 +943,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				F30000000000000000000300 /* XCRemoteSwiftPackageReference "swift-toolkit" */,
 				F30000000000000000000401 /* XCRemoteSwiftPackageReference "SwiftSoup" */,
 				F30000000000000000000402 /* XCLocalSwiftPackageReference "Vendor/CLibMobi" */,
+				F30000000000000000000403 /* XCLocalSwiftPackageReference "Vendor/NoveliaECH" */,
 			);
 		};
 /* End PBXProject section */
@@ -941,6 +952,10 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 		F30000000000000000000402 /* XCLocalSwiftPackageReference "Vendor/CLibMobi" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Vendor/CLibMobi;
+		};
+		F30000000000000000000403 /* XCLocalSwiftPackageReference "Vendor/NoveliaECH" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/NoveliaECH;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -1015,6 +1030,10 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 			isa = XCSwiftPackageProductDependency;
 			productName = CLibMobi;
 		};
+		F31000000000000000000403 /* NoveliaECH */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NoveliaECH;
+		};
 		F15F00000000000000000001 /* ReadiumZIPFoundation */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = F30000000000000000000003 /* XCRemoteSwiftPackageReference "ReadiumZIPFoundation" */;
@@ -1039,6 +1058,10 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 			isa = XCSwiftPackageProductDependency;
 			package = F30000000000000000000401 /* XCRemoteSwiftPackageReference "SwiftSoup" */;
 			productName = SwiftSoup;
+		};
+		F15F00000000000000000006 /* NoveliaECH */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NoveliaECH;
 		};
 /* End XCSwiftPackageProductDependency section */
 
@@ -1097,6 +1120,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				FDA000000000000000000002 /* FileContentHash.swift in Sources */,
 				FDA000000000000000000001 /* SyncLocalStateAdapter.swift in Sources */,
 				FCA000000000000000000003 /* ReadingTimeTracking.swift in Sources */,
+				FCA000000000000000000403 /* NoveliaECHTransport.swift in Sources */,
 				FCA000000000000000000002 /* ReadingActivity.swift in Sources */,
 				FCA000000000000000000001 /* ReadingActivityController.swift in Sources */,
 				FBA000000000000000000001 /* NoveliaServices.swift in Sources */,
@@ -1298,6 +1322,7 @@ F03210000000000000000001 /* WebNovelEPUBReading.swift */ = {isa = PBXFileReferen
 				A15F00000000000000000004 /* FileContentHash.swift in Sources */,
 				A15F00000000000000000005 /* SyncLocalStateAdapter.swift in Sources */,
 				A15F00000000000000000006 /* ReadingTimeTracking.swift in Sources */,
+				A15F00000000000000000404 /* NoveliaECHTransport.swift in Sources */,
 				A15F00000000000000000007 /* ReadingActivity.swift in Sources */,
 				A15F00000000000000000008 /* ReadingActivityController.swift in Sources */,
 				A15F00000000000000000009 /* NoveliaServices.swift in Sources */,

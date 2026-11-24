@@ -33,6 +33,15 @@ stored = '''
  init(_ refresher: AuthSessionRefresher, _ queue: SerialAsyncGate) { self.refresher = refresher; refreshQueue = queue }
 '''
 code = 'import Foundation\n' + gate + error + r'''
+struct ShareableLogger {
+ init(category: String) {}
+ func notice(_ message: String) {}
+ func error(_ message: String) {}
+}
+enum AppDiagnosticMessage {
+ static func authSessionRefreshed(scope: String, outcome: String, status: Int? = nil, domain: String? = nil, code: Int? = nil) -> String { "" }
+ static func authSessionCleared(scope: String, reason: String) -> String { "" }
+}
 final class MemoryTokens {
  var token: String?; var clears = 0
  func save(_ value: String) throws { token = value }

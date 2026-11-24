@@ -18,6 +18,8 @@ App 在“我的 → 开源许可”提供第三方许可原文；仓库的[完�
 
 **libmobi：** AZW3／MOBI 导入使用 [libmobi](https://github.com/bfabiszewski/libmobi) 0.12（LGPL-3.0-or-later）。其 C 源码位于 [`Vendor/CLibMobi/`](../Vendor/CLibMobi/README.md)，作为本地 Swift 包编译并静态链接，未修改上游源码，未收录 DRM 处理代码；许可原文随 App 提供（[libmobi-LICENSE.txt](../iOSApp/Resources/ThirdPartyLicenses/libmobi-LICENSE.txt)）。Kindle 导入测试样本取自 libmobi 自带的自生成样本，来源见 [`Tests/NoveliaKindleTests/Fixtures/README.md`](../Tests/NoveliaKindleTests/Fixtures/README.md)。
 
+**NoveliaECH：** 原站 ECH（Encrypted Client Hello）与 DoH 传输库复用自 Novelia 安卓端 `native/ech`（提交 `fa93eef2508cfc9830db76842c8db82af6908e68`，GPL-3.0-only），内部使用 Go 运行时与标准库（BSD-3-Clause）、`github.com/inqadh/jissr-bypass` v0.1.1（Apache-2.0）修改版与 `golang.org/x/*`（BSD-3-Clause）。完整 Go 源码位于 [`Vendor/NoveliaECH/`](../Vendor/NoveliaECH/README.md)，通过 `scripts/build_ech_xcframework.sh` 编译为本地 Swift 包 `NoveliaECH.xcframework`，同时链接进 `Novelia` 与 `NoveliaLegacy`；许可全文随 App 提供（[ECH-native.txt](../iOSApp/Resources/ThirdPartyLicenses/ECH-native.txt)）。
+
 **TXT 分章参考：** [Qingdu Reader](https://github.com/zengchen666/qingdu-reader) 使用 Apache License 2.0。本项目仅参考其公开说明中的设计思路，分章识别器为独立 Swift 实现；没有复制、修改或随包分发 Qingdu Reader 的源代码、二进制或资源。Apache-2.0 原文见 [Qingdu Reader LICENSE](https://github.com/zengchen666/qingdu-reader/blob/main/LICENSE)。
 
 ## 对应源码与发布核对

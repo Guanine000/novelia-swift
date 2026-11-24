@@ -397,7 +397,7 @@ private final class ForumMarkdownImageLoader: @unchecked Sendable {
         configuration.requestCachePolicy = .returnCacheDataElseLoad
         configuration.timeoutIntervalForRequest = 30
         configuration.urlCache = URLCache(memoryCapacity: 16 * 1024 * 1024, diskCapacity: 64 * 1024 * 1024)
-        session = URLSession(configuration: configuration)
+        session = NoveliaECHController.shared.makeURLSession(baseConfiguration: configuration)
         memory.countLimit = 80
         memory.totalCostLimit = 48 * 1024 * 1024
     }

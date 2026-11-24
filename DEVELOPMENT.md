@@ -202,7 +202,7 @@ Debug 独立验证 App 可用 `-architectureBrowseResize` 将同一个 Root 内�
 
 小说与论坛是同一个用户账号，但分别维护 `app=n` 与 `app=f` 会话。书籍评论虽然使用论坛来源，仍使用小说会话。改变这些对应关系必须有后端证据及相关回归。
 
-两种会话用同一个认证站点刷新 Cookie 续期，而该 Cookie 每次续期都会轮换。`AccountAuthStore` 与 `ForumAuthStore` 必须注入同一个 `SerialAsyncGate`（`AppServices` 统一组装），续期逐个执行，后一个读取前一个写回 WebView 的新 Cookie。续期进行中再调用 `refreshSession` 时等待同一结果；退出登录（`sessionGeneration` 变化）后的调用不复用旧结果。登录 WebView 打开配置的小说官网，脚本在官网按钮挂载后自动点击“登录/注册”；找不到时用户可手动点击。桥接只观察官网向认证来源发送的成功登录请求或认证页的成功通知，不读取表单及响应正文。登录网页与认证 API 使用分别校验的 HTTPS origin，不扩大到任意子域。网络续期部分由 `AuthSessionRefresher` 实现，WebView Cookie 存储是唯一来源，请求设置 `httpShouldHandleCookies = false`。
+两种会话用同一个认证站点刷新 Cookie 续期，而该 Cookie 每次续期都会轮换。`AccountAuthStore` 与 `ForumAuthStore` 必须注入同一个 `SerialAsyncGate` 与同一个 `AuthRefreshCookieStore`（`AppServices` 统一组装；生产使用 `AuthRefreshCookieKeychainStore`，独立 Debug 验证使用 `MemoryAuthRefreshCookieStore`），续期与登录逐个执行，后一个读取前一个写回的新 Cookie。续期进行中再调用 `refreshSession` 时等待同一结果；退出登录（`sessionGeneration` 变化）后的调用不复用旧结果，并清除本机保存的刷新 Cookie。登录入口使用原生 SwiftUI 账密表单（`NoveliaLoginSheet` / `ForumLoginSheet`），直连已校验 HTTPS 认证来源的 `loginAPIURL`（`POST /api/v1/auth/login`），仅识别长度受限的 `text/plain` 已知业务错误原因，不回显原始 HTML 或长响应；注册与找回密码通过外部浏览器打开已校验的官网链接，不内置 Turnstile 网页桥接。升级自旧版 `WKWebView` 登录的账号，在 Keychain 尚无刷新 Cookie 时会一次性回退读取 `WKHTTPCookieStore`，续期成功后即落盘至 Keychain。网络登录与续期均由 `AuthSessionRefresher` 实现，请求设置 `httpShouldHandleCookies = false`。
 
 生产账号状态、API token provider 与续期入口使用同一 `SessionTokenStore`。生产适配继续使用原 Keychain/Vault；测试使用内存适配。不要在消费方直接读取 Vault、解析 JWT 判断账号，使用 `AccountSessionProviding` 的状态和 `matchesAccount`。
 
@@ -514,6 +514,8 @@ WebDAV 请求使用 `reloadIgnoringLocalCacheData` 与 `Cache-Control: no-cache,
 ## 网络、缓存与诊断约定
 
 当前小说/论坛传输使用共享请求策略：401 通过会话续期后有限重试，GET/HEAD 仅对指定瞬时错误及 502/503/504 有限重试。超时和写操作不能随意扩展重试，以免重复提交。API、文库文件和生成小说文件使用不同超时；新请求沿用对应策略，不在页面另写无界循环。
+
+原站 ECH（Encrypted Client Hello）由 `iOSApp/App/Integrations/NoveliaECHTransport.swift` 的 `NoveliaECHController` 与 `NoveliaECHURLProtocol` 提供，底层链接本地 Swift 包 `Vendor/NoveliaECH`（通过 `scripts/build_ech_xcframework.sh` 从 `Vendor/NoveliaECH/ech` 编译 `NoveliaECH.xcframework`，兼容 iOS 15+）。开关与可选自定义 DoH 节点分别保存在 `SettingsKey.networkECHEnabled`（默认关闭）与 `SettingsKey.networkECHCustomDoH`（留空使用内置默认节点，最多 8 个不含查询参数的 `https://` 地址，入口位于“我的 → 加密连接（ECH）”）。开启后仅拦截 `n.novelia.cc`、`auth.novelia.cc`、`forum.novelia.cc`（HTTPS 443），严格要求 TLS 1.3 + ECH 接受、不静默降级，并桥接 iOS 系统 HTTP 代理与 `NWPathMonitor` / 前台恢复时的连接池重置；WebDAV、外部图床、公开更新检查、Edge TTS 与 AI 客户端不经过 ECH。连接诊断（`ProbeDiagnostics`）与最近 30 条 ECH 请求的阶段耗时/失败分类可在设置页展开查看，同时经 `ShareableLogger(category: "ech")` 与 `AppDiagnosticMessage.echRequest` / `echProbe` 写入可分享应用日志（只保留固定分类字段，不含 URL、自定义 DoH 地址、请求头或凭据）。
 
 封面加载由 `CoverImage` 处理下采样、内存/磁盘缓存与并发去重；论坛 Markdown 缓存解析结果。修改共享缓存时保持内容身份、失效、容量、清理与取消规则，避免返回错误版本或让大图/富文本在主线程重复解析。
 

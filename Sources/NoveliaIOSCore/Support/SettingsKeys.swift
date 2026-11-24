@@ -61,6 +61,11 @@ enum SettingsKey {
         static let resumePointPrefix = "speech.resume.v1."
     }
 
+    /// 是否对 Novelia 原站域名（n/auth/forum.novelia.cc）启用 ECH（加密 SNI）与 DoH 解析；默认关闭，仅存本机。
+    static let networkECHEnabled = "network.ech.enabled.v1"
+    /// 自定义 DoH 节点列表（换行分隔的 https:// 地址；空字符串表示使用内置默认节点），仅存本机。
+    static let networkECHCustomDoH = "network.ech.customDoH.v1"
+
     /// 阅读期间阻止自动锁屏（屏幕常亮）；默认关闭，仅阅读器前台生效。
     static let readerKeepScreenOn = "readerKeepScreenOn"
     /// 底栏页面顺序，以逗号分隔的 `AppTab` 原始值保存。

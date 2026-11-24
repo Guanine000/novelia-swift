@@ -1,0 +1,8 @@
+framework module "NoveliaECH" {
+	header "ref.h"
+    header "Ech.objc.h"
+    header "Universe.objc.h"
+    header "NoveliaECH.h"
+
+    export *
+}
