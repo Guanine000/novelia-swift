@@ -601,7 +601,7 @@ private struct NoveliaNativeLoginForm: View {
     @State private var username = ""
     @State private var password = ""
     @State private var isPasswordVisible = false
-    @FocusState private var focusedField: Field?
+    @State private var focusedField: Field?
 
     private var canSubmit: Bool {
         !isBusy && !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty
@@ -649,18 +649,24 @@ private struct NoveliaNativeLoginForm: View {
                             Image(systemName: "person")
                                 .foregroundStyle(NoveliaStyle.muted)
                                 .frame(width: 20)
-                            TextField("用户名或邮箱", text: $username)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .textContentType(.username)
-                                .keyboardType(.emailAddress)
-                                .submitLabel(.next)
-                                .focused($focusedField, equals: .username)
-                                .disabled(isBusy)
-                                .onSubmit { focusedField = .password }
+                            LoginAutoFillTextField(
+                                placeholder: "用户名或邮箱",
+                                text: $username,
+                                contentType: .username,
+                                isSecure: false,
+                                returnKeyType: .next,
+                                isEnabled: !isBusy,
+                                isFocused: focusedField == .username,
+                                onFocusChange: { isFocused in
+                                    if isFocused { focusedField = .username }
+                                    else if focusedField == .username { focusedField = nil }
+                                },
+                                onSubmit: { focusedField = .password }
+                            )
+                            .frame(height: 24)
                         }
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 13)
+                        .padding(.vertical, 12)
 
                         Divider()
                             .overlay(NoveliaStyle.hairline)
@@ -670,20 +676,21 @@ private struct NoveliaNativeLoginForm: View {
                             Image(systemName: "lock")
                                 .foregroundStyle(NoveliaStyle.muted)
                                 .frame(width: 20)
-                            Group {
-                                if isPasswordVisible {
-                                    TextField("密码", text: $password)
-                                } else {
-                                    SecureField("密码", text: $password)
-                                }
-                            }
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .textContentType(.password)
-                            .submitLabel(.go)
-                            .focused($focusedField, equals: .password)
-                            .disabled(isBusy)
-                            .onSubmit { submitIfReady() }
+                            LoginAutoFillTextField(
+                                placeholder: "密码",
+                                text: $password,
+                                contentType: .password,
+                                isSecure: !isPasswordVisible,
+                                returnKeyType: .go,
+                                isEnabled: !isBusy,
+                                isFocused: focusedField == .password,
+                                onFocusChange: { isFocused in
+                                    if isFocused { focusedField = .password }
+                                    else if focusedField == .password { focusedField = nil }
+                                },
+                                onSubmit: { submitIfReady() }
+                            )
+                            .frame(height: 24)
 
                             Button {
                                 isPasswordVisible.toggle()
@@ -780,6 +787,101 @@ private struct NoveliaNativeLoginForm: View {
             if await onSubmit(currentUsername, currentPassword) {
                 password = ""
             }
+        }
+    }
+}
+
+/// 基于持久化 UITextField 的凭据输入框：避免 SwiftUI 条件切换 SecureField 与 emailAddress 键盘组合破坏 iCloud 钥匙串自动填充配对。
+private struct LoginAutoFillTextField: UIViewRepresentable {
+    let placeholder: String
+    @Binding var text: String
+    let contentType: UITextContentType
+    let isSecure: Bool
+    let returnKeyType: UIReturnKeyType
+    let isEnabled: Bool
+    let isFocused: Bool
+    let onFocusChange: (Bool) -> Void
+    let onSubmit: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = UITextField(frame: .zero)
+        field.placeholder = placeholder
+        field.textContentType = contentType
+        field.isSecureTextEntry = isSecure
+        field.autocapitalizationType = .none
+        field.autocorrectionType = .no
+        field.spellCheckingType = .no
+        field.smartQuotesType = .no
+        field.smartDashesType = .no
+        field.keyboardType = .default
+        field.returnKeyType = returnKeyType
+        field.font = UIFont.preferredFont(forTextStyle: .body)
+        field.adjustsFontForContentSizeCategory = true
+        field.textColor = .label
+        field.clearButtonMode = .whileEditing
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        field.delegate = context.coordinator
+        field.addTarget(context.coordinator, action: #selector(Coordinator.textDidChange(_:)), for: .editingChanged)
+        return field
+    }
+
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        context.coordinator.parent = self
+        if uiView.text != text {
+            uiView.text = text
+        }
+        if uiView.isSecureTextEntry != isSecure {
+            // 切换明文/密文时保持同一 UITextField 实例与光标位置，不中断钥匙串自动填充关联。
+            let wasFirstResponder = uiView.isFirstResponder
+            uiView.isSecureTextEntry = isSecure
+            if wasFirstResponder, let existing = uiView.text {
+                uiView.text = nil
+                uiView.insertText(existing)
+            }
+        }
+        uiView.isEnabled = isEnabled
+        uiView.returnKeyType = returnKeyType
+        if isFocused && !uiView.isFirstResponder && uiView.window != nil {
+            uiView.becomeFirstResponder()
+        } else if !isFocused && uiView.isFirstResponder {
+            uiView.resignFirstResponder()
+        }
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: LoginAutoFillTextField
+
+        init(_ parent: LoginAutoFillTextField) {
+            self.parent = parent
+        }
+
+        @objc func textDidChange(_ textField: UITextField) {
+            let updated = textField.text ?? ""
+            if parent.text != updated {
+                parent.text = updated
+            }
+        }
+
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            DispatchQueue.main.async { self.parent.onFocusChange(true) }
+        }
+
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            let updated = textField.text ?? ""
+            if parent.text != updated {
+                parent.text = updated
+            }
+            DispatchQueue.main.async { self.parent.onFocusChange(false) }
+        }
+
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            DispatchQueue.main.async { self.parent.onSubmit() }
+            return false
         }
     }
 }
