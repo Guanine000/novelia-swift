@@ -85,13 +85,6 @@ final class LibraryImportModel: ObservableObject {
         return "\(listed)\(more)\n\n是否使用 EPUB 工具箱执行目录结构标准化、XHTML 良构修复、OPF/目录/封面修复与冗余资源清理后再导入？（不会修改原始文件）"
     }
 
-    private static var shouldInspectEPUBOnImport: Bool {
-        if UserDefaults.standard.object(forKey: SettingsKey.libraryAutoInspectEPUBOnImport) == nil {
-            return true
-        }
-        return UserDefaults.standard.bool(forKey: SettingsKey.libraryAutoInspectEPUBOnImport)
-    }
-
     /// 选择器回调：含 AZW3／MOBI 时先请用户确认转换，再按设置对 EPUB 执行轻量结构体检。
     func handlePickedFiles(_ pickedURLs: [URL]) async {
         guard !pickedURLs.isEmpty, !isBusy else { return }
@@ -154,7 +147,7 @@ final class LibraryImportModel: ObservableObject {
     private func inspectEPUBsOrImport(_ urls: [URL]) async {
         guard !urls.isEmpty else { return }
         let epubURLs = urls.filter { $0.pathExtension.lowercased() == "epub" }
-        guard Self.shouldInspectEPUBOnImport, !epubURLs.isEmpty else {
+        guard EPUBIntakeInspection.isEnabled, !epubURLs.isEmpty else {
             await importFiles(urls)
             return
         }
@@ -171,8 +164,7 @@ final class LibraryImportModel: ObservableObject {
                     readableTarget = readableURL
                 }
                 let targetURL = readableTarget ?? url
-                if let report = try? await EPUBToolboxInspector.inspect(url: targetURL, mode: .lightweight),
-                   report.hasActionableIssues {
+                if let report = try? await EPUBIntakeInspection.actionableReport(at: targetURL) {
                     found.append(PendingEPUBRepair.Item(
                         url: url,
                         filename: url.lastPathComponent,
@@ -561,6 +553,74 @@ struct WebNovelEPUBUpdateOptionsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .compatToolbar(.visible, for: .navigationBar)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
+        }
+    }
+}
+
+/// 外部导入与首次下载沿用同一偏好和轻量体检规则。
+enum EPUBIntakeInspection {
+    static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: SettingsKey.libraryAutoInspectEPUBOnImport) as? Bool ?? true
+    }
+
+    static func actionableReport(at file: URL) async throws -> EPUBInspectionReport? {
+        let report = try await EPUBToolboxInspector.inspect(url: file, mode: .lightweight)
+        return report.hasActionableIssues ? report : nil
+    }
+}
+
+/// 下载面板持有单个入库确认。临时文件归下载任务，取消或退出面板时由任务清理。
+@MainActor
+final class DownloadedEPUBIntake: ObservableObject {
+    @Published private(set) var issueSummary: String?
+    private var decision: CheckedContinuation<LibraryImportModel.EPUBRepairDecision, Never>?
+
+    /// 返回原件、修复副本，或 nil（跳过）；修复失败交给下载入口报告。
+    func preparedFile(at file: URL) async throws -> URL? {
+        try Task.checkCancellation()
+        guard EPUBIntakeInspection.isEnabled else { return file }
+        let report = try await EPUBIntakeInspection.actionableReport(at: file)
+        try Task.checkCancellation()
+        guard let report else { return file }
+
+        let choice = await withCheckedContinuation { continuation in
+            decision = continuation
+            issueSummary = "\(file.lastPathComponent)：\(report.shortSummary)"
+        }
+        try Task.checkCancellation()
+        switch choice {
+        case .repairAndImport:
+            let repaired = file.deletingLastPathComponent()
+                .appendingPathComponent("repaired-\(UUID().uuidString).epub")
+            _ = try await EPUBToolboxProcessor.process(source: file, destination: repaired, options: .all)
+            return repaired
+        case .importOriginal:
+            return file
+        case .skipProblematic:
+            return nil
+        }
+    }
+
+    func resolve(_ choice: LibraryImportModel.EPUBRepairDecision) {
+        let pending = decision
+        decision = nil
+        issueSummary = nil
+        pending?.resume(returning: choice)
+    }
+}
+
+extension View {
+    @MainActor
+    func downloadedEPUBIntakeAlert(_ intake: DownloadedEPUBIntake) -> some View {
+        alert("检测到 EPUB 结构问题", isPresented: .init(
+            get: { intake.issueSummary != nil },
+            set: { _ in }
+        ), presenting: intake.issueSummary) { _ in
+            Button("修复并标准化后入库") { intake.resolve(.repairAndImport) }
+            Button("按原样直接入库") { intake.resolve(.importOriginal) }
+            Button("跳过问题文件", role: .cancel) { intake.resolve(.skipProblematic) }
+        } message: { summary in
+            Text("\(summary)\n\n可使用 EPUB 工具箱修复并标准化后再加入书库。")
         }
     }
 }

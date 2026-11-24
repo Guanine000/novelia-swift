@@ -527,6 +527,8 @@ private struct WebNovelDownloadSheet: View {
     @State private var selectedSourceRaw: String
     @State private var isDownloading = false
     @State private var didFinish = false
+    @State private var downloadTask: Task<Void, Never>?
+    @StateObject private var intake = DownloadedEPUBIntake()
 
     init(novel: Novel, availableSources: [NovelTranslationSource]) {
         self.novel = novel
@@ -596,11 +598,13 @@ private struct WebNovelDownloadSheet: View {
                 Section {
                     Button {
                         isDownloading = true
-                        Task {
-                            await downloads.download(novel, mode: selectedMode,
-                                                     translationSource: effectiveSource)
+                        didFinish = false
+                        downloadTask = Task {
+                            didFinish = await downloads.download(novel, mode: selectedMode,
+                                                                 translationSource: effectiveSource,
+                                                                 prepareForIntake: intake.preparedFile)
                             isDownloading = false
-                            didFinish = downloads.isDownloaded(novel.id) && downloads.errors[novel.id] == nil
+                            downloadTask = nil
                         }
                     } label: {
                         HStack {
@@ -611,6 +615,11 @@ private struct WebNovelDownloadSheet: View {
                     }
                     .disabled(isDownloading || progress != nil || (selectedMode != .original && effectiveSource == nil))
                 }
+            }
+            .downloadedEPUBIntakeAlert(intake)
+            .onDisappear {
+                downloadTask?.cancel()
+                intake.resolve(.skipProblematic)
             }
             .navigationTitle("下载全书")
             .navigationBarTitleDisplayMode(.inline)

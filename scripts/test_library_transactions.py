@@ -371,6 +371,31 @@ func disk(_ directory: URL) throws -> [LocalWenkuEPUB] {
   try fm.createDirectory(at: updateDir, withIntermediateDirectories: true)
   let novel = Novel(id: "remote/site/one", title: "Update", author: "", summary: "", genres: [], chapters: [], accent: .plum,
                     providerId: "site", novelId: "one")
+  // 首次下载在确认前不发布记录，跳过清理暂存，修复副本沿用原书身份和下载配置。
+  let intakeDir = root.appendingPathComponent("epub-intake")
+  let intake = WebNovelDownloadStore(api: UpdatingAPI(), directory: intakeDir)
+  var staging: URL?
+  let skipped = await intake.download(novel, mode: .bilingual, translationSource: .sakura) { file in
+   staging = file.deletingLastPathComponent()
+   precondition(intake.books.isEmpty && fm.fileExists(atPath: file.path))
+   return nil
+  }
+  precondition(!skipped && intake.books.isEmpty && intake.errors[novel.id] == nil)
+  precondition(staging.map { !fm.fileExists(atPath: $0.path) } == true)
+  let repairedBytes = Data("repaired EPUB".utf8)
+  let accepted = await intake.download(novel, mode: .bilingual, translationSource: .sakura) { file in
+   staging = file.deletingLastPathComponent()
+   let repaired = file.deletingLastPathComponent().appendingPathComponent("repaired.epub")
+   try repairedBytes.write(to: repaired)
+   return repaired
+  }
+  precondition(accepted && intake.books.count == 1)
+  let acceptedBook = intake.books[0]
+  precondition(acceptedBook.id == novel.id && acceptedBook.downloadMode == .bilingual && acceptedBook.translationSource == .sakura)
+  let acceptedBytes = try Data(contentsOf: intake.fileURL(for: acceptedBook))
+  precondition(acceptedBytes == repairedBytes && !acceptedBook.fileFilename.hasPrefix("repaired"))
+  precondition(staging.map { !fm.fileExists(atPath: $0.path) } == true)
+
   let updateBook = DownloadedWebNovel(novel: novel, fileFilename: "old.epub", downloadedAt: Date(timeIntervalSince1970: 1),
                                     translationSource: .sakura, downloadMode: .bilingual, fileFormat: .epub)
   let oldBytes = Data("old EPUB".utf8)

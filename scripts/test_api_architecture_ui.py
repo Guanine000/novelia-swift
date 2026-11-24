@@ -100,6 +100,35 @@ final class TapTests: XCTestCase {
   }
   XCTAssertTrue(element.waitForExistence(timeout: 5)); return element
  }
+ func finishEPUBDownload(_ app: XCUIApplication, completion: XCUIElement) {
+  let issue = app.alerts["检测到 EPUB 结构问题"]
+  let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in issue.exists || completion.exists }, object: nil)
+  XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 30), .completed)
+  if issue.exists { issue.buttons["按原样直接入库"].tap() }
+  XCTAssertTrue(completion.waitForExistence(timeout: 30))
+ }
+ func testDownloadEPUBIntakeSkipAndOriginal() {
+  // 网络小说夹具使用非标准 OPF 路径，轻量体检会提供三个可选动作。
+  let app = start(webUpdate: true); defer { app.terminate() }
+  app.buttons["发现"].firstMatch.tap()
+  let novel = app.staticTexts["架构验证小说"].firstMatch
+  XCTAssertTrue(novel.waitForExistence(timeout: 15)); novel.tap()
+  let download = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "下载全书 EPUB")).firstMatch
+  reveal(download, app: app); download.tap()
+  let begin = app.buttons["开始下载"]; reveal(begin, app: app); begin.tap()
+  let issue = app.alerts["检测到 EPUB 结构问题"]
+  let completed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "EPUB 下载完成")).firstMatch
+  XCTAssertTrue(issue.waitForExistence(timeout: 30))
+  XCTAssertTrue(issue.buttons["修复并标准化后入库"].exists)
+  XCTAssertFalse(completed.exists)
+  issue.buttons["跳过问题文件"].tap()
+  XCTAssertTrue(begin.waitForExistence(timeout: 10))
+  XCTAssertFalse(completed.exists)
+  begin.tap()
+  XCTAssertTrue(issue.waitForExistence(timeout: 30))
+  issue.buttons["按原样直接入库"].tap()
+  XCTAssertTrue(completed.waitForExistence(timeout: 30))
+ }
  func openDownloadedNetworkBook(readium: Bool, ambiguous: Bool = false, large: Bool = false, speechAudio: Bool = false, nativeCurl: Bool = false) -> XCUIApplication {
   let app = start(readium: readium, webUpdate: true, ambiguous: ambiguous, large: large, speechAudio: speechAudio, nativeCurl: nativeCurl)
   app.buttons["发现"].firstMatch.tap()
@@ -108,7 +137,7 @@ final class TapTests: XCTestCase {
   let download = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "下载全书 EPUB")).firstMatch
   reveal(download, app: app); download.tap()
   let begin = app.buttons["开始下载"]; reveal(begin, app: app); begin.tap()
-  XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "EPUB 下载完成")).firstMatch.waitForExistence(timeout: 30))
+  finishEPUBDownload(app, completion: app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "EPUB 下载完成")).firstMatch)
   app.buttons["关闭"].tap(); app.buttons["书库"].firstMatch.tap()
   let more = app.buttons["更多操作：架构验证小说"]
   XCTAssertTrue(more.waitForExistence(timeout: 15)); more.tap()
@@ -1045,7 +1074,7 @@ final class TapTests: XCTestCase {
   reveal(download, app: app); download.tap()
   let begin = app.buttons["开始下载"]; reveal(begin, app: app); begin.tap()
   let completed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "EPUB 下载完成")).firstMatch
-  XCTAssertTrue(completed.waitForExistence(timeout: 30))
+  finishEPUBDownload(app, completion: completed)
   app.buttons["关闭"].tap()
   app.buttons["书库"].firstMatch.tap()
   let more = app.buttons["更多操作：架构验证小说"]
@@ -1642,7 +1671,7 @@ final class TapTests: XCTestCase {
   XCTAssertTrue(app.navigationBars["\u{4e0b}\u{8f7d}\u{5168}\u{4e66}"].waitForExistence(timeout: 10))
   let begin = app.buttons["\u{5f00}\u{59cb}\u{4e0b}\u{8f7d}"]; reveal(begin, app: app); begin.tap()
   let completed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "EPUB \u{4e0b}\u{8f7d}\u{5b8c}\u{6210}")).firstMatch
-  XCTAssertTrue(completed.waitForExistence(timeout: 30))
+  finishEPUBDownload(app, completion: completed)
   app.buttons["\u{5173}\u{95ed}"].tap()
   app.navigationBars.buttons.element(boundBy: 0).tap()
   app.tabBars.buttons["\u{4e66}\u{5e93}"].tap()

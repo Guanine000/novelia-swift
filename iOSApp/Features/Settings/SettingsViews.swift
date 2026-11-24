@@ -174,8 +174,8 @@ struct SettingsView: View {
                 }
                 Toggle(isOn: $autoInspectEPUBOnImport) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("导入时检测 EPUB 结构问题")
-                        Text("导入本地 EPUB 时执行轻量体检（不解压正文），发现目录、封面或容器问题时询问是否修复并标准化后再导入。")
+                        Text("入库时检测 EPUB 结构问题")
+                        Text("导入本地 EPUB 或首次下载 EPUB 时执行轻量体检（不解压正文）。发现问题时可修复、原样入库或跳过。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

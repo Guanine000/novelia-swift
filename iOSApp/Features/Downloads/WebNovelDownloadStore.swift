@@ -83,14 +83,16 @@ final class WebNovelDownloadStore: ObservableObject {
         books.contains { $0.id == novelID }
     }
 
-    func download(_ novel: Novel, mode: WebNovelDownloadMode, translationSource: NovelTranslationSource?) async {
+    func download(_ novel: Novel, mode: WebNovelDownloadMode, translationSource: NovelTranslationSource?,
+                  prepareForIntake: @MainActor (URL) async throws -> URL?) async -> Bool {
         guard novel.isRemote,
               let providerId = novel.providerId,
               let novelId = novel.novelId,
-              progress[novel.id] == nil else { return }
+              progress[novel.id] == nil else { return false }
 
         errors[novel.id] = nil
         progress[novel.id] = WebNovelDownloadProgress(completed: 0, total: 1)
+        defer { progress[novel.id] = nil }
 
         do {
             try await loadIfNeeded()
@@ -98,9 +100,13 @@ final class WebNovelDownloadStore: ObservableObject {
             let effectiveSource = mode == .original ? nil : translationSource
             let filename = Self.websiteDownloadFilename(title: novel.title, mode: mode,
                                                          translationSource: effectiveSource)
-            let dataURL = uniqueDestination(for: filename)
+            let staging = fileManager.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try fileManager.createDirectory(at: staging, withIntermediateDirectories: false)
+            defer { try? fileManager.removeItem(at: staging) }
+            let downloaded = staging.appendingPathComponent(filename)
             try await api.downloadWebNovelEPUB(
-                to: dataURL,
+                to: downloaded,
                 providerId: providerId,
                 novelId: novelId,
                 title: novel.title,
@@ -108,6 +114,12 @@ final class WebNovelDownloadStore: ObservableObject {
                 mode: mode
             )
             progress[novel.id] = WebNovelDownloadProgress(completed: 1, total: 1)
+
+            guard let prepared = try await prepareForIntake(downloaded) else { return false }
+            try Task.checkCancellation()
+            let dataURL = uniqueDestination(for: filename)
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            try fileManager.moveItem(at: prepared, to: dataURL)
 
             let record = DownloadedWebNovel(
                 novel: novel,
@@ -127,10 +139,13 @@ final class WebNovelDownloadStore: ObservableObject {
                 }
             } catch { await syncFileCopier.remove([dataURL]); throw error }
             if let old { await syncFileCopier.remove([fileURL(for: old)]) }
+            return true
+        } catch is CancellationError {
+            return false
         } catch {
-            errors[novel.id] = error.localizedDescription
+            if !Task.isCancelled { errors[novel.id] = error.localizedDescription }
+            return false
         }
-        progress[novel.id] = nil
     }
 
     /// 手动更新同一下载记录：完整重新生成，沿用语言/译源；内容相同不改变文件或同步时间。

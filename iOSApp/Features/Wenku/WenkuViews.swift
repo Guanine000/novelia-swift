@@ -748,6 +748,8 @@ private struct WenkuDownloadSheet: View {
     @State private var hasCustomTranslatorSelection = false
     @State private var translationsMode: WenkuTranslationsMode = .priority
     @State private var isDownloading = false
+    @State private var downloadTask: Task<Void, Never>?
+    @StateObject private var intake = DownloadedEPUBIntake()
     @State private var errorMessage: String?
     @State private var finished = false
 
@@ -793,7 +795,7 @@ private struct WenkuDownloadSheet: View {
                 if finished { Section { Label("下载完成，可在“书库”中阅读或导出", systemImage: "checkmark.circle.fill").foregroundStyle(.green) } }
                 Section {
                     Button {
-                        Task { await download() }
+                        downloadTask = Task { await download() }
                     } label: {
                         HStack {
                             Spacer()
@@ -803,6 +805,11 @@ private struct WenkuDownloadSheet: View {
                     }
                     .disabled(isDownloading || availableTranslators.isEmpty)
                 }
+            }
+            .downloadedEPUBIntakeAlert(intake)
+            .onDisappear {
+                downloadTask?.cancel()
+                intake.resolve(.skipProblematic)
             }
             .navigationTitle("下载 EPUB")
             .navigationBarTitleDisplayMode(.inline)
@@ -819,7 +826,11 @@ private struct WenkuDownloadSheet: View {
         guard mode == .translated || mode == .originalThenTranslation || mode == .translationThenOriginal else { return }
         isDownloading = true
         errorMessage = nil
-        defer { isDownloading = false }
+        finished = false
+        defer {
+            isDownloading = false
+            downloadTask = nil
+        }
         do {
             let filenameTranslators = hasCustomTranslatorSelection ? [translator] : WenkuTranslator.websiteDefaultPriority
             let filename = mode.websiteDownloadFilename(
@@ -829,9 +840,13 @@ private struct WenkuDownloadSheet: View {
                 authors: detail.authors
             )
             try await localLibrary.loadIfNeeded()
-            let destination = localLibrary.downloadDestination(for: filename)
+            let staging = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)
+            defer { try? FileManager.default.removeItem(at: staging) }
+            let downloaded = staging.appendingPathComponent(filename)
             try await api.downloadWenkuEPUB(
-                to: destination,
+                to: downloaded,
                 novelId: detail.id,
                 volumeId: volume.volumeId,
                 mode: mode,
@@ -840,9 +855,21 @@ private struct WenkuDownloadSheet: View {
                 filenameAuthors: detail.authors,
                 translationsMode: translationsMode
             )
-            try await localLibrary.registerDownloadedFile(at: destination, title: "\(detail.displayTitle) · \(volume.volumeId)", parentWenkuID: detail.id, parentWenkuTitle: detail.displayTitle, volumeID: volume.volumeId)
+            guard let prepared = try await intake.preparedFile(at: downloaded) else { return }
+            try Task.checkCancellation()
+            let destination = localLibrary.downloadDestination(for: filename)
+            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: prepared, to: destination)
+            do {
+                try await localLibrary.registerDownloadedFile(at: destination, title: "\(detail.displayTitle) · \(volume.volumeId)", parentWenkuID: detail.id, parentWenkuTitle: detail.displayTitle, volumeID: volume.volumeId)
+            } catch {
+                try? FileManager.default.removeItem(at: destination)
+                throw error
+            }
             finished = true
-        } catch { errorMessage = error.localizedDescription }
+        } catch {
+            if !Task.isCancelled { errorMessage = error.localizedDescription }
+        }
     }
 }
 

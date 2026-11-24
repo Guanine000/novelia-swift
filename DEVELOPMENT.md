@@ -825,6 +825,9 @@ Core 的 `ReadingRecapPlan` 接受此前 1–3 章及可选当前章已读部分
 
 ## EPUB 工具箱
 
+本地导入与网络小说、文库首次下载共用 `EPUBToolboxInspector` 的轻量模式和原有 `SettingsKey.libraryAutoInspectEPUBOnImport`（界面显示“入库时检测 EPUB 结构问题”，默认开启）。下载面板持有入库确认，下载任务在独立临时目录保存原件和可选的修复副本；原样或修复选项确认后，才按原有来源身份移动文件并登记书库。跳过、取消或失败清理本次临时目录。正在等待确认时关闭面板会取消任务，并释放确认等待。网络小说的现有文件替换仍走 `WebNovelEPUBUpdate` 的逐章完整性校验与位置承接。 书库事务脚本覆盖确认前不登记、跳过清理和修复副本登记；独立验证 App 的 `testDownloadEPUBIntakeSkipAndOriginal` 使用合成 EPUB 覆盖提示、跳过和原样入库。
+
+
 EPUB 工具箱位于 `iOSApp/Features/EPUBToolbox/`，仅依赖项目既有的 `ReadiumZIPFoundation` 与 `SwiftSoup`，同时编入 `Novelia`（iOS 17+）与 `NoveliaLegacy`（iOS 15+）两个目标，不引入新第三方依赖。
 
 - **入口导航**：设置页将工具箱推入现有导航栈，沿用系统返回按钮。书库的 `LibraryBookActionDialogs` 弹出工具箱，并在弹层入口提供“关闭”按钮。
