@@ -625,20 +625,31 @@ private enum ApplicationLogExporter {
     }
 
     static func makeFile(summary: EnvironmentSummary) throws -> URL {
-        let store = try OSLogStore(scope: .currentProcessIdentifier)
         let startDate = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? .distantPast
-        let entries = try store.getEntries(at: store.position(date: startDate))
-        let logEntries = entries.compactMap { $0 as? OSLogEntryLog }.filter { $0.subsystem == ShareableLogPolicy.subsystem }
         let now = Date()
-        // 以前启动的记录来自 App 自己的诊断文件；当前进程的记录仍从系统日志读取，避免重复。
         let journal = DiagnosticJournal.shared
         journal.flush()
-        let earlierEntries = journal.entries(since: startDate, excludingLaunch: journal.launch)
+        let logEntries: [OSLogEntryLog]
+        let persistedEntries: [DiagnosticJournalEntry]
+        do {
+            let store = try OSLogStore(scope: .currentProcessIdentifier)
+            let entries = try store.getEntries(at: store.position(date: startDate))
+            logEntries = entries.compactMap { $0 as? OSLogEntryLog }.filter { $0.subsystem == ShareableLogPolicy.subsystem }
+            // OSLogStore 成功时，当前启动从系统日志读取，持久化文件只补充以前启动，避免重复。
+            // 但空结果通常表示当前进程日志不可见；此时改用 journal，避免导出空日志。
+            persistedEntries = logEntries.isEmpty
+                ? journal.entries(since: startDate)
+                : journal.entries(since: startDate, excludingLaunch: journal.launch)
+        } catch {
+            // 系统日志权限、容器状态或 OSLogStore 初始化失败时，持久化文件仍是完整的分享来源。
+            logEntries = []
+            persistedEntries = journal.entries(since: startDate)
+        }
         var launchSections: [(label: String, lines: [ShareableLogLine])] = []
-        for entry in earlierEntries {
+        for entry in persistedEntries {
             let line = ShareableLogLine(secondsAgo: max(0, Int(now.timeIntervalSince(entry.date))),
                                         level: entry.level, category: entry.category, message: entry.message)
-            let label = "Launch \(entry.launch) (previous)"
+            let label = "Launch \(entry.launch) (\(entry.launch == journal.launch ? "current" : "previous"))"
             if launchSections.last?.label == label {
                 launchSections[launchSections.count - 1].lines.append(line)
             } else {
@@ -655,10 +666,11 @@ private enum ApplicationLogExporter {
         if !current.isEmpty {
             launchSections.append((label: "Launch \(journal.launch) (current)", lines: current))
         }
-        // 在限制行数之前按启动批次分段并合并连续重复记录，既保留重启边界又防止重复事件挤掉较早记录。
-        let collapsed = ShareableLogAggregator.collapseByLaunch(launchSections)
-        let messages = Array(collapsed.suffix(10_000))
+        // 按分类分配有界预算后，再按启动批次分段并合并连续重复记录。
+        let bounded = boundedSections(launchSections, maxLines: 10_000, reservedPerCategory: 100)
+        let messages = ShareableLogAggregator.collapseByLaunch(bounded)
         let txtDiagnosticCount = logEntries.filter { $0.category == "txt" }.count
+            + persistedEntries.filter { $0.category == "txt" }.count
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "未知"
         var lines = [
@@ -666,9 +678,9 @@ private enum ApplicationLogExporter {
             "版本：\(version) (\(build))",
             "系统：\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)（\(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone")）",
             "配置摘要：阅读引擎=\(summary.readerEngine)，WebDAV=\(summary.webDAVEnabled ? "开启" : "关闭")，AI=\(summary.aiEnabled ? "开启(\(summary.aiFormat))" : "关闭")",
-            "范围：最近 7 天；以前启动的记录来自 App 诊断文件，本次启动来自系统日志；按启动批次分段，连续重复事件合并为一行并标注 (×次数)，最多 10000 行",
-            "以前启动的诊断记录：\(earlierEntries.count)",
-            "本次启动读取的应用事件：\(logEntries.count)；通过隐私过滤：\(current.count)；合并后行数：\(collapsed.count)",
+            "范围：最近 7 天；优先读取本次启动的系统日志并以 App 诊断文件补充以前启动；若系统日志不可读则全部从 App 诊断文件读取；按启动批次分段，连续重复事件合并为一行并标注 (×次数)",
+            "持久化诊断记录：\(persistedEntries.count)",
+            "本次启动读取的应用事件：\(logEntries.count)；通过隐私过滤：\(current.count)；有界折叠后行数：\(messages.count)",
             "省略未经审查的应用事件：\(logEntries.count - current.count)",
             "不包含系统／框架日志；仅导出已审查的诊断格式，时间为距导出时的秒数。",
             "已读取的 TXT 导入 / 解码 / 分章事件数：\(txtDiagnosticCount)",
@@ -680,6 +692,27 @@ private enum ApplicationLogExporter {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
         try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
         return url
+    }
+
+    /// 每个分类先保留最近的保底名额，剩余名额按全局新鲜度补齐，避免单一高频分类独占导出预算。
+    private static func boundedSections(
+        _ sections: [(label: String, lines: [ShareableLogLine])],
+        maxLines: Int,
+        reservedPerCategory: Int
+    ) -> [(label: String, lines: [ShareableLogLine])] {
+        let categories = sections.flatMap { $0.lines.map(\.category) }
+        guard categories.count > maxLines else { return sections }
+        let selected = ShareableLogBudget.selectedIndices(
+            categories: categories, maxLines: maxLines, reservedPerCategory: reservedPerCategory
+        )
+        var flatIndex = 0
+        return sections.compactMap { section in
+            let lines = section.lines.compactMap { line -> ShareableLogLine? in
+                defer { flatIndex += 1 }
+                return selected.contains(flatIndex) ? line : nil
+            }
+            return lines.isEmpty ? nil : (label: section.label, lines: lines)
+        }
     }
 
     private static func levelName(_ level: OSLogEntryLog.Level) -> String {

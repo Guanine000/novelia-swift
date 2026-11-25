@@ -266,6 +266,28 @@ public enum ShareableLogAggregator {
     }
 }
 
+/// 分享日志的有界预算选择器。先为每个分类保留最近名额，再用剩余额度补入全局最新事件。
+public enum ShareableLogBudget {
+    public static func selectedIndices(categories: [String], maxLines: Int, reservedPerCategory: Int) -> Set<Int> {
+        guard maxLines > 0 else { return [] }
+        guard categories.count > maxLines else {
+            return Set(categories.indices)
+        }
+        let grouped = Dictionary(grouping: categories.indices, by: { categories[$0] })
+        let reserve = grouped.count <= maxLines ? max(1, min(reservedPerCategory, maxLines / grouped.count)) : 0
+        var selected = Set<Int>()
+        if reserve > 0 {
+            for indices in grouped.values {
+                selected.formUnion(indices.suffix(reserve))
+            }
+        }
+        for index in categories.indices.reversed() where selected.count < maxLines {
+            selected.insert(index)
+        }
+        return selected
+    }
+}
+
 // MARK: - 跨启动诊断记录
 
 /// 一条跨启动诊断记录。`launch` 标识写入它的那次启动。
@@ -281,7 +303,7 @@ public struct DiagnosticJournalEntry: Equatable {
 /// 仍能导出之前的记录（`OSLogStore` 在 iOS 上只能读当前进程）。
 ///
 /// 只保存允许清单内的格式，写入与读取都再经过审查，因此文件中不会出现书名、正文、路径或账号。
-/// 文件超过 `maxBytes` 时轮换为一个旧文件，最多占用约两倍空间；读取时只取最近 7 天。
+/// 每个分类的文件超过 `maxBytes` 时独立轮换为一个旧文件；导出时只取最近 7 天。
 /// 所有文件操作在私有串行队列上执行，调用方不阻塞主线程。
 public final class DiagnosticJournal: @unchecked Sendable {
     /// App 使用的实例，位于 Application Support/Diagnostics，不随 iCloud 备份。
@@ -296,8 +318,16 @@ public final class DiagnosticJournal: @unchecked Sendable {
     private let directory: URL
     private let maxBytes: Int
     private let queue = DispatchQueue(label: "cc.novelia.ios.port.diagnostic-journal")
-    private var currentURL: URL { directory.appendingPathComponent("journal.log") }
-    private var rotatedURL: URL { directory.appendingPathComponent("journal.1.log") }
+    /// 旧版的 lifecycle 文件名保持不变，便于已有安装继续读取；新分类各自轮换，避免高频 Readium 事件挤掉其他分类。
+    private func currentURL(for category: String) -> URL {
+        let safeCategory = category.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || $0 == "-" }.map(String.init).joined()
+        let filename = safeCategory == "lifecycle" || safeCategory.isEmpty ? "journal.log" : "journal.\(safeCategory).log"
+        return directory.appendingPathComponent(filename)
+    }
+
+    private func rotatedURL(for category: String) -> URL {
+        currentURL(for: category).deletingPathExtension().appendingPathExtension("1.log")
+    }
 
     public init(directory: URL, launch: String = DiagnosticContext.newTraceID(), maxBytes: Int = 1_500_000) {
         self.directory = directory
@@ -311,14 +341,14 @@ public final class DiagnosticJournal: @unchecked Sendable {
             guard ShareableLogPolicy.message(subsystem: ShareableLogPolicy.subsystem, category: category, text: message) != nil,
                   ["debug", "info", "notice", "error", "fault"].contains(level) else { return }
             let line = "\(Int((date.timeIntervalSince1970 * 1_000).rounded()))\t\(launch)\t\(level)\t\(category)\t\(message)\n"
-            write(Data(line.utf8))
+            write(Data(line.utf8), category: category)
         }
     }
 
     /// 读取 `since` 之后的记录（旧到新），可排除指定启动；损坏或未通过审查的行被跳过。
     public func entries(since: Date, excludingLaunch: String? = nil) -> [DiagnosticJournalEntry] {
         queue.sync {
-            [rotatedURL, currentURL].flatMap { url -> [DiagnosticJournalEntry] in
+            journalURLs().flatMap { url -> [DiagnosticJournalEntry] in
                 guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
                 return text.split(separator: "\n").compactMap { Self.parse($0) }
             }
@@ -332,7 +362,15 @@ public final class DiagnosticJournal: @unchecked Sendable {
         queue.sync {}
     }
 
-    private func write(_ data: Data) {
+    private func journalURLs() -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { url in
+            let name = url.lastPathComponent
+            return name == "journal.log" || (name.hasPrefix("journal.") && name.hasSuffix(".log"))
+        }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    private func write(_ data: Data, category: String) {
         let manager = FileManager.default
         if !manager.fileExists(atPath: directory.path) {
             try? manager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -341,6 +379,8 @@ public final class DiagnosticJournal: @unchecked Sendable {
             var url = directory
             try? url.setResourceValues(values)
         }
+        let currentURL = currentURL(for: category)
+        let rotatedURL = rotatedURL(for: category)
         let size = (try? manager.attributesOfItem(atPath: currentURL.path)[.size] as? Int) ?? 0
         if size + data.count > maxBytes, size > 0 {
             try? manager.removeItem(at: rotatedURL)

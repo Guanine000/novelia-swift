@@ -86,4 +86,4 @@ iPad 书库与发现页支持系统双栏浏览，窄窗口收为单列；进入
 
 ## 反馈
 
-普通问题请通过 [Issues](https://github.com/Guanine000/novelia-swift/issues) 提交。公开反馈前请移除账号、令牌、WebDAV 凭据、私人书籍和个人信息。安全漏洞请通过[私密安全报告](https://github.com/Guanine000/novelia-swift/security/advisories/new)提交。
+普通问题请通过 [Issues](https://github.com/Guanine000/novelia-swift/issues) 提交，可附上 App 重开后导出的[诊断日志](docs/FEATURES.md#诊断)。公开反馈前请移除账号、令牌、WebDAV 凭据、私人书籍和个人信息。安全漏洞请通过[私密安全报告](https://github.com/Guanine000/novelia-swift/security/advisories/new)提交。

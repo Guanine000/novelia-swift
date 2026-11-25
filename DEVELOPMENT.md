@@ -204,7 +204,7 @@ Debug 独立验证 App 可用 `-architectureBrowseResize` 将同一个 Root 内�
 
 两种会话用同一个认证站点刷新 Cookie 续期，而该 Cookie 每次续期都会轮换。`AccountAuthStore` 与 `ForumAuthStore` 必须注入同一个 `SerialAsyncGate` 与同一个 `AuthRefreshCookieStore`（`AppServices` 统一组装；生产使用 `AuthRefreshCookieKeychainStore`，独立 Debug 验证使用 `MemoryAuthRefreshCookieStore`），续期与登录逐个执行，后一个读取前一个写回的新 Cookie。续期进行中再调用 `refreshSession` 时等待同一结果；退出登录（`sessionGeneration` 变化）后的调用不复用旧结果，并清除本机保存的刷新 Cookie。登录入口使用原生 SwiftUI 账密表单（`NoveliaLoginSheet` / `ForumLoginSheet`），直连已校验 HTTPS 认证来源的 `loginAPIURL`（`POST /api/v1/auth/login`），仅识别长度受限的 `text/plain` 已知业务错误原因，不回显原始 HTML 或长响应；注册与找回密码通过外部浏览器打开已校验的官网链接，不内置 Turnstile 网页桥接。升级自旧版 `WKWebView` 登录的账号，在 Keychain 尚无刷新 Cookie 时会一次性回退读取 `WKHTTPCookieStore`，续期成功后即落盘至 Keychain。网络登录与续期均由 `AuthSessionRefresher` 实现，请求设置 `httpShouldHandleCookies = false`。
 
-原生登录表单用同一个 UIKit 容器承载两个同级输入框，分别标记为 `.username` 和 `.password`。系统可能分次写入两个字段，协调器合并输入事件并读取当前表单，将账号与密码作为同一个绑定值提交给 SwiftUI，避免界面刷新覆盖尚未回传的输入。
+原生登录表单用同一个 UIKit 容器承载两个同级输入框，分别标记为 `.username` 和 `.password`。系统可能分次写入两个字段，协调器合并输入事件并读取当前表单，将账号与密码作为同一个绑定值提交给 SwiftUI，避免界面刷新覆盖尚未回传的输入。 容器高度按当前动态字体的行高计算。实现 `intrinsicContentSize` 时不得在同一视图上调用 `systemLayoutSizeFitting`，否则 Auto Layout 计算约束时会再次请求固有尺寸，打开弹窗即可能耗尽堆栈。
 
 生产账号状态、API token provider 与续期入口使用同一 `SessionTokenStore`。生产适配继续使用原 Keychain/Vault；测试使用内存适配。不要在消费方直接读取 Vault、解析 JWT 判断账号，使用 `AccountSessionProviding` 的状态和 `matchesAccount`。
 
@@ -523,7 +523,7 @@ WebDAV 请求使用 `reloadIgnoringLocalCacheData` 与 `Cache-Control: no-cache,
 
 分享日志使用 `ShareableLogPolicy` 的事件允许清单，只导出 App 子系统的受控记录。新增诊断需同时定义可分享格式和回归；自由文本、用户书名/正文、路径、URL、账号和凭据不能直接进入分享文件。系统/框架日志与未知事件不透传，内部完整诊断的动态敏感字段继续使用私有日志标记。构建日志属于本机排障材料，不作为发布附件。
 
-导出通过 `OSLogStore` 读取，在 iOS 上只能读到当前进程，并且实际只读回 `notice` 及以上级别；`info`／`debug` 只用于连接 Xcode 时的本机排障。需要出现在分享日志中的事件（包括关键失败事件与跨启动排障事件）使用 Core 的 `ShareableLogger`：它写入系统日志（只有通过审查的消息标为公开），同时追加到 `DiagnosticJournal`（Application Support/Diagnostics，不备份，单文件约 1.5 MB、轮换保留一个旧文件，导出时取最近 7 天）。写入与读取都再经过 `ShareableLogPolicy` 审查。导出时，以前启动的记录来自该文件，本次启动的记录来自系统日志，两者按启动标识去重并由 `ShareableLogAggregator.collapseByLaunch` 按启动批次分段折叠，头部附带无隐私的配置摘要（阅读引擎、WebDAV/AI 开关与格式），因此 App 重启或被系统结束后仍可清晰区分并导出之前的记录。阅读诊断消息统一由 `ReaderDiagnosticMessage` 生成，导入（`txt`／`epub`／`kindleimport`）、下载（`novel-download`）、EPUB 工具箱（`epubtoolbox`）、同步（`webdav`）、朗读（`speech`）、AI 请求（`reading-ai`）与会话认证（`auth`）等跨模块诊断统一由 `AppDiagnosticMessage` 生成，不在调用处手写格式；新增事件时同时增加格式化函数、允许清单和 `ReaderDiagnosticMessageTests` 用例。
+导出通过 `OSLogStore` 读取，在 iOS 上只能读到当前进程，并且实际只读回 `notice` 及以上级别；`info`／`debug` 只用于连接 Xcode 时的本机排障。需要出现在分享日志中的事件（包括关键失败事件与跨启动排障事件）使用 Core 的 `ShareableLogger`：它写入系统日志（只有通过审查的消息标为公开），同时追加到 `DiagnosticJournal`（Application Support/Diagnostics，不备份，按诊断分类独立轮换，每类保留当前文件和一个旧文件，兼容旧版共享文件，导出时取最近 7 天）。写入与读取都再经过 `ShareableLogPolicy` 审查。导出时，以前启动的记录来自该文件，本次启动优先使用系统日志，读取失败或无应用事件时改用磁盘记录。按启动标识避免重复，每个分类先保留最多 100 条最近事件，其余额度按时间补足至最多 10,000 条，再由 `ShareableLogAggregator.collapseByLaunch` 按启动批次分段折叠，头部附带无隐私的配置摘要（阅读引擎、WebDAV/AI 开关与格式），因此 App 重启或被系统结束后仍可清晰区分并导出之前的记录。阅读诊断消息统一由 `ReaderDiagnosticMessage` 生成，导入（`txt`／`epub`／`kindleimport`）、下载（`novel-download`）、EPUB 工具箱（`epubtoolbox`）、同步（`webdav`）、朗读（`speech`）、AI 请求（`reading-ai`）与会话认证（`auth`）等跨模块诊断统一由 `AppDiagnosticMessage` 生成，不在调用处手写格式；新增事件时同时增加格式化函数、允许清单和 `ReaderDiagnosticMessageTests` 用例。
 
 跳页相关诊断：
 - 前后台切换与内存警告（`lifecycle`）。

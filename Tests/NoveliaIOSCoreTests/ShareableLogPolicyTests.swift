@@ -387,6 +387,19 @@ final class DiagnosticJournalTests: XCTestCase {
         XCTAssertLessThan(entries.count, 200)
     }
 
+    func testHighVolumeCategoryDoesNotEvictOtherShareableCategories() {
+        let journal = DiagnosticJournal(directory: directory, launch: "aaaaaaaa", maxBytes: 2_048)
+        journal.append(level: "notice", category: "lifecycle", message: "Application launched, version 1.0.0 (93)")
+        for index in 0..<200 {
+            journal.append(level: "notice", category: "readium", message: ReaderDiagnosticMessage.readiumWebViewCreated(count: index, mono: index))
+        }
+        journal.flush()
+
+        let messages = journal.entries(since: .distantPast).map(\.message)
+        XCTAssertTrue(messages.contains("Application launched, version 1.0.0 (93)"))
+        XCTAssertTrue(messages.contains(ReaderDiagnosticMessage.readiumWebViewCreated(count: 199, mono: 199)))
+    }
+
     func testTamperedLinesAreSkipped() throws {
         let journal = DiagnosticJournal(directory: directory, launch: "aaaaaaaa")
         journal.append(level: "notice", category: "lifecycle", message: ReaderDiagnosticMessage.scenePhase("active"))
@@ -397,5 +410,26 @@ final class DiagnosticJournalTests: XCTestCase {
         try handle.write(contentsOf: Data("1\taaaaaaaa\tnotice\tlifecycle\tAuthorization: Bearer secret\nnot a record\n".utf8))
         try handle.close()
         XCTAssertEqual(journal.entries(since: .distantPast).map(\.message), ["Scene phase changed; phase=active"])
+    }
+}
+
+final class ShareableLogBudgetTests: XCTestCase {
+    func testReservedCategorySlotsSurviveHighVolumeTail() {
+        let categories = Array(repeating: "readium", count: 20)
+            + ["lifecycle", "epub", "txt"]
+            + Array(repeating: "readium", count: 20)
+        let selected = ShareableLogBudget.selectedIndices(categories: categories, maxLines: 10, reservedPerCategory: 2)
+
+        XCTAssertEqual(selected.count, 10)
+        XCTAssertTrue(selected.contains(20))
+        XCTAssertTrue(selected.contains(21))
+        XCTAssertTrue(selected.contains(22))
+        XCTAssertTrue(selected.contains(41))
+        XCTAssertTrue(selected.contains(42))
+    }
+
+    func testSmallInputRemainsUnboundedByBudget() {
+        let categories = ["lifecycle", "readium", "epub"]
+        XCTAssertEqual(ShareableLogBudget.selectedIndices(categories: categories, maxLines: 10, reservedPerCategory: 2), Set(categories.indices))
     }
 }

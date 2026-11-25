@@ -765,6 +765,7 @@ private final class LoginCredentialsContainerView: UIView {
     let passwordField = AutoFillAwareTextField(frame: .zero)
     let visibilityButton = UIButton(type: .system)
     private var isPasswordVisible = false
+    private static let fieldVerticalInset: CGFloat = 12
     var onToggleVisibility: (() -> Void)?
 
     override init(frame: CGRect) {
@@ -836,13 +837,13 @@ private final class LoginCredentialsContainerView: UIView {
 
             usernameField.leadingAnchor.constraint(equalTo: userIcon.trailingAnchor, constant: 10),
             usernameField.trailingAnchor.constraint(equalTo: usernameRow.trailingAnchor, constant: -14),
-            usernameField.topAnchor.constraint(equalTo: usernameRow.topAnchor, constant: 12),
-            usernameField.bottomAnchor.constraint(equalTo: usernameRow.bottomAnchor, constant: -12),
+            usernameField.topAnchor.constraint(equalTo: usernameRow.topAnchor, constant: Self.fieldVerticalInset),
+            usernameField.bottomAnchor.constraint(equalTo: usernameRow.bottomAnchor, constant: -Self.fieldVerticalInset),
 
             divider.topAnchor.constraint(equalTo: usernameRow.bottomAnchor),
             divider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 44),
             divider.trailingAnchor.constraint(equalTo: trailingAnchor),
-            divider.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale),
+            divider.heightAnchor.constraint(equalToConstant: 1),
 
             passwordRow.topAnchor.constraint(equalTo: divider.bottomAnchor),
             passwordRow.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -856,8 +857,8 @@ private final class LoginCredentialsContainerView: UIView {
 
             passwordField.leadingAnchor.constraint(equalTo: lockIcon.trailingAnchor, constant: 10),
             passwordField.trailingAnchor.constraint(equalTo: visibilityButton.leadingAnchor, constant: -6),
-            passwordField.topAnchor.constraint(equalTo: passwordRow.topAnchor, constant: 12),
-            passwordField.bottomAnchor.constraint(equalTo: passwordRow.bottomAnchor, constant: -12),
+            passwordField.topAnchor.constraint(equalTo: passwordRow.topAnchor, constant: Self.fieldVerticalInset),
+            passwordField.bottomAnchor.constraint(equalTo: passwordRow.bottomAnchor, constant: -Self.fieldVerticalInset),
 
             visibilityButton.trailingAnchor.constraint(equalTo: passwordRow.trailingAnchor, constant: -10),
             visibilityButton.centerYAnchor.constraint(equalTo: passwordRow.centerYAnchor),
@@ -925,13 +926,17 @@ private final class LoginCredentialsContainerView: UIView {
     }
 
     override var intrinsicContentSize: CGSize {
-        let width = bounds.width > 0 ? bounds.width : 320
-        let fitted = systemLayoutSizeFitting(
-            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        )
-        return CGSize(width: UIView.noIntrinsicMetric, height: max(97, ceil(fitted.height)))
+        // SwiftUI 正在测量根容器时不能在同一个视图上再启动 Auto Layout 测量。
+        let font = UIFont.preferredFont(forTextStyle: .body, compatibleWith: traitCollection)
+        let rowHeight = max(48, ceil(font.lineHeight) + 2 * Self.fieldVerticalInset)
+        return CGSize(width: UIView.noIntrinsicMetric, height: 2 * rowHeight + 1)
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if traitCollection.preferredContentSizeCategory != previousTraitCollection?.preferredContentSizeCategory {
+            invalidateIntrinsicContentSize()
+        }
     }
 }
 

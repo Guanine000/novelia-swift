@@ -107,6 +107,31 @@ final class TapTests: XCTestCase {
   if issue.exists { issue.buttons["按原样直接入库"].tap() }
   XCTAssertTrue(completion.waitForExistence(timeout: 30))
  }
+ func testNativeLoginSheetOpensAndAcceptsCredentials() {
+  let app = start(); defer { app.terminate() }
+  app.buttons["我的"].firstMatch.tap()
+  let openLogin = app.buttons["登录 / 注册"].firstMatch
+  let logout = app.buttons["退出登录"].firstMatch
+  if logout.exists {
+   logout.tap()
+   app.buttons["退出登录"].firstMatch.tap()
+  }
+  XCTAssertTrue(openLogin.waitForExistence(timeout: 10))
+  openLogin.tap()
+  let username = app.textFields["用户名或邮箱"]
+  let password = app.secureTextFields["密码"]
+  XCTAssertTrue(username.waitForExistence(timeout: 10))
+  XCTAssertTrue(password.exists)
+  let submit = app.buttons["登录"]
+  XCTAssertFalse(submit.isEnabled)
+  username.tap(); username.typeText("fixture@example.invalid")
+  password.tap(); password.typeText("fixture-password")
+  XCTAssertTrue(submit.isEnabled)
+  app.buttons["显示密码"].tap()
+  XCTAssertEqual(app.textFields["密码"].value as? String, "fixture-password")
+  app.buttons["关闭"].tap()
+  XCTAssertTrue(openLogin.waitForExistence(timeout: 10))
+ }
  func testDownloadEPUBIntakeSkipAndOriginal() {
   // 网络小说夹具使用非标准 OPF 路径，轻量体检会提供三个可选动作。
   let app = start(webUpdate: true); defer { app.terminate() }
