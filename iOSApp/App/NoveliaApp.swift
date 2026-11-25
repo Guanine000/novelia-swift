@@ -117,8 +117,8 @@ enum AppThemeColor: String, CaseIterable, Identifiable {
 /// 界面底色预设：只调整浅色模式的纸面底色，深色模式保持现有近黑配色。
 /// 卡片保持白色，与各档纸面都能保持层次；选择保存在本机，不参与同步。
 enum AppPaperStyle: String, CaseIterable, Identifiable {
-    case cream
     case gray
+    case cream
     case parchment
     case sage
 
@@ -126,8 +126,8 @@ enum AppPaperStyle: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .cream: "米白（默认）"
-        case .gray: "浅灰"
+        case .gray: "浅灰（默认）"
+        case .cream: "米白"
         case .parchment: "羊皮纸"
         case .sage: "淡豆沙绿"
         }
@@ -136,8 +136,8 @@ enum AppPaperStyle: String, CaseIterable, Identifiable {
     /// 紧凑短名，用于横向纸面色卡预览。
     var shortTitle: String {
         switch self {
-        case .cream: "米白"
         case .gray: "浅灰"
+        case .cream: "米白"
         case .parchment: "羊皮纸"
         case .sage: "豆沙绿"
         }
@@ -146,8 +146,8 @@ enum AppPaperStyle: String, CaseIterable, Identifiable {
     /// 浅色模式的页面底色。
     var lightPaper: UIColor {
         switch self {
-        case .cream: UIColor(red: 0.98, green: 0.97, blue: 0.94, alpha: 1)
         case .gray: UIColor(red: 0.949, green: 0.949, blue: 0.965, alpha: 1)
+        case .cream: UIColor(red: 0.98, green: 0.97, blue: 0.94, alpha: 1)
         case .parchment: UIColor(red: 0.955, green: 0.925, blue: 0.865, alpha: 1)
         case .sage: UIColor(red: 0.925, green: 0.955, blue: 0.935, alpha: 1)
         }
@@ -159,7 +159,7 @@ enum AppPaperStyle: String, CaseIterable, Identifiable {
     }
 
     static func from(storedValue: String?) -> AppPaperStyle {
-        storedValue.flatMap(AppPaperStyle.init(rawValue:)) ?? .cream
+        storedValue.flatMap(AppPaperStyle.init(rawValue:)) ?? .gray
     }
 }
 
@@ -388,7 +388,7 @@ struct RootView: View {
         order: AppTabLayout.order(from: UserDefaults.standard.string(forKey: SettingsKey.tabBarOrder))
     )
     /// 界面底色预设。持有它让根视图在换档时重渲染，纸面与卡片的动态色随之刷新。
-    @AppStorage(SettingsKey.appPaperStyle) private var paperStyleRaw = AppPaperStyle.cream.rawValue
+    @AppStorage(SettingsKey.appPaperStyle) private var paperStyleRaw = AppPaperStyle.gray.rawValue
     /// 深色模式纯黑 OLED 开关；持有它使切换时立即重渲染动态纸面色。
     @AppStorage(SettingsKey.appDarkOLED) private var appDarkOLED = false
 

@@ -4,294 +4,458 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct SettingsView: View {
-    @AppStorage(NoveliaUpdateStore.enabledKey) private var checksUpdates = true
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var auth: AccountAuthStore
     @EnvironmentObject private var updates: NoveliaUpdateStore
     @EnvironmentObject private var services: AppServices
+    @EnvironmentObject private var readerSettings: ReaderSettings
+    @EnvironmentObject private var statistics: ReadingStatisticsStore
+    @EnvironmentObject private var webDAVSync: WebDAVSyncStore
+    @EnvironmentObject private var libraryState: LibraryStateStore
+    @EnvironmentObject private var webDownloads: WebNovelDownloadStore
+    @EnvironmentObject private var wenkuDownloads: WenkuLocalLibraryStore
+    @EnvironmentObject private var cloudBooks: CloudBookStore
+
     @State private var updateCheckMessage: String?
     @State private var isConfirmingLogout = false
     @AppStorage(SettingsKey.appThemeColor) private var themeColorRaw = AppThemeColor.novelia.rawValue
     @AppStorage(SettingsKey.appThemeCustomHex) private var themeCustomHex = "559775"
-    @AppStorage(SettingsKey.appPaperStyle) private var paperStyleRaw = AppPaperStyle.cream.rawValue
+    @AppStorage(SettingsKey.appPaperStyle) private var paperStyleRaw = AppPaperStyle.gray.rawValue
     @AppStorage(SettingsKey.appDarkOLED) private var appDarkOLED = false
-    @AppStorage(SettingsKey.libraryAutoReadingStatus) private var autoReadingStatus = false
-    @AppStorage(SettingsKey.libraryAutoOnHoldDays) private var autoOnHoldDays = 30
-    @AppStorage(SettingsKey.libraryAutoInspectEPUBOnImport) private var autoInspectEPUBOnImport = true
-    #if !NOVELIA_READIUM_ONLY
-    @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = false
-    #endif
-    @AppStorage(SettingsKey.readerEPUBDisablesScripts) private var epubDisablesScripts = false
-    @AppStorage(SettingsKey.readerBookBackgroundFollow) private var bookBackgroundFollow = ReaderBookBackgroundFollow.default.rawValue
-    @EnvironmentObject private var readerSettings: ReaderSettings
     @AppStorage(SettingsKey.readerMode) private var modeRaw = ReaderMode.bilingual.rawValue
-    @State private var isExportingLogs = false
-    @State private var isShowingLogShare = false
-    @State private var logFileURL: URL?
-    @State private var logExportError: String?
-    /// 目录诊断说明与 spine 编号默认隐藏，只在需要排查排版问题时显示。
-    @AppStorage(ReaderDebugOptions.showsTOCDiagnosticsKey) private var showsTOCDiagnostics = false
     @AppStorage(SettingsKey.networkECHEnabled) private var echEnabled = false
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
     }
 
-    /// iOS 26 的 Form 行由 UIKit 支撑：主题在页面打开时变化，行内取值文字不会随
-    /// 新 tint 重新着色。用主题身份作行身份强制重建带取值的 Picker 行，行高不变，
-    /// 不影响滚动位置；自定义颜色变化同样触发。
-    private var themeRowIdentity: String {
-        themeColorRaw + "-" + themeCustomHex
-    }
-
     private var selectedMode: ReaderMode {
         ReaderMode(rawValue: modeRaw) ?? .bilingual
     }
 
-    /// Readium 才使用的阅读选项。iOS 15 目标固定走 Readium，因此始终显示；主目标只在开关打开时显示。
-    @ViewBuilder
-    private var readiumExperienceControls: some View {
-        Toggle(isOn: $epubDisablesScripts) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("禁用书内脚本")
-                Text("Readium 打开 EPUB 时不执行书籍自带的脚本，例如自绘注释气泡，改用统一的注释弹层；依赖脚本的排版效果可能失效。原生分页引擎始终不执行书内脚本。下次打开书籍时生效。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        Picker(selection: Binding(
-            get: { ReaderBookBackgroundFollow(storedValue: bookBackgroundFollow) },
-            set: { bookBackgroundFollow = $0.rawValue }
-        )) {
-            ForEach(ReaderBookBackgroundFollow.allCases) { Text($0.title).tag($0) }
-        } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("书页底色与阅读背景")
-                Text("“忽略白色底色”：正文页面的白色、米白底色透明化，显示阅读背景；保留彩色底色、书内背景图片和局部元素底色。“保留背景图片”：保留书内底色，设置阅读背景图片时边距不跟随书页。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .id(themeRowIdentity)
+    private var libraryBookCount: Int {
+        guard webDownloads.isReady, wenkuDownloads.isReady else { return 0 }
+        let all = libraryState.books(web: webDownloads, wenku: wenkuDownloads, cloud: cloudBooks)
+        return libraryState.displayBooks(from: all).count
+    }
+
+    private var todayReadingText: String {
+        let key = ReadingStatistics.dayKey(Date())
+        return Self.compactDuration(statistics.statistics.seconds(days: [key]))
+    }
+
+    private var totalReadingText: String {
+        Self.compactDuration(statistics.statistics.seconds())
+    }
+
+    private var streakDays: Int {
+        statistics.statistics.streakDays(asOf: Date())
+    }
+
+    private var webDAVStatusText: String {
+        if webDAVSync.isSyncing { return "正在同步…" }
+        if !webDAVSync.isEnabled { return "未开启" }
+        return webDAVSync.autoSyncEnabled ? "自动同步" : "已开启"
+    }
+
+    private var aiStatusText: String {
+        services.readingAI.configuration.isEnabled ? "已开启" : "未开启"
+    }
+
+    private static func compactDuration(_ seconds: TimeInterval) -> String {
+        let value = max(0, Int(seconds))
+        if value < 60 { return "\(value) 秒" }
+        if value < 3600 { return "\(value / 60) 分钟" }
+        let hours = value / 3600
+        let minutes = (value % 3600) / 60
+        return minutes == 0 ? "\(hours) 小时" : "\(hours)h \(minutes)m"
     }
 
     var body: some View {
-        Form {
-            Section {
-                if let username = auth.username {
-                    HStack(spacing: 14) {
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [NoveliaStyle.brandGreen, NoveliaStyle.brandGreen.opacity(0.72)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                profileHeroCard
+                quickHubGrid
+                readingSection
+                appearanceSection
+                dataAndNetworkSection
+                aboutSection
+                footerView
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 28)
+            .frame(maxWidth: 680)
+            .frame(maxWidth: .infinity)
+        }
+        .background(NoveliaStyle.paper.ignoresSafeArea())
+        .navigationTitle("我的")
+        .navigationBarTitleDisplayMode(.large)
+        .alert("检查更新", isPresented: .init(get: { updateCheckMessage != nil }, set: { if !$0 { updateCheckMessage = nil } })) {
+            Button("好", role: .cancel) { updateCheckMessage = nil }
+        } message: {
+            Text(updateCheckMessage ?? "")
+        }
+    }
+
+    // MARK: - 个人阅读看板
+
+    private var profileHeroCard: some View {
+        VStack(spacing: 0) {
+            if let username = auth.username {
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [NoveliaStyle.brandGreen, NoveliaStyle.brandGreen.opacity(0.68)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
                                 )
-                            Text(String(username.prefix(1)).uppercased())
-                                .font(.system(size: 19, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                        }
-                        .frame(width: 46, height: 46)
-                        .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(verbatim: username)
-                                .font(.system(size: 17, weight: .bold, design: .rounded))
-                                .foregroundStyle(NoveliaStyle.ink)
-                                .lineLimit(1)
-                            HStack(spacing: 5) {
-                                Circle()
-                                    .fill(NoveliaStyle.brandGreen)
-                                    .frame(width: 6, height: 6)
-                                Text("已登录 Novelia 账号")
-                                    .font(.caption)
-                                    .foregroundStyle(NoveliaStyle.muted)
-                            }
-                        }
-                        Spacer(minLength: 8)
+                            )
+                        Text(String(username.prefix(1)).uppercased())
+                            .font(.system(size: 20, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
                     }
-                    .padding(.vertical, 4)
+                    .frame(width: 50, height: 50)
+                    .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(verbatim: username)
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundStyle(NoveliaStyle.ink)
+                            .lineLimit(1)
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(NoveliaStyle.brandGreen)
+                                .frame(width: 6, height: 6)
+                            Text("已登录 Novelia 账号")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(NoveliaStyle.muted)
+                        }
+                    }
+
+                    Spacer(minLength: 8)
+
                     Button("退出登录", role: .destructive) { isConfirmingLogout = true }
+                        .font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
+                        .background(NoveliaStyle.danger.opacity(0.10), in: Capsule())
+                        .buttonStyle(.plain)
+                        .foregroundStyle(NoveliaStyle.danger)
                         .confirmationDialog("退出登录？", isPresented: $isConfirmingLogout, titleVisibility: .visible) {
                             Button("退出登录", role: .destructive) { auth.logout() }
                             Button("取消", role: .cancel) {}
                         } message: {
                             Text("小说与论坛使用同一账号，会一起退出。")
                         }
-                } else {
-                    Button {
-                        auth.errorMessage = nil
-                        auth.isLoginPresented = true
-                    } label: {
-                        HStack(spacing: 14) {
-                            ZStack {
-                                Circle()
-                                    .fill(NoveliaStyle.brandGreen.opacity(0.14))
-                                Image(systemName: "person.crop.circle.badge.plus")
-                                    .font(.title2)
-                                    .foregroundStyle(NoveliaStyle.brandGreen)
-                            }
-                            .frame(width: 46, height: 46)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("登录 / 注册")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(NoveliaStyle.ink)
-                                Text("同步收藏、历史与社区互动")
-                                    .font(.caption)
-                                    .foregroundStyle(NoveliaStyle.muted)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(NoveliaStyle.muted.opacity(0.5))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
+            } else {
+                Button {
+                    auth.errorMessage = nil
+                    auth.isLoginPresented = true
+                } label: {
+                    HStack(spacing: 14) {
+                        ZStack {
+                            Circle()
+                                .fill(NoveliaStyle.brandGreen.opacity(0.14))
+                            Image(systemName: "person.crop.circle.badge.plus")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(NoveliaStyle.brandGreen)
                         }
-                        .padding(.vertical, 4)
+                        .frame(width: 50, height: 50)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("登录 / 注册")
+                                .font(.system(size: 17, weight: .bold, design: .rounded))
+                                .foregroundStyle(NoveliaStyle.ink)
+                            Text("同步云端收藏、阅读历史与社区互动")
+                                .font(.system(size: 12))
+                                .foregroundStyle(NoveliaStyle.muted)
+                                .lineLimit(2)
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(NoveliaStyle.muted.opacity(0.55))
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 16)
+                    .contentShape(Rectangle())
                 }
-            } header: {
-                Text("账号")
-            } footer: {
-                // 说明只在未登录时出现，避免占据已登录用户的首屏。
-                if auth.username == nil {
-                    Text("登录后可使用需要账号的服务。密码仅用于登录认证，App 不保存密码，仅保存会话令牌与刷新凭据。")
-                }
+                .buttonStyle(.plain)
             }
-            Section("阅读数据") {
-                NavigationLink {
-                    OfflineChapterManagementView()
-                } label: {
-                    Label("离线章节管理", systemImage: "internaldrive")
+
+            Rectangle()
+                .fill(NoveliaStyle.hairline)
+                .frame(height: 0.75)
+                .padding(.horizontal, 16)
+
+            NavigationLink {
+                ReadingStatisticsView()
+            } label: {
+                HStack(spacing: 0) {
+                    heroMetric(value: todayReadingText, label: "今日阅读")
+                    heroMetricDivider
+                    heroMetric(value: "\(streakDays) 天", label: "连续阅读")
+                    heroMetricDivider
+                    heroMetric(value: "\(libraryBookCount) 本", label: "书库藏书")
                 }
-                NavigationLink {
-                    BlockedTagsView()
-                } label: {
-                    Label("标签屏蔽", systemImage: "tag.slash")
-                }
-                NavigationLink { ReadingStatisticsView() } label: {
-                    Label("阅读统计", systemImage: "chart.bar.xaxis")
-                }
+                .padding(.vertical, 13)
+                .padding(.horizontal, 8)
+                .contentShape(Rectangle())
             }
-            Section("阅读") {
-                NavigationLink {
-                    ReaderBackgroundSettingsView()
-                } label: {
-                    Label("阅读背景", systemImage: "paintbrush")
+            .buttonStyle(.plain)
+            .accessibilityLabel("阅读概览：今日阅读 \(todayReadingText)，连续阅读 \(streakDays) 天，书库藏书 \(libraryBookCount) 本")
+        }
+        .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
+    }
+
+    private func heroMetric(value: String, label: String) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(NoveliaStyle.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(label)
+                .font(NoveliaStyle.fontCaption)
+                .foregroundStyle(NoveliaStyle.muted)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var heroMetricDivider: some View {
+        Rectangle()
+            .fill(NoveliaStyle.hairline)
+            .frame(width: 0.75, height: 24)
+    }
+
+    // MARK: - 常用功能快捷入口
+
+    private var quickHubGrid: some View {
+        let columns = Array(
+            repeating: GridItem(.flexible(), spacing: 12),
+            count: dynamicTypeSize.isAccessibilitySize ? 1 : 2
+        )
+        return LazyVGrid(columns: columns, spacing: 12) {
+            NavigationLink {
+                ReadingStatisticsView()
+            } label: {
+                MeQuickTile(
+                    title: "阅读统计",
+                    subtitle: "累计 \(totalReadingText)",
+                    systemImage: "chart.bar.xaxis",
+                    tint: NoveliaStyle.brandGreen
+                )
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink {
+                WebDAVSyncView()
+            } label: {
+                MeQuickTile(
+                    title: "WebDAV 同步",
+                    subtitle: webDAVStatusText,
+                    systemImage: "arrow.triangle.2.circlepath",
+                    tint: webDAVSync.isEnabled ? NoveliaStyle.brandGreen : NoveliaStyle.muted,
+                    highlightsSubtitle: webDAVSync.isEnabled
+                )
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink {
+                EPUBToolboxView()
+            } label: {
+                MeQuickTile(
+                    title: "EPUB 工具箱",
+                    subtitle: "体检、修复与转换",
+                    systemImage: "wrench.and.screwdriver",
+                    tint: Color.orange
+                )
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink {
+                ReadingAISettingsView(store: services.readingAI)
+            } label: {
+                MeQuickTile(
+                    title: "AI 阅读辅助",
+                    subtitle: aiStatusText,
+                    systemImage: "sparkles",
+                    tint: Color.indigo,
+                    highlightsSubtitle: services.readingAI.configuration.isEnabled
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - 阅读偏好
+
+    private var readingSection: some View {
+        MeCardSection(title: "阅读偏好") {
+            NavigationLink {
+                SpeechSettingsView()
+            } label: {
+                MeNavigationRow(
+                    title: "朗读",
+                    systemImage: "speaker.wave.2",
+                    iconTint: NoveliaStyle.brandGreen
+                )
+            }
+            .buttonStyle(.plain)
+
+            MeRowDivider()
+
+            NavigationLink {
+                ReaderBackgroundSettingsView()
+            } label: {
+                MeNavigationRow(
+                    title: "阅读背景",
+                    systemImage: "paintbrush",
+                    iconTint: Color.teal
+                )
+            }
+            .buttonStyle(.plain)
+
+            MeRowDivider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    MeIconBadge(systemImage: "textformat.size", tint: NoveliaStyle.brandGreen)
+                    Text("正文字号")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(NoveliaStyle.ink)
+                    Spacer()
+                    Text("\(Int(readerSettings.fontSize)) pt")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(NoveliaStyle.brandGreen)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(NoveliaStyle.brandGreen.opacity(0.12), in: Capsule())
                 }
-                NavigationLink {
-                    SpeechSettingsView()
+                Slider(value: $readerSettings.fontSize, in: ReaderSettings.fontRange, step: 1)
+                    .tint(NoveliaStyle.brandGreen)
+                    .accessibilityLabel("正文字号")
+                    .accessibilityValue("\(Int(readerSettings.fontSize)) 点")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+
+            MeRowDivider()
+
+            HStack(spacing: 12) {
+                MeIconBadge(systemImage: "character.book.closed", tint: Color.blue)
+                Text("显示语言")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(NoveliaStyle.ink)
+                Spacer()
+                Menu {
+                    Picker("显示语言", selection: $modeRaw) {
+                        ForEach(ReaderMode.allCases) { mode in
+                            Text(mode.title).tag(mode.rawValue)
+                        }
+                    }
                 } label: {
-                    Label("朗读", systemImage: "speaker.wave.2")
-                }
-                VStack(alignment: .leading, spacing: 9) {
-                    HStack {
-                        Text("正文字号")
-                        Spacer()
-                        Text("\(Int(readerSettings.fontSize)) pt")
+                    HStack(spacing: 4) {
+                        Text(selectedMode.title)
+                            .font(.system(size: 14))
                             .foregroundStyle(NoveliaStyle.muted)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(NoveliaStyle.muted.opacity(0.7))
                     }
-                    Slider(value: $readerSettings.fontSize, in: ReaderSettings.fontRange, step: 1)
-                        .tint(NoveliaStyle.brandGreen)
-                        .accessibilityLabel("正文字号")
-                        .accessibilityValue("\(Int(readerSettings.fontSize)) 点")
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
                 }
-                Picker("显示语言", selection: $modeRaw) {
-                    ForEach(ReaderMode.allCases) { mode in
-                        Text(mode.title).tag(mode.rawValue)
-                    }
-                }
-                .id(themeRowIdentity)
-                NavigationLink {
-                    TXTChapterRulesView()
-                } label: {
-                    Label("TXT 分章规则", systemImage: "text.alignleft")
-                }
-                // 实验引擎开关与随附选项沉底：设一次就忘的项不占常用位。
-                #if NOVELIA_READIUM_ONLY
-                readiumExperienceControls
-                #else
-                Toggle(isOn: $epubUsesReadium) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("分页使用 Readium 引擎（实验）")
-                        Text("适用于 EPUB、TXT 和在线小说的分页阅读；关闭后使用原生分页引擎。下次打开阅读器时生效。")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                if epubUsesReadium {
-                    readiumExperienceControls
-                }
-                #endif
+                .accessibilityLabel("显示语言：\(selectedMode.title)")
             }
-            Section("工具") {
-                NavigationLink {
-                    EPUBToolboxView()
-                } label: {
-                    Label("EPUB 工具箱", systemImage: "wrench.and.screwdriver")
-                }
-                Toggle(isOn: $autoInspectEPUBOnImport) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("入库时检测 EPUB 结构问题")
-                        Text("导入本地 EPUB 或首次下载 EPUB 时执行轻量体检（不解压正文）。发现问题时可修复、原样入库或跳过。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+
+            MeRowDivider()
+
+            NavigationLink {
+                MoreReadingSettingsView()
+            } label: {
+                MeNavigationRow(
+                    title: "更多阅读与书库设置",
+                    subtitle: "分章规则、自动状态、入库体检与分页引擎",
+                    systemImage: "slider.horizontal.3",
+                    iconTint: NoveliaStyle.muted
+                )
             }
-            Section("界面") {
-                NavigationLink { TabBarSettingsView() } label: {
-                    Label("自定义底栏", systemImage: "dock.rectangle")
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - 外观与界面
+
+    private var appearanceSection: some View {
+        MeCardSection(title: "外观与界面") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    MeIconBadge(systemImage: "paintpalette", tint: NoveliaStyle.brandGreen)
+                    Text("主题色")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(NoveliaStyle.ink)
+                    Spacer()
+                    Text((AppThemeColor(rawValue: themeColorRaw) ?? .novelia).title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(NoveliaStyle.muted)
                 }
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Label("主题色", systemImage: "paintpalette")
-                        Spacer()
-                        Text((AppThemeColor(rawValue: themeColorRaw) ?? .novelia).title)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(AppThemeColor.allCases) { option in
-                                let isSelected = themeColorRaw == option.rawValue
-                                let swatch = option == .custom ? AppThemeColor.color(fromHex: themeCustomHex) : option.color
-                                Button {
-                                    NoveliaHaptics.selection()
-                                    themeColorRaw = option.rawValue
-                                } label: {
-                                    VStack(spacing: 5) {
-                                        ZStack {
-                                            Circle()
-                                                .fill(swatch)
-                                                .frame(width: 30, height: 30)
-                                            if option == .custom && !isSelected {
-                                                Image(systemName: "eyedropper")
-                                                    .font(.system(size: 11, weight: .bold))
-                                                    .foregroundStyle(.white)
-                                            }
-                                            if isSelected {
-                                                Image(systemName: "checkmark")
-                                                    .font(.system(size: 12, weight: .bold))
-                                                    .foregroundStyle(.white)
-                                            }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(AppThemeColor.allCases) { option in
+                            let isSelected = themeColorRaw == option.rawValue
+                            let swatch = option == .custom ? AppThemeColor.color(fromHex: themeCustomHex) : option.color
+                            Button {
+                                NoveliaHaptics.selection()
+                                themeColorRaw = option.rawValue
+                            } label: {
+                                VStack(spacing: 5) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(swatch)
+                                            .frame(width: 30, height: 30)
+                                        if option == .custom && !isSelected {
+                                            Image(systemName: "eyedropper")
+                                                .font(.system(size: 11, weight: .bold))
+                                                .foregroundStyle(.white)
                                         }
-                                        .padding(3)
-                                        .overlay(
-                                            Circle()
-                                                .stroke(isSelected ? swatch : Color.clear, lineWidth: 2)
-                                        )
-                                        Text(option.title)
-                                            .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
-                                            .foregroundStyle(isSelected ? NoveliaStyle.ink : NoveliaStyle.muted)
+                                        if isSelected {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 12, weight: .bold))
+                                                .foregroundStyle(.white)
+                                        }
                                     }
-                                    .frame(minWidth: 48)
+                                    .padding(3)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(isSelected ? swatch : Color.clear, lineWidth: 2)
+                                    )
+                                    Text(option.title)
+                                        .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                                        .foregroundStyle(isSelected ? NoveliaStyle.ink : NoveliaStyle.muted)
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("主题色：\(option.title)")
-                                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                                .frame(minWidth: 46)
                             }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("主题色：\(option.title)")
+                            .accessibilityAddTraits(isSelected ? .isSelected : [])
                         }
-                        .padding(.vertical, 2)
                     }
+                    .padding(.vertical, 2)
                 }
-                .padding(.vertical, 4)
                 if AppThemeColor(rawValue: themeColorRaw) == .custom {
                     ColorPicker(
                         "自定义颜色",
@@ -301,159 +465,702 @@ struct SettingsView: View {
                         ),
                         supportsOpacity: false
                     )
+                    .font(.system(size: 14))
+                    .padding(.top, 2)
                 }
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Label("界面底色", systemImage: "square.on.square")
-                        Spacer()
-                        Text(AppPaperStyle.from(storedValue: paperStyleRaw).title)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack(spacing: 10) {
-                        ForEach(AppPaperStyle.allCases) { option in
-                            let isSelected = paperStyleRaw == option.rawValue
-                            Button {
-                                NoveliaHaptics.selection()
-                                paperStyleRaw = option.rawValue
-                            } label: {
-                                VStack(spacing: 6) {
-                                    RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous)
-                                        .fill(option.swatchColor)
-                                        .frame(height: 34)
-                                        .overlay(alignment: .bottomTrailing) {
-                                            if isSelected {
-                                                Image(systemName: "checkmark.circle.fill")
-                                                    .font(.system(size: 13))
-                                                    .foregroundStyle(NoveliaStyle.brandGreen)
-                                                    .padding(4)
-                                            }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+
+            MeRowDivider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    MeIconBadge(systemImage: "square.on.square", tint: Color.brown)
+                    Text("界面底色")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(NoveliaStyle.ink)
+                    Spacer()
+                    Text(AppPaperStyle.from(storedValue: paperStyleRaw).title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(NoveliaStyle.muted)
+                }
+                HStack(spacing: 10) {
+                    ForEach(AppPaperStyle.allCases) { option in
+                        let isSelected = paperStyleRaw == option.rawValue
+                        Button {
+                            NoveliaHaptics.selection()
+                            paperStyleRaw = option.rawValue
+                        } label: {
+                            VStack(spacing: 6) {
+                                RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous)
+                                    .fill(option.swatchColor)
+                                    .frame(height: 36)
+                                    .overlay(alignment: .bottomTrailing) {
+                                        if isSelected {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .font(.system(size: 13))
+                                                .foregroundStyle(NoveliaStyle.brandGreen)
+                                                .padding(4)
                                         }
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous)
-                                                .stroke(isSelected ? NoveliaStyle.brandGreen : NoveliaStyle.hairline, lineWidth: isSelected ? 2 : 1)
-                                        )
-                                    Text(option.shortTitle)
-                                        .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
-                                        .foregroundStyle(isSelected ? NoveliaStyle.ink : NoveliaStyle.muted)
-                                        .lineLimit(1)
-                                }
-                                .frame(maxWidth: .infinity)
+                                    }
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous)
+                                            .stroke(isSelected ? NoveliaStyle.brandGreen : NoveliaStyle.hairline, lineWidth: isSelected ? 2 : 1)
+                                    )
+                                Text(option.shortTitle)
+                                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                                    .foregroundStyle(isSelected ? NoveliaStyle.ink : NoveliaStyle.muted)
+                                    .lineLimit(1)
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("界面底色：\(option.title)")
-                            .accessibilityAddTraits(isSelected ? .isSelected : [])
+                            .frame(maxWidth: .infinity)
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("界面底色：\(option.title)")
+                        .accessibilityAddTraits(isSelected ? .isSelected : [])
                     }
                 }
-                .padding(.vertical, 4)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+
+            MeRowDivider()
+
+            HStack(spacing: 12) {
+                MeIconBadge(systemImage: "moon.fill", tint: Color.indigo)
                 Toggle(isOn: $appDarkOLED) {
-                    Label("深色使用纯黑（OLED）", systemImage: "moon.fill")
+                    Text("深色使用纯黑（OLED）")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(NoveliaStyle.ink)
                 }
-                Toggle(isOn: $autoReadingStatus) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Label("自动识别阅读状态", systemImage: "wand.and.stars")
-                        Text("开启后，新书自动归入「想读」，开始阅读转为「在读」，读到 98% 以上转为「读过」；手动标为「抛弃」的书不会被覆盖。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                if autoReadingStatus {
-                    Picker(selection: $autoOnHoldDays) {
-                        Text("关闭").tag(0)
-                        Text("30 天").tag(30)
-                        Text("60 天").tag(60)
-                        Text("90 天").tag(90)
-                    } label: {
-                        Label("久未阅读自动搁置", systemImage: "pause.circle")
-                    }
-                }
+                .tint(NoveliaStyle.brandGreen)
             }
-            Section("网络与同步") {
-                NavigationLink {
-                    NetworkECHSettingsView()
-                } label: {
-                    HStack {
-                        Label("加密连接（ECH）", systemImage: "lock.shield")
-                        Spacer()
-                        Text(echEnabled ? "已开启" : "已关闭")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                NavigationLink {
-                    WebDAVSyncView()
-                } label: {
-                    Label("WebDAV 同步", systemImage: "arrow.triangle.2.circlepath")
-                }
-                NavigationLink {
-                    LocalBackupView()
-                } label: {
-                    Label("本地备份与恢复", systemImage: "archivebox")
-                }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            MeRowDivider()
+
+            NavigationLink {
+                TabBarSettingsView()
+            } label: {
+                MeNavigationRow(
+                    title: "自定义底栏",
+                    systemImage: "dock.rectangle",
+                    iconTint: Color.purple
+                )
             }
-            Section("关于") {
-                Toggle("启动时检查更新", isOn: $checksUpdates)
-                if services.performsUpdateChecks {
-                    Button {
-                        Task { await checkForUpdates() }
-                    } label: {
-                        if updates.isCheckingManually {
-                            Label("正在检查更新…", systemImage: "hourglass")
-                        } else {
-                            Label("检查更新", systemImage: "arrow.down.circle")
-                        }
-                    }
-                    .disabled(updates.isCheckingManually)
-                }
-                CompatLabeledContent("当前版本", value: appVersion)
-                #if NOVELIA_READIUM_ONLY
-                CompatLabeledContent("平台", value: "iOS 15+")
-                #else
-                CompatLabeledContent("平台", value: "iOS 17+")
-                #endif
-                NavigationLink {
-                    ThirdPartyLicensesView()
-                } label: {
-                    Label("开源许可", systemImage: "doc.plaintext")
-                }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - 数据与连接
+
+    private var dataAndNetworkSection: some View {
+        MeCardSection(title: "数据与连接") {
+            NavigationLink {
+                NetworkECHSettingsView()
+            } label: {
+                MeNavigationRow(
+                    title: "加密连接（ECH）",
+                    value: echEnabled ? "已开启" : "已关闭",
+                    valueHighlighted: echEnabled,
+                    systemImage: "lock.shield",
+                    iconTint: NoveliaStyle.brandGreen
+                )
             }
-            Section {
-                NavigationLink {
-                    ReadingAISettingsView(store: services.readingAI)
-                } label: { Label("AI 阅读辅助", systemImage: "sparkles") }
-                Toggle(isOn: $showsTOCDiagnostics) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("显示目录诊断信息")
-                        Text("在目录里显示书籍结构解析说明、章节 spine 编号与诊断提示。排查排版问题时打开，平时保持关闭。")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
+            .buttonStyle(.plain)
+
+            MeRowDivider()
+
+            NavigationLink {
+                OfflineChapterManagementView()
+            } label: {
+                MeNavigationRow(
+                    title: "离线章节管理",
+                    systemImage: "internaldrive",
+                    iconTint: Color.blue
+                )
+            }
+            .buttonStyle(.plain)
+
+            MeRowDivider()
+
+            NavigationLink {
+                BlockedTagsView()
+            } label: {
+                MeNavigationRow(
+                    title: "标签屏蔽",
+                    systemImage: "tag.slash",
+                    iconTint: Color.orange
+                )
+            }
+            .buttonStyle(.plain)
+
+            MeRowDivider()
+
+            NavigationLink {
+                LocalBackupView()
+            } label: {
+                MeNavigationRow(
+                    title: "本地备份与恢复",
+                    systemImage: "archivebox",
+                    iconTint: Color.teal
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - 关于与高级
+
+    private var aboutSection: some View {
+        MeCardSection(title: "关于与高级") {
+            if services.performsUpdateChecks {
                 Button {
-                    exportLogs()
+                    Task { await checkForUpdates() }
                 } label: {
-                    if isExportingLogs {
-                        Label("正在准备日志…", systemImage: "hourglass")
-                    } else {
-                        Label("导出应用日志", systemImage: "square.and.arrow.up")
-                    }
+                    MeNavigationRow(
+                        title: updates.isCheckingManually ? "正在检查更新…" : "检查更新",
+                        value: "v\(appVersion)",
+                        systemImage: updates.isCheckingManually ? "hourglass" : "arrow.down.circle",
+                        iconTint: NoveliaStyle.brandGreen,
+                        showsChevron: false
+                    )
                 }
-                .disabled(isExportingLogs)
-            } header: {
-                Text("高级")
-            } footer: {
-                Text("导出本应用最近 7 天内当前运行可读取的诊断事件，仅保留错误码、耗时和数量等信息，省略标识符、文件路径和未经审查的文本。")
+                .buttonStyle(.plain)
+                .disabled(updates.isCheckingManually)
+
+                MeRowDivider()
+            }
+
+            NavigationLink {
+                AboutAndDiagnosticsView()
+            } label: {
+                MeNavigationRow(
+                    title: "关于、许可与诊断",
+                    subtitle: "开源许可、更新偏好与日志导出",
+                    systemImage: "info.circle",
+                    iconTint: NoveliaStyle.muted
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var footerView: some View {
+        HStack {
+            Spacer()
+            #if NOVELIA_READIUM_ONLY
+            Text("Novelia · v\(appVersion) · iOS 15+")
+            #else
+            Text("Novelia · v\(appVersion)")
+            #endif
+            Spacer()
+        }
+        .font(.system(size: 11, weight: .medium, design: .rounded))
+        .monospacedDigit()
+        .foregroundStyle(NoveliaStyle.muted.opacity(0.65))
+        .padding(.top, 4)
+    }
+
+    /// 有新版本时由根视图弹出“发现新版本”；这里只提示已是最新或检查失败。
+    private func checkForUpdates() async {
+        switch await updates.checkManually() {
+        case .available: break
+        case .upToDate(let current): updateCheckMessage = "暂无更新的公开正式版（当前 \(current)）。"
+        case .inProgress: break
+        case .failed: updateCheckMessage = "暂时无法获取 GitHub 版本信息，请稍后重试。"
+        case .rateLimited: updateCheckMessage = "GitHub 暂时限制了当前网络的更新查询，备用页面也未能连接。请稍后重试或切换网络。"
+        }
+    }
+}
+
+// MARK: - 「我的」页轻量组件与二级设置页
+
+private struct MeCardSection<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(NoveliaStyle.muted)
+                .padding(.horizontal, 6)
+            VStack(spacing: 0) {
+                content
+            }
+            .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
+        }
+    }
+}
+
+private struct MeIconBadge: View {
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: 28, height: 28)
+            .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous))
+            .accessibilityHidden(true)
+    }
+}
+
+private struct MeRowDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(NoveliaStyle.hairline)
+            .frame(height: 0.75)
+            .padding(.leading, 54)
+    }
+}
+
+private struct MeNavigationRow: View {
+    let title: String
+    var subtitle: String? = nil
+    var value: String? = nil
+    var valueHighlighted: Bool = false
+    let systemImage: String
+    let iconTint: Color
+    var showsChevron: Bool = true
+
+    var body: some View {
+        HStack(spacing: 12) {
+            MeIconBadge(systemImage: systemImage, tint: iconTint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(NoveliaStyle.ink)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(NoveliaStyle.fontCaption)
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 8)
+            if let value {
+                Text(value)
+                    .font(.system(size: 13, weight: valueHighlighted ? .semibold : .regular))
+                    .foregroundStyle(valueHighlighted ? NoveliaStyle.brandGreen : NoveliaStyle.muted)
+            }
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(NoveliaStyle.muted.opacity(0.45))
             }
         }
-        .compatScrollContentBackgroundHidden()
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct MeQuickTile: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let tint: Color
+    var highlightsSubtitle: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                MeIconBadge(systemImage: systemImage, tint: tint)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(NoveliaStyle.muted.opacity(0.45))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(NoveliaStyle.ink)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(NoveliaStyle.fontFootnote)
+                    .foregroundStyle(highlightsSubtitle ? tint : NoveliaStyle.muted)
+                    .lineLimit(1)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
+        .contentShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
+    }
+}
+
+private struct MeToggleRow: View {
+    let title: String
+    var subtitle: String? = nil
+    let systemImage: String
+    let iconTint: Color
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(alignment: subtitle == nil ? .center : .top, spacing: 12) {
+            MeIconBadge(systemImage: systemImage, tint: iconTint)
+                .padding(.top, subtitle == nil ? 0 : 1)
+            Toggle(isOn: $isOn) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(NoveliaStyle.ink)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(NoveliaStyle.fontCaption)
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .tint(NoveliaStyle.brandGreen)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+}
+
+private struct MeSectionFooter: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(NoveliaStyle.fontCaption)
+            .foregroundStyle(NoveliaStyle.muted)
+            .padding(.horizontal, 8)
+            .padding(.top, -8)
+    }
+}
+
+/// 收敛低频阅读与书库行为开关，保持「我的」首屏简洁，并沿用统一纸面卡片风格。
+private struct MoreReadingSettingsView: View {
+    @AppStorage(SettingsKey.libraryAutoReadingStatus) private var autoReadingStatus = false
+    @AppStorage(SettingsKey.libraryAutoOnHoldDays) private var autoOnHoldDays = 30
+    @AppStorage(SettingsKey.libraryAutoInspectEPUBOnImport) private var autoInspectEPUBOnImport = true
+    #if !NOVELIA_READIUM_ONLY
+    @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = false
+    #endif
+    @AppStorage(SettingsKey.readerEPUBDisablesScripts) private var epubDisablesScripts = false
+    @AppStorage(SettingsKey.readerBookBackgroundFollow) private var bookBackgroundFollow = ReaderBookBackgroundFollow.default.rawValue
+
+    private var onHoldDaysLabel: String {
+        autoOnHoldDays == 0 ? "关闭" : "\(autoOnHoldDays) 天"
+    }
+
+    private var currentBackgroundFollow: ReaderBookBackgroundFollow {
+        ReaderBookBackgroundFollow(storedValue: bookBackgroundFollow)
+    }
+
+    @ViewBuilder
+    private var readiumExperienceControls: some View {
+        MeToggleRow(
+            title: "禁用书内脚本",
+            subtitle: "Readium 打开 EPUB 时不执行书籍自带脚本（如自绘注释气泡），改用统一注释弹层；原生引擎始终不执行。下次打开书籍时生效。",
+            systemImage: "hand.raised",
+            iconTint: Color.orange,
+            isOn: $epubDisablesScripts
+        )
+
+        MeRowDivider()
+
+        HStack(spacing: 12) {
+            MeIconBadge(systemImage: "photo.on.rectangle.angled", tint: Color.teal)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("书页底色与阅读背景")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(NoveliaStyle.ink)
+                Text("控制书籍原有白底与阅读背景的叠加方式")
+                    .font(NoveliaStyle.fontCaption)
+                    .foregroundStyle(NoveliaStyle.muted)
+            }
+            Spacer(minLength: 8)
+            Menu {
+                Picker("书页底色与阅读背景", selection: Binding(
+                    get: { currentBackgroundFollow },
+                    set: { bookBackgroundFollow = $0.rawValue }
+                )) {
+                    ForEach(ReaderBookBackgroundFollow.allCases) { Text($0.title).tag($0) }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(currentBackgroundFollow.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(NoveliaStyle.brandGreen)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(NoveliaStyle.muted.opacity(0.7))
+                }
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                MeCardSection(title: "文本与导入") {
+                    NavigationLink {
+                        TXTChapterRulesView()
+                    } label: {
+                        MeNavigationRow(
+                            title: "TXT 分章规则",
+                            subtitle: "管理内置与自定义正则分章匹配",
+                            systemImage: "text.alignleft",
+                            iconTint: Color.blue
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    MeRowDivider()
+
+                    MeToggleRow(
+                        title: "入库时检测 EPUB 结构问题",
+                        subtitle: "导入本地或首次下载 EPUB 时执行轻量体检（不解压正文），发现问题可修复、原样入库或跳过。",
+                        systemImage: "checkmark.shield",
+                        iconTint: Color.orange,
+                        isOn: $autoInspectEPUBOnImport
+                    )
+                }
+
+                MeCardSection(title: "书库状态") {
+                    MeToggleRow(
+                        title: "自动识别阅读状态",
+                        subtitle: "新书自动归入「想读」，开始阅读转为「在读」，读到 98% 以上转为「读过」；手动标为「抛弃」的书不会被覆盖。",
+                        systemImage: "wand.and.stars",
+                        iconTint: NoveliaStyle.brandGreen,
+                        isOn: $autoReadingStatus
+                    )
+
+                    if autoReadingStatus {
+                        MeRowDivider()
+
+                        HStack(spacing: 12) {
+                            MeIconBadge(systemImage: "pause.circle", tint: Color.purple)
+                            Text("久未阅读自动搁置")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(NoveliaStyle.ink)
+                            Spacer(minLength: 8)
+                            Menu {
+                                Picker("久未阅读自动搁置", selection: $autoOnHoldDays) {
+                                    Text("关闭").tag(0)
+                                    Text("30 天").tag(30)
+                                    Text("60 天").tag(60)
+                                    Text("90 天").tag(90)
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text(onHoldDaysLabel)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(autoOnHoldDays == 0 ? NoveliaStyle.muted : NoveliaStyle.brandGreen)
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(NoveliaStyle.muted.opacity(0.7))
+                                }
+                                .padding(.vertical, 4)
+                                .contentShape(Rectangle())
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                    }
+                }
+
+                MeCardSection(title: "分页引擎") {
+                    #if NOVELIA_READIUM_ONLY
+                    readiumExperienceControls
+                    #else
+                    MeToggleRow(
+                        title: "分页使用 Readium 引擎（实验）",
+                        subtitle: "适用于 EPUB、TXT 和在线小说的分页阅读；关闭后使用原生分页引擎。下次打开阅读器时生效。",
+                        systemImage: "book.pages",
+                        iconTint: Color.indigo,
+                        isOn: $epubUsesReadium
+                    )
+                    if epubUsesReadium {
+                        MeRowDivider()
+                        readiumExperienceControls
+                    }
+                    #endif
+                }
+
+                #if NOVELIA_READIUM_ONLY
+                MeSectionFooter(text: "“忽略白色底色”会将白/米白页底透明化以透出阅读背景，保留彩色底与书内背景图；“保留背景图片”在设置背景图时边距不跟随书页。")
+                #else
+                if epubUsesReadium {
+                    MeSectionFooter(text: "“忽略白色底色”会将白/米白页底透明化以透出阅读背景，保留彩色底与书内背景图；“保留背景图片”在设置背景图时边距不跟随书页。")
+                }
+                #endif
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 28)
+            .frame(maxWidth: 680)
+            .frame(maxWidth: .infinity)
+        }
         .background(NoveliaStyle.paper.ignoresSafeArea())
-        .navigationTitle("我的")
+        .navigationTitle("更多阅读与书库设置")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// 收敛关于信息、更新开关、开源许可与诊断日志，采用统一纸面卡片风格。
+private struct AboutAndDiagnosticsView: View {
+    @AppStorage(NoveliaUpdateStore.enabledKey) private var checksUpdates = true
+    @AppStorage(ReaderDebugOptions.showsTOCDiagnosticsKey) private var showsTOCDiagnostics = false
+    #if !NOVELIA_READIUM_ONLY
+    @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = false
+    #endif
+    @EnvironmentObject private var updates: NoveliaUpdateStore
+    @EnvironmentObject private var services: AppServices
+    @State private var updateCheckMessage: String?
+    @State private var isExportingLogs = false
+    @State private var isShowingLogShare = false
+    @State private var logFileURL: URL?
+    @State private var logExportError: String?
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
+    }
+
+    private var platformText: String {
+        #if NOVELIA_READIUM_ONLY
+        return "iOS 15+"
+        #else
+        return "iOS 17+"
+        #endif
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 14) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [NoveliaStyle.brandGreen, NoveliaStyle.brandGreen.opacity(0.72)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                        Image(systemName: "books.vertical.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .frame(width: 48, height: 48)
+                    .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Novelia")
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundStyle(NoveliaStyle.ink)
+                        HStack(spacing: 8) {
+                            Text("版本 \(appVersion)")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(NoveliaStyle.muted)
+                            Text(platformText)
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundStyle(NoveliaStyle.brandGreen)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(NoveliaStyle.brandGreen.opacity(0.12), in: Capsule())
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(16)
+                .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
+
+                MeCardSection(title: "更新与许可") {
+                    MeToggleRow(
+                        title: "启动时检查更新",
+                        systemImage: "sparkles.rectangle.stack",
+                        iconTint: NoveliaStyle.brandGreen,
+                        isOn: $checksUpdates
+                    )
+
+                    if services.performsUpdateChecks {
+                        MeRowDivider()
+
+                        Button {
+                            Task { await checkForUpdates() }
+                        } label: {
+                            MeNavigationRow(
+                                title: updates.isCheckingManually ? "正在检查更新…" : "检查更新",
+                                value: "v\(appVersion)",
+                                systemImage: updates.isCheckingManually ? "hourglass" : "arrow.down.circle",
+                                iconTint: Color.blue,
+                                showsChevron: false
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(updates.isCheckingManually)
+                    }
+
+                    MeRowDivider()
+
+                    NavigationLink {
+                        ThirdPartyLicensesView()
+                    } label: {
+                        MeNavigationRow(
+                            title: "开源许可",
+                            subtitle: "GPL-3.0 与第三方组件声明",
+                            systemImage: "doc.plaintext",
+                            iconTint: Color.teal
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                MeCardSection(title: "诊断与日志") {
+                    MeToggleRow(
+                        title: "显示目录诊断信息",
+                        subtitle: "在目录中显示书籍结构解析说明、章节 spine 编号与诊断提示。排查排版问题时打开，平时保持关闭。",
+                        systemImage: "stethoscope",
+                        iconTint: Color.orange,
+                        isOn: $showsTOCDiagnostics
+                    )
+
+                    MeRowDivider()
+
+                    Button {
+                        exportLogs()
+                    } label: {
+                        MeNavigationRow(
+                            title: isExportingLogs ? "正在准备日志…" : "导出应用日志",
+                            systemImage: isExportingLogs ? "hourglass" : "square.and.arrow.up",
+                            iconTint: NoveliaStyle.brandGreen,
+                            showsChevron: false
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isExportingLogs)
+                }
+
+                MeSectionFooter(text: "导出本应用最近 7 天内当前运行可读取的诊断事件，仅保留错误码、耗时和数量等信息，省略标识符、文件路径和未经审查的文本。")
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 28)
+            .frame(maxWidth: 680)
+            .frame(maxWidth: .infinity)
+        }
+        .background(NoveliaStyle.paper.ignoresSafeArea())
+        .navigationTitle("关于、许可与诊断")
+        .navigationBarTitleDisplayMode(.inline)
         .alert("检查更新", isPresented: .init(get: { updateCheckMessage != nil }, set: { if !$0 { updateCheckMessage = nil } })) {
             Button("好", role: .cancel) { updateCheckMessage = nil }
         } message: {
             Text(updateCheckMessage ?? "")
         }
-        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $isShowingLogShare) {
             if let logFileURL {
                 LogActivitySheet(activityItems: [logFileURL])
@@ -469,7 +1176,6 @@ struct SettingsView: View {
         }
     }
 
-    /// 有新版本时由根视图弹出“发现新版本”；这里只提示已是最新或检查失败。
     private func checkForUpdates() async {
         switch await updates.checkManually() {
         case .available: break
