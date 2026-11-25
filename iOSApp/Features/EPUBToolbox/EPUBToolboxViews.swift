@@ -285,6 +285,19 @@ struct EPUBToolboxView: View {
             .filter { $0.format == .epub && !$0.isCloudOnly }
     }
 
+    /// 外部 EPUB 选取类型：覆盖标准 `org.idpf.epub-container` 与 Apple Books 的 `com.apple.ibooks.epub`。
+    private var externalEPUBContentTypes: [UTType] {
+        var types: [UTType] = []
+        for candidate in [
+            UTType(filenameExtension: "epub"),
+            UTType.epub,
+            UTType("com.apple.ibooks.epub")
+        ].compactMap({ $0 }) where !types.contains(candidate) {
+            types.append(candidate)
+        }
+        return types.isEmpty ? [.data] : types
+    }
+
     var body: some View {
         Form {
             sourceSection
@@ -310,9 +323,6 @@ struct EPUBToolboxView: View {
             if model.source == nil, let initialBook {
                 model.selectLibraryBook(initialBook)
             }
-        }
-        .onDisappear {
-            model.cleanup()
         }
         .sheet(isPresented: $isShowingLibraryPicker) {
             CompatNavigationStack {
@@ -351,16 +361,14 @@ struct EPUBToolboxView: View {
                     .ignoresSafeArea()
             }
         }
-        .fileImporter(
-            isPresented: $isShowingFileImporter,
-            allowedContentTypes: [UTType.epub],
-            allowsMultipleSelection: false
-        ) { result in
-            if case .success(let urls) = result, let first = urls.first {
-                model.selectExternalFile(url: first)
-            } else if case .failure(let error) = result {
-                model.errorMessage = error.localizedDescription
+        .fullScreenCover(isPresented: $isShowingFileImporter) {
+            EPUBFilePicker(contentTypes: externalEPUBContentTypes, allowsMultipleSelection: false) { urls in
+                isShowingFileImporter = false
+                if let first = urls.first {
+                    model.selectExternalFile(url: first)
+                }
             }
+            .ignoresSafeArea()
         }
         .alert("提示", isPresented: Binding(
             get: { model.errorMessage != nil },
