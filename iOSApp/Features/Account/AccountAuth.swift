@@ -584,10 +584,13 @@ struct ForumLoginSheet: View {
     }
 }
 
+private struct LoginCredentials: Equatable {
+    var username = ""
+    var password = ""
+}
+
 /// 原生账密登录表单；注册与找回密码通过外部浏览器打开已校验的官网链接，避免内置 Turnstile 网页桥接。
 private struct NoveliaNativeLoginForm: View {
-    private enum Field { case username, password }
-
     @Environment(\.openURL) private var openURL
     let configuration: AuthenticationConfiguration
     let isBusy: Bool
@@ -598,13 +601,11 @@ private struct NoveliaNativeLoginForm: View {
     let onSubmit: (String, String) async -> Bool
     let onClose: () -> Void
 
-    @State private var username = ""
-    @State private var password = ""
-    @State private var isPasswordVisible = false
-    @State private var focusedField: Field?
+    @State private var credentials = LoginCredentials()
+    @State private var dismissKeyboardToken = 0
 
     private var canSubmit: Bool {
-        !isBusy && !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty
+        !isBusy && !credentials.username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !credentials.password.isEmpty
     }
 
     var body: some View {
@@ -644,68 +645,13 @@ private struct NoveliaNativeLoginForm: View {
                         .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
                     }
 
-                    VStack(spacing: 0) {
-                        HStack(spacing: 10) {
-                            Image(systemName: "person")
-                                .foregroundStyle(NoveliaStyle.muted)
-                                .frame(width: 20)
-                            LoginAutoFillTextField(
-                                placeholder: "用户名或邮箱",
-                                text: $username,
-                                contentType: .username,
-                                isSecure: false,
-                                returnKeyType: .next,
-                                isEnabled: !isBusy,
-                                isFocused: focusedField == .username,
-                                onFocusChange: { isFocused in
-                                    if isFocused { focusedField = .username }
-                                    else if focusedField == .username { focusedField = nil }
-                                },
-                                onSubmit: { focusedField = .password }
-                            )
-                            .frame(height: 24)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 12)
-
-                        Divider()
-                            .overlay(NoveliaStyle.hairline)
-                            .padding(.leading, 44)
-
-                        HStack(spacing: 10) {
-                            Image(systemName: "lock")
-                                .foregroundStyle(NoveliaStyle.muted)
-                                .frame(width: 20)
-                            LoginAutoFillTextField(
-                                placeholder: "密码",
-                                text: $password,
-                                contentType: .password,
-                                isSecure: !isPasswordVisible,
-                                returnKeyType: .go,
-                                isEnabled: !isBusy,
-                                isFocused: focusedField == .password,
-                                onFocusChange: { isFocused in
-                                    if isFocused { focusedField = .password }
-                                    else if focusedField == .password { focusedField = nil }
-                                },
-                                onSubmit: { submitIfReady() }
-                            )
-                            .frame(height: 24)
-
-                            Button {
-                                isPasswordVisible.toggle()
-                            } label: {
-                                Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
-                                    .foregroundStyle(NoveliaStyle.muted)
-                                    .frame(width: 32, height: 32)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(isPasswordVisible ? "隐藏密码" : "显示密码")
-                            .disabled(isBusy)
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                    }
+                    LoginCredentialsCardView(
+                        credentials: $credentials,
+                        isEnabled: !isBusy,
+                        dismissKeyboardToken: dismissKeyboardToken,
+                        onSubmit: { submitIfReady() }
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
                     .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
 
                     if let errorMessage, !errorMessage.isEmpty {
@@ -775,40 +721,167 @@ private struct NoveliaNativeLoginForm: View {
             }
         }
         .onAppear { onClearError() }
-        .onDisappear { password = "" }
+        .onDisappear { credentials.password = "" }
     }
 
     private func submitIfReady() {
         guard canSubmit else { return }
-        let currentUsername = username
-        let currentPassword = password
-        focusedField = nil
+        let submitted = credentials
+        dismissKeyboardToken &+= 1
         Task {
-            if await onSubmit(currentUsername, currentPassword) {
-                password = ""
+            if await onSubmit(submitted.username, submitted.password) {
+                credentials.password = ""
             }
         }
     }
 }
 
-/// 基于持久化 UITextField 的凭据输入框：避免 SwiftUI 条件切换 SecureField 与 emailAddress 键盘组合破坏 iCloud 钥匙串自动填充配对。
-private struct LoginAutoFillTextField: UIViewRepresentable {
-    let placeholder: String
-    @Binding var text: String
-    let contentType: UITextContentType
-    let isSecure: Bool
-    let returnKeyType: UIReturnKeyType
-    let isEnabled: Bool
-    let isFocused: Bool
-    let onFocusChange: (Bool) -> Void
-    let onSubmit: () -> Void
+/// 监听所有 UIKit 写入路径（包括系统钥匙串静默设置 .text / insertText / replace）的输入框。
+private final class AutoFillAwareTextField: UITextField {
+    var onTextMutation: (() -> Void)?
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
+    override var text: String? {
+        didSet {
+            if text != oldValue {
+                onTextMutation?()
+            }
+        }
     }
 
-    func makeUIView(context: Context) -> UITextField {
-        let field = UITextField(frame: .zero)
+    override func insertText(_ text: String) {
+        super.insertText(text)
+        onTextMutation?()
+    }
+
+    override func replace(_ range: UITextRange, withText text: String) {
+        super.replace(range, withText: text)
+        onTextMutation?()
+    }
+}
+
+/// 单一 UIKit 凭据容器：用户名与密码框作为直接同级视图共处同一父视图，避免 SwiftUI 包装层与焦点回写打断 iCloud 钥匙串自动填充。
+private final class LoginCredentialsContainerView: UIView {
+    let usernameField = AutoFillAwareTextField(frame: .zero)
+    let passwordField = AutoFillAwareTextField(frame: .zero)
+    let visibilityButton = UIButton(type: .system)
+    private var isPasswordVisible = false
+    var onToggleVisibility: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupViews()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func setupViews() {
+        backgroundColor = .clear
+
+        let mutedColor = UIColor(NoveliaStyle.muted)
+        let hairlineColor = UIColor(NoveliaStyle.hairline)
+
+        let userIcon = makeIconView(systemName: "person", tint: mutedColor)
+        let lockIcon = makeIconView(systemName: "lock", tint: mutedColor)
+
+        configureField(
+            usernameField,
+            placeholder: "用户名或邮箱",
+            contentType: .username,
+            isSecure: false,
+            returnKeyType: .next
+        )
+        configureField(
+            passwordField,
+            placeholder: "密码",
+            contentType: .password,
+            isSecure: true,
+            returnKeyType: .go
+        )
+
+        visibilityButton.translatesAutoresizingMaskIntoConstraints = false
+        visibilityButton.tintColor = mutedColor
+        visibilityButton.addTarget(self, action: #selector(handleVisibilityTap), for: .touchUpInside)
+        updateVisibilityButtonAppearance()
+
+        let divider = UIView(frame: .zero)
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        divider.backgroundColor = hairlineColor
+
+        let usernameRow = UIView(frame: .zero)
+        usernameRow.translatesAutoresizingMaskIntoConstraints = false
+        usernameRow.addSubview(userIcon)
+
+        let passwordRow = UIView(frame: .zero)
+        passwordRow.translatesAutoresizingMaskIntoConstraints = false
+        passwordRow.addSubview(lockIcon)
+        passwordRow.addSubview(visibilityButton)
+
+        addSubview(usernameRow)
+        addSubview(divider)
+        addSubview(passwordRow)
+        addSubview(usernameField)
+        addSubview(passwordField)
+
+        NSLayoutConstraint.activate([
+            usernameRow.topAnchor.constraint(equalTo: topAnchor),
+            usernameRow.leadingAnchor.constraint(equalTo: leadingAnchor),
+            usernameRow.trailingAnchor.constraint(equalTo: trailingAnchor),
+            usernameRow.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
+
+            userIcon.leadingAnchor.constraint(equalTo: usernameRow.leadingAnchor, constant: 14),
+            userIcon.centerYAnchor.constraint(equalTo: usernameRow.centerYAnchor),
+            userIcon.widthAnchor.constraint(equalToConstant: 20),
+
+            usernameField.leadingAnchor.constraint(equalTo: userIcon.trailingAnchor, constant: 10),
+            usernameField.trailingAnchor.constraint(equalTo: usernameRow.trailingAnchor, constant: -14),
+            usernameField.topAnchor.constraint(equalTo: usernameRow.topAnchor, constant: 12),
+            usernameField.bottomAnchor.constraint(equalTo: usernameRow.bottomAnchor, constant: -12),
+
+            divider.topAnchor.constraint(equalTo: usernameRow.bottomAnchor),
+            divider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 44),
+            divider.trailingAnchor.constraint(equalTo: trailingAnchor),
+            divider.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale),
+
+            passwordRow.topAnchor.constraint(equalTo: divider.bottomAnchor),
+            passwordRow.leadingAnchor.constraint(equalTo: leadingAnchor),
+            passwordRow.trailingAnchor.constraint(equalTo: trailingAnchor),
+            passwordRow.bottomAnchor.constraint(equalTo: bottomAnchor),
+            passwordRow.heightAnchor.constraint(greaterThanOrEqualToConstant: 48),
+
+            lockIcon.leadingAnchor.constraint(equalTo: passwordRow.leadingAnchor, constant: 14),
+            lockIcon.centerYAnchor.constraint(equalTo: passwordRow.centerYAnchor),
+            lockIcon.widthAnchor.constraint(equalToConstant: 20),
+
+            passwordField.leadingAnchor.constraint(equalTo: lockIcon.trailingAnchor, constant: 10),
+            passwordField.trailingAnchor.constraint(equalTo: visibilityButton.leadingAnchor, constant: -6),
+            passwordField.topAnchor.constraint(equalTo: passwordRow.topAnchor, constant: 12),
+            passwordField.bottomAnchor.constraint(equalTo: passwordRow.bottomAnchor, constant: -12),
+
+            visibilityButton.trailingAnchor.constraint(equalTo: passwordRow.trailingAnchor, constant: -10),
+            visibilityButton.centerYAnchor.constraint(equalTo: passwordRow.centerYAnchor),
+            visibilityButton.widthAnchor.constraint(equalToConstant: 32),
+            visibilityButton.heightAnchor.constraint(equalToConstant: 32),
+        ])
+    }
+
+    private func makeIconView(systemName: String, tint: UIColor) -> UIImageView {
+        let imageView = UIImageView(image: UIImage(systemName: systemName))
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.tintColor = tint
+        imageView.contentMode = .scaleAspectFit
+        return imageView
+    }
+
+    private func configureField(
+        _ field: AutoFillAwareTextField,
+        placeholder: String,
+        contentType: UITextContentType,
+        isSecure: Bool,
+        returnKeyType: UIReturnKeyType
+    ) {
+        field.translatesAutoresizingMaskIntoConstraints = false
         field.placeholder = placeholder
         field.textContentType = contentType
         field.isSecureTextEntry = isSecure
@@ -825,62 +898,189 @@ private struct LoginAutoFillTextField: UIViewRepresentable {
         field.clearButtonMode = .whileEditing
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        field.delegate = context.coordinator
-        field.addTarget(context.coordinator, action: #selector(Coordinator.textDidChange(_:)), for: .editingChanged)
-        return field
     }
 
-    func updateUIView(_ uiView: UITextField, context: Context) {
-        context.coordinator.parent = self
-        if uiView.text != text {
-            uiView.text = text
+    @objc private func handleVisibilityTap() {
+        isPasswordVisible.toggle()
+        onToggleVisibility?()
+        updateVisibilityButtonAppearance()
+    }
+
+    func applyPasswordVisibility() {
+        let shouldBeSecure = !isPasswordVisible
+        guard passwordField.isSecureTextEntry != shouldBeSecure else { return }
+        let wasFirstResponder = passwordField.isFirstResponder
+        let existing = passwordField.text
+        passwordField.isSecureTextEntry = shouldBeSecure
+        if wasFirstResponder, let existing {
+            passwordField.text = nil
+            passwordField.insertText(existing)
         }
-        if uiView.isSecureTextEntry != isSecure {
-            // 切换明文/密文时保持同一 UITextField 实例与光标位置，不中断钥匙串自动填充关联。
-            let wasFirstResponder = uiView.isFirstResponder
-            uiView.isSecureTextEntry = isSecure
-            if wasFirstResponder, let existing = uiView.text {
-                uiView.text = nil
-                uiView.insertText(existing)
-            }
+    }
+
+    private func updateVisibilityButtonAppearance() {
+        let symbol = isPasswordVisible ? "eye.slash" : "eye"
+        visibilityButton.setImage(UIImage(systemName: symbol), for: .normal)
+        visibilityButton.accessibilityLabel = isPasswordVisible ? "隐藏密码" : "显示密码"
+    }
+
+    override var intrinsicContentSize: CGSize {
+        let width = bounds.width > 0 ? bounds.width : 320
+        let fitted = systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        return CGSize(width: UIView.noIntrinsicMetric, height: max(97, ceil(fitted.height)))
+    }
+}
+
+private struct LoginCredentialsCardView: UIViewRepresentable {
+    @Binding var credentials: LoginCredentials
+    let isEnabled: Bool
+    let dismissKeyboardToken: Int
+    let onSubmit: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeUIView(context: Context) -> LoginCredentialsContainerView {
+        let container = LoginCredentialsContainerView(frame: .zero)
+        let coordinator = context.coordinator
+        coordinator.container = container
+        container.usernameField.text = credentials.username
+        container.passwordField.text = credentials.password
+
+        container.usernameField.delegate = coordinator
+        container.passwordField.delegate = coordinator
+        container.usernameField.addTarget(coordinator, action: #selector(Coordinator.fieldsDidChange), for: .editingChanged)
+        container.passwordField.addTarget(coordinator, action: #selector(Coordinator.fieldsDidChange), for: .editingChanged)
+        container.usernameField.onTextMutation = { [weak coordinator] in coordinator?.syncFromFields() }
+        container.passwordField.onTextMutation = { [weak coordinator] in coordinator?.syncFromFields() }
+        container.onToggleVisibility = { [weak coordinator, weak container] in
+            guard let coordinator, let container else { return }
+            coordinator.isApplyingFromSwiftUI = true
+            container.applyPasswordVisibility()
+            coordinator.isApplyingFromSwiftUI = false
+            coordinator.syncFromFields()
         }
-        uiView.isEnabled = isEnabled
-        uiView.returnKeyType = returnKeyType
-        if isFocused && !uiView.isFirstResponder && uiView.window != nil {
-            uiView.becomeFirstResponder()
-        } else if !isFocused && uiView.isFirstResponder {
-            uiView.resignFirstResponder()
+
+        coordinator.observeNotifications(for: container)
+        return container
+    }
+
+    func updateUIView(_ uiView: LoginCredentialsContainerView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.parent = self
+        coordinator.container = uiView
+
+        // 只应用 SwiftUI 主动变更。系统填充尚未回传时，旧的绑定值仍是已知快照。
+        if credentials != coordinator.lastPublishedCredentials {
+            coordinator.lastPublishedCredentials = credentials
+            coordinator.isApplyingFromSwiftUI = true
+            uiView.usernameField.text = credentials.username
+            uiView.passwordField.text = credentials.password
+            coordinator.isApplyingFromSwiftUI = false
+        }
+
+        if uiView.usernameField.isEnabled != isEnabled {
+            uiView.usernameField.isEnabled = isEnabled
+        }
+        if uiView.passwordField.isEnabled != isEnabled {
+            uiView.passwordField.isEnabled = isEnabled
+        }
+        if uiView.visibilityButton.isEnabled != isEnabled {
+            uiView.visibilityButton.isEnabled = isEnabled
+        }
+
+        // 不在常规 updateUIView 中强行修改第一响应者，仅在点击提交时收起键盘。
+        if dismissKeyboardToken != coordinator.lastDismissKeyboardToken {
+            coordinator.lastDismissKeyboardToken = dismissKeyboardToken
+            uiView.endEditing(true)
         }
     }
 
     final class Coordinator: NSObject, UITextFieldDelegate {
-        var parent: LoginAutoFillTextField
+        var parent: LoginCredentialsCardView
+        weak var container: LoginCredentialsContainerView?
+        var isApplyingFromSwiftUI = false
+        var lastPublishedCredentials: LoginCredentials
+        private var isFieldSyncScheduled = false
+        var lastDismissKeyboardToken = 0
+        private var observers: [NSObjectProtocol] = []
 
-        init(_ parent: LoginAutoFillTextField) {
+        init(_ parent: LoginCredentialsCardView) {
             self.parent = parent
+            self.lastPublishedCredentials = parent.credentials
+            self.lastDismissKeyboardToken = parent.dismissKeyboardToken
         }
 
-        @objc func textDidChange(_ textField: UITextField) {
-            let updated = textField.text ?? ""
-            if parent.text != updated {
-                parent.text = updated
+        deinit {
+            for observer in observers {
+                NotificationCenter.default.removeObserver(observer)
             }
         }
 
-        func textFieldDidBeginEditing(_ textField: UITextField) {
-            DispatchQueue.main.async { self.parent.onFocusChange(true) }
+        func observeNotifications(for container: LoginCredentialsContainerView) {
+            let center = NotificationCenter.default
+            observers = [
+                center.addObserver(
+                    forName: UITextField.textDidChangeNotification,
+                    object: container.usernameField,
+                    queue: .main
+                ) { [weak self] _ in self?.syncFromFields() },
+                center.addObserver(
+                    forName: UITextField.textDidChangeNotification,
+                    object: container.passwordField,
+                    queue: .main
+                ) { [weak self] _ in self?.syncFromFields() },
+            ]
+        }
+
+        @objc func fieldsDidChange() {
+            syncFromFields()
+        }
+
+        func syncFromFields() {
+            guard !isApplyingFromSwiftUI, !isFieldSyncScheduled else { return }
+            isFieldSyncScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.isFieldSyncScheduled = false
+                self.publishCurrentFields()
+            }
+        }
+
+        private func publishCurrentFields() {
+            guard let container else { return }
+            // 系统可能先后写入两个字段。读取当前表单一次，将整组凭据一起发布。
+            let credentials = LoginCredentials(
+                username: container.usernameField.text ?? "",
+                password: container.passwordField.text ?? ""
+            )
+            guard credentials != lastPublishedCredentials else { return }
+            lastPublishedCredentials = credentials
+            parent.credentials = credentials
+        }
+
+        func textFieldDidChangeSelection(_ textField: UITextField) {
+            syncFromFields()
         }
 
         func textFieldDidEndEditing(_ textField: UITextField) {
-            let updated = textField.text ?? ""
-            if parent.text != updated {
-                parent.text = updated
-            }
-            DispatchQueue.main.async { self.parent.onFocusChange(false) }
+            syncFromFields()
         }
 
         func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-            DispatchQueue.main.async { self.parent.onSubmit() }
+            syncFromFields()
+            if textField === container?.usernameField {
+                container?.passwordField.becomeFirstResponder()
+            } else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.parent.onSubmit()
+                }
+            }
             return false
         }
     }

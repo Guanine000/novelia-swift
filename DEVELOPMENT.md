@@ -204,6 +204,8 @@ Debug 独立验证 App 可用 `-architectureBrowseResize` 将同一个 Root 内�
 
 两种会话用同一个认证站点刷新 Cookie 续期，而该 Cookie 每次续期都会轮换。`AccountAuthStore` 与 `ForumAuthStore` 必须注入同一个 `SerialAsyncGate` 与同一个 `AuthRefreshCookieStore`（`AppServices` 统一组装；生产使用 `AuthRefreshCookieKeychainStore`，独立 Debug 验证使用 `MemoryAuthRefreshCookieStore`），续期与登录逐个执行，后一个读取前一个写回的新 Cookie。续期进行中再调用 `refreshSession` 时等待同一结果；退出登录（`sessionGeneration` 变化）后的调用不复用旧结果，并清除本机保存的刷新 Cookie。登录入口使用原生 SwiftUI 账密表单（`NoveliaLoginSheet` / `ForumLoginSheet`），直连已校验 HTTPS 认证来源的 `loginAPIURL`（`POST /api/v1/auth/login`），仅识别长度受限的 `text/plain` 已知业务错误原因，不回显原始 HTML 或长响应；注册与找回密码通过外部浏览器打开已校验的官网链接，不内置 Turnstile 网页桥接。升级自旧版 `WKWebView` 登录的账号，在 Keychain 尚无刷新 Cookie 时会一次性回退读取 `WKHTTPCookieStore`，续期成功后即落盘至 Keychain。网络登录与续期均由 `AuthSessionRefresher` 实现，请求设置 `httpShouldHandleCookies = false`。
 
+原生登录表单用同一个 UIKit 容器承载两个同级输入框，分别标记为 `.username` 和 `.password`。系统可能分次写入两个字段，协调器合并输入事件并读取当前表单，将账号与密码作为同一个绑定值提交给 SwiftUI，避免界面刷新覆盖尚未回传的输入。
+
 生产账号状态、API token provider 与续期入口使用同一 `SessionTokenStore`。生产适配继续使用原 Keychain/Vault；测试使用内存适配。不要在消费方直接读取 Vault、解析 JWT 判断账号，使用 `AccountSessionProviding` 的状态和 `matchesAccount`。
 
 保留登录桥接的 HTTPS、主框架、来源 host/port 检查、配置校验、受控 JS 数据编码及有界续期/重试。不为测试放宽生产检查，不把真实 token、Cookie 或密码写入代码、日志、测试、文档或记忆库。
