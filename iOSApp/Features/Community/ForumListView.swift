@@ -78,10 +78,13 @@ private struct ForumContentView: View {
                         .listRowBackground(Color.clear)
                         .id("forum-post-list-top")
 
-                    if store.isLoadingCategories && store.categories.isEmpty {
-                        HStack { Spacer(); ProgressView("正在连接论坛…"); Spacer() }
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
+                    if (store.isLoadingCategories && store.categories.isEmpty) || (store.isLoadingPosts && visiblePosts.isEmpty) {
+                        ForEach(0..<4, id: \.self) { _ in
+                            NoveliaListSkeletonCard(showsCover: false)
+                                .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                        }
                     }
 
                     if store.categories.isEmpty, !store.isLoadingCategories, let error = store.errorMessage {
@@ -433,7 +436,10 @@ private struct ForumCategoryBar: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(categories) { category in
-                    Button { onSelect(category) } label: {
+                    Button {
+                        NoveliaHaptics.selection()
+                        onSelect(category)
+                    } label: {
                         Text(category.title)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(selectedCategory == category.slug ? .white : NoveliaStyle.ink)

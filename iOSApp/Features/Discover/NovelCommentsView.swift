@@ -44,7 +44,7 @@ struct NovelCommentsView: View {
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 13)
-                            .background(NoveliaStyle.brandGreen, in: RoundedRectangle(cornerRadius: 13))
+                            .background(NoveliaStyle.brandGreen, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
@@ -241,7 +241,7 @@ struct NovelCommentsView: View {
         }
         .padding(15)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
+        .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
     }
 
     @MainActor

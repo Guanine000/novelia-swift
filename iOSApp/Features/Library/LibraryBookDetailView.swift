@@ -56,37 +56,12 @@ struct LibraryBookDetailView: View {
 
     private var detailContent: some View {
         let status = state.status(for: book)
+        let bookStatus = state.bookStatus(for: book)
         return Form {
-                if embedded {
-                    Section {
-                        BrowseReadingLink(destination: .library(book)) {
-                            Label("阅读本书", systemImage: "book.fill")
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        }
-                        .accessibilityIdentifier("library-detail-read")
-                        .disabled(book.isCloudOnly)
-                    }
-                }
                 Section {
-                    HStack(alignment: .top, spacing: 14) {
-                        LibraryCoverView(book: book, width: 72, height: 100, fitMode: state.coverFitMode(for: book))
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(book.title)
-                                .font(.headline)
-                                .foregroundStyle(NoveliaStyle.ink)
-                            Text(book.author.isEmpty ? "未知作者" : book.author)
-                                .font(.subheadline)
-                                .foregroundStyle(NoveliaStyle.muted)
-                            Text(book.format.title)
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(NoveliaStyle.brandGreen)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(NoveliaStyle.brandGreen.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.vertical, 4)
+                    bookHeroCard(status: status, bookStatus: bookStatus)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
+                        .listRowBackground(Color.clear)
                 }
                 Section("书籍") {
                     CompatLabeledContent("来源", value: book.categoryTitle)
@@ -199,6 +174,106 @@ struct LibraryBookDetailView: View {
                     )
                 }
             }
+    }
+
+    private func bookHeroCard(status: LibraryReadingStatus, bookStatus: LibraryBookStatus) -> some View {
+        let shape = RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 16) {
+                LibraryCoverView(
+                    book: book,
+                    width: 88,
+                    height: 122,
+                    elevated: true,
+                    fitMode: state.coverFitMode(for: book)
+                )
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(book.title)
+                        .font(.system(size: 19, weight: .bold, design: .rounded))
+                        .foregroundStyle(NoveliaStyle.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(book.author.isEmpty ? "未知作者" : book.author)
+                        .font(.subheadline)
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .lineLimit(2)
+                    HStack(spacing: 6) {
+                        Text(book.format.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(NoveliaStyle.brandGreen.opacity(0.12), in: Capsule())
+                        Label(bookStatus.title, systemImage: bookStatus.systemImage)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(NoveliaStyle.muted.opacity(0.12), in: Capsule())
+                    }
+                    Spacer(minLength: 2)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(status.detail)
+                            .font(.system(size: 12, weight: .medium).monospacedDigit())
+                            .foregroundStyle(NoveliaStyle.muted)
+                        if let fraction = status.fraction {
+                            let clamped = min(1.0, max(0.0, fraction))
+                            GeometryReader { bar in
+                                ZStack(alignment: .leading) {
+                                    Capsule()
+                                        .fill(NoveliaStyle.muted.opacity(0.16))
+                                    if clamped > 0 {
+                                        Capsule()
+                                            .fill(NoveliaStyle.brandGreen)
+                                            .frame(width: max(4, bar.size.width * clamped))
+                                    }
+                                }
+                            }
+                            .frame(height: 4)
+                            .accessibilityHidden(true)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if embedded {
+                BrowseReadingLink(destination: .library(book)) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "book.fill")
+                        Text(status.isUnread ? "开始阅读" : "继续阅读")
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(
+                        (book.isCloudOnly ? NoveliaStyle.muted.opacity(0.45) : NoveliaStyle.brandGreen),
+                        in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium, style: .continuous)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("library-detail-read")
+                .disabled(book.isCloudOnly)
+            }
+        }
+        .padding(16)
+        .background {
+            ZStack {
+                NoveliaStyle.card
+                if let url = book.coverURL {
+                    CoverImage(url: url) { Color.clear }
+                        .scaledToFill()
+                        .blur(radius: 36)
+                        .opacity(0.20)
+                        .allowsHitTesting(false)
+                }
+                Rectangle().fill(.ultraThinMaterial).opacity(0.68)
+            }
+        }
+        .clipShape(shape)
+        .overlay(
+            shape.stroke(NoveliaStyle.hairline, lineWidth: 0.75)
+                .allowsHitTesting(false)
+        )
+        .shadow(color: NoveliaStyle.cardShadowColor, radius: 8, x: 0, y: 3)
     }
 
     private var seriesID: String? { state.series.seriesID(forBook: book.key) }

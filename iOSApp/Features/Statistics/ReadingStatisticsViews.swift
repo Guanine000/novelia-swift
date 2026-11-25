@@ -88,7 +88,6 @@ struct ReadingStatisticsView: View {
             let isWide = horizontalSizeClass == .regular && !dynamicTypeSize.isAccessibilitySize
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    recordingHeaderCard
                     ReadingOverviewMetrics(
                         today: ReadingDuration.text(store.statistics.seconds(days: [today])),
                         week: ReadingDuration.text(ReadingDuration.weekSeconds(store.statistics, at: context.date)),
@@ -116,6 +115,7 @@ struct ReadingStatisticsView: View {
                     ReadingKindDistributionCard(statistics: store.statistics)
                     booksCard
                     devicesCard(today: today)
+                    recordingHeaderCard
                     footnoteCard
                 }
                 .padding(.horizontal, 16)
@@ -179,11 +179,7 @@ struct ReadingStatisticsView: View {
                 .foregroundStyle(NoveliaStyle.muted)
         }
         .padding(16)
-        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
-                .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
-        )
+        .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
     }
 
     private func dailyTrendCard(dates: [Date], today: String) -> some View {
@@ -225,11 +221,7 @@ struct ReadingStatisticsView: View {
             .buttonStyle(.plain)
         }
         .padding(16)
-        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
-                .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
-        )
+        .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
     }
 
     private var booksCard: some View {

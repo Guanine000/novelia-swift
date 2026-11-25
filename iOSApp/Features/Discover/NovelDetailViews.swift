@@ -103,9 +103,9 @@ struct NovelDetailView: View {
                 .frame(height: 88)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
                 .stroke(NoveliaStyle.hairline, lineWidth: 0.75)
                 .allowsHitTesting(false)
         )
@@ -178,20 +178,38 @@ struct NovelDetailView: View {
                             Text("译源进度")
                                 .font(.system(size: 19, weight: .bold, design: .rounded))
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 220 : 140), spacing: 9)], spacing: 9) {
+                                let totalChapters = displayNovel.chapters.count
                                 ForEach(NovelTranslationSource.allCases) { source in
-                                    VStack(spacing: 5) {
+                                    let translated = translationCounts[source] ?? 0
+                                    let ratio = totalChapters > 0 ? min(1.0, max(0.0, Double(translated) / Double(totalChapters))) : 0
+                                    let isComplete = totalChapters > 0 && translated >= totalChapters
+                                    VStack(spacing: 6) {
                                         Text(source.title)
                                             .font(.system(size: 13, weight: .semibold))
                                             .foregroundStyle(NoveliaStyle.ink)
-                                        Text("\(translationCounts[source] ?? 0) / \(displayNovel.chapters.count) 章")
-                                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                                            .foregroundStyle(NoveliaStyle.muted)
+                                        Text("\(translated) / \(totalChapters) 章")
+                                            .font(.system(size: 11, weight: .medium, design: .rounded).monospacedDigit())
+                                            .foregroundStyle(isComplete ? NoveliaStyle.brandGreen : NoveliaStyle.muted)
                                             .lineLimit(1)
                                             .minimumScaleFactor(0.8)
+                                        GeometryReader { bar in
+                                            ZStack(alignment: .leading) {
+                                                Capsule()
+                                                    .fill(NoveliaStyle.muted.opacity(0.14))
+                                                if ratio > 0 {
+                                                    Capsule()
+                                                        .fill(isComplete ? NoveliaStyle.brandGreen : NoveliaStyle.accent(for: displayNovel.accent))
+                                                        .frame(width: max(4, bar.size.width * ratio))
+                                                }
+                                            }
+                                        }
+                                        .frame(height: 3.5)
+                                        .padding(.horizontal, 14)
+                                        .accessibilityHidden(true)
                                     }
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 12)
-                                    .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 13))
+                                    .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium)
                                 }
                             }
                             Text("阅读时可在右上角设置中切换译源。")
@@ -260,7 +278,7 @@ struct NovelDetailView: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 17)
                             .padding(.vertical, 14)
-                            .background(NoveliaStyle.brandGreen, in: RoundedRectangle(cornerRadius: 15))
+                            .background(NoveliaStyle.brandGreen, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
                         }
                         .buttonStyle(.plain)
                     }
@@ -294,7 +312,7 @@ struct NovelDetailView: View {
                                 .padding(.horizontal, 17)
                                 .padding(.vertical, 14)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(NoveliaStyle.accent(for: displayNovel.accent), in: RoundedRectangle(cornerRadius: 15))
+                                .background(NoveliaStyle.accent(for: displayNovel.accent), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous))
                             }
                             .buttonStyle(.plain)
                             .disabled(progress != nil)
@@ -328,7 +346,7 @@ struct NovelDetailView: View {
                             .foregroundStyle(NoveliaStyle.ink)
                             .padding(.horizontal, 17)
                             .padding(.vertical, 14)
-                            .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
+                            .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
                         }
                         .buttonStyle(.plain)
                     }
@@ -386,7 +404,7 @@ struct NovelDetailView: View {
                                     .foregroundStyle(NoveliaStyle.muted.opacity(0.6))
                             }
                             .padding(13)
-                            .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
+                            .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium)
                         }
                         .buttonStyle(.plain)
                     }

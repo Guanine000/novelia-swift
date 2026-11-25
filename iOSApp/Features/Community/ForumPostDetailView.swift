@@ -90,11 +90,7 @@ struct ForumPostDetailView: View {
                             .tint(NoveliaStyle.brandGreen)
                         }
                         .padding(18)
-                        .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .stroke(NoveliaStyle.muted.opacity(0.10), lineWidth: 1)
-                        )
+                        .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
                     } else if isLoading {
                         HStack { Spacer(); ProgressView("正在加载帖子…"); Spacer() }
                     } else if let errorMessage {

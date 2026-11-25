@@ -42,7 +42,7 @@ struct WenkuView: View {
                 }
             }
             .padding(12)
-            .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 14))
+            .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium)
             .padding(.horizontal, 16)
             .padding(.top, 4)
             if searchFocused && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -429,7 +429,17 @@ struct WenkuDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .top)
                 }
             } else if isLoading {
-                ProgressView("正在加载文库详情…")
+                ScrollView {
+                    VStack(spacing: 16) {
+                        NoveliaListSkeletonCard(showsCover: true)
+                        ForEach(0..<3, id: \.self) { _ in
+                            NoveliaListSkeletonCard(showsCover: false)
+                        }
+                    }
+                    .padding(18)
+                    .frame(maxWidth: 800)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                }
             } else {
                 CompatUnavailable("无法加载作品", systemImage: "wifi.exclamationmark", description: Text(error ?? "请稍后重试。"))
             }
@@ -454,7 +464,7 @@ struct WenkuDetailView: View {
     }
 
     private func header(_ detail: WenkuNovelDetail) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: NoveliaStyle.radiusLarge, style: .continuous)
         return HStack(alignment: .top, spacing: 16) {
             CoverImage(url: detail.cover.flatMap(URL.init(string:))) {
                 RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous)

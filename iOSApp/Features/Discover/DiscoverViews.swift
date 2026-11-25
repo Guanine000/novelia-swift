@@ -59,7 +59,7 @@ struct DiscoverShortcutChip: View {
             .padding(.vertical, 8)
             .frame(minHeight: 44)
             .background(NoveliaStyle.card, in: Capsule())
-            .overlay(Capsule().stroke(NoveliaStyle.muted.opacity(0.18), lineWidth: 1))
+            .overlay(Capsule().stroke(NoveliaStyle.hairline, lineWidth: 0.75))
     }
 }
 
@@ -127,8 +127,7 @@ struct PageNavigator: View {
                 .monospacedDigit()
                 .focused($inlineJumpFocused)
                 .frame(width: 64, height: 32)
-                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall))
-                .overlay(RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall).stroke(NoveliaStyle.muted.opacity(0.2), lineWidth: 1))
+                .noveliaCard(cornerRadius: NoveliaStyle.radiusSmall)
                 .onSubmit { submitInlineJump() }
                 .accessibilityLabel("页码")
             Text("/ \(pageCount) 页")
@@ -205,6 +204,7 @@ struct PageNavigator: View {
 
     private func select(_ target: Int) {
         guard target != page, (1...max(1, pageCount)).contains(target) else { return }
+        NoveliaHaptics.selection()
         onSelect(target)
     }
 }
@@ -303,7 +303,7 @@ private struct DiscoverContentView: View {
                     }
                 }
                 .padding(14)
-                .background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: 15))
+                .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium)
 
                 if searchFocused && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     SearchHistoryStrip(store: searchHistory) { term in
@@ -399,13 +399,19 @@ private struct DiscoverContentView: View {
                 let cardWidth = min(1120, max(0, geometry.size.width - 40))
                 let cardColumns = dynamicTypeSize.isAccessibilitySize ? 1 : max(1, Int((cardWidth + 20) / 360))
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .top), count: cardColumns), spacing: 20) {
-                    ForEach(store.novels.filter { !blocked.hides($0.genres) }) { novel in
-                        BrowseDetailLink(destination: .novel(novel)) {
-                            FeaturedNovelCard(novel: novel)
+                    if store.isLoading && store.novels.isEmpty && store.errorMessage == nil {
+                        ForEach(0..<4, id: \.self) { _ in
+                            NoveliaListSkeletonCard(showsCover: true)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("discover-card-\(novel.id)")
-                        .id("novel:" + novel.id)
+                    } else {
+                        ForEach(store.novels.filter { !blocked.hides($0.genres) }) { novel in
+                            BrowseDetailLink(destination: .novel(novel)) {
+                                FeaturedNovelCard(novel: novel)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("discover-card-\(novel.id)")
+                            .id("novel:" + novel.id)
+                        }
                     }
                 }
                 if !store.novels.isEmpty || store.page > 1 {

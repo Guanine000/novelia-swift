@@ -124,11 +124,14 @@ struct CoverImage<Placeholder: View>: View {
         Color.clear
             .overlay {
                 if let image = currentImage {
-                    if contentMode == .fit {
-                        Image(uiImage: image).resizable().scaledToFit()
-                    } else {
-                        Image(uiImage: image).resizable().scaledToFill()
+                    Group {
+                        if contentMode == .fit {
+                            Image(uiImage: image).resizable().scaledToFit()
+                        } else {
+                            Image(uiImage: image).resizable().scaledToFill()
+                        }
                     }
+                    .transition(.opacity)
                 } else {
                     placeholder()
                 }
@@ -137,7 +140,11 @@ struct CoverImage<Placeholder: View>: View {
             .contentShape(Rectangle())
             .task(id: url) {
                 guard let url, loaded?.url != url else { return }
-                if let image = await CoverImageLoader.shared.image(for: url) { loaded = (url, image) }
+                if let image = await CoverImageLoader.shared.image(for: url) {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        loaded = (url, image)
+                    }
+                }
             }
     }
 

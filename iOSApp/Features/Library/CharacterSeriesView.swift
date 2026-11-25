@@ -563,9 +563,7 @@ private struct CharacterCardView: View {
             }.accessibilityAddTraits(.isHeader)
             VStack(spacing: 0, content: content)
         }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
-            .background(NoveliaStyle.card.opacity(0.9)).clipShape(RoundedRectangle(cornerRadius: 15))
-            .overlay(RoundedRectangle(cornerRadius: 15).stroke(NoveliaStyle.ink.opacity(0.025), lineWidth: 0.7))
-            .shadow(color: .black.opacity(0.035), radius: 8, x: 0, y: 3)
+            .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
     }
     private func archiveRow(_ category: String, facts: [CharacterFact]) -> some View {
         VStack(spacing: 0) {
@@ -630,7 +628,7 @@ private struct CharacterCardView: View {
                 Image(systemName: icon).font(amber ? .system(size: 9) : .title3).foregroundStyle(amber ? Color.orange.opacity(0.75) : NoveliaStyle.brandGreen)
                 Text(title).font(.system(.body, design: .serif).weight(.medium)).foregroundStyle(NoveliaStyle.ink)
             }
-        }.padding(14).background(NoveliaStyle.card.opacity(0.9)).clipShape(RoundedRectangle(cornerRadius: 13))
+        }.padding(14).noveliaCard(cornerRadius: NoveliaStyle.radiusMedium)
     }
     private var updateBar: some View {
         VStack(spacing: 0) {

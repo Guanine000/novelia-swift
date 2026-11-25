@@ -76,7 +76,39 @@ struct SettingsView: View {
         Form {
             Section {
                 if let username = auth.username {
-                    CompatLabeledContent("已登录", value: username)
+                    HStack(spacing: 14) {
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [NoveliaStyle.brandGreen, NoveliaStyle.brandGreen.opacity(0.72)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                            Text(String(username.prefix(1)).uppercased())
+                                .font(.system(size: 19, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                        }
+                        .frame(width: 46, height: 46)
+                        .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(verbatim: username)
+                                .font(.system(size: 17, weight: .bold, design: .rounded))
+                                .foregroundStyle(NoveliaStyle.ink)
+                                .lineLimit(1)
+                            HStack(spacing: 5) {
+                                Circle()
+                                    .fill(NoveliaStyle.brandGreen)
+                                    .frame(width: 6, height: 6)
+                                Text("已登录 Novelia 账号")
+                                    .font(.caption)
+                                    .foregroundStyle(NoveliaStyle.muted)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                    }
+                    .padding(.vertical, 4)
                     Button("退出登录", role: .destructive) { isConfirmingLogout = true }
                         .confirmationDialog("退出登录？", isPresented: $isConfirmingLogout, titleVisibility: .visible) {
                             Button("退出登录", role: .destructive) { auth.logout() }
@@ -89,9 +121,31 @@ struct SettingsView: View {
                         auth.errorMessage = nil
                         auth.isLoginPresented = true
                     } label: {
-                        Label("登录 / 注册", systemImage: "person.crop.circle.badge.checkmark")
+                        HStack(spacing: 14) {
+                            ZStack {
+                                Circle()
+                                    .fill(NoveliaStyle.brandGreen.opacity(0.14))
+                                Image(systemName: "person.crop.circle.badge.plus")
+                                    .font(.title2)
+                                    .foregroundStyle(NoveliaStyle.brandGreen)
+                            }
+                            .frame(width: 46, height: 46)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("登录 / 注册")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(NoveliaStyle.ink)
+                                Text("同步收藏、历史与社区互动")
+                                    .font(.caption)
+                                    .foregroundStyle(NoveliaStyle.muted)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(NoveliaStyle.muted.opacity(0.5))
+                        }
+                        .padding(.vertical, 4)
                     }
-                    .tint(NoveliaStyle.brandGreen)
+                    .buttonStyle(.plain)
                 }
             } header: {
                 Text("账号")
@@ -185,20 +239,59 @@ struct SettingsView: View {
                 NavigationLink { TabBarSettingsView() } label: {
                     Label("自定义底栏", systemImage: "dock.rectangle")
                 }
-                Picker(selection: $themeColorRaw) {
-                    ForEach(AppThemeColor.allCases) { option in
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(option == .custom ? AppThemeColor.color(fromHex: themeCustomHex) : option.color)
-                                .frame(width: 12, height: 12)
-                            Text(option.title)
-                        }
-                        .tag(option.rawValue)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Label("主题色", systemImage: "paintpalette")
+                        Spacer()
+                        Text((AppThemeColor(rawValue: themeColorRaw) ?? .novelia).title)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                } label: {
-                    Label("主题色", systemImage: "paintpalette")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(AppThemeColor.allCases) { option in
+                                let isSelected = themeColorRaw == option.rawValue
+                                let swatch = option == .custom ? AppThemeColor.color(fromHex: themeCustomHex) : option.color
+                                Button {
+                                    NoveliaHaptics.selection()
+                                    themeColorRaw = option.rawValue
+                                } label: {
+                                    VStack(spacing: 5) {
+                                        ZStack {
+                                            Circle()
+                                                .fill(swatch)
+                                                .frame(width: 30, height: 30)
+                                            if option == .custom && !isSelected {
+                                                Image(systemName: "eyedropper")
+                                                    .font(.system(size: 11, weight: .bold))
+                                                    .foregroundStyle(.white)
+                                            }
+                                            if isSelected {
+                                                Image(systemName: "checkmark")
+                                                    .font(.system(size: 12, weight: .bold))
+                                                    .foregroundStyle(.white)
+                                            }
+                                        }
+                                        .padding(3)
+                                        .overlay(
+                                            Circle()
+                                                .stroke(isSelected ? swatch : Color.clear, lineWidth: 2)
+                                        )
+                                        Text(option.title)
+                                            .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                                            .foregroundStyle(isSelected ? NoveliaStyle.ink : NoveliaStyle.muted)
+                                    }
+                                    .frame(minWidth: 48)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("主题色：\(option.title)")
+                                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
                 }
-                .id(themeRowIdentity)
+                .padding(.vertical, 4)
                 if AppThemeColor(rawValue: themeColorRaw) == .custom {
                     ColorPicker(
                         "自定义颜色",
@@ -209,17 +302,51 @@ struct SettingsView: View {
                         supportsOpacity: false
                     )
                 }
-                Picker(selection: $paperStyleRaw) {
-                    ForEach(AppPaperStyle.allCases) { option in
-                        HStack(spacing: 8) {
-                            PaperStyleSwatch(color: option.swatchColor)
-                            Text(option.title)
-                        }
-                        .tag(option.rawValue)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Label("界面底色", systemImage: "square.on.square")
+                        Spacer()
+                        Text(AppPaperStyle.from(storedValue: paperStyleRaw).title)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
-                } label: {
-                    Label("界面底色", systemImage: "square.on.square")
+                    HStack(spacing: 10) {
+                        ForEach(AppPaperStyle.allCases) { option in
+                            let isSelected = paperStyleRaw == option.rawValue
+                            Button {
+                                NoveliaHaptics.selection()
+                                paperStyleRaw = option.rawValue
+                            } label: {
+                                VStack(spacing: 6) {
+                                    RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous)
+                                        .fill(option.swatchColor)
+                                        .frame(height: 34)
+                                        .overlay(alignment: .bottomTrailing) {
+                                            if isSelected {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .font(.system(size: 13))
+                                                    .foregroundStyle(NoveliaStyle.brandGreen)
+                                                    .padding(4)
+                                            }
+                                        }
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall, style: .continuous)
+                                                .stroke(isSelected ? NoveliaStyle.brandGreen : NoveliaStyle.hairline, lineWidth: isSelected ? 2 : 1)
+                                        )
+                                    Text(option.shortTitle)
+                                        .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                                        .foregroundStyle(isSelected ? NoveliaStyle.ink : NoveliaStyle.muted)
+                                        .lineLimit(1)
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("界面底色：\(option.title)")
+                            .accessibilityAddTraits(isSelected ? .isSelected : [])
+                        }
+                    }
                 }
+                .padding(.vertical, 4)
                 Toggle(isOn: $appDarkOLED) {
                     Label("深色使用纯黑（OLED）", systemImage: "moon.fill")
                 }

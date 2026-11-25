@@ -60,57 +60,156 @@ struct SpeechControlView: View {
     }
 
     private var playerContent: some View {
-        ScrollView {
-            VStack(spacing: 18) {
-                HStack(spacing: 12) {
-                    Image(systemName: "book.closed.fill")
-                        .font(.title2).foregroundStyle(NoveliaStyle.brandGreen)
-                        .frame(width: 52, height: 64)
-                        .background(NoveliaStyle.brandGreen.opacity(0.1), in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusSmall))
+        let clampedProgress = min(1.0, max(0.0, controller.chapterProgression))
+        return ScrollView {
+            VStack(spacing: 16) {
+                HStack(spacing: 14) {
+                    ZStack {
+                        LinearGradient(
+                            colors: [NoveliaStyle.brandGreen, NoveliaStyle.brandGreen.opacity(0.72)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                        Image(systemName: controller.state.isPlaying ? "waveform" : "book.closed.fill")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .frame(width: 56, height: 74)
+                    .noveliaBookCoverStyle(cornerRadius: NoveliaStyle.radiusSmall, elevated: true)
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(title).font(.headline).lineLimit(2)
-                        Text(controller.chapterTitle).font(.subheadline).foregroundStyle(.secondary)
+                        Text(title)
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .foregroundStyle(NoveliaStyle.ink)
+                            .lineLimit(2)
+                        Text(controller.chapterTitle)
+                            .font(.subheadline)
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .lineLimit(1)
                             .accessibilityIdentifier("tts-current-chapter")
-                        Text(controller.engineTitle).font(.caption).foregroundStyle(.secondary)
+                        Text(controller.engineTitle)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(NoveliaStyle.brandGreen.opacity(0.12), in: Capsule())
                     }
                     Spacer(minLength: 0)
                 }
-                VStack(alignment: .leading, spacing: 10) {
+                .padding(14)
+                .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
+
+                VStack(alignment: .leading, spacing: 12) {
                     Text(controller.currentSentence.isEmpty ? "从当前阅读位置开始，或继续上次收听。" : controller.currentSentence)
-                        .font(.body).lineLimit(5).frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
+                        .font(.body)
+                        .foregroundStyle(NoveliaStyle.ink)
+                        .lineSpacing(4)
+                        .lineLimit(5)
+                        .frame(maxWidth: .infinity, minHeight: 88, alignment: .topLeading)
                         .accessibilityIdentifier("tts-current-sentence")
-                    Text(statusText).font(.footnote).foregroundStyle(.secondary)
-                    ProgressView(value: controller.chapterProgression)
+                    VStack(alignment: .leading, spacing: 6) {
+                        GeometryReader { bar in
+                            ZStack(alignment: .leading) {
+                                Capsule()
+                                    .fill(NoveliaStyle.muted.opacity(0.18))
+                                if clampedProgress > 0 {
+                                    Capsule()
+                                        .fill(NoveliaStyle.brandGreen)
+                                        .frame(width: max(4, bar.size.width * clampedProgress))
+                                }
+                            }
+                        }
+                        .frame(height: 4)
+                        .accessibilityElement(children: .ignore)
                         .accessibilityLabel("本章朗读位置")
-                        .accessibilityValue("\(Int(controller.chapterProgression * 100))%")
-                    Text("本章文字位置 \(Int(controller.chapterProgression * 100))%")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .accessibilityValue("\(Int(clampedProgress * 100))%")
+                        HStack {
+                            Text(statusText)
+                            Spacer()
+                            Text("本章文字位置 \(Int(clampedProgress * 100))%")
+                                .monospacedDigit()
+                        }
+                        .font(.caption)
+                        .foregroundStyle(NoveliaStyle.muted)
+                    }
                 }
-                .padding().background(NoveliaStyle.card, in: RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium))
+                .padding(16)
+                .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
+
                 HStack(spacing: 28) {
-                    Button { controller.skipBackward() } label: { Image(systemName: "backward.fill").font(.title2).frame(width: 48, height: 48) }
-                        .accessibilityLabel(controller.skipBackwardLabel).disabled(controller.state.utterance == nil)
-                    Button { toggle() } label: {
+                    Button {
+                        NoveliaHaptics.selection()
+                        controller.skipBackward()
+                    } label: {
+                        Image(systemName: "backward.fill")
+                            .font(.title3)
+                            .foregroundStyle(controller.state.utterance == nil ? NoveliaStyle.muted.opacity(0.4) : NoveliaStyle.ink)
+                            .frame(width: 48, height: 48)
+                            .background(NoveliaStyle.card, in: Circle())
+                            .overlay(Circle().stroke(NoveliaStyle.hairline, lineWidth: 0.75))
+                    }
+                    .accessibilityLabel(controller.skipBackwardLabel)
+                    .disabled(controller.state.utterance == nil)
+                    Button {
+                        NoveliaHaptics.light()
+                        toggle()
+                    } label: {
                         Group {
                             if controller.state == .preparing { ProgressView().tint(.white) }
-                            else { Image(systemName: controller.state.isPlaying ? "pause.fill" : "play.fill").font(.largeTitle) }
+                            else { Image(systemName: controller.state.isPlaying ? "pause.fill" : "play.fill").font(.title.weight(.bold)) }
                         }
-                        .frame(width: 72, height: 72).foregroundStyle(.white)
+                        .frame(width: 72, height: 72)
+                        .foregroundStyle(.white)
                         .background(NoveliaStyle.brandGreen, in: Circle())
+                        .shadow(color: NoveliaStyle.brandGreen.opacity(0.28), radius: 8, x: 0, y: 4)
                     }
                     .accessibilityLabel(controller.state.isPlaying ? "暂停朗读" : "播放朗读")
                     .disabled(controller.state == .preparing || !controller.isAvailable)
-                    Button { controller.skipForward() } label: { Image(systemName: "forward.fill").font(.title2).frame(width: 48, height: 48) }
-                        .accessibilityLabel(controller.skipForwardLabel).disabled(controller.state.utterance == nil)
+                    Button {
+                        NoveliaHaptics.selection()
+                        controller.skipForward()
+                    } label: {
+                        Image(systemName: "forward.fill")
+                            .font(.title3)
+                            .foregroundStyle(controller.state.utterance == nil ? NoveliaStyle.muted.opacity(0.4) : NoveliaStyle.ink)
+                            .frame(width: 48, height: 48)
+                            .background(NoveliaStyle.card, in: Circle())
+                            .overlay(Circle().stroke(NoveliaStyle.hairline, lineWidth: 0.75))
+                    }
+                    .accessibilityLabel(controller.skipForwardLabel)
+                    .disabled(controller.state.utterance == nil)
                 }
                 .buttonStyle(.plain)
+                .padding(.vertical, 4)
+
                 if controller.capabilities.contains(.chapterNavigation) {
-                    HStack {
-                        Button("上一章") { controller.skipChapter(-1) }.frame(minHeight: 44)
-                        Spacer()
-                        Button("下一章") { controller.skipChapter(1) }.frame(minHeight: 44)
-                    }.disabled(!controller.isActive)
+                    HStack(spacing: 12) {
+                        Button {
+                            NoveliaHaptics.selection()
+                            controller.skipChapter(-1)
+                        } label: {
+                            Label("上一章", systemImage: "chevron.left")
+                                .font(.subheadline.weight(.medium))
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium)
+                        }
+                        Button {
+                            NoveliaHaptics.selection()
+                            controller.skipChapter(1)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text("下一章")
+                                Image(systemName: "chevron.right")
+                            }
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(controller.isActive ? NoveliaStyle.ink : NoveliaStyle.muted.opacity(0.45))
+                    .disabled(!controller.isActive)
                 }
+
                 SpeechFollowStatus(controller: controller)
                 if case .failed = controller.state {
                     VStack(spacing: 8) {
@@ -127,21 +226,39 @@ struct SpeechControlView: View {
                 }
                 if let saved = controller.savedResume, let resume = onResumeSaved {
                     Button("继续上次收听（第 \(saved.chapterIndex + 1) 章）") { resume(saved) }
-                        .frame(minHeight: 44).disabled(controller.isActive)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium)
+                        .disabled(controller.isActive)
                 }
-                if controller.capabilities.contains(.rateControl) {
-                    SpeechRateControls(settings: $controller.settings, engineKind: controller.engineKind)
+                VStack(spacing: 12) {
+                    if controller.capabilities.contains(.rateControl) {
+                        SpeechRateControls(settings: $controller.settings, engineKind: controller.engineKind)
+                        Divider()
+                    }
+                    Button { showsSettings = true } label: {
+                        HStack {
+                            Label("定时停止", systemImage: "moon.zzz")
+                                .foregroundStyle(NoveliaStyle.ink)
+                            Spacer()
+                            Text(session.remaining.map { "剩余 " + durationText($0) }
+                                 ?? SpeechSettings.sleepTimerTitle(minutes: controller.settings.sleepTimerMinutes))
+                                .foregroundStyle(NoveliaStyle.muted)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(NoveliaStyle.muted.opacity(0.5))
+                        }
+                        .frame(minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
                 }
-                Button { showsSettings = true } label: {
-                    HStack {
-                        Label("定时停止", systemImage: "moon.zzz")
-                        Spacer()
-                        Text(session.remaining.map { "剩余 " + durationText($0) }
-                             ?? SpeechSettings.sleepTimerTitle(minutes: controller.settings.sleepTimerMinutes))
-                    }.frame(minHeight: 44)
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
+
                 if controller.state != .idle {
-                    Button("停止朗读", role: .destructive) { controller.stop() }.frame(minHeight: 44)
+                    Button("停止朗读", role: .destructive) { controller.stop() }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium)
                 }
             }
             .padding()
