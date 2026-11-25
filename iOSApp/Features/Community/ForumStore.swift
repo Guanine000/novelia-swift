@@ -28,6 +28,7 @@ final class ForumStore: ObservableObject {
     @Published var source: ForumFeedSource = .all
 
     private let pageSize = 20
+    var pageCount: Int { max(1, Int((total + Int64(pageSize) - 1) / Int64(pageSize))) }
     var hasNextPage: Bool { Int64((page + 1) * pageSize) < total }
     private var requestGeneration = 0
     private let api: any ForumService

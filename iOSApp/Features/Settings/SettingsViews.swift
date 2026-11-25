@@ -1017,9 +1017,7 @@ private struct AboutAndDiagnosticsView: View {
     #if !NOVELIA_READIUM_ONLY
     @AppStorage(SettingsKey.readerEPUBReadium) private var epubUsesReadium = false
     #endif
-    @EnvironmentObject private var updates: NoveliaUpdateStore
     @EnvironmentObject private var services: AppServices
-    @State private var updateCheckMessage: String?
     @State private var isExportingLogs = false
     @State private var isShowingLogShare = false
     @State private var logFileURL: URL?
@@ -1087,24 +1085,6 @@ private struct AboutAndDiagnosticsView: View {
                         isOn: $checksUpdates
                     )
 
-                    if services.performsUpdateChecks {
-                        MeRowDivider()
-
-                        Button {
-                            Task { await checkForUpdates() }
-                        } label: {
-                            MeNavigationRow(
-                                title: updates.isCheckingManually ? "正在检查更新…" : "检查更新",
-                                value: "v\(appVersion)",
-                                systemImage: updates.isCheckingManually ? "hourglass" : "arrow.down.circle",
-                                iconTint: Color.blue,
-                                showsChevron: false
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(updates.isCheckingManually)
-                    }
-
                     MeRowDivider()
 
                     NavigationLink {
@@ -1156,11 +1136,6 @@ private struct AboutAndDiagnosticsView: View {
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle("关于、许可与诊断")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("检查更新", isPresented: .init(get: { updateCheckMessage != nil }, set: { if !$0 { updateCheckMessage = nil } })) {
-            Button("好", role: .cancel) { updateCheckMessage = nil }
-        } message: {
-            Text(updateCheckMessage ?? "")
-        }
         .sheet(isPresented: $isShowingLogShare) {
             if let logFileURL {
                 LogActivitySheet(activityItems: [logFileURL])
@@ -1173,16 +1148,6 @@ private struct AboutAndDiagnosticsView: View {
             Button("好", role: .cancel) { logExportError = nil }
         } message: {
             Text(logExportError ?? "")
-        }
-    }
-
-    private func checkForUpdates() async {
-        switch await updates.checkManually() {
-        case .available: break
-        case .upToDate(let current): updateCheckMessage = "暂无更新的公开正式版（当前 \(current)）。"
-        case .inProgress: break
-        case .failed: updateCheckMessage = "暂时无法获取 GitHub 版本信息，请稍后重试。"
-        case .rateLimited: updateCheckMessage = "GitHub 暂时限制了当前网络的更新查询，备用页面也未能连接。请稍后重试或切换网络。"
         }
     }
 

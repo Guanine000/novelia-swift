@@ -5,29 +5,52 @@ import UniformTypeIdentifiers
 struct FeaturedNovelCard: View {
     let novel: Novel
 
+    private var accentColor: Color { NoveliaStyle.accent(for: novel.accent) }
+
     var body: some View {
-        HStack(spacing: 15) {
-            BookCover(novel: novel, width: 82, height: 112)
-            VStack(alignment: .leading, spacing: 7) {
-                Text(novel.title)
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .foregroundStyle(NoveliaStyle.ink)
-                    .lineLimit(2)
-                Text(novel.author)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(NoveliaStyle.muted)
-                Text(novel.summary)
-                    .font(NoveliaStyle.fontFootnote)
-                    .lineLimit(2)
-                    .lineSpacing(3)
-                    .foregroundStyle(NoveliaStyle.muted)
-                Text(novel.genres.joined(separator: "  ·  "))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(NoveliaStyle.accent(for: novel.accent))
+        HStack(alignment: .top, spacing: 14) {
+            BookCover(novel: novel, width: 76, height: 106)
+            VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(novel.title)
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundStyle(NoveliaStyle.ink)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    if !novel.author.isEmpty {
+                        Text(novel.author)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(NoveliaStyle.muted)
+                            .lineLimit(1)
+                    }
+                }
+                if !novel.summary.isEmpty {
+                    Text(novel.summary)
+                        .font(NoveliaStyle.fontFootnote)
+                        .lineLimit(2)
+                        .lineSpacing(2.5)
+                        .foregroundStyle(NoveliaStyle.muted.opacity(0.9))
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 2)
+                if !novel.genres.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(Array(novel.genres.prefix(3)), id: \.self) { genre in
+                            Text(genre)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(accentColor)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(accentColor.opacity(0.11), in: Capsule())
+                                .lineLimit(1)
+                        }
+                    }
+                }
             }
+            .frame(minHeight: 106, alignment: .top)
             Spacer(minLength: 0)
         }
-        .padding(14)
+        .padding(13)
         .noveliaCard(cornerRadius: NoveliaStyle.radiusLarge)
     }
 }

@@ -27,7 +27,9 @@ struct WenkuView: View {
     private var content: some View {
         VStack(spacing: 0) {
             HStack(spacing: 9) {
-                Image(systemName: "magnifyingglass").foregroundStyle(NoveliaStyle.muted)
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(searchFocused ? NoveliaStyle.brandGreen : NoveliaStyle.muted)
                 TextField("搜索文库作品", text: $query)
                     .focused($searchFocused)
                     .submitLabel(.search)
@@ -35,16 +37,18 @@ struct WenkuView: View {
                         searchFocused = false
                         searchHistory.record(query)
                     }
+                    .font(.system(size: 14))
                     .textInputAutocapitalization(.never)
                     .compatAutocorrectionDisabled()
                 if !query.isEmpty {
                     Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(NoveliaStyle.muted) }
                 }
             }
-            .padding(12)
-            .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium, isSelected: searchFocused)
             .padding(.horizontal, 16)
-            .padding(.top, 4)
+            .padding(.top, 6)
             if searchFocused && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 SearchHistoryStrip(store: searchHistory) { term in
                     query = term
@@ -54,19 +58,20 @@ struct WenkuView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 BrowseListLink {
                     WenkuFavoritesView()
                         .environmentObject(store)
                         .environmentObject(localLibrary)
                 } label: {
-                    DiscoverShortcutChip(title: "文库收藏", systemImage: "heart")
+                    DiscoverShortcutChip(title: "文库收藏", systemImage: "heart.fill", tint: Color.pink, compact: true)
                 }
                 .buttonStyle(.plain)
                 Spacer()
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
             WenkuNovelList(novels: store.novels, loading: store.isLoading, error: store.errorMessage,
                            filtersBlocked: true,
                            pager: .init(page: store.page, pageCount: store.pageCount) { target in

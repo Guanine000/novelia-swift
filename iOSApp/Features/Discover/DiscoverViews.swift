@@ -21,6 +21,7 @@ struct DiscoverHomeView: View {
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
+            .padding(.top, 4)
             .padding(.bottom, 8)
             .frame(maxWidth: 760)
             // 两个分段首次打开后都保留，切换时不丢失搜索词和已加载的列表。
@@ -42,24 +43,38 @@ struct DiscoverHomeView: View {
         .onValueChange(of: catalog, initial: true) { _, value in loaded.insert(value) }
         .background(NoveliaStyle.paper.ignoresSafeArea())
         .navigationTitle("发现")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
     }
 }
 
-/// 发现页搜索框下方的快捷入口。
+/// 发现页快捷入口：轻图标徽章 + 标题，视觉上与筛选药丸明确区分。
 struct DiscoverShortcutChip: View {
     let title: String
     let systemImage: String
+    var tint: Color = NoveliaStyle.brandGreen
+    var compact: Bool = false
 
     var body: some View {
-        Label(title, systemImage: systemImage)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(NoveliaStyle.ink)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(minHeight: 44)
-            .background(NoveliaStyle.card, in: Capsule())
-            .overlay(Capsule().stroke(NoveliaStyle.hairline, lineWidth: 0.75))
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 24, height: 24)
+                .background(tint.opacity(0.13), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(NoveliaStyle.ink)
+                .lineLimit(1)
+            if !compact {
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: compact ? nil : .infinity, minHeight: 40)
+        .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium)
+        .contentShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium, style: .continuous))
     }
 }
 
@@ -119,25 +134,30 @@ struct PageNavigator: View {
 
     /// 输入页码跳转，超出范围时取最近的有效页。
     private var jumpRow: some View {
-        HStack(spacing: 8) {
+        let canJump = Int(inlineJumpText.trimmingCharacters(in: .whitespaces)) != nil
+        return HStack(spacing: 8) {
             Text("跳至")
             TextField("\(page)", text: $inlineJumpText)
                 .keyboardType(.numberPad)
                 .multilineTextAlignment(.center)
                 .monospacedDigit()
                 .focused($inlineJumpFocused)
-                .frame(width: 64, height: 32)
+                .frame(width: 60, height: 30)
                 .noveliaCard(cornerRadius: NoveliaStyle.radiusSmall)
                 .onSubmit { submitInlineJump() }
                 .accessibilityLabel("页码")
             Text("/ \(pageCount) 页")
             Button("跳转") { submitInlineJump() }
-                .font(.system(size: 13, weight: .semibold))
-                .buttonStyle(.bordered)
-                .tint(NoveliaStyle.brandGreen)
-                .disabled(Int(inlineJumpText.trimmingCharacters(in: .whitespaces)) == nil)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .foregroundStyle(canJump ? .white : NoveliaStyle.muted.opacity(0.6))
+                .background(canJump ? NoveliaStyle.brandGreen : NoveliaStyle.card, in: Capsule())
+                .overlay(Capsule().stroke(canJump ? Color.clear : NoveliaStyle.hairline, lineWidth: 0.75))
+                .buttonStyle(.plain)
+                .disabled(!canJump)
         }
-        .font(.system(size: 13, weight: .medium))
+        .font(.system(size: 12, weight: .medium))
         .foregroundStyle(NoveliaStyle.muted)
         .compatKeyboardJumpToolbar(isPresented: inlineJumpFocused, action: submitInlineJump)
     }
@@ -224,12 +244,17 @@ private struct DiscoverContentView: View {
     @Environment(\.browseSelection) private var keyboardSelect
     @Environment(\.browseSelectedID) private var keyboardSelectedID
     @Environment(\.browseReading) private var keyboardRead
+    @EnvironmentObject private var auth: AccountAuthStore
+    @EnvironmentObject private var readingHistory: ReadingHistoryStore
     @FocusState private var searchFocused: Bool
     @StateObject private var searchHistory = SearchHistoryStore(scope: .discoverWeb)
     @EnvironmentObject private var blocked: BlockedTagsStore
     @State private var query = ""
     @State private var filter = NovelCatalogFilter.standard
     @StateObject private var store: DiscoverStore
+    @State private var resumingItemID: String?
+    @State private var resumedTarget: CloudReadingContinuation?
+    @State private var resumeErrorMessage: String?
     private let showsNavigationBar: Bool
     /// 嵌入“发现”页的“网络小说”分段时，不显示自己的大标题，也不改动导航栏。
     private let embedded: Bool
@@ -268,23 +293,24 @@ private struct DiscoverContentView: View {
         GeometryReader { geometry in
         ScrollViewReader { proxy in
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 14) {
                 Color.clear.frame(height: 0).id(Self.topAnchor)
                 if !embedded {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text("FIND YOUR NEXT STORY")
                             .font(.system(size: 11, weight: .bold, design: .rounded))
                             .compatTracking(1.4)
                             .foregroundStyle(NoveliaStyle.brandGreen)
                         Text("发现好故事")
-                            .font(.system(size: 31, weight: .bold, design: .rounded))
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
                             .foregroundStyle(NoveliaStyle.ink)
                     }
                 }
 
-                HStack(spacing: 10) {
+                HStack(spacing: 9) {
                     Image(systemName: "magnifyingglass")
-                        .foregroundStyle(NoveliaStyle.muted)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(searchFocused ? NoveliaStyle.brandGreen : NoveliaStyle.muted)
                     TextField("搜索书名、作者或题材", text: $query)
                         .focused($searchFocused)
                         .submitLabel(.search)
@@ -292,7 +318,7 @@ private struct DiscoverContentView: View {
                             searchFocused = false
                             searchHistory.record(query)
                         }
-                        .font(.system(size: 15))
+                        .font(.system(size: 14))
                         .compatAutocorrectionDisabled()
                     if !query.isEmpty {
                         Button { query = "" } label: {
@@ -302,8 +328,9 @@ private struct DiscoverContentView: View {
                         .accessibilityLabel("清空搜索词")
                     }
                 }
-                .padding(14)
-                .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium, isSelected: searchFocused)
 
                 if searchFocused && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     SearchHistoryStrip(store: searchHistory) { term in
@@ -313,75 +340,88 @@ private struct DiscoverContentView: View {
                     }
                 }
 
-                // 与网页端一致的列表筛选：类型、分级和排序；默认组合保持原有“全部/一般向/更新”。
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        Menu {
-                            Picker("类型", selection: $filter.kind) {
-                                ForEach(NovelCatalogFilter.Kind.allCases, id: \.self) { kind in
-                                    Text(kind.title).tag(kind)
-                                }
-                            }
-                        } label: {
-                            DiscoverFilterChip(category: "类型", value: filter.kind.title,
-                                               isDefault: filter.kind == .all)
-                        }
-                        Menu {
-                            Picker("分级", selection: $filter.rating) {
-                                ForEach(NovelCatalogFilter.Rating.allCases, id: \.self) { rating in
-                                    Text(rating.title).tag(rating)
-                                }
-                            }
-                        } label: {
-                            DiscoverFilterChip(category: "分级", value: filter.rating.title,
-                                               isDefault: filter.rating == .general)
-                        }
-                        Menu {
-                            Picker("排序", selection: $filter.sort) {
-                                ForEach(NovelCatalogFilter.Sort.allCases, id: \.self) { sort in
-                                    Text(sort.title).tag(sort)
-                                }
-                            }
-                        } label: {
-                            DiscoverFilterChip(category: "排序", value: filter.sort.title,
-                                               isDefault: filter.sort == .updated)
-                        }
+                let recentOnline = recentContinueItems
+                if !recentOnline.isEmpty {
+                    DiscoverContinueReadingStrip(
+                        items: recentOnline,
+                        resumingItemID: resumingItemID,
+                        errorMessage: resumeErrorMessage,
+                        onDismissError: { resumeErrorMessage = nil },
+                        onResume: { item in resumeOnline(item) }
+                    )
+                }
+
+                HStack(spacing: 10) {
+                    BrowseListLink { RankingView() } label: {
+                        DiscoverShortcutChip(title: "排行榜", systemImage: "flame.fill", tint: Color.orange)
+                    }
+                    BrowseListLink { CloudFavoritesListView() } label: {
+                        DiscoverShortcutChip(title: "收藏", systemImage: "heart.fill", tint: Color.pink)
+                    }
+                    BrowseListLink { CloudReadingHistoryListView() } label: {
+                        DiscoverShortcutChip(title: "历史", systemImage: "clock.arrow.circlepath", tint: Color.blue)
                     }
                 }
+                .buttonStyle(.plain)
 
-                if filter.rating != .general {
-                    Text("“全部”和“R18”分级需要已登录且具备 R18 权限的账号。")
-                        .font(NoveliaStyle.fontMicro)
-                        .foregroundStyle(NoveliaStyle.muted)
-                }
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        BrowseListLink { RankingView() } label: {
-                            DiscoverShortcutChip(title: "排行榜", systemImage: "chart.line.uptrend.xyaxis")
-                        }
-                        BrowseListLink { CloudFavoritesListView() } label: {
-                            DiscoverShortcutChip(title: "收藏", systemImage: "heart")
-                        }
-                        BrowseListLink { CloudReadingHistoryListView() } label: {
-                            DiscoverShortcutChip(title: "阅读历史", systemImage: "clock.arrow.circlepath")
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(listTitle)
+                            .font(.system(size: 19, weight: .bold, design: .rounded))
+                            .foregroundStyle(NoveliaStyle.ink)
+                        Spacer()
+                        if store.isLoading {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("Novelia 在线书源")
+                                .font(NoveliaStyle.fontCaption)
+                                .foregroundStyle(NoveliaStyle.muted)
                         }
                     }
-                    .buttonStyle(.plain)
-                }
 
-                HStack(alignment: .firstTextBaseline) {
-                    Text(listTitle)
-                        .font(.system(size: 21, weight: .bold, design: .rounded))
-                    Spacer()
-                    if store.isLoading {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Text("Novelia 在线书源")
-                            .font(.system(size: 12, weight: .medium))
+                    // 与网页端一致的列表筛选：类型、分级和排序；默认组合保持原有“全部/一般向/更新”。
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            Menu {
+                                Picker("类型", selection: $filter.kind) {
+                                    ForEach(NovelCatalogFilter.Kind.allCases, id: \.self) { kind in
+                                        Text(kind.title).tag(kind)
+                                    }
+                                }
+                            } label: {
+                                DiscoverFilterChip(category: "类型", value: filter.kind.title,
+                                                   isDefault: filter.kind == .all)
+                            }
+                            Menu {
+                                Picker("分级", selection: $filter.rating) {
+                                    ForEach(NovelCatalogFilter.Rating.allCases, id: \.self) { rating in
+                                        Text(rating.title).tag(rating)
+                                    }
+                                }
+                            } label: {
+                                DiscoverFilterChip(category: "分级", value: filter.rating.title,
+                                                   isDefault: filter.rating == .general)
+                            }
+                            Menu {
+                                Picker("排序", selection: $filter.sort) {
+                                    ForEach(NovelCatalogFilter.Sort.allCases, id: \.self) { sort in
+                                        Text(sort.title).tag(sort)
+                                    }
+                                }
+                            } label: {
+                                DiscoverFilterChip(category: "排序", value: filter.sort.title,
+                                                   isDefault: filter.sort == .updated)
+                            }
+                        }
+                    }
+
+                    if filter.rating != .general {
+                        Text("“全部”和“R18”分级需要已登录且具备 R18 权限的账号。")
+                            .font(NoveliaStyle.fontMicro)
                             .foregroundStyle(NoveliaStyle.muted)
                     }
                 }
+                .padding(.top, 2)
 
                 if let errorMessage = store.errorMessage {
                     CompatUnavailable {
@@ -396,9 +436,9 @@ private struct DiscoverContentView: View {
                 }
 
                 // 列数取自内容区可用宽度；分屏变窄时回到单列，不按设备型号判断。
-                let cardWidth = min(1120, max(0, geometry.size.width - 40))
-                let cardColumns = dynamicTypeSize.isAccessibilitySize ? 1 : max(1, Int((cardWidth + 20) / 360))
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .top), count: cardColumns), spacing: 20) {
+                let cardWidth = min(1120, max(0, geometry.size.width - 32))
+                let cardColumns = dynamicTypeSize.isAccessibilitySize ? 1 : max(1, Int((cardWidth + 14) / 360))
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .top), count: cardColumns), spacing: 12) {
                     if store.isLoading && store.novels.isEmpty && store.errorMessage == nil {
                         ForEach(0..<4, id: \.self) { _ in
                             NoveliaListSkeletonCard(showsCover: true)
@@ -447,13 +487,14 @@ private struct DiscoverContentView: View {
                         .padding(.top, 20)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
             .padding(.bottom, 24)
             .frame(maxWidth: 1160)
             .frame(maxWidth: .infinity)
         }
         .background(NoveliaStyle.paper.ignoresSafeArea())
+        .compatScrollDismissesKeyboardInteractively()
         // 翻页后回到顶部，像网页端一样从新一页的第一部作品开始看。
         .onValueChange(of: store.page) { _, _ in proxy.scrollTo(Self.topAnchor, anchor: .top) }
         .pageKeyboardActions(browseKeyboardActions(
@@ -464,12 +505,148 @@ private struct DiscoverContentView: View {
         }
         }
         .task(id: requestKey) { await store.searchIfNeeded(query: query, filter: filter) }
+        .task(id: auth.username) {
+            guard let username = auth.username, !username.isEmpty else { return }
+            if readingHistory.items.isEmpty && !readingHistory.isLoading {
+                await readingHistory.refresh(account: username)
+            }
+        }
+        .compatNavigationDestination(item: $resumedTarget) { target in
+            ReaderView(novel: target.novel, startingAt: target.chapterIndex)
+        }
+    }
+
+    private var recentContinueItems: [NoveliaCloudReadingHistoryItem] {
+        guard auth.username != nil else { return [] }
+        return Array(readingHistory.items.filter { !blocked.hides($0.novel.genres) }.prefix(5))
+    }
+
+    private func resumeOnline(_ item: NoveliaCloudReadingHistoryItem) {
+        guard resumingItemID == nil, let username = auth.username, !username.isEmpty else { return }
+        NoveliaHaptics.selection()
+        resumingItemID = item.id
+        resumeErrorMessage = nil
+        Task {
+            defer { resumingItemID = nil }
+            do {
+                let continuation = try await readingHistory.continuation(for: item, account: username)
+                if let keyboardRead {
+                    keyboardRead(.online(continuation.novel, continuation.chapterIndex))
+                } else {
+                    resumedTarget = continuation
+                }
+            } catch {
+                resumeErrorMessage = error.localizedDescription
+            }
+        }
     }
 
     private static let topAnchor = "discover-top"
 }
 
-/// 筛选菜单的收起状态标签：显示类别、当前选项与下拉箭头，非默认选项用品牌色强调。
+/// 「发现 → 网络小说」顶部的「继续追更」单行横幅：支持单本全宽或最多 5 本横滑，点按 1 步直达在线阅读器。
+private struct DiscoverContinueReadingStrip: View {
+    let items: [NoveliaCloudReadingHistoryItem]
+    let resumingItemID: String?
+    let errorMessage: String?
+    let onDismissError: () -> Void
+    let onResume: (NoveliaCloudReadingHistoryItem) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if items.count == 1, let item = items.first {
+                bannerCard(item, fullWidth: true)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(items) { item in
+                            bannerCard(item, fullWidth: false)
+                        }
+                    }
+                }
+            }
+            if let errorMessage {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(NoveliaStyle.warning)
+                    Text(errorMessage)
+                        .font(NoveliaStyle.fontCaption)
+                        .foregroundStyle(NoveliaStyle.muted)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Button { onDismissError() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(NoveliaStyle.muted)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 4)
+            }
+        }
+    }
+
+    private func bannerCard(_ item: NoveliaCloudReadingHistoryItem, fullWidth: Bool) -> some View {
+        let isResuming = resumingItemID == item.id
+        return Button {
+            onResume(item)
+        } label: {
+            HStack(spacing: 11) {
+                BookCover(novel: item.novel, width: 32, height: 44)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        Text("继续追更")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(NoveliaStyle.brandGreen)
+                        if let ts = item.lastReadAt, ts > 0 {
+                            Text("· \(Self.relativeTime(ts))")
+                                .font(NoveliaStyle.fontMicro)
+                                .foregroundStyle(NoveliaStyle.muted)
+                        }
+                    }
+                    Text(item.novel.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(NoveliaStyle.ink)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 6)
+                Group {
+                    if isResuming {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 44, height: 26)
+                    } else {
+                        Text("续读")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 5)
+                            .background(NoveliaStyle.brandGreen, in: Capsule())
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(maxWidth: fullWidth ? .infinity : 272, alignment: .leading)
+            .noveliaCard(cornerRadius: NoveliaStyle.radiusMedium)
+            .contentShape(RoundedRectangle(cornerRadius: NoveliaStyle.radiusMedium, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(resumingItemID != nil)
+        .accessibilityLabel("继续追更：\(item.novel.title)")
+    }
+
+    private static func relativeTime(_ timestamp: Int64) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+/// 筛选菜单的收起状态标签：紧凑视觉高度，非默认选项用柔和品牌色底强调。
 private struct DiscoverFilterChip: View {
     let category: String
     let value: String
@@ -478,19 +655,23 @@ private struct DiscoverFilterChip: View {
     var body: some View {
         HStack(spacing: 4) {
             Text(category)
-                .foregroundStyle(NoveliaStyle.muted)
+                .foregroundStyle(isDefault ? NoveliaStyle.muted : NoveliaStyle.brandGreen.opacity(0.8))
             Text(value)
                 .foregroundStyle(isDefault ? NoveliaStyle.ink : NoveliaStyle.brandGreen)
             Image(systemName: "chevron.down")
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(NoveliaStyle.muted)
+                .foregroundStyle(isDefault ? NoveliaStyle.muted : NoveliaStyle.brandGreen)
         }
-        .font(.system(size: 13, weight: .semibold))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(minHeight: 44)
-        .background(NoveliaStyle.card, in: Capsule())
-        .overlay(Capsule().stroke(NoveliaStyle.muted.opacity(0.18), lineWidth: 1))
+        .font(.system(size: 12, weight: .semibold))
+        .padding(.horizontal, 11)
+        .padding(.vertical, 7)
+        .background(isDefault ? NoveliaStyle.card : NoveliaStyle.brandGreen.opacity(0.12), in: Capsule())
+        .overlay(
+            Capsule().stroke(
+                isDefault ? NoveliaStyle.hairline : NoveliaStyle.brandGreen.opacity(0.35),
+                lineWidth: 0.75
+            )
+        )
         .contentShape(Capsule())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(category)：\(value)")
