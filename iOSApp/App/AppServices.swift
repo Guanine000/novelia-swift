@@ -42,7 +42,7 @@ final class AppServices: ObservableObject {
         RetiredSpeechServiceCleanup.removeStoredKey()
         // 小说与论坛续期使用同一刷新 Cookie，共用一个队列与 Cookie 存储逐个执行。
         let refreshQueue = SerialAsyncGate()
-        let cookieStore = AuthRefreshCookieKeychainStore()
+        let cookieStore = AuthRefreshCookieKeychainStore(authentication: configuration.authentication)
         let account = AccountAuthStore(configuration: configuration, session: transportSession,
                                        refreshQueue: refreshQueue, cookieStore: cookieStore)
         let forum = ForumAuthStore(configuration: configuration, session: transportSession,

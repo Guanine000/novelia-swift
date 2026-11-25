@@ -69,11 +69,12 @@ func jwt(_ subject: String) -> String {
 }
 @MainActor struct AuthSessionRefresher {
  let server: FakeAuthServer; let app: String
- func fetchToken() async throws -> String { try await server.refresh(app: app) }
+ func fetchToken(usingWebsiteCookies: Bool = false) async throws -> String { try await server.refresh(app: app) }
 }
 @MainActor final class AccountAuthStore {
 ''' + stored + method(account, '    func refreshSession() async -> Bool {') \
-    + method(account, '    private func performRefresh(generation: Int) async -> Bool {') \
+    + method(account, '    private func refreshSession(usingWebsiteCookies: Bool) async -> Bool {') \
+    + method(account, '    private func performRefresh(generation: Int, usingWebsiteCookies: Bool) async -> Bool {') \
     + method(account, '    func clearSession() {') + method(account, '    static func username(from token: String?) -> String? {') + r'''
 }
 @MainActor final class ForumAuthStore {

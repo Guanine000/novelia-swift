@@ -107,7 +107,7 @@ final class TapTests: XCTestCase {
   if issue.exists { issue.buttons["按原样直接入库"].tap() }
   XCTAssertTrue(completion.waitForExistence(timeout: 30))
  }
- func testNativeLoginSheetOpensAndAcceptsCredentials() {
+ func testLoginSheetOffersWebsiteAndNativeMethods() {
   let app = start(); defer { app.terminate() }
   app.buttons["我的"].firstMatch.tap()
   let openLogin = app.buttons["登录 / 注册"].firstMatch
@@ -122,13 +122,20 @@ final class TapTests: XCTestCase {
   let password = app.secureTextFields["密码"]
   XCTAssertTrue(username.waitForExistence(timeout: 10))
   XCTAssertTrue(password.exists)
-  let submit = app.buttons["登录"]
+  let submit = app.buttons["登录"].firstMatch
   XCTAssertFalse(submit.isEnabled)
   username.tap(); username.typeText("fixture@example.invalid")
   password.tap(); password.typeText("fixture-password")
   XCTAssertTrue(submit.isEnabled)
-  app.buttons["显示密码"].tap()
-  XCTAssertEqual(app.textFields["密码"].value as? String, "fixture-password")
+  let website = app.buttons["使用官网网页登录"]
+  reveal(website, app: app); website.tap()
+  let complete = app.buttons["完成登录"]
+  XCTAssertTrue(complete.waitForExistence(timeout: 10))
+  complete.tap()
+  XCTAssertTrue(app.staticTexts["认证站点没有可用会话，请重新登录。"].waitForExistence(timeout: 10))
+  app.buttons["返回原生登录"].tap()
+  XCTAssertTrue(username.waitForExistence(timeout: 10))
+  XCTAssertFalse(app.buttons["登录"].firstMatch.isEnabled)
   app.buttons["关闭"].tap()
   XCTAssertTrue(openLogin.waitForExistence(timeout: 10))
  }

@@ -32,7 +32,7 @@ final class AccountAuthStore: ObservableObject, AccountSessionProviding {
         self.tokenStore = tokenStore
         self.configuration = configuration
         self.refreshQueue = refreshQueue
-        let resolvedCookieStore = cookieStore ?? AuthRefreshCookieKeychainStore()
+        let resolvedCookieStore = cookieStore ?? AuthRefreshCookieKeychainStore(authentication: configuration.authentication)
         self.cookieStore = resolvedCookieStore
         refresher = AuthSessionRefresher(configuration: configuration, session: session, app: "n",
                                          origin: configuration.novelOrigin, cookieStore: resolvedCookieStore)
@@ -48,9 +48,17 @@ final class AccountAuthStore: ObservableObject, AccountSessionProviding {
 
     /// 续期进行中再被调用时等待同一结果，不另发请求；退出登录后发起的调用不复用旧结果。
     func refreshSession() async -> Bool {
+        await refreshSession(usingWebsiteCookies: false)
+    }
+
+    private func refreshSession(usingWebsiteCookies: Bool) async -> Bool {
         let generation = sessionGeneration
         if let refreshTask, refreshTask.generation == generation { return await refreshTask.task.value }
-        let task = Task { await refreshQueue.run { await performRefresh(generation: generation) } }
+        let task = Task {
+            await refreshQueue.run {
+                await performRefresh(generation: generation, usingWebsiteCookies: usingWebsiteCookies)
+            }
+        }
         refreshTask = (generation, task)
         isRefreshing = true
         errorMessage = nil
@@ -62,11 +70,11 @@ final class AccountAuthStore: ObservableObject, AccountSessionProviding {
         return result
     }
 
-    private func performRefresh(generation: Int) async -> Bool {
+    private func performRefresh(generation: Int, usingWebsiteCookies: Bool) async -> Bool {
         guard generation == sessionGeneration else { return false }
         let authLogger = ShareableLogger(category: "auth")
         do {
-            let token = try await refresher.fetchToken()
+            let token = try await refresher.fetchToken(usingWebsiteCookies: usingWebsiteCookies)
             guard Self.username(from: token) != nil else { throw AccountAuthError.invalidToken }
             guard generation == sessionGeneration else { return false }
             try tokenStore.save(token)
@@ -93,12 +101,12 @@ final class AccountAuthStore: ObservableObject, AccountSessionProviding {
         }
     }
 
-    /// 清除本应用令牌与本机保存的刷新 Cookie，不清空系统浏览器或网页存储中的其他会话。
+    /// 清除本应用令牌及对应认证来源的会话 Cookie。
     func logout() {
         clearSession()
         forumAuth?.clearSession()
         let store = cookieStore
-        Task { await store.clear() }
+        Task { await refreshQueue.run { await store.clear() } }
     }
 
     func clearSession() {
@@ -171,12 +179,12 @@ final class AccountAuthStore: ObservableObject, AccountSessionProviding {
     }
 
     /// 一次网站登录为同一账户建立两个 API 会话。
-    func establishUnifiedSession() async -> Bool {
+    func establishUnifiedSession(usingWebsiteCookies: Bool = false) async -> Bool {
         while isRefreshing || forumAuth?.isRefreshing == true {
             do { try await Task.sleep(nanoseconds: 100_000_000) }
             catch { return false }
         }
-        guard !Task.isCancelled, await refreshSession(), let account = username else { return false }
+        guard !Task.isCancelled, await refreshSession(usingWebsiteCookies: usingWebsiteCookies), let account = username else { return false }
         guard let forumAuth else { return false }
         if forumAuth.username != account { forumAuth.clearSession() }
         guard await forumAuth.refreshSession(), forumAuth.username == account else {
@@ -229,7 +237,7 @@ final class ForumAuthStore: ObservableObject, AccountSessionProviding {
         self.tokenStore = tokenStore
         self.configuration = configuration
         self.refreshQueue = refreshQueue
-        let resolvedCookieStore = cookieStore ?? AuthRefreshCookieKeychainStore()
+        let resolvedCookieStore = cookieStore ?? AuthRefreshCookieKeychainStore(authentication: configuration.authentication)
         self.cookieStore = resolvedCookieStore
         refresher = AuthSessionRefresher(configuration: configuration, session: session, app: "f",
                                          origin: configuration.forumOrigin, cookieStore: resolvedCookieStore)
@@ -297,7 +305,7 @@ final class ForumAuthStore: ObservableObject, AccountSessionProviding {
         clearSession()
         accountAuth?.clearSession()
         let store = cookieStore
-        Task { await store.clear() }
+        Task { await refreshQueue.run { await store.clear() } }
     }
 
     func clearSession() {
@@ -310,10 +318,10 @@ final class ForumAuthStore: ObservableObject, AccountSessionProviding {
         errorMessage = nil
     }
 
-    func establishUnifiedSession() async -> Bool {
+    func establishUnifiedSession(usingWebsiteCookies: Bool = false) async -> Bool {
         guard let accountAuth else { return false }
-        let success = await accountAuth.establishUnifiedSession()
-        if !success { errorMessage = accountAuth.errorMessage }
+        let success = await accountAuth.establishUnifiedSession(usingWebsiteCookies: usingWebsiteCookies)
+        errorMessage = success ? nil : accountAuth.errorMessage
         return success
     }
 
@@ -324,7 +332,6 @@ final class ForumAuthStore: ObservableObject, AccountSessionProviding {
         else { errorMessage = nil }
         return success
     }
-
 }
 
 enum NoveliaForumSessionTokenVault {
@@ -425,14 +432,18 @@ struct AuthSessionRefresher {
         }
         let received = Self.responseCookies(from: http, for: loginAPIURL)
         if !received.isEmpty {
-            await cookieStore.save(received, for: loginAPIURL)
+            await cookieStore.save(received, replacing: [], for: refreshURL)
         }
         let body = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         return body.isEmpty ? nil : body
     }
 
-    func fetchToken() async throws -> String {
-        let cookies = await cookieStore.cookies(for: refreshURL)
+    func fetchToken(usingWebsiteCookies: Bool = false) async throws -> String {
+        let cookies = if usingWebsiteCookies {
+            await cookieStore.websiteCookies(for: refreshURL)
+        } else {
+            await cookieStore.cookies(for: refreshURL)
+        }
         guard !cookies.isEmpty else { throw AccountAuthError.missingSiteSession }
         var request = URLRequest(url: refreshURL)
         request.httpMethod = "POST"
@@ -446,9 +457,12 @@ struct AuthSessionRefresher {
         guard let http = response as? HTTPURLResponse else { throw AccountAuthError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else { throw AccountAuthError.refreshRejected(http.statusCode) }
         // URLSession 与刷新 Cookie 存储相互独立；将轮换后的刷新 Cookie 持久化，供下次续期使用。
-        let received = Self.responseCookies(from: http, for: refreshURL)
+        let received = AuthRefreshCookieKeychainStore.filter(Self.responseCookies(from: http, for: refreshURL), for: refreshURL)
         if !received.isEmpty {
-            await cookieStore.save(received, for: refreshURL)
+            await cookieStore.save(received, replacing: cookies, for: refreshURL)
+        } else if usingWebsiteCookies {
+            // 认证站点即使没有返回轮换值，随后建立的论坛会话也必须使用这次网页登录的 Cookie。
+            await cookieStore.save(cookies, replacing: cookies, for: refreshURL)
         }
         return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -459,6 +473,7 @@ struct AuthSessionRefresher {
         }
         return HTTPCookie.cookies(withResponseHeaderFields: headers, for: url)
     }
+
 
     /// 仅识别长度受限的 text/plain 业务原因；不回显 HTML 或过长的原始响应正文。
     static func extractPlainTextReason(data: Data, response: HTTPURLResponse) -> String? {
@@ -531,8 +546,48 @@ private enum AccountAuthError: LocalizedError {
 }
 
 struct NoveliaLoginSheet: View {
+    @ObservedObject var auth: AccountAuthStore
+
+    var body: some View {
+        LoginMethods { back in
+            NoveliaWebsiteLoginSheet(auth: auth, onBack: back)
+        } password: { openWebsite in
+            NoveliaPasswordLoginSheet(auth: auth, onOpenWebsite: openWebsite)
+        }
+    }
+}
+
+struct ForumLoginSheet: View {
+    @ObservedObject var auth: ForumAuthStore
+
+    var body: some View {
+        LoginMethods { back in
+            ForumWebsiteLoginSheet(auth: auth, onBack: back)
+        } password: { openWebsite in
+            ForumPasswordLoginSheet(auth: auth, onOpenWebsite: openWebsite)
+        }
+    }
+}
+
+private struct LoginMethods<Website: View, Password: View>: View {
+    let website: (@escaping () -> Void) -> Website
+    let password: (@escaping () -> Void) -> Password
+    @State private var showsWebsite = false
+
+    var body: some View {
+        if showsWebsite {
+            website { showsWebsite = false }
+        } else {
+            password { showsWebsite = true }
+        }
+    }
+}
+
+private struct NoveliaPasswordLoginSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var auth: AccountAuthStore
+
+    let onOpenWebsite: () -> Void
 
     var body: some View {
         NoveliaNativeLoginForm(
@@ -549,14 +604,17 @@ struct NoveliaLoginSheet: View {
                 }
                 return false
             },
+            onOpenWebsite: onOpenWebsite,
             onClose: { dismiss() }
         )
     }
 }
 
-struct ForumLoginSheet: View {
+private struct ForumPasswordLoginSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var auth: ForumAuthStore
+
+    let onOpenWebsite: () -> Void
 
     var body: some View {
         NoveliaNativeLoginForm(
@@ -579,6 +637,7 @@ struct ForumLoginSheet: View {
                 }
                 return false
             },
+            onOpenWebsite: onOpenWebsite,
             onClose: { dismiss() }
         )
     }
@@ -599,6 +658,7 @@ private struct NoveliaNativeLoginForm: View {
     let onClearError: () -> Void
     let onSyncExistingAccount: (() async -> Bool)?
     let onSubmit: (String, String) async -> Bool
+    let onOpenWebsite: () -> Void
     let onClose: () -> Void
 
     @State private var credentials = LoginCredentials()
@@ -646,7 +706,7 @@ private struct NoveliaNativeLoginForm: View {
                     }
 
                     LoginCredentialsCardView(
-                        credentials: $credentials,
+                        onCredentialsChanged: { credentials = $0 },
                         isEnabled: !isBusy,
                         dismissKeyboardToken: dismissKeyboardToken,
                         onSubmit: { submitIfReady() }
@@ -684,6 +744,11 @@ private struct NoveliaNativeLoginForm: View {
                     .buttonStyle(.borderedProminent)
                     .tint(NoveliaStyle.brandGreen)
                     .disabled(!canSubmit)
+
+                    Button("使用官网网页登录", action: onOpenWebsite)
+                        .frame(maxWidth: .infinity)
+                        .tint(NoveliaStyle.brandGreen)
+                        .disabled(isBusy)
 
                     VStack(spacing: 8) {
                         Text("还没有账号，或忘记密码？")
@@ -746,6 +811,10 @@ private final class AutoFillAwareTextField: UITextField {
                 onTextMutation?()
             }
         }
+    }
+
+    override var attributedText: NSAttributedString? {
+        didSet { onTextMutation?() }
     }
 
     override func insertText(_ text: String) {
@@ -941,7 +1010,7 @@ private final class LoginCredentialsContainerView: UIView {
 }
 
 private struct LoginCredentialsCardView: UIViewRepresentable {
-    @Binding var credentials: LoginCredentials
+    let onCredentialsChanged: (LoginCredentials) -> Void
     let isEnabled: Bool
     let dismissKeyboardToken: Int
     let onSubmit: () -> Void
@@ -954,8 +1023,6 @@ private struct LoginCredentialsCardView: UIViewRepresentable {
         let container = LoginCredentialsContainerView(frame: .zero)
         let coordinator = context.coordinator
         coordinator.container = container
-        container.usernameField.text = credentials.username
-        container.passwordField.text = credentials.password
 
         container.usernameField.delegate = coordinator
         container.passwordField.delegate = coordinator
@@ -964,11 +1031,8 @@ private struct LoginCredentialsCardView: UIViewRepresentable {
         container.usernameField.onTextMutation = { [weak coordinator] in coordinator?.syncFromFields() }
         container.passwordField.onTextMutation = { [weak coordinator] in coordinator?.syncFromFields() }
         container.onToggleVisibility = { [weak coordinator, weak container] in
-            guard let coordinator, let container else { return }
-            coordinator.isApplyingFromSwiftUI = true
-            container.applyPasswordVisibility()
-            coordinator.isApplyingFromSwiftUI = false
-            coordinator.syncFromFields()
+            container?.applyPasswordVisibility()
+            coordinator?.syncFromFields()
         }
 
         coordinator.observeNotifications(for: container)
@@ -978,17 +1042,7 @@ private struct LoginCredentialsCardView: UIViewRepresentable {
     func updateUIView(_ uiView: LoginCredentialsContainerView, context: Context) {
         let coordinator = context.coordinator
         coordinator.parent = self
-        coordinator.container = uiView
-
-        // 只应用 SwiftUI 主动变更。系统填充尚未回传时，旧的绑定值仍是已知快照。
-        if credentials != coordinator.lastPublishedCredentials {
-            coordinator.lastPublishedCredentials = credentials
-            coordinator.isApplyingFromSwiftUI = true
-            uiView.usernameField.text = credentials.username
-            uiView.passwordField.text = credentials.password
-            coordinator.isApplyingFromSwiftUI = false
-        }
-
+        // UIKit 持有输入值。SwiftUI 刷新只更新交互状态，不能回写可能早于系统填充的快照。
         if uiView.usernameField.isEnabled != isEnabled {
             uiView.usernameField.isEnabled = isEnabled
         }
@@ -1006,18 +1060,23 @@ private struct LoginCredentialsCardView: UIViewRepresentable {
         }
     }
 
+    static func dismantleUIView(_ uiView: LoginCredentialsContainerView, coordinator: Coordinator) {
+        coordinator.container = nil
+        uiView.usernameField.onTextMutation = nil
+        uiView.passwordField.onTextMutation = nil
+        uiView.passwordField.text = nil
+    }
+
     final class Coordinator: NSObject, UITextFieldDelegate {
         var parent: LoginCredentialsCardView
         weak var container: LoginCredentialsContainerView?
-        var isApplyingFromSwiftUI = false
-        var lastPublishedCredentials: LoginCredentials
+        private var lastPublishedCredentials = LoginCredentials()
         private var isFieldSyncScheduled = false
         var lastDismissKeyboardToken = 0
         private var observers: [NSObjectProtocol] = []
 
         init(_ parent: LoginCredentialsCardView) {
             self.parent = parent
-            self.lastPublishedCredentials = parent.credentials
             self.lastDismissKeyboardToken = parent.dismissKeyboardToken
         }
 
@@ -1048,7 +1107,7 @@ private struct LoginCredentialsCardView: UIViewRepresentable {
         }
 
         func syncFromFields() {
-            guard !isApplyingFromSwiftUI, !isFieldSyncScheduled else { return }
+            guard !isFieldSyncScheduled else { return }
             isFieldSyncScheduled = true
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -1066,7 +1125,11 @@ private struct LoginCredentialsCardView: UIViewRepresentable {
             )
             guard credentials != lastPublishedCredentials else { return }
             lastPublishedCredentials = credentials
-            parent.credentials = credentials
+            parent.onCredentialsChanged(credentials)
+        }
+
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            syncFromFields()
         }
 
         func textFieldDidChangeSelection(_ textField: UITextField) {
@@ -1091,11 +1154,260 @@ private struct LoginCredentialsCardView: UIViewRepresentable {
     }
 }
 
-/// 刷新 Cookie 存储接口：生产使用 Keychain（首次为空时兼容读取旧 WKHTTPCookieStore），测试与独立验证使用内存实现。
+private struct NoveliaWebsiteLoginSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var auth: AccountAuthStore
+    let onBack: () -> Void
+    @State private var loginCompletionTask: Task<Void, Never>?
+
+    @State private var pageLoadError: String?
+
+    var body: some View {
+        CompatNavigationStack {
+            VStack(spacing: 0) {
+                Text("在 Novelia 官网登录。若未自动显示登录框，请点击网页中的“登录/注册”。账号密码由官网直接处理。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+
+                NoveliaAuthWebView(
+                    appID: "n",
+                    configuration: auth.configuration.authentication,
+                    onLoginSuccess: { completeLogin() },
+                    onLoadFailure: { message in
+                        pageLoadError = message
+                    }
+                )
+            }
+            .navigationTitle("登录 Novelia")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(auth.isRefreshing ? "验证中…" : "完成登录") {
+                        completeLogin()
+                    }
+                    .disabled(auth.isRefreshing || loginCompletionTask != nil)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 0) {
+                    if let message = auth.errorMessage ?? pageLoadError {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(NoveliaStyle.danger)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                    }
+                    Button("返回原生登录", action: onBack)
+                        .padding(10)
+                        .frame(maxWidth: .infinity)
+                        .disabled(auth.isRefreshing || loginCompletionTask != nil)
+                }
+                .background(.regularMaterial)
+            }
+        }
+        .onAppear { auth.errorMessage = nil }
+        .onDisappear { loginCompletionTask?.cancel() }
+    }
+
+    private func completeLogin() {
+        guard loginCompletionTask == nil else { return }
+        loginCompletionTask = Task { @MainActor in
+            defer { loginCompletionTask = nil }
+            do {
+                // 等待 WebKit 更新响应 Cookie，再等待已有的
+                // 续期任务完成，避免丢失本次登录成功信号。
+                try await Task.sleep(nanoseconds: 150_000_000)
+                while auth.isRefreshing {
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                }
+                try Task.checkCancellation()
+                if await auth.establishUnifiedSession(usingWebsiteCookies: true), !Task.isCancelled { dismiss() }
+            } catch { /* Closing the sheet cancels automatic completion. */ }
+        }
+    }
+
+}
+
+struct NoveliaAuthWebView: UIViewRepresentable {
+    let appID: String
+    let configuration: AuthenticationConfiguration
+    let onLoginSuccess: () -> Void
+    let onLoadFailure: (String) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(configuration: configuration, onLoginSuccess: onLoginSuccess, onLoadFailure: onLoadFailure)
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let controller = WKUserContentController()
+        controller.add(context.coordinator, name: "noveliaAuth")
+        // 使用官网现有登录表单；成功通知只触发原生 Cookie 续期，不读取账号密码。
+        // 小说网页与认证 API 的来源分别配置并严格检查。
+        let script = configuration.loginSuccessScript
+        controller.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .default()
+        configuration.userContentController = controller
+        let view = WKWebView(frame: .zero, configuration: configuration)
+        view.navigationDelegate = context.coordinator
+        view.allowsBackForwardNavigationGestures = true
+        view.isOpaque = false
+        view.backgroundColor = .systemBackground
+
+        view.load(URLRequest(url: self.configuration.loginURL(app: appID)))
+        return view
+    }
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        context.coordinator.onLoginSuccess = onLoginSuccess
+        context.coordinator.onLoadFailure = onLoadFailure
+    }
+
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        uiView.stopLoading()
+        uiView.configuration.userContentController.removeScriptMessageHandler(forName: "noveliaAuth")
+        uiView.navigationDelegate = nil
+    }
+
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+        let configuration: AuthenticationConfiguration
+        var onLoginSuccess: () -> Void
+        var onLoadFailure: (String) -> Void
+
+        init(configuration: AuthenticationConfiguration, onLoginSuccess: @escaping () -> Void, onLoadFailure: @escaping (String) -> Void) {
+            self.configuration = configuration
+            self.onLoginSuccess = onLoginSuccess
+            self.onLoadFailure = onLoadFailure
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == "noveliaAuth",
+                  message.frameInfo.isMainFrame,
+                  configuration.trustsLoginPage(scheme: message.frameInfo.securityOrigin.protocol,
+                                       host: message.frameInfo.securityOrigin.host,
+                                       port: message.frameInfo.securityOrigin.port),
+                  message.body as? String == "login_success" else { return }
+            DispatchQueue.main.async { self.onLoginSuccess() }
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            reportLoadFailure(error)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            reportLoadFailure(error)
+        }
+
+        private func reportLoadFailure(_ error: Error) {
+            let nsError = error as NSError
+            guard nsError.code != NSURLErrorCancelled else { return }
+            DispatchQueue.main.async {
+                self.onLoadFailure("认证页面加载失败：\(error.localizedDescription)（\(nsError.code)）")
+            }
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.allow)
+                return
+            }
+            // 将安全的身份提供方重定向保留在同一个 WKWebView 中，
+            // 使其完成登录流程并保留 Cookie 会话。
+            guard url.scheme == "https" else {
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
+        }
+    }
+}
+
+private struct ForumWebsiteLoginSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var auth: ForumAuthStore
+    let onBack: () -> Void
+    @State private var loginCompletionTask: Task<Void, Never>?
+
+    @State private var pageLoadError: String?
+
+    var body: some View {
+        CompatNavigationStack {
+            VStack(spacing: 0) {
+                Text("在 Novelia 官网登录同一个小说与论坛账号。若未显示登录框，请点击网页中的“登录/注册”。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                NoveliaAuthWebView(appID: "f", configuration: auth.configuration.authentication, onLoginSuccess: {
+                    completeLogin()
+                }, onLoadFailure: { pageLoadError = $0 })
+            }
+            .navigationTitle("登录 Novelia")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(auth.isRefreshing ? "验证中…" : "完成登录") {
+                        completeLogin()
+                    }
+                    .disabled(auth.isRefreshing || loginCompletionTask != nil)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 0) {
+                    if let message = auth.errorMessage ?? pageLoadError {
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(NoveliaStyle.danger)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                    }
+                    Button("返回原生登录", action: onBack)
+                        .padding(10)
+                        .frame(maxWidth: .infinity)
+                        .disabled(auth.isRefreshing || loginCompletionTask != nil)
+                }
+                .background(.regularMaterial)
+            }
+        }
+        .onAppear { auth.errorMessage = nil }
+        .onDisappear { loginCompletionTask?.cancel() }
+    }
+
+    private func completeLogin() {
+        guard loginCompletionTask == nil else { return }
+        loginCompletionTask = Task { @MainActor in
+            defer { loginCompletionTask = nil }
+            do {
+                // 等待 WebKit 更新响应 Cookie，再等待已有的
+                // 续期任务完成，避免丢失本次登录成功信号。
+                try await Task.sleep(nanoseconds: 150_000_000)
+                while auth.isRefreshing {
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                }
+                try Task.checkCancellation()
+                if await auth.establishUnifiedSession(usingWebsiteCookies: true), !Task.isCancelled { dismiss() }
+            } catch { /* Closing the sheet cancels automatic completion. */ }
+        }
+    }
+
+}
+
+/// 刷新 Cookie 存储接口。生产在网页与 Keychain 之间衔接会话，独立验证使用内存实现。
 @MainActor
 protocol AuthRefreshCookieStore: AnyObject {
     func cookies(for url: URL) async -> [HTTPCookie]
-    func save(_ cookies: [HTTPCookie], for url: URL) async
+    func websiteCookies(for url: URL) async -> [HTTPCookie]
+    func save(_ cookies: [HTTPCookie], replacing previous: [HTTPCookie], for url: URL) async
     func clear() async
 }
 
@@ -1144,10 +1456,10 @@ final class AuthRefreshCookieKeychainStore: AuthRefreshCookieStore {
         }
     }
 
-    private let allowsLegacyWebKitMigration: Bool
+    private let authentication: AuthenticationConfiguration
 
-    init(allowsLegacyWebKitMigration: Bool = true) {
-        self.allowsLegacyWebKitMigration = allowsLegacyWebKitMigration
+    init(authentication: AuthenticationConfiguration) {
+        self.authentication = authentication
     }
 
     func cookies(for url: URL) async -> [HTTPCookie] {
@@ -1155,22 +1467,29 @@ final class AuthRefreshCookieKeychainStore: AuthRefreshCookieStore {
         let stored = loadStoredCookies().compactMap { $0.toHTTPCookie() }
             .filter { $0.expiresDate.map { $0 > now } ?? true }
         let matched = Self.filter(stored, for: url)
-        if !matched.isEmpty || !allowsLegacyWebKitMigration {
-            return matched
-        }
-        // 兼容升级自旧版 WKWebView 登录的账号：Keychain 尚无刷新 Cookie 时回退读取一次网页存储。
-        let legacy: [HTTPCookie] = await withCheckedContinuation { continuation in
-            WKWebsiteDataStore.default().httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
-        }
-        return Self.filter(legacy.filter { $0.expiresDate.map { $0 > now } ?? true }, for: url)
+        if !matched.isEmpty { return matched }
+        // 兼容旧版只在 WebKit 持有刷新 Cookie 的会话。
+        return await websiteCookies(for: url)
     }
 
-    func save(_ cookies: [HTTPCookie], for url: URL) async {
-        guard !cookies.isEmpty else { return }
+    func websiteCookies(for url: URL) async -> [HTTPCookie] {
+        let cookies = await allWebsiteCookies()
+        return Self.filter(cookies.filter { $0.expiresDate.map { $0 > Date() } ?? true }, for: url)
+    }
+
+    private func allWebsiteCookies() async -> [HTTPCookie] {
+        await withCheckedContinuation { continuation in
+            WKWebsiteDataStore.default().httpCookieStore.getAllCookies { continuation.resume(returning: $0) }
+        }
+    }
+
+    func save(_ cookies: [HTTPCookie], replacing previous: [HTTPCookie], for url: URL) async {
         let now = Date()
+        let matched = Self.filter(cookies, for: url)
+        guard !matched.isEmpty else { return }
         var merged = loadStoredCookies().compactMap { $0.toHTTPCookie() }
             .filter { $0.expiresDate.map { $0 > now } ?? true }
-        for incoming in cookies {
+        for incoming in matched {
             merged.removeAll { existing in
                 existing.name == incoming.name
                     && existing.domain.lowercased() == incoming.domain.lowercased()
@@ -1181,6 +1500,18 @@ final class AuthRefreshCookieKeychainStore: AuthRefreshCookieStore {
             }
         }
         persist(merged.map(StoredCookie.init))
+        // 只轮换网页里仍等于本次请求所用的 Cookie，保留请求期间新完成的网页登录。
+        let website = WKWebsiteDataStore.default().httpCookieStore
+        let existing = await websiteCookies(for: url)
+        for cookie in matched {
+            guard let used = previous.first(where: { Self.sameCookie($0, cookie) }),
+                  let current = existing.first(where: { Self.sameCookie($0, cookie) }),
+                  used.value == current.value,
+                  cookie.value != current.value || cookie.expiresDate != current.expiresDate else { continue }
+            await withCheckedContinuation { continuation in
+                website.setCookie(cookie) { continuation.resume() }
+            }
+        }
     }
 
     func clear() async {
@@ -1188,6 +1519,17 @@ final class AuthRefreshCookieKeychainStore: AuthRefreshCookieStore {
 #if targetEnvironment(simulator)
         UserDefaults.standard.removeObject(forKey: Self.simulatorFallbackKey)
 #endif
+        let website = WKWebsiteDataStore.default().httpCookieStore
+        let cookies = await allWebsiteCookies()
+        for cookie in Self.filter(cookies, for: authentication.refreshURL(app: "n")) {
+            await withCheckedContinuation { continuation in
+                website.delete(cookie) { continuation.resume() }
+            }
+        }
+    }
+
+    private static func sameCookie(_ lhs: HTTPCookie, _ rhs: HTTPCookie) -> Bool {
+        lhs.name == rhs.name && lhs.domain.lowercased() == rhs.domain.lowercased() && lhs.path == rhs.path
     }
 
     static func filter(_ cookies: [HTTPCookie], for url: URL) -> [HTTPCookie] {
@@ -1265,7 +1607,11 @@ final class MemoryAuthRefreshCookieStore: AuthRefreshCookieStore {
         )
     }
 
-    func save(_ cookies: [HTTPCookie], for url: URL) async {
+    func websiteCookies(for url: URL) async -> [HTTPCookie] {
+        await cookies(for: url)
+    }
+
+    func save(_ cookies: [HTTPCookie], replacing previous: [HTTPCookie], for url: URL) async {
         let now = Date()
         stored.removeAll { $0.expiresDate.map { $0 <= now } ?? false }
         for incoming in cookies {

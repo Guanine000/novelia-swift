@@ -15,7 +15,8 @@ def method(part, signature):
     return part[start:end] + "\n"
 a = s.split('final class AccountAuthStore',1)[1].split('final class ForumAuthStore',1)[0]
 f = s.split('final class ForumAuthStore',1)[1].split('enum NoveliaForumSessionTokenVault',1)[0]
-code = '''import Foundation
+gate = Path('Sources/NoveliaIOSCore/Support/SerialAsyncGate.swift').read_text()
+code = gate + '''import Foundation
 @MainActor final class StubCookieStore {
  var clears = 0
  func clear() async { clears += 1 }
@@ -24,19 +25,22 @@ code = '''import Foundation
  var isRefreshing = false; var username: String?; var errorMessage: String?
  weak var forumAuth: ForumAuthStore?
  let cookieStore = StubCookieStore()
+ let refreshQueue = SerialAsyncGate()
  var nextUser = "alice"; var succeeds = true; var refreshes = 0; var clears = 0
- func refreshSession() async -> Bool { refreshes += 1; if succeeds { username = nextUser }; return succeeds }
+ var websiteMode = false
+ func refreshSession(usingWebsiteCookies: Bool = false) async -> Bool { websiteMode = usingWebsiteCookies; refreshes += 1; if succeeds { username = nextUser }; return succeeds }
  func clearSession() { clears += 1; username = nil }
-''' + method(a,'func establishUnifiedSession()') + method(a,'func logout()') + '''
+''' + method(a,'func establishUnifiedSession(usingWebsiteCookies:') + method(a,'func logout()') + '''
 }
 @MainActor final class ForumAuthStore {
  var isRefreshing = false; var username: String?; var errorMessage: String?
  weak var accountAuth: AccountAuthStore?
  let cookieStore = StubCookieStore()
+ let refreshQueue = SerialAsyncGate()
  var nextUser = "alice"; var succeeds = true; var refreshes = 0; var clears = 0
  func refreshSession() async -> Bool { refreshes += 1; if succeeds && nextUser == accountAuth?.username { username = nextUser; return true }; return false }
  func clearSession() { clears += 1; username = nil }
-''' + method(f,'func establishUnifiedSession()') + method(f,'func logout()') + '''
+''' + method(f,'func establishUnifiedSession(usingWebsiteCookies:') + method(f,'func logout()') + '''
 }
 @main struct Tests {
  @MainActor static func main() async {
@@ -45,8 +49,8 @@ code = '''import Foundation
   var result = await account.establishUnifiedSession()
   assert(result && account.username == "alice" && forum.username == "alice")
   forum.logout(); assert(account.username == nil && forum.username == nil)
-  result = await forum.establishUnifiedSession()
-  assert(result && account.username == forum.username)
+  result = await forum.establishUnifiedSession(usingWebsiteCookies: true)
+  assert(result && account.username == forum.username && account.websiteMode)
   account.logout(); assert(account.username == nil && forum.username == nil)
   account.succeeds = false; let count = forum.refreshes
   result = await account.establishUnifiedSession(); assert(!result && forum.refreshes == count)

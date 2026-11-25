@@ -202,9 +202,9 @@ Debug 独立验证 App 可用 `-architectureBrowseResize` 将同一个 Root 内�
 
 小说与论坛是同一个用户账号，但分别维护 `app=n` 与 `app=f` 会话。书籍评论虽然使用论坛来源，仍使用小说会话。改变这些对应关系必须有后端证据及相关回归。
 
-两种会话用同一个认证站点刷新 Cookie 续期，而该 Cookie 每次续期都会轮换。`AccountAuthStore` 与 `ForumAuthStore` 必须注入同一个 `SerialAsyncGate` 与同一个 `AuthRefreshCookieStore`（`AppServices` 统一组装；生产使用 `AuthRefreshCookieKeychainStore`，独立 Debug 验证使用 `MemoryAuthRefreshCookieStore`），续期与登录逐个执行，后一个读取前一个写回的新 Cookie。续期进行中再调用 `refreshSession` 时等待同一结果；退出登录（`sessionGeneration` 变化）后的调用不复用旧结果，并清除本机保存的刷新 Cookie。登录入口使用原生 SwiftUI 账密表单（`NoveliaLoginSheet` / `ForumLoginSheet`），直连已校验 HTTPS 认证来源的 `loginAPIURL`（`POST /api/v1/auth/login`），仅识别长度受限的 `text/plain` 已知业务错误原因，不回显原始 HTML 或长响应；注册与找回密码通过外部浏览器打开已校验的官网链接，不内置 Turnstile 网页桥接。升级自旧版 `WKWebView` 登录的账号，在 Keychain 尚无刷新 Cookie 时会一次性回退读取 `WKHTTPCookieStore`，续期成功后即落盘至 Keychain。网络登录与续期均由 `AuthSessionRefresher` 实现，请求设置 `httpShouldHandleCookies = false`。
+两种会话用同一个认证站点刷新 Cookie。`AccountAuthStore` 与 `ForumAuthStore` 必须注入同一个 `SerialAsyncGate` 与同一个 `AuthRefreshCookieStore`（`AppServices` 统一组装；生产使用 `AuthRefreshCookieKeychainStore`，独立 Debug 验证使用 `MemoryAuthRefreshCookieStore`）。先建立小说会话，再用轮换后的 Cookie 建立同一账号的论坛会话。续期进行中再调用 `refreshSession` 时等待同一结果，退出后通过 `sessionGeneration` 拒绝旧结果，并在同一队列清除 Keychain 与认证续期端点匹配的 WebKit Cookie。
 
-原生登录表单用同一个 UIKit 容器承载两个同级输入框，分别标记为 `.username` 和 `.password`。系统可能分次写入两个字段，协调器合并输入事件并读取当前表单，将账号与密码作为同一个绑定值提交给 SwiftUI，避免界面刷新覆盖尚未回传的输入。 容器高度按当前动态字体的行高计算。实现 `intrinsicContentSize` 时不得在同一视图上调用 `systemLayoutSizeFitting`，否则 Auto Layout 计算约束时会再次请求固有尺寸，打开弹窗即可能耗尽堆栈。
+登录入口（`NoveliaLoginSheet` / `ForumLoginSheet`）默认显示原生账密表单，「使用官网网页登录」按钮在下方打开 `WKWebView` 加载已配置的官网页面。两种表单各自创建，离开时取消网页完成任务或清空原生输入。自动完成和「完成登录」共用同一个任务。桥接只接受已配置 HTTPS 来源的主框架成功通知，不读取表单、密码或响应正文。显式完成登录优先使用当前网页认证 Cookie，续期请求由 `AuthSessionRefresher` 走 App 注入的 URLSession（`httpShouldHandleCookies = false`）。它把新 Cookie 保存在 Keychain，并在网页 Cookie 仍与发出请求时一致时同步轮换。后台恢复优先从 Keychain 读取，兼容只在 WebKit 保存会话的旧安装。网页加载由 WebKit 自己执行，App 的 ECH URLSession 继续用于原生认证、续期和其他原有业务请求。原生表单由 UIKit 管理输入，通过已校验 HTTPS 认证来源的 `loginAPIURL` 提交，并与网页登录复用令牌存储、Cookie 存储和续期队列。
 
 生产账号状态、API token provider 与续期入口使用同一 `SessionTokenStore`。生产适配继续使用原 Keychain/Vault；测试使用内存适配。不要在消费方直接读取 Vault、解析 JWT 判断账号，使用 `AccountSessionProviding` 的状态和 `matchesAccount`。
 
