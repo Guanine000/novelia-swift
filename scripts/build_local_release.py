@@ -108,7 +108,7 @@ def modified_date(settings_source: str) -> str:
     """App 许可页面显示的 GPL 修改日期。"""
     match = MODIFIED_DATE.search(settings_source)
     if not match:
-        raise RuntimeError("SettingsViews.swift has no modifiedDate")
+        raise RuntimeError("AboutAndDiagnosticsView.swift has no modifiedDate")
     return match.group(1)
 
 
@@ -237,9 +237,9 @@ def main():
     if status and not args.allow_dirty:
         parser.error("Worktree is dirty; commit first or explicitly use --allow-dirty")
     commit_date = git("log", "-1", "--format=%cd", "--date=format:%Y-%m-%d")
-    shown_date = modified_date((ROOT / "iOSApp/Features/Settings/SettingsViews.swift").read_text())
+    shown_date = modified_date((ROOT / "iOSApp/Features/Settings/AboutAndDiagnosticsView.swift").read_text())
     if not status and shown_date != commit_date:
-        parser.error(f"GPL modification date {shown_date} in SettingsViews.swift must equal the commit date {commit_date}")
+        parser.error(f"GPL modification date {shown_date} in AboutAndDiagnosticsView.swift must equal the commit date {commit_date}")
     out = (args.output or ROOT / f"build/local-releases/{version}-{build}").resolve()
     if not out.is_relative_to((ROOT / "build").resolve()):
         parser.error("Output must be under the ignored repository build/ directory")

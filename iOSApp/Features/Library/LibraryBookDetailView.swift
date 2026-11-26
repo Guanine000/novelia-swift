@@ -302,12 +302,7 @@ struct LibraryBookDetailView: View {
     private var worldviewBooks: [LibraryBook] { seriesID == nil ? [book] : seriesMembers }
 
     private var bookAnnotations: [ReaderAnnotation] {
-        var keys = [book.key]
-        if let hash { keys.append(book.positionPrefix + hash) }
-        if case .webNovel(let record) = book.origin, record.novel.isRemote,
-           let provider = record.novel.providerId, let novel = record.novel.novelId {
-            keys.append(WebNovelEPUBContext.key(provider: provider, novel: novel))
-        }
+        let keys = state.annotationStorageKeys(for: book)
         var seen = Set<UUID>()
         var result: [ReaderAnnotation] = []
         for key in keys {

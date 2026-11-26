@@ -67,7 +67,7 @@ Release 编译每次仍调用 Xcode，由其做增量构建；生产验证排除
 
 ### 注意事项
 
-- 开源许可页的 GPL 修改日期（`SettingsViews.swift` 的 `modifiedDate`）必须等于发布提交的日期，否则脚本拒绝构建。
+- 开源许可页的 GPL 修改日期（`AboutAndDiagnosticsView.swift` 的 `modifiedDate`）必须等于发布提交的日期，否则脚本拒绝构建。
 - Xcode 派生数据默认保存在固定的临时目录缓存中；`--fresh-build` 使用全新目录，成功后删除、失败时保留排查。Release 二进制会记录目标文件路径，`--derived-data` 不得位于用户主目录下，否则 IPA 隐私检查会失败；该参数不能与 `--fresh-build` 同用。
 - `Novelia` 与 `NoveliaLegacy` 的 Release 构建依次执行。任一 scheme 失败会中断本次发布：不写 SUCCESS，并留下 FAILED-DO-NOT-DISTRIBUTE。
 - 产物位于忽略的 `build/local-releases/<版本>-<构建号>/`；只有出现 SUCCESS 才可分发。两个 IPA 使用同一版本号和构建号。

@@ -25,7 +25,7 @@ class LocalReleaseTests(unittest.TestCase):
             root = Path(directory)
             (root / "NoveliaIOS.xcodeproj").mkdir()
             (root / "NoveliaIOS.xcodeproj/project.pbxproj").write_text("MARKETING_VERSION = 1.1.0; CURRENT_PROJECT_VERSION = 101;\n" * 2)
-            settings = root / "iOSApp/Features/Settings/SettingsViews.swift"
+            settings = root / "iOSApp/Features/Settings/AboutAndDiagnosticsView.swift"
             settings.parent.mkdir(parents=True)
             settings.write_text('static let modifiedDate = "2026-10-22"')
             with mock.patch.object(release, "ROOT", root), mock.patch.object(release, "git", return_value="dirty"), \
@@ -67,7 +67,7 @@ class LocalReleaseTests(unittest.TestCase):
         self.assertEqual(release.modified_date('    static let modifiedDate = "2026-10-13"\n'), "2026-10-13")
         with self.assertRaises(RuntimeError):
             release.modified_date('static let modifiedDate = "13/10/2026"')
-        settings = (Path(__file__).resolve().parents[1] / "iOSApp/Features/Settings/SettingsViews.swift").read_text()
+        settings = (Path(__file__).resolve().parents[1] / "iOSApp/Features/Settings/AboutAndDiagnosticsView.swift").read_text()
         self.assertRegex(release.modified_date(settings), r"^\d{4}-\d{2}-\d{2}$")
 
     def test_npm_production_packages_and_integrity(self):

@@ -23,8 +23,8 @@ forum = (root / layout['ForumStore.swift']).read_text()
 code += '\n' + forum[forum.index('@MainActor\nfinal class ForumStore'):]
 wenku = (root / layout['WenkuStore.swift']).read_text()
 code += '\n' + wenku[wenku.index('@MainActor\nfinal class WenkuStore'):]
-reader = (root / layout['ReaderView.swift']).read_text()
-code += '\n' + reader[reader.index('@MainActor\nprivate final class OnlineChapterCache'):].split('private extension NovelChapter')[0]
+code += '\n' + (core / 'Support/FileContentHash.swift').read_text()
+code += '\n' + (core / 'Features/Reader/OnlineChapterOfflineStore.swift').read_text()
 
 # 未覆盖的协议方法生成为显式失败，而不是回退到生产实现。
 # 下方被覆盖的方法实现合成后台行为。
@@ -206,13 +206,15 @@ actor Backend: NovelCatalogService, NovelContentService, WenkuCatalogService,
         await forum.loadCategories(); await forum.selectCategory("novel")
         precondition(forum.categories.count == 1 && forum.posts.isEmpty)
 
-        let cache = OnlineChapterCache()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = OnlineChapterOfflineStore(directory: directory)
         let listed = book().chapters[0]
-        async let first = cache.chapter(listed, in: book(), service: backend)
-        async let second = cache.chapter(listed, in: book(), service: backend)
+        async let first = cache.chapter(listed, book: book(), account: "alice", service: backend)
+        async let second = cache.chapter(listed, book: book(), account: "alice", service: backend)
         let values = try await (first, second)
         precondition(values.0.title == "Injected" && values.1.translatedText == "译文")
-        _ = try await cache.chapter(listed, in: book(), service: backend)
+        _ = try await cache.chapter(listed, book: book(), account: "alice", service: backend)
         let chapters = await backend.count("chapter")
         precondition(chapters == 1, "Paged chapter fetching must retain in-flight and completed cache reuse")
         print("Service consumers passed: injected discovery/fallback/paging, stale results, ranking reuse, favorites/session, history/logout/continuation, wenku, forum and chapter cache")

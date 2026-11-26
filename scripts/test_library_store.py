@@ -5,7 +5,8 @@ import subprocess
 import tempfile
 root = Path(__file__).resolve().parents[1]
 source = (root / 'iOSApp/Features/Library/LibraryStore.swift').read_text()
-display = source[source.index('    func displayBooks'):source.index('    func status(for')]
+display_end = source.index('\n    }', source.index('    private func displayIdentity')) + len('\n    }')
+display = source[source.index('    func displayBooks'):display_end] + '\n'
 identity = source[source.index('    nonisolated private static func identity'):source.index('    private func hash(for')]
 refresh = source[source.index('    func refreshHashes'):source.index('    // MARK: 排序设置')]
 forget = source[source.index('    func forget(keys:'):source.index('    /// WebDAV 合并后的系列状态。')]

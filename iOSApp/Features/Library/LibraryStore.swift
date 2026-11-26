@@ -232,6 +232,17 @@ final class LibraryStateStore: ObservableObject, LibrarySeriesManaging {
         return "\(book.categoryTitle)|\(series.seriesID(forBook: book.key) ?? "")|\(book.positionPrefix)\(hash)"
     }
 
+    /// 摘录可能保存在旧书库键、内容哈希键或网络小说键下。查询时保留三者的顺序。
+    func annotationStorageKeys(for book: LibraryBook) -> [String] {
+        var keys = [book.key]
+        if let hash = hash(for: book) { keys.append(book.positionPrefix + hash) }
+        if case .webNovel(let record) = book.origin, record.novel.isRemote,
+           let provider = record.novel.providerId, let novel = record.novel.novelId {
+            keys.append(WebNovelEPUBContext.key(provider: provider, novel: novel))
+        }
+        return keys
+    }
+
     func status(for book: LibraryBook) -> LibraryReadingStatus {
         let status = readingStatus(for: book)
         guard book.isCloudOnly else { return status }

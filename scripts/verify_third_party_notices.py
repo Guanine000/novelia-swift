@@ -134,7 +134,7 @@ def main() -> None:
     assert "](OpenCC-LICENSE.txt)" in index, "OpenCC license not listed in INDEX.md"
     derived_header = conversion.read_text()[:800]
     assert "Apache-2.0" in derived_header and "修改版本" in derived_header, "Derived table must state its source license and modification"
-    assert "OpenCC-LICENSE.txt" in (ROOT / "iOSApp/Features/Settings/SettingsViews.swift").read_text(), "In-app license list must include OpenCC"
+    assert "OpenCC-LICENSE.txt" in (ROOT / "iOSApp/Features/Settings/AboutAndDiagnosticsView.swift").read_text(), "In-app license list must include OpenCC"
     yuedu_pin = pins["yueducoretext"]
     assert yuedu_pin["state"]["revision"] in index, "Exact YueduCoreText source revision is missing"
     assert (NOTICES / "YueduCoreText-NOTICE.txt").is_file()
@@ -142,7 +142,7 @@ def main() -> None:
     project = (ROOT / "NoveliaIOS.xcodeproj/project.pbxproj").read_text()
     legacy = re.search(r"(?m)^[ \t]*E15E00000000000000000001 /\* NoveliaLegacy \*/ = \{.*?\n\t\t\};", project, re.S)
     assert legacy and "YueduCoreText" not in legacy.group(0), "Legacy target still depends on YueduCoreText"
-    assert "iOS 15 版本使用 Readium" in (ROOT / "iOSApp/Features/Settings/SettingsViews.swift").read_text()
+    assert "iOS 15 版本使用 Readium" in (ROOT / "iOSApp/Features/Settings/AboutAndDiagnosticsView.swift").read_text()
     if args.legacy_executable:
         import subprocess
         symbols = subprocess.check_output(["nm", "-gj", str(args.legacy_executable)], text=True, errors="replace")

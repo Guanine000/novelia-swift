@@ -113,7 +113,7 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 
 | 功能 | 主要入口与实现 | 状态与职责 |
 |---|---|---|
-| 账号 | `Account/AccountAuth.swift` | 登录桥接、统一会话、Keychain 凭据适配与账号状态 |
+| 账号 | `Account/AccountAuth.swift`、`AccountLoginViews.swift`、`AccountCredentialStorage.swift` | 登录桥接、统一会话、Keychain 凭据适配与账号状态 |
 | 发现与详情 | `Discover/DiscoverViews.swift`、`DiscoverStore.swift`、`NovelDetailViews.swift`、`NovelCommentsView.swift` | 搜索、排行、标签、分页、详情和评论；调用目录/评论等服务 |
 | 书库 | `Library/LibraryViews.swift`、`LibraryStore.swift`、`LibraryComponents.swift`、`LibraryBookDetailView.swift`、`LibraryBookActions.swift`、`CharacterSeriesView.swift`、`CharacterCardSupportViews.swift` | 聚合本地记录、查询筛选、系列、排序、批量与菜单动作及跨卷人物资料界面 |
 | 收藏与历史 | `Library/FavoritesStore.swift`、`ReadingHistoryStore.swift`、`ShelfViews.swift` | 账号相关远端状态、收藏操作、历史与续读 |
@@ -124,9 +124,11 @@ API 失败时尝试同一仓库的 `/releases/latest` 网页重定向，只从�
 | 社区 | `Community/ForumStore.swift`、列表/详情/编辑/Markdown 页面 | 论坛查询、筛选、正文、评论、编辑与链接交互 |
 | 统计 | `Statistics/ReadingStatisticsViews.swift`；Core 的 `Features/Statistics/` | 图表与明细、阅读记录、设备统计及合并 |
 | 同步 | `Sync/WebDAVSync.swift`、`Sync/LocalLibraryBackup.swift`；Core 的 `Features/Sync/` | 同步设置与进度、计划、文件传输、清单、统计同步及本地整库备份与恢复 |
-| 设置 | `Settings/SettingsViews.swift`、`BlockedTagsViews.swift` | 偏好、主题、底栏、标签、阅读体验和功能入口 |
+| 设置 | `Settings/SettingsViews.swift`、`SettingsCardComponents.swift`、`ReadingLibrarySettingsView.swift`、`AboutAndDiagnosticsView.swift`、`NetworkECHSettingsView.swift`、`BlockedTagsViews.swift` | 偏好、主题、底栏、标签、阅读体验和功能入口 |
 
 共享封面组件位于 `iOSApp/Shared/CoverImage.swift`。日志、更新、设置键与通用哈希位于 Core 的 Support。不要因某文件被多个页面引用就把它的业务职责移动到 Shared 或 Support。
+
+在线滚动和分页共用 ReaderSettings 注入的 OnlineChapterOfflineStore。同章请求按账号合并，清理只使相应账号和书籍的请求失效。书库搜索与详情通过 LibraryStateStore.annotationStorageKeys 查询可兼容的摘录键。
 
 典型调用链如下：
 
@@ -169,7 +171,7 @@ Debug 独立验证 App 可用 `-architectureBrowseResize` 将同一个 Root 内�
 - `Infrastructure/API/APIConfiguration.swift`：API、网页来源与认证配置。
 - `Infrastructure/API/NoveliaAPIClient.swift`、`NoveliaAPISessionAndDTOs.swift`、`NoveliaServices.swift`：当前客户端请求、会话恢复／DTO 解码与协议适配工厂。
 - `App/AppServices.swift`：App 持有服务集合和账号状态；生产入口为 `AppServices.novelia(...)`。
-- `Features/Account/AccountAuth.swift`：当前网页登录、会话恢复与续期适配。
+- `Features/Account/AccountAuth.swift`：会话恢复与续期适配。网页登录在同目录 AccountLoginViews.swift，Cookie 和凭据存储在 AccountCredentialStorage.swift。
 - `Domain/SessionTokenStore.swift`：凭据存储接口。
 
 | 能力 | 消费的协议 |

@@ -21,7 +21,7 @@ def method(part, signature):
 
 account = source.split('final class AccountAuthStore', 1)[1].split('final class ForumAuthStore', 1)[0]
 forum = source.split('final class ForumAuthStore', 1)[1].split('struct AuthSessionRefresher', 1)[0]
-error = source[source.index('private enum AccountAuthError'):source.index('struct NoveliaLoginSheet')]
+error = source[source.index('private enum AccountAuthError'):]
 
 stored = '''
  var username: String?; var isRefreshing = false; var errorMessage: String?

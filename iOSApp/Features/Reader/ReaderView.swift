@@ -69,7 +69,7 @@ struct ReaderView: View {
     @State private var loadedChapters: [String: NovelChapter] = [:]
     @State private var isLoadingChapter = false
     @State private var chapterError: String?
-    @State private var loadAttempt = 0
+    @State private var retry = OnlineChapterRetry()
     @StateObject private var speech = SpeechPlaybackController()
     @State private var isShowingSpeech = false
     @State private var isShowingBookPreferences = false
@@ -166,7 +166,9 @@ struct ReaderView: View {
                         } description: {
                             Text(chapterError)
                         } actions: {
-                            Button("重试") { loadAttempt += 1 }
+                            Button("重试") {
+                                retry.request(chapter.id)
+                            }
                                 .buttonStyle(.borderedProminent)
                                 .tint(NoveliaStyle.brandGreen)
                         }
@@ -351,9 +353,11 @@ struct ReaderView: View {
                     settings.recordWebPosition(id: novel.id, chapterIndex: chapterIndex)
                 }
             }
-            .task(id: "\(chapter.id)-\(loadAttempt)-\(auth.username ?? "")") {
+            .task(id: "\(chapter.id)-\(retry.attempt)-\(auth.username ?? "")") {
                 let chapterID = chapter.id
-                guard await loadChapter(), !Task.isCancelled else { return }
+                // 强制刷新只消费一次，切到别章后仍优先读磁盘缓存。
+                let refresh = retry.consume(for: chapterID)
+                guard await loadChapter(refresh: refresh), !Task.isCancelled else { return }
                 await readingHistory.recordRead(novel: novel, chapterId: chapterID, account: auth.username)
             }
         }
@@ -533,17 +537,18 @@ struct ReaderView: View {
 
 
     @MainActor
-    private func loadChapter() async -> Bool {
-        guard novel.isRemote,
-              let providerId = novel.providerId,
-              let novelId = novel.novelId else { return false }
+    private func loadChapter(refresh: Bool) async -> Bool {
+        chapterError = nil
+        isLoadingChapter = false
+        guard novel.isRemote else { return false }
         guard chapter.originalText.isEmpty else { return true }
         isLoadingChapter = true
-        chapterError = nil
-        defer { isLoadingChapter = false }
+        defer { if !Task.isCancelled { isLoadingChapter = false } }
         do {
-            let loaded = try await settings.offlineChapters.chapter(chapter, book: novel, account: auth.offlineAccountScope, service: services.api.content, refresh: loadAttempt > 0)
-            loadedChapters[chapter.id] = loaded
+            let listed = chapter
+            let loaded = try await settings.offlineChapters.chapter(listed, book: novel, account: auth.offlineAccountScope, service: services.api.content, refresh: refresh)
+            try Task.checkCancellation()
+            loadedChapters[listed.id] = loaded
             return true
         } catch {
             guard !Task.isCancelled else { return false }
@@ -832,7 +837,7 @@ private struct OnlinePagedReader: View {
     @AppStorage(SettingsKey.readerTranslationSource) private var translationSourceRaw = NovelTranslationSource.gpt.rawValue
     @AppStorage private var bookmarkIDsJSON: String
     @AppStorage private var savedChapterIndex: Int
-    @State private var cache = OnlineChapterCache()
+    @State private var lastRecordedChapter: Int?
 
     init(novel: Novel, chapterIndex: Binding<Int>) {
         self.novel = novel
@@ -892,14 +897,14 @@ private struct OnlinePagedReader: View {
 
     private func chapterChanged(to unit: Int) {
         // 每次翻页后调用；仅在章节变化时记录。打开后的第一次报告若只是恢复，不写入同步位置。
-        guard novel.chapters.indices.contains(unit), unit != cache.lastRecordedChapter else { return }
-        let isOpening = cache.lastRecordedChapter == nil
+        guard novel.chapters.indices.contains(unit), unit != lastRecordedChapter else { return }
+        let isOpening = lastRecordedChapter == nil
         chapterIndex = unit
         savedChapterIndex = unit
         if !(isOpening && settings.isRestoringWebPosition(id: novel.id, chapterIndex: unit)) {
             settings.recordWebPosition(id: novel.id, chapterIndex: unit)
         }
-        cache.lastRecordedChapter = unit
+        lastRecordedChapter = unit
         guard novel.isRemote else { return }
         let chapterID = novel.chapters[unit].id
         Task { await readingHistory.recordRead(novel: novel, chapterId: chapterID, account: auth.username) }
@@ -941,29 +946,6 @@ private struct OnlinePagedReader: View {
         var next = bookmarkIDs
         if !next.insert(id).inserted { next.remove(id) }
         bookmarkIDsJSON = String(data: (try? JSONEncoder().encode(Array(next).sorted())) ?? Data("[]".utf8), encoding: .utf8) ?? "[]"
-    }
-}
-
-/// 分页模式获取的章节，在同一阅读器切换显示模式时共享。
-@MainActor
-private final class OnlineChapterCache {
-    private var chapters: [String: NovelChapter] = [:]
-    private var inFlight: [String: Task<NovelChapter, Error>] = [:]
-    /// 最近保存进度的章节；章内翻页不重复记录。
-    var lastRecordedChapter: Int?
-
-    func chapter(_ listed: NovelChapter, in novel: Novel, service: any NovelContentService) async throws -> NovelChapter {
-        if let cached = chapters[listed.id] { return cached }
-        guard listed.originalText.isEmpty, novel.isRemote,
-              let providerId = novel.providerId, let novelId = novel.novelId else { return listed }
-        let task = inFlight[listed.id] ?? Task {
-            try await service.chapter(providerId: providerId, novelId: novelId, chapterId: listed.id)
-        }
-        inFlight[listed.id] = task
-        defer { inFlight[listed.id] = nil }
-        let loaded = try await task.value
-        chapters[listed.id] = loaded
-        return loaded
     }
 }
 

@@ -154,7 +154,85 @@ private actor OfflineFixture: NovelContentService {
     }
     func requests() -> Int { count }
 }
+/// 即使请求被取消也等到测试放行才返回，用于覆盖迟到结果与清理之间的竞争。
+private actor PausedChapterService: NovelContentService {
+    private var release: CheckedContinuation<Void, Never>?
+    private var observer: CheckedContinuation<Void, Never>?
+
+    func waitForRequest() async {
+        if release == nil { await withCheckedContinuation { observer = $0 } }
+    }
+
+    func finish() {
+        release?.resume()
+        release = nil
+    }
+
+    func chapter(providerId: String, novelId: String, chapterId: String) async throws -> NovelChapter {
+        await withCheckedContinuation { pending in
+            release = pending
+            observer?.resume()
+            observer = nil
+        }
+        return NovelChapter(id: chapterId, title: "章", originalText: "已下载", translatedText: "")
+    }
+}
+
 final class OfflineChapterTests: XCTestCase {
+    func testRetryKeepsNextChapterAvailableOnDisk() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = OnlineChapterOfflineStore(directory: directory)
+        let service = OfflineFixture()
+        let first = NovelChapter(id: "a", title: "甲", originalText: "", translatedText: "")
+        let next = NovelChapter(id: "b", title: "乙", originalText: "", translatedText: "")
+        let book = Novel(id: "book", title: "书", author: "", summary: "", genres: [], chapters: [first, next], accent: .ocean, providerId: "source", novelId: "book")
+        _ = try await store.chapter(next, book: book, account: "a", service: service)
+        var retry = OnlineChapterRetry()
+        retry.request(first.id)
+        XCTAssertTrue(retry.consume(for: first.id))
+        _ = try await store.chapter(next, book: book, account: "a", service: service, refresh: retry.consume(for: next.id))
+        let requests = await service.requests()
+        XCTAssertEqual(requests, 1)
+        retry.request(first.id)
+        XCTAssertFalse(retry.consume(for: next.id))
+        XCTAssertFalse(retry.consume(for: first.id))
+    }
+
+    func testClearInvalidatesOnlyMatchingPendingRequests() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = OnlineChapterOfflineStore(directory: directory)
+        let chapter = NovelChapter(id: "chapter", title: "章", originalText: "", translatedText: "")
+        func book(_ id: String) -> Novel {
+            Novel(id: id, title: id, author: "", summary: "", genres: [], chapters: [chapter], accent: .ocean, providerId: "source", novelId: id)
+        }
+
+        for clearWholeAccount in [false, true] {
+            let target = book("target")
+            let survivor = clearWholeAccount ? target : book("other")
+            let survivorAccount = clearWholeAccount ? "b" : "a"
+            let removed = PausedChapterService()
+            let preserved = PausedChapterService()
+            let old = Task { try await store.chapter(chapter, book: target, account: "a", service: removed, refresh: true) }
+            let other = Task { try await store.chapter(chapter, book: survivor, account: survivorAccount, service: preserved, refresh: true) }
+            await removed.waitForRequest()
+            await preserved.waitForRequest()
+            try await store.remove(account: "a", bookID: clearWholeAccount ? nil : target.id)
+            await removed.finish()
+            await preserved.finish()
+            do {
+                _ = try await old.value
+                XCTFail("清理前发起的请求不应恢复已清除的章节")
+            } catch is CancellationError {}
+            _ = try await other.value
+            let cleared = await store.cached(book: target, chapter: chapter.id, account: "a")
+            let retained = await store.cached(book: survivor, chapter: chapter.id, account: survivorAccount)
+            XCTAssertNil(cleared)
+            XCTAssertEqual(retained?.originalText, "已下载")
+        }
+    }
+
     func testClearAllRemovesEveryBookOnlyForSelectedAccount() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

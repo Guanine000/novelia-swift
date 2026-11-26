@@ -747,14 +747,7 @@ struct LibraryView: View {
     private func storageKeyBookMap(for books: [LibraryBook]) -> [String: LibraryBook] {
         var map: [String: LibraryBook] = [:]
         for book in books {
-            map[book.key] = book
-            if let hash = state.hashByBook[book.key] ?? book.cloudFileHash {
-                map[book.positionPrefix + hash] = book
-            }
-            if case .webNovel(let record) = book.origin, record.novel.isRemote,
-               let provider = record.novel.providerId, let novel = record.novel.novelId {
-                map[WebNovelEPUBContext.key(provider: provider, novel: novel)] = book
-            }
+            for key in state.annotationStorageKeys(for: book) { map[key] = book }
         }
         return map
     }
